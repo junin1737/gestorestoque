@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="claro">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gestor Estoque</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="app">
+    <!-- LOGIN -->
+    <section id="view-login" class="view login-view">
+      <div class="login-split">
+        <aside class="login-brand">
+          <div class="brand-logo-wrap">
+            <img id="login-logo" alt="" hidden />
+            <div id="login-logo-placeholder" class="logo-placeholder">MT</div>
+          </div>
+          <h1 id="login-empresa">Gestor Estoque</h1>
+          <p>Painel Administrativo</p>
+        </aside>
+        <div class="login-card-wrap">
+          <form id="form-login" class="login-card" autocomplete="off">
+            <h2>Entrar</h2>
+            <label>Usuário
+              <select id="login-usuario" required>
+                <option value="">Selecione o usuário</option>
+              </select>
+            </label>
+            <label>Senha
+              <div class="input-row">
+                <input id="login-senha" type="password" placeholder="Digite sua senha" required />
+                <button type="button" id="toggle-senha" class="icon-btn" title="Mostrar senha">👁</button>
+              </div>
+            </label>
+            <p id="login-erro" class="erro" hidden></p>
+            <p id="svc-status" class="hint">Verificando serviço…</p>
+            <div class="login-actions">
+              <button type="submit" class="btn primary block">ENTRAR</button>
+              <button type="button" id="btn-abrir-config" class="btn outline block">CONFIGURAÇÃO</button>
+            </div>
+          </form>
+        </div>
+      </div>
+      <footer class="app-footer">
+        <span>MT Automações (34) 3674-1937</span>
+        <a href="https://www.instagram.com/mtautomacoes" target="_blank" rel="noopener">Instagram</a>
+      </footer>
+    </section>
+
+    <!-- CONFIG MODAL -->
+    <dialog id="dlg-config" class="dlg">
+      <form method="dialog" id="form-config" class="dlg-card">
+        <h3>Configuração da base</h3>
+        <p class="hint">Salva o caminho mesmo se o Firebird estiver offline. Para testar/conectar, o <strong>Firebird Server</strong> (porta 3050) e este painel em <code>http://127.0.0.1:5077</code> precisam estar rodando.</p>
+        <label>Arquivo da base (.FDB)
+          <div class="input-row">
+            <input id="cfg-database" type="text" required placeholder="C:\...\CLIPP.FDB" />
+            <button type="button" id="cfg-browse" class="btn small">…</button>
+          </div>
+        </label>
+        <div class="grid-2">
+          <label>Host<input id="cfg-host" type="text" /></label>
+          <label>Porta<input id="cfg-port" type="number" /></label>
+        </div>
+        <div class="grid-2">
+          <label>Usuário FB<input id="cfg-user" type="text" /></label>
+          <label>Senha FB<input id="cfg-password" type="password" placeholder="(mantém se vazio)" /></label>
+        </div>
+        <label>Sistema
+          <select id="cfg-sistema">
+            <option value="clipp">Clipp</option>
+            <option value="managepro">ManagePro</option>
+            <option value="ambos">Clipp + ManagePro</option>
+          </select>
+        </label>
+        <label>Tema
+          <select id="cfg-tema">
+            <option value="claro">Claro</option>
+            <option value="escuro">Escuro</option>
+            <option value="empresa">Tema da empresa</option>
+          </select>
+        </label>
+        <p id="cfg-msg" class="hint" hidden></p>
+        <div class="dlg-actions">
+          <button value="cancel" class="btn">Cancelar</button>
+          <button type="button" id="cfg-testar" class="btn outline">Testar conexão</button>
+          <button type="submit" class="btn primary">Salvar</button>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- APP SHELL -->
+    <section id="view-app" class="view app-view" hidden>
+      <aside class="sidebar">
+        <div class="side-brand">
+          <img id="side-logo" alt="" hidden />
+          <div id="side-logo-placeholder" class="logo-placeholder sm">MT</div>
+          <strong id="side-empresa">Empresa</strong>
+        </div>
+        <nav class="side-nav">
+          <button class="nav-btn active" data-page="estoque">Estoque</button>
+          <button class="nav-btn" data-page="usuarios" id="nav-usuarios">Usuários</button>
+        </nav>
+        <div class="side-bottom">
+          <label class="tema-inline">Tema
+            <select id="tema-rapido">
+              <option value="claro">Claro</option>
+              <option value="escuro">Escuro</option>
+              <option value="empresa">Empresa</option>
+            </select>
+          </label>
+          <button id="btn-logout" class="btn small block">Sair</button>
+        </div>
+      </aside>
+      <main class="main">
+        <header class="topbar">
+          <div>
+            <h1 id="page-title">Estoque</h1>
+            <p id="page-sub">Painel Administrativo</p>
+          </div>
+          <div class="user-chip">
+            <span id="user-nome">—</span>
+          </div>
+        </header>
+
+        <div id="page-estoque" class="page">
+          <div class="toolbar">
+            <input id="estoque-busca" type="search" placeholder="Buscar produto, código, barras…" />
+            <button id="btn-buscar-estoque" class="btn primary">Buscar</button>
+          </div>
+          <div class="split-panels">
+            <div class="panel list-panel">
+              <div id="estoque-lista" class="item-list"></div>
+            </div>
+            <div class="panel detail-panel" id="estoque-detalhe">
+              <p class="empty">Selecione um produto</p>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-usuarios" class="page" hidden>
+          <div class="toolbar">
+            <p class="hint">Permissões por módulo. Supervisor sempre tem acesso total (senha 1020).</p>
+            <button id="btn-salvar-usuarios" class="btn primary">Salvar usuários</button>
+          </div>
+          <div id="usuarios-lista" class="users-grid"></div>
+        </div>
+
+        <footer class="app-footer in-app">
+          <span>MT Automações (34) 3674-1937</span>
+          <a href="https://www.instagram.com/mtautomacoes" target="_blank" rel="noopener">Instagram</a>
+        </footer>
+      </main>
+    </section>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
