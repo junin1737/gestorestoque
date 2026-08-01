@@ -1050,6 +1050,9 @@ function applyScannedCode(value) {
   return true;
 }
 
+/** Usado pelo APK Android (câmera nativa ao vivo). */
+window.applyScannedCodeFromApp = (value) => applyScannedCode(value);
+
 function getZxingReader() {
   const ZXing = window.ZXingBrowser || window.ZXing;
   if (!ZXing?.BrowserMultiFormatReader) return null;
@@ -1191,6 +1194,14 @@ async function decodeBarcodeFromImageUrl(url) {
 }
 
 async function startScanner() {
+  // No APK, usa câmera nativa (HTTP da rede local não permite getUserMedia no WebView).
+  if (window.GestorApp?.scanBarcode) {
+    try {
+      window.GestorApp.scanBarcode();
+      return;
+    } catch { /* fallback abaixo */ }
+  }
+
   const dlg = $('#dlg-scan');
   const msg = $('#scan-msg');
   const preview = $('#scan-preview');
@@ -1205,9 +1216,11 @@ async function startScanner() {
   dlg.showModal();
   msg.textContent = 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
 
-  // Leitura ao vivo só em contexto seguro (HTTPS/localhost)
-  if (liveBtn) {
-    liveBtn.hidden = !(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
+  // Leitura ao vivo só em contexto seguro (HTTPS/localhost) ou app nativo
+  const canLive = !!(navigator.mediaDevices?.getUserMedia && (window.isSecureContext || window.__GESTOR_APP__));
+  if (liveBtn) liveBtn.hidden = !canLive;
+  if (canLive && window.__GESTOR_APP__) {
+    startLiveScanner();
   }
 }
 
@@ -1217,7 +1230,7 @@ async function startLiveScanner() {
   const preview = $('#scan-preview');
   if (!video || !msg) return;
 
-  if (!window.isSecureContext) {
+  if (!window.isSecureContext && !window.__GESTOR_APP__) {
     msg.textContent = 'Leitura ao vivo precisa de HTTPS. Use “Abrir câmera / galeria”.';
     return;
   }

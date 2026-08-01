@@ -63,8 +63,6 @@ function fillBanco(cfg) {
   $('#cfg-database').value = cfg.database || '';
   $('#cfg-host').value = cfg.host || '127.0.0.1';
   $('#cfg-port').value = cfg.port || 3050;
-  $('#cfg-user').value = cfg.user || 'SYSDBA';
-  $('#cfg-password').value = '';
   $('#cfg-sistema').value = cfg.sistema || 'clipp';
 }
 
@@ -90,8 +88,8 @@ function readBanco() {
     database: $('#cfg-database').value.trim(),
     host: $('#cfg-host').value.trim(),
     port: Number($('#cfg-port').value) || 3050,
-    user: $('#cfg-user').value.trim(),
-    password: $('#cfg-password').value,
+    user: 'SYSDBA',
+    password: 'masterkey',
     sistema: $('#cfg-sistema').value,
   };
 }

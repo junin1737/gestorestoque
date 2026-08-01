@@ -109,7 +109,6 @@ router.get('/config', (_req, res) => {
       host: cfg.host,
       port: cfg.port,
       database: cfg.database,
-      user: cfg.user,
       sistema: cfg.sistema,
       tema: cfg.tema,
     },
@@ -125,11 +124,11 @@ router.post('/config', (req, res) => {
     host: body.host || current.host,
     port: Number(body.port) || current.port,
     database: body.database || current.database,
-    user: body.user || current.user,
+    user: 'SYSDBA',
+    password: 'masterkey',
     sistema: body.sistema || current.sistema,
     tema: body.tema || current.tema,
   };
-  if (body.password !== undefined && body.password !== '') next.password = body.password;
   saveAppConfig(next);
   res.json({ ok: true, config: { ...next, password: undefined } });
 });
@@ -143,10 +142,10 @@ router.post('/connect', async (req, res) => {
       host: body.host || current.host,
       port: Number(body.port) || current.port,
       database: body.database || current.database,
-      user: body.user || current.user,
+      user: 'SYSDBA',
+      password: 'masterkey',
       sistema: body.sistema || current.sistema,
     };
-    if (body.password) cfg.password = body.password;
     saveAppConfig(cfg);
 
     const { db, fbVersion } = await connectSmart(cfg);

@@ -137,7 +137,7 @@ input, select, textarea {
   background: linear-gradient(145deg, #12233a, #1e3a5f 55%, #2f6fed);
   color: #fff; display: grid; place-content: center; text-align: center; gap: 0.5rem; padding: 2rem;
 }
-.login-brand h1 { margin: 0; font-size: clamp(1.45rem, 4vw, 2rem); font-weight: 750; letter-spacing: -0.02em; }
+.login-brand h1 { margin: 0; font-size: 1.55rem; font-weight: 750; letter-spacing: -0.02em; }
 .login-brand p { margin: 0; opacity: 0.85; font-size: var(--fs-sm); }
 .brand-logo-wrap { margin-bottom: 0.75rem; display: grid; place-items: center; }
 .brand-logo-wrap.sm { margin: 0; }
@@ -686,11 +686,12 @@ input, select, textarea {
     overflow: hidden;
   }
   .login-view {
-    height: 100%;
-    height: 100dvh;
+    height: auto;
+    min-height: 100%;
     overflow: auto;
     -webkit-overflow-scrolling: touch;
   }
+  .login-brand h1 { font-size: 1.45rem; }
   .login-split, .app-view, .split-panels, .form-grid, .qty-box { grid-template-columns: 1fr; }
   .app-view {
     grid-template-columns: 1fr;

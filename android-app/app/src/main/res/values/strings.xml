@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Gestor Estoque</string>
+    <string name="subtitle">Conecte ao serviço do PC na mesma Wi‑Fi</string>
+    <string name="scan_qr">Ler QR Code do serviço</string>
+    <string name="scan_qr_hint">Aponte para o QR Code na tela do Gestor Estoque no computador.</string>
+    <string name="or_manual">ou digite o endereço</string>
+    <string name="label_url">IP ou URL do serviço</string>
+    <string name="url_hint">192.168.0.100:5077</string>
+    <string name="connect">Conectar</string>
+    <string name="change_server">Trocar servidor</string>
+    <string name="hint_connect">Na primeira conexão, use o QR Code do PC.</string>
+    <string name="loading">Carregando painel…</string>
+    <string name="load_error">Falha ao abrir: %1$s</string>
+    <string name="toast_offline">Não conectou. Confira se o serviço está ligado no PC e se o celular está na mesma Wi‑Fi.</string>
+    <string name="invalid_url">Informe um IP ou URL válido.</string>
+    <string name="invalid_qr">QR Code inválido. Use o QR da tela do serviço.</string>
+    <string name="camera_denied">Permissão de câmera negada.</string>
+    <string name="scan_canceled">Leitura cancelada.</string>
+    <string name="scan_barcode_hint">Aponte para o código de barras do produto</string>
+</resources>
