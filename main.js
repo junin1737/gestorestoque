@@ -89,9 +89,10 @@ function createWindow() {
     mainWindow.show();
     if (!updateCheckStarted) {
       updateCheckStarted = true;
-      // Aguarda a UI carregar e consulta o GitHub
       setTimeout(() => {
-        promptAndUpdate(mainWindow).catch(() => {});
+        promptAndUpdate(mainWindow).catch((err) => {
+          console.warn('Falha na verificação de atualização:', err?.message || err);
+        });
       }, 1800);
     }
   });
@@ -117,6 +118,17 @@ function createWindow() {
 }
 
 if (gotLock) {
+  // Evita fechar o app por erro não tratado no spawn do instalador
+  process.on('uncaughtException', (err) => {
+    console.error('uncaughtException:', err);
+    try {
+      dialog.showErrorBox(
+        'Gestor Estoque',
+        `Ocorreu um erro inesperado, mas o serviço continua.\n\n${err && err.message ? err.message : err}`
+      );
+    } catch { /* ignore */ }
+  });
+
   app.whenReady().then(createWindow);
   app.on('window-all-closed', () => app.quit());
   app.on('activate', () => {

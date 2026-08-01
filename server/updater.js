@@ -2,7 +2,7 @@
 const https = require('https');
 const fs = require('fs');
 const path = require('path');
-const { app, dialog, BrowserWindow } = require('electron');
+const { app, dialog, BrowserWindow, shell } = require('electron');
 const { spawn } = require('child_process');
 
 const GH_OWNER = 'junin1737';
@@ -55,46 +55,6 @@ function httpsGetJson(url) {
   });
 }
 
-function httpsDownload(url, dest, onProgress) {
-  return new Promise((resolve, reject) => {
-    const follow = (u, redirects = 0) => {
-      if (redirects > 8) return reject(new Error('Muitos redirecionamentos'));
-      const file = fs.createWriteStream(dest);
-      const req = https.get(u, {
-        headers: { 'User-Agent': 'GestorEstoque-Updater' },
-      }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          file.close();
-          fs.unlink(dest, () => {});
-          follow(res.headers.location, redirects + 1);
-          res.resume();
-          return;
-        }
-        if (res.statusCode && res.statusCode >= 400) {
-          file.close();
-          fs.unlink(dest, () => {});
-          reject(new Error(`Download HTTP ${res.statusCode}`));
-          return;
-        }
-        const total = Number(res.headers['content-length'] || 0);
-        let received = 0;
-        res.on('data', (chunk) => {
-          received += chunk.length;
-          if (onProgress && total) onProgress(received / total);
-        });
-        res.pipe(file);
-        file.on('finish', () => file.close(() => resolve(dest)));
-      });
-      req.on('error', (err) => {
-        file.close();
-        fs.unlink(dest, () => {});
-        reject(err);
-      });
-    };
-    follow(url);
-  });
-}
-
 function httpsGetText(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
@@ -120,6 +80,119 @@ function httpsGetText(url) {
       req.destroy(new Error('Timeout ao consultar GitHub'));
     });
   });
+}
+
+function httpsDownload(url, dest, onProgress) {
+  return new Promise((resolve, reject) => {
+    const follow = (u, redirects = 0) => {
+      if (redirects > 8) return reject(new Error('Muitos redirecionamentos'));
+      fs.mkdirSync(path.dirname(dest), { recursive: true });
+      const file = fs.createWriteStream(dest);
+      const cleanup = () => {
+        try { file.close(); } catch { /* ignore */ }
+        try { fs.unlinkSync(dest); } catch { /* ignore */ }
+      };
+      const req = https.get(u, {
+        headers: { 'User-Agent': 'GestorEstoque-Updater' },
+      }, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          cleanup();
+          follow(res.headers.location, redirects + 1);
+          res.resume();
+          return;
+        }
+        if (res.statusCode && res.statusCode >= 400) {
+          cleanup();
+          reject(new Error(`Download HTTP ${res.statusCode}`));
+          return;
+        }
+        const total = Number(res.headers['content-length'] || 0);
+        let received = 0;
+        res.on('data', (chunk) => {
+          received += chunk.length;
+          if (onProgress && total) onProgress(received / total);
+        });
+        res.on('error', (err) => {
+          cleanup();
+          reject(err);
+        });
+        file.on('error', (err) => {
+          cleanup();
+          reject(err);
+        });
+        res.pipe(file);
+        file.on('finish', () => {
+          file.close((err) => {
+            if (err) {
+              cleanup();
+              reject(err);
+              return;
+            }
+            try {
+              const st = fs.statSync(dest);
+              if (!st.size) {
+                cleanup();
+                reject(new Error('Arquivo baixado está vazio'));
+                return;
+              }
+            } catch (e) {
+              reject(e);
+              return;
+            }
+            resolve(dest);
+          });
+        });
+      });
+      req.on('error', (err) => {
+        cleanup();
+        reject(err);
+      });
+    };
+    follow(url);
+  });
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function launchInstaller(exePath) {
+  if (!fs.existsSync(exePath)) {
+    throw new Error(`Instalador não encontrado: ${exePath}`);
+  }
+
+  // Pequena pausa para o Windows liberar o arquivo após o download
+  await sleep(600);
+
+  // 1) API nativa do Electron (mais estável no Windows)
+  try {
+    const openErr = await shell.openPath(exePath);
+    if (!openErr) return { ok: true, method: 'openPath' };
+  } catch {
+    /* tenta próximo */
+  }
+
+  // 2) start via cmd (evita EACCES do spawn direto em alguns PCs)
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn(
+        process.env.ComSpec || 'cmd.exe',
+        ['/d', '/s', '/c', `start "" "${exePath}"`],
+        {
+          detached: true,
+          stdio: 'ignore',
+          windowsHide: true,
+          shell: false,
+        }
+      );
+      child.once('error', reject);
+      child.unref();
+      setTimeout(resolve, 400);
+    });
+    return { ok: true, method: 'cmd-start' };
+  } catch (err) {
+    return { ok: false, error: err.message || String(err) };
+  }
 }
 
 async function fetchRemotePackageVersion() {
@@ -228,8 +301,9 @@ async function promptAndUpdate(parentWindow) {
     return { ok: true, updated: false, declined: true, info };
   }
 
-  const tmpDir = app.getPath('temp');
-  const dest = path.join(tmpDir, info.assetName || 'GestorEstoque-Setup.exe');
+  const updatesDir = path.join(app.getPath('userData'), 'updates');
+  fs.mkdirSync(updatesDir, { recursive: true });
+  const dest = path.join(updatesDir, info.assetName || 'GestorEstoque-Setup.exe');
 
   const progressWin = new BrowserWindow({
     width: 420,
@@ -275,10 +349,35 @@ async function promptAndUpdate(parentWindow) {
 
   try { progressWin.close(); } catch { /* ignore */ }
 
-  // Inicia o instalador e encerra o app para liberar arquivos
-  spawn(dest, [], { detached: true, stdio: 'ignore' }).unref();
-  setTimeout(() => app.quit(), 400);
-  return { ok: true, updated: true, info };
+  let launched = false;
+  try {
+    const launch = await launchInstaller(dest);
+    launched = !!launch.ok;
+    if (!launch.ok) throw new Error(launch.error || 'Falha ao abrir o instalador');
+  } catch (err) {
+    const { response: r2 } = await dialog.showMessageBox(win || undefined, {
+      type: 'warning',
+      buttons: ['Abrir pasta do instalador', 'OK'],
+      defaultId: 0,
+      cancelId: 1,
+      title: 'Atualização baixada',
+      message: 'O download concluiu, mas não foi possível iniciar o instalador automaticamente.',
+      detail: `${err.message || err}\n\nArquivo:\n${dest}\n\nAbra a pasta e execute o instalador manualmente.`,
+      noLink: true,
+    });
+    if (r2 === 0) {
+      try { shell.showItemInFolder(dest); } catch { /* ignore */ }
+    }
+    return { ok: true, updated: false, manual: true, path: dest, info };
+  }
+
+  // Só encerra se o instalador abriu de fato
+  if (launched) {
+    setTimeout(() => {
+      try { app.quit(); } catch { /* ignore */ }
+    }, 800);
+  }
+  return { ok: true, updated: true, info, path: dest };
 }
 
 module.exports = {
