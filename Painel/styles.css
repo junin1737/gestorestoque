@@ -64,6 +64,10 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+button, input, select, textarea {
+  font-family: inherit;
+}
+
 #app {
   min-height: 100%;
   min-height: 100dvh;

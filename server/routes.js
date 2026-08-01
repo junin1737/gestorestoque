@@ -733,6 +733,83 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
   }
 });
 
+function pad2(n) {
+  return String(n).padStart(2, '0');
+}
+
+/** Formata DATA/HORA do Firebird para dd/MM/yyyy HH:mm:ss */
+function formatBrDateTime(data, hora) {
+  let y; let m; let d;
+  if (data instanceof Date && !Number.isNaN(data.getTime())) {
+    // DATE do Firebird costuma vir como meia-noite UTC
+    const iso = data.toISOString();
+    if (/T00:00:00/.test(iso)) {
+      y = data.getUTCFullYear();
+      m = data.getUTCMonth() + 1;
+      d = data.getUTCDate();
+    } else {
+      y = data.getFullYear();
+      m = data.getMonth() + 1;
+      d = data.getDate();
+    }
+  } else if (data != null && data !== '') {
+    const s = String(data);
+    let match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (match) {
+      y = Number(match[1]); m = Number(match[2]); d = Number(match[3]);
+    } else {
+      match = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (match) {
+        d = Number(match[1]); m = Number(match[2]); y = Number(match[3]);
+      }
+    }
+  }
+  if (!y) return '—';
+
+  let hh = 0; let mm = 0; let ss = 0; let hasTime = false;
+  if (hora instanceof Date && !Number.isNaN(hora.getTime())) {
+    hasTime = true;
+    const iso = hora.toISOString();
+    // TIME do Firebird frequentemente serializa em 1970-01-01T...Z
+    if (hora.getFullYear() < 1980 || /1970-01-01/.test(iso)) {
+      hh = hora.getUTCHours();
+      mm = hora.getUTCMinutes();
+      ss = hora.getUTCSeconds();
+    } else {
+      hh = hora.getHours();
+      mm = hora.getMinutes();
+      ss = hora.getSeconds();
+    }
+  } else if (hora != null && hora !== '') {
+    const s = String(hora);
+    let match = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (match) {
+      hasTime = true;
+      hh = Number(match[1]);
+      mm = Number(match[2]);
+      ss = Number(match[3] || 0);
+    } else {
+      const dt = new Date(s);
+      if (!Number.isNaN(dt.getTime())) {
+        hasTime = true;
+        if (dt.getFullYear() < 1980 || /1970-01-01/.test(s)) {
+          hh = dt.getUTCHours();
+          mm = dt.getUTCMinutes();
+          ss = dt.getUTCSeconds();
+        } else {
+          hh = dt.getHours();
+          mm = dt.getMinutes();
+          ss = dt.getSeconds();
+        }
+      }
+    }
+  }
+
+  const datePart = `${pad2(d)}/${pad2(m)}/${y}`;
+  if (!hasTime) return datePart;
+  return `${datePart} ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
+}
+
 function mapSaldoAlteracao(r) {
   const antigo = Number(r.SALDO_ANTIGO || 0);
   const novo = Number(r.SALDO_NOVO || 0);
@@ -742,6 +819,7 @@ function mapSaldoAlteracao(r) {
     tipo: 'quantidade',
     data: r.DATA,
     hora: r.HORA,
+    data_hora: formatBrDateTime(r.DATA, r.HORA),
     id_identificador: Number(r.ID_IDENTIFICADOR),
     id_estoque: Number(r.ID_ESTOQUE),
     descricao: String(r.DESCRICAO || '').trim(),
@@ -765,6 +843,7 @@ function mapGestorAlteracao(r) {
     tipo: String(r.TIPO || 'ficha').trim().toLowerCase(),
     data: r.DATA,
     hora: r.HORA,
+    data_hora: formatBrDateTime(r.DATA, r.HORA),
     id_identificador: Number(r.ID_IDENTIFICADOR),
     id_estoque: Number(r.ID_ESTOQUE),
     descricao: String(r.DESCRICAO || '').trim(),

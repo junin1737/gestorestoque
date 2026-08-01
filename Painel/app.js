@@ -580,8 +580,8 @@ function renderDetalhe() {
     </div>
     <div class="tab-pane" data-pane="ficha">
       <div class="form-grid">
-        <label>ID Estoque<input value="${it.id_estoque ?? 'novo'}" disabled /></label>
-        <label>ID Identificador<input value="${it.id_identificador ?? 'novo'}" disabled /></label>
+        <label>ID Estoque<input value="${it.id_estoque ?? 'Novo'}" disabled /></label>
+        <label>ID Identificador<input value="${it.id_identificador ?? 'Novo'}" disabled /></label>
         <label class="full">Descrição<input id="f-descricao" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
         <label class="full">Grupo
           <div class="input-row">
@@ -790,13 +790,23 @@ function renderUsuarios() {
           </select>
         </label>
       </div>
-      <p class="hint">${u.supervisor ? 'Supervisor: todas as permissões ativas automaticamente.' : 'Preços: visualizar = só venda; editar = altera venda; total = venda + custo.'}</p>
+      <p class="hint">${u.supervisor ? 'Supervisor: todas as permissões ativas automaticamente.' : 'Preços: Visualizar = só venda; Editar = altera venda; Total = venda + custo.'}</p>
     </div>
   `).join('');
 }
 
+const PERM_LABELS = {
+  nenhum: 'Nenhum',
+  visualizar: 'Visualizar',
+  editar: 'Editar',
+  total: 'Total',
+};
+
 function permOptions(list, current) {
-  return list.map((v) => `<option value="${v}" ${v === current ? 'selected' : ''}>${v}</option>`).join('');
+  return list.map((v) => {
+    const label = PERM_LABELS[v] || (String(v).charAt(0).toUpperCase() + String(v).slice(1));
+    return `<option value="${v}" ${v === current ? 'selected' : ''}>${label}</option>`;
+  }).join('');
 }
 
 $('#btn-salvar-usuarios').addEventListener('click', async () => {
@@ -838,23 +848,62 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
   alert('Usuários atualizados.');
 });
 
-function fmtDataHora(data, hora) {
-  const d = data ? new Date(data) : null;
-  let ds = '—';
-  if (d && !Number.isNaN(d.getTime())) {
-    ds = d.toLocaleDateString('pt-BR');
-  } else if (data != null) {
-    ds = String(data).slice(0, 10);
+function fmtDataHora(data, hora, dataHoraPronta) {
+  if (dataHoraPronta && /^\d{2}\/\d{2}\/\d{4}/.test(String(dataHoraPronta))) {
+    return String(dataHoraPronta);
   }
-  let hs = '';
-  if (hora != null) {
-    if (hora instanceof Date) {
-      hs = hora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+  const pad = (n) => String(n).padStart(2, '0');
+
+  let y; let mo; let d;
+  if (data instanceof Date && !Number.isNaN(data.getTime())) {
+    const iso = data.toISOString();
+    if (/T00:00:00/.test(iso)) {
+      y = data.getUTCFullYear(); mo = data.getUTCMonth() + 1; d = data.getUTCDate();
     } else {
-      hs = String(hora).slice(0, 8);
+      y = data.getFullYear(); mo = data.getMonth() + 1; d = data.getDate();
+    }
+  } else if (data != null && data !== '') {
+    const s = String(data);
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; }
+    else {
+      m = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+      if (m) { d = +m[1]; mo = +m[2]; y = +m[3]; }
     }
   }
-  return hs ? `${ds} ${hs}` : ds;
+  if (!y) return '—';
+
+  let hh = 0; let mi = 0; let ss = 0; let hasTime = false;
+  if (hora instanceof Date && !Number.isNaN(hora.getTime())) {
+    hasTime = true;
+    const iso = hora.toISOString();
+    if (hora.getFullYear() < 1980 || /1970-01-01/.test(iso)) {
+      hh = hora.getUTCHours(); mi = hora.getUTCMinutes(); ss = hora.getUTCSeconds();
+    } else {
+      hh = hora.getHours(); mi = hora.getMinutes(); ss = hora.getSeconds();
+    }
+  } else if (hora != null && hora !== '') {
+    const s = String(hora);
+    let m = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+    if (m) {
+      hasTime = true;
+      hh = +m[1]; mi = +m[2]; ss = +(m[3] || 0);
+    } else {
+      const dt = new Date(s);
+      if (!Number.isNaN(dt.getTime())) {
+        hasTime = true;
+        if (dt.getFullYear() < 1980 || /1970-01-01/.test(s)) {
+          hh = dt.getUTCHours(); mi = dt.getUTCMinutes(); ss = dt.getUTCSeconds();
+        } else {
+          hh = dt.getHours(); mi = dt.getMinutes(); ss = dt.getSeconds();
+        }
+      }
+    }
+  }
+
+  const datePart = `${pad(d)}/${pad(mo)}/${y}`;
+  return hasTime ? `${datePart} ${pad(hh)}:${pad(mi)}:${pad(ss)}` : datePart;
 }
 
 async function loadAlteracoes() {
@@ -928,7 +977,7 @@ function renderAlteracoes() {
         <div class="item-main">
           <strong title="${escapeAttr(it.descricao)}">${escapeHtml(it.descricao || 'Produto')}</strong>
           <div class="item-meta">
-            <span class="chip">${escapeHtml(fmtDataHora(it.data, it.hora))}</span>
+            <span class="chip">${escapeHtml(fmtDataHora(it.data, it.hora, it.data_hora))}</span>
             <span class="chip">#${it.id_estoque || '—'}</span>
             ${it.cod_barras ? `<span class="chip">${escapeHtml(it.cod_barras)}</span>` : ''}
             <span class="chip">${escapeHtml(it.funcionario || '—')}</span>

@@ -7,14 +7,23 @@
   --bg: #ffffff;
   --ok: #1faa4c;
   --danger: #e53935;
+  --font: "Segoe UI", "Helvetica Neue", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body {
-  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+  font-family: var(--font);
+  font-size: 16px;
+  line-height: 1.4;
   color: var(--text);
   background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, select, textarea {
+  font-family: inherit;
+  font-size: inherit;
 }
 
 .svc-app {
@@ -216,7 +225,8 @@ body {
   padding: 0.7rem 1rem;
   font-weight: 700;
   cursor: pointer;
-  font: inherit;
+  font-family: inherit;
+  font-size: 0.95rem;
 }
 .btn-teal {
   border: 0;
