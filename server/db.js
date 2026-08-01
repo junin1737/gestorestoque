@@ -118,6 +118,14 @@ async function ensureSchema(db) {
       await query(db, `ALTER TABLE ${table} ADD OBSERVACAO VARCHAR(200)`);
     }
   }
+
+  try {
+    const { ensureAuditSchema } = require('./audit');
+    await ensureAuditSchema(db);
+  } catch (err) {
+    console.warn('Auditoria GESTOR_EST_ALTERACAO:', err.message);
+  }
+
   schemaReady = true;
   await refreshTables(db);
 }
@@ -187,13 +195,47 @@ function activeTargets(appCfg) {
   return list;
 }
 
-function blobToBase64(blob) {
-  if (!blob) return null;
-  if (Buffer.isBuffer(blob)) return blob.toString('base64');
-  if (blob.type === 'Buffer' && Array.isArray(blob.data)) {
-    return Buffer.from(blob.data).toString('base64');
+function detectImageMime(buf) {
+  if (!buf || buf.length < 4) return 'image/png';
+  if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
+  if (buf[0] === 0x89 && buf[1] === 0x50 && buf[2] === 0x4e && buf[3] === 0x47) return 'image/png';
+  if (buf[0] === 0x47 && buf[1] === 0x49 && buf[2] === 0x46) return 'image/gif';
+  if (buf[0] === 0x42 && buf[1] === 0x4d) return 'image/bmp';
+  if (buf[0] === 0x52 && buf[1] === 0x49 && buf[2] === 0x46 && buf[3] === 0x46) return 'image/webp';
+  return 'image/jpeg';
+}
+
+function readBlobBuffer(blob) {
+  return new Promise((resolve, reject) => {
+    if (!blob) return resolve(null);
+    if (Buffer.isBuffer(blob)) return resolve(blob);
+    if (blob.type === 'Buffer' && Array.isArray(blob.data)) {
+      return resolve(Buffer.from(blob.data));
+    }
+    if (typeof blob !== 'function') return resolve(null);
+
+    // node-firebird: LOGO chega como função async de leitura do blob
+    blob((err, _name, event) => {
+      if (err) return reject(err);
+      const chunks = [];
+      event.on('data', (chunk) => {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, 'binary'));
+      });
+      event.on('end', () => resolve(Buffer.concat(chunks)));
+      event.on('error', reject);
+    });
+  });
+}
+
+async function blobToDataUrl(blob) {
+  try {
+    const buf = await readBlobBuffer(blob);
+    if (!buf || !buf.length) return null;
+    const mime = detectImageMime(buf);
+    return `data:${mime};base64,${buf.toString('base64')}`;
+  } catch {
+    return null;
   }
-  return null;
 }
 
 module.exports = {
@@ -202,12 +244,13 @@ module.exports = {
   connectSmart,
   detach,
   hasTable,
+  columnExists,
   ensureSchema,
   refreshTables,
   refreshGenerators,
   activeTargets,
   stockTables,
   targetsForSistema,
-  blobToBase64,
+  blobToDataUrl,
   buildFbOptions,
 };

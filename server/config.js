@@ -17,6 +17,10 @@ const MODULOS = {
       quantidades: 'editar',
     },
   },
+  alteracoes: {
+    label: 'Alterações',
+    default: { acesso: false },
+  },
   usuarios: {
     label: 'Usuários',
     default: { acesso: false },
@@ -79,6 +83,7 @@ function fullPermissoes() {
     if (key === 'estoque') {
       out[key] = { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'editar' };
     }
+    if (key === 'alteracoes') out[key] = { acesso: true };
     if (key === 'usuarios') out[key] = { acesso: true };
   }
   return out;

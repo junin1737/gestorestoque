@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Gestor Estoque — Serviço</title>
+  <link rel="stylesheet" href="servico.css" />
+</head>
+<body>
+  <div class="svc-app">
+    <aside class="svc-side">
+      <button class="svc-nav active" data-panel="conexao" title="Conexão">
+        <span class="ico net"></span>
+        <span>Conexão</span>
+      </button>
+      <button class="svc-nav" data-panel="banco" title="Banco de dados">
+        <span class="ico db"></span>
+        <span>Banco de dados</span>
+      </button>
+      <button class="svc-nav" data-panel="sobre" title="Sobre">
+        <span class="ico info"></span>
+        <span>Sobre</span>
+      </button>
+      <button class="svc-nav" id="btn-sair" title="Sair">
+        <span class="ico exit"></span>
+        <span>Sair</span>
+      </button>
+    </aside>
+
+    <main class="svc-main">
+      <header class="svc-header">
+        <div class="svc-brand-mark" aria-hidden="true"></div>
+        <div>
+          <h1>Gestor Estoque</h1>
+          <p>Servidor de acesso móvel — MT Automações</p>
+        </div>
+      </header>
+
+      <!-- CONEXÃO -->
+      <section id="panel-conexao" class="svc-panel">
+        <p class="svc-lead">Inicie o serviço e informe os dados abaixo no celular, ou escaneie o QR Code.</p>
+
+        <div class="svc-grid">
+          <div class="svc-col">
+            <div class="field">
+              <label>Endereço IP</label>
+              <div id="svc-ip" class="ip-value">—</div>
+            </div>
+            <div class="field">
+              <label>Porta para conexão</label>
+              <input id="svc-porta" type="text" readonly value="5077" />
+            </div>
+            <div class="field">
+              <label>URL do painel</label>
+              <a id="svc-url" class="url-link" href="#" target="_blank">—</a>
+            </div>
+            <div class="field">
+              <label>Hostname</label>
+              <div id="svc-host" class="muted">—</div>
+            </div>
+            <div id="svc-alts" class="alts muted"></div>
+          </div>
+
+          <div class="svc-ou">ou</div>
+
+          <div class="svc-col qr-col">
+            <label>Escaneie o QR Code</label>
+            <div class="qr-frame">
+              <img id="svc-qr" alt="QR Code de acesso" />
+            </div>
+            <p class="hint">Aponte a câmera do celular — abre o navegador com o painel.</p>
+          </div>
+        </div>
+
+        <div class="svc-footer-status">
+          <button type="button" id="btn-toggle-svc" class="btn-stop" title="Parar serviço">
+            <span class="stop-icon"></span>
+          </button>
+          <div>
+            <strong id="btn-toggle-label">Parar serviço</strong>
+            <div class="status-line">
+              <span id="status-dot" class="dot on"></span>
+              <span id="status-text">Servidor em execução…</span>
+            </div>
+          </div>
+          <button type="button" id="btn-abrir-painel" class="btn-teal">Abrir painel neste PC</button>
+        </div>
+      </section>
+
+      <!-- BANCO -->
+      <section id="panel-banco" class="svc-panel" hidden>
+        <p class="svc-lead">Configure o caminho da base Firebird neste computador (servidor).</p>
+
+        <form id="form-banco" class="banco-form" autocomplete="off">
+          <label>Arquivo da base (.FDB)
+            <div class="row">
+              <input id="cfg-database" type="text" required placeholder="C:\...\CLIPP.FDB" />
+              <button type="button" id="cfg-browse" class="btn-teal small">…</button>
+            </div>
+          </label>
+          <div class="row-2">
+            <label>Host Firebird<input id="cfg-host" type="text" /></label>
+            <label>Porta FB<input id="cfg-port" type="number" /></label>
+          </div>
+          <div class="row-2">
+            <label>Usuário<input id="cfg-user" type="text" /></label>
+            <label>Senha<input id="cfg-password" type="password" placeholder="(mantém se vazio)" /></label>
+          </div>
+          <label>Sistema
+            <select id="cfg-sistema">
+              <option value="clipp">Clipp</option>
+              <option value="managepro">ManagePro</option>
+              <option value="ambos">Clipp + ManagePro</option>
+            </select>
+          </label>
+          <p id="banco-msg" class="hint" hidden></p>
+          <div class="banco-actions">
+            <button type="button" id="cfg-testar" class="btn-outline">Testar conexão</button>
+            <button type="submit" class="btn-teal">Salvar configuração</button>
+          </div>
+        </form>
+
+        <div id="banco-emitente" class="emitente-card" hidden>
+          <strong id="banco-empresa">—</strong>
+          <span id="banco-fb">—</span>
+        </div>
+      </section>
+
+      <!-- SOBRE -->
+      <section id="panel-sobre" class="svc-panel" hidden>
+        <p class="svc-lead">Gestor Estoque — painel administrativo com acesso local e móvel.</p>
+        <ul class="sobre-list">
+          <li>MT Automações — (34) 3674-1937</li>
+          <li><a href="https://www.instagram.com/mtautomacoes" target="_blank" rel="noopener">instagram.com/mtautomacoes</a></li>
+          <li>Versão <strong id="svc-versao">—</strong></li>
+        </ul>
+
+        <div class="sobre-box">
+          <h3>Inicialização</h3>
+          <label class="switch-row">
+            <input type="checkbox" id="chk-inicio-windows" />
+            <span>Iniciar com o Windows</span>
+          </label>
+          <p class="hint" id="inicio-windows-msg">Abre o serviço automaticamente ao ligar o computador.</p>
+        </div>
+
+        <div class="sobre-box">
+          <h3>Atualizações</h3>
+          <p class="hint" id="update-status">Ao abrir o app, consultamos o GitHub por versões novas.</p>
+          <button type="button" id="btn-verificar-update" class="btn-teal">Verificar atualização agora</button>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="servico.js"></script>
+</body>
+</html>

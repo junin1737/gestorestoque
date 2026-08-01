@@ -2,7 +2,8 @@
 <html lang="pt-BR" data-theme="claro">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#1e3a5f" />
   <title>Gestor Estoque</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
@@ -12,7 +13,7 @@
     <section id="view-login" class="view login-view">
       <div class="login-split">
         <aside class="login-brand">
-          <div class="brand-logo-wrap">
+          <div class="brand-logo-wrap" id="login-logo-wrap">
             <img id="login-logo" alt="" hidden />
             <div id="login-logo-placeholder" class="logo-placeholder">MT</div>
           </div>
@@ -37,8 +38,8 @@
             <p id="svc-status" class="hint">Verificando serviço…</p>
             <div class="login-actions">
               <button type="submit" class="btn primary block">ENTRAR</button>
-              <button type="button" id="btn-abrir-config" class="btn outline block">CONFIGURAÇÃO</button>
             </div>
+            <p class="hint center-hint">A base é configurada no aplicativo do serviço no computador do servidor.</p>
           </form>
         </div>
       </div>
@@ -48,58 +49,20 @@
       </footer>
     </section>
 
-    <!-- CONFIG MODAL -->
-    <dialog id="dlg-config" class="dlg">
-      <form method="dialog" id="form-config" class="dlg-card">
-        <h3>Configuração da base</h3>
-        <p class="hint">Salva o caminho mesmo se o Firebird estiver offline. Para testar/conectar, o <strong>Firebird Server</strong> (porta 3050) e este painel em <code>http://127.0.0.1:5077</code> precisam estar rodando.</p>
-        <label>Arquivo da base (.FDB)
-          <div class="input-row">
-            <input id="cfg-database" type="text" required placeholder="C:\...\CLIPP.FDB" />
-            <button type="button" id="cfg-browse" class="btn small">…</button>
-          </div>
-        </label>
-        <div class="grid-2">
-          <label>Host<input id="cfg-host" type="text" /></label>
-          <label>Porta<input id="cfg-port" type="number" /></label>
-        </div>
-        <div class="grid-2">
-          <label>Usuário FB<input id="cfg-user" type="text" /></label>
-          <label>Senha FB<input id="cfg-password" type="password" placeholder="(mantém se vazio)" /></label>
-        </div>
-        <label>Sistema
-          <select id="cfg-sistema">
-            <option value="clipp">Clipp</option>
-            <option value="managepro">ManagePro</option>
-            <option value="ambos">Clipp + ManagePro</option>
-          </select>
-        </label>
-        <label>Tema
-          <select id="cfg-tema">
-            <option value="claro">Claro</option>
-            <option value="escuro">Escuro</option>
-            <option value="empresa">Tema da empresa</option>
-          </select>
-        </label>
-        <p id="cfg-msg" class="hint" hidden></p>
-        <div class="dlg-actions">
-          <button value="cancel" class="btn">Cancelar</button>
-          <button type="button" id="cfg-testar" class="btn outline">Testar conexão</button>
-          <button type="submit" class="btn primary">Salvar</button>
-        </div>
-      </form>
-    </dialog>
-
     <!-- APP SHELL -->
     <section id="view-app" class="view app-view" hidden>
-      <aside class="sidebar">
+      <aside class="sidebar" id="sidebar">
         <div class="side-brand">
-          <img id="side-logo" alt="" hidden />
-          <div id="side-logo-placeholder" class="logo-placeholder sm">MT</div>
+          <div class="brand-logo-wrap sm" id="side-logo-wrap">
+            <img id="side-logo" alt="" hidden />
+            <div id="side-logo-placeholder" class="logo-placeholder sm">MT</div>
+          </div>
           <strong id="side-empresa">Empresa</strong>
         </div>
         <nav class="side-nav">
-          <button class="nav-btn active" data-page="estoque">Estoque</button>
+          <button class="nav-btn active" data-page="dashboard">Início</button>
+          <button class="nav-btn" data-page="estoque" id="nav-estoque">Estoque</button>
+          <button class="nav-btn" data-page="alteracoes" id="nav-alteracoes">Alterações</button>
           <button class="nav-btn" data-page="usuarios" id="nav-usuarios">Usuários</button>
         </nav>
         <div class="side-bottom">
@@ -110,32 +73,121 @@
               <option value="empresa">Empresa</option>
             </select>
           </label>
+          <button id="btn-trocar-usuario" class="btn small block outline-light">Trocar usuário</button>
           <button id="btn-logout" class="btn small block">Sair</button>
         </div>
       </aside>
+
       <main class="main">
         <header class="topbar">
-          <div>
-            <h1 id="page-title">Estoque</h1>
-            <p id="page-sub">Painel Administrativo</p>
+          <button type="button" id="btn-menu-mobile" class="btn-icon-menu" aria-label="Menu">☰</button>
+          <div class="topbar-text">
+            <h1 id="page-title">Início</h1>
+            <p id="page-sub">Dashboard</p>
           </div>
-          <div class="user-chip">
-            <span id="user-nome">—</span>
+          <div class="topbar-actions">
+            <div class="user-chip"><span id="user-nome">—</span></div>
+            <button id="btn-trocar-usuario-top" class="btn small">Trocar usuário</button>
           </div>
         </header>
 
-        <div id="page-estoque" class="page">
-          <div class="toolbar">
-            <input id="estoque-busca" type="search" placeholder="Buscar produto, código, barras…" />
-            <button id="btn-buscar-estoque" class="btn primary">Buscar</button>
+        <!-- DASHBOARD -->
+        <div id="page-dashboard" class="page">
+          <div class="dash-grid">
+            <button type="button" id="dash-estoque" class="dash-card">
+              <span class="dash-icon box" aria-hidden="true">
+                <svg viewBox="0 0 64 64" width="64" height="64" fill="none">
+                  <path d="M8 22L32 10l24 12v28L32 62 8 50V22z" fill="#c4a574" stroke="#8a6a3d" stroke-width="2"/>
+                  <path d="M8 22l24 12 24-12" stroke="#8a6a3d" stroke-width="2"/>
+                  <path d="M32 34v28" stroke="#8a6a3d" stroke-width="2"/>
+                  <path d="M20 16l24 12" stroke="#a67c42" stroke-width="3" stroke-linecap="round"/>
+                  <rect x="26" y="28" width="12" height="8" rx="1" fill="#e8d5a8" stroke="#8a6a3d"/>
+                </svg>
+              </span>
+              <strong>Estoque</strong>
+              <span>Produtos, preços e quantidades</span>
+            </button>
+            <button type="button" id="dash-alteracoes" class="dash-card" hidden>
+              <span class="dash-icon report" aria-hidden="true">
+                <svg viewBox="0 0 64 64" width="64" height="64" fill="none">
+                  <rect x="12" y="8" width="40" height="48" rx="4" fill="#d7e6fb" stroke="#2f6fed" stroke-width="2"/>
+                  <path d="M22 22h20M22 32h20M22 42h12" stroke="#1e3a5f" stroke-width="2.5" stroke-linecap="round"/>
+                  <circle cx="44" cy="44" r="10" fill="#2f6fed"/>
+                  <path d="M44 39v6l4 2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </span>
+              <strong>Alterações</strong>
+              <span>Relatório de saldos editados</span>
+            </button>
           </div>
-          <div class="split-panels">
-            <div class="panel list-panel">
+        </div>
+
+        <!-- ESTOQUE -->
+        <div id="page-estoque" class="page" hidden>
+          <div id="estoque-lista-view">
+            <div class="toolbar estoque-toolbar">
+              <div class="search-wrap">
+                <div class="search-field">
+                  <input id="estoque-busca" type="search" placeholder="Buscar produto, código, barras…" enterkeyhint="search" />
+                  <button type="button" id="btn-limpar-busca" class="btn-clear-search" hidden title="Voltar filtro anterior / limpar" aria-label="Limpar filtro">×</button>
+                </div>
+                <button type="button" id="btn-scan-barras" class="btn icon-cam" title="Ler código de barras">📷</button>
+              </div>
+              <button id="btn-buscar-estoque" class="btn primary">Buscar</button>
+              <button id="btn-novo-produto" class="btn ok">+ Novo</button>
+            </div>
+            <div class="panel list-panel list-panel-full">
               <div id="estoque-lista" class="item-list"></div>
             </div>
-            <div class="panel detail-panel" id="estoque-detalhe">
-              <p class="empty">Selecione um produto</p>
+          </div>
+
+          <div id="estoque-edit-view" hidden>
+            <div class="edit-toolbar">
+              <button type="button" id="btn-cancelar-produto" class="btn">Cancelar</button>
+              <div class="edit-title">
+                <strong id="edit-produto-nome">Produto</strong>
+                <span id="edit-produto-meta" class="hint"></span>
+              </div>
+              <button type="button" id="btn-salvar-produto" class="btn primary">Salvar</button>
             </div>
+            <div class="panel detail-panel" id="estoque-detalhe"></div>
+          </div>
+        </div>
+
+        <!-- ALTERAÇÕES -->
+        <div id="page-alteracoes" class="page" hidden>
+          <div class="toolbar alteracoes-toolbar">
+            <label class="inline-field">Período
+              <select id="alt-dias">
+                <option value="7">7 dias</option>
+                <option value="30" selected>30 dias</option>
+                <option value="90">90 dias</option>
+                <option value="365">1 ano</option>
+              </select>
+            </label>
+            <label class="inline-field" id="alt-escopo-wrap" hidden>Escopo
+              <select id="alt-escopo">
+                <option value="usuario">Minhas alterações</option>
+                <option value="todos">Todas</option>
+              </select>
+            </label>
+            <div class="search-wrap">
+              <div class="search-field">
+                <input id="alt-busca" type="search" placeholder="Filtrar produto ou usuário…" enterkeyhint="search" />
+                <button type="button" id="btn-limpar-alt" class="btn-clear-search" hidden title="Limpar filtro" aria-label="Limpar filtro">×</button>
+              </div>
+            </div>
+            <button type="button" id="btn-buscar-alt" class="btn primary">Atualizar</button>
+          </div>
+          <div class="tabs alt-tabs" id="alt-tabs" role="tablist">
+            <button type="button" class="tab active" data-alt-tipo="todos">Todas</button>
+            <button type="button" class="tab" data-alt-tipo="quantidade">Quantidades</button>
+            <button type="button" class="tab" data-alt-tipo="precos">Preços</button>
+            <button type="button" class="tab" data-alt-tipo="ficha">Ficha</button>
+            <button type="button" class="tab" data-alt-tipo="cadastro">Cadastros</button>
+          </div>
+          <div class="panel list-panel list-panel-full">
+            <div id="alteracoes-lista" class="item-list"></div>
           </div>
         </div>
 
@@ -147,13 +199,41 @@
           <div id="usuarios-lista" class="users-grid"></div>
         </div>
 
+        <nav class="mobile-nav" id="mobile-nav">
+          <button type="button" data-page="dashboard" class="active">Início</button>
+          <button type="button" data-page="estoque" id="nav-estoque-mobile">Estoque</button>
+          <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile" hidden>Alterações</button>
+          <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
+          <button type="button" id="btn-trocar-mobile">Trocar</button>
+        </nav>
+
         <footer class="app-footer in-app">
           <span>MT Automações (34) 3674-1937</span>
           <a href="https://www.instagram.com/mtautomacoes" target="_blank" rel="noopener">Instagram</a>
         </footer>
       </main>
     </section>
+
+    <!-- SCANNER -->
+    <dialog id="dlg-scan" class="dlg">
+      <div class="dlg-card scan-card">
+        <h3>Ler código de barras</h3>
+        <p class="hint">Foque só no código de barras. O app captura apenas o número e busca o produto.</p>
+        <input id="scan-file" type="file" accept="image/*" capture="environment" hidden />
+        <div class="scan-actions">
+          <button type="button" id="btn-scan-foto" class="btn primary block">Abrir câmera / galeria</button>
+          <button type="button" id="btn-scan-live" class="btn outline block" hidden>Leitura ao vivo</button>
+        </div>
+        <img id="scan-preview" class="scan-preview" alt="" hidden />
+        <video id="scan-video" playsinline muted hidden></video>
+        <p id="scan-msg" class="hint">Toque em “Abrir câmera” e enquadre o código de barras.</p>
+        <div class="dlg-actions">
+          <button type="button" id="btn-scan-fechar" class="btn">Fechar</button>
+        </div>
+      </div>
+    </dialog>
   </div>
+  <script src="vendor/zxing-browser.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

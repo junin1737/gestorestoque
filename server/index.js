@@ -1,8 +1,12 @@
 'use strict';
 const express = require('express');
 const path = require('path');
+const os = require('os');
 const routes = require('./routes');
 const { PORT } = require('./config');
+const { ensureFirebirdClientPath } = require('./nativePath');
+
+ensureFirebirdClientPath();
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -13,12 +17,32 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, '..', 'Painel', 'index.html'));
 });
 
-if (require.main === module || !process.versions.electron) {
-  // When required by Electron, still listen; when `node server/index.js`, same.
+function lanAddresses() {
+  const nets = os.networkInterfaces();
+  const out = [];
+  for (const name of Object.keys(nets)) {
+    for (const net of nets[name] || []) {
+      if (net.family !== 'IPv4' && net.family !== 4) continue;
+      if (net.internal) continue;
+      out.push({ interface: name, address: net.address });
+    }
+  }
+  return out;
 }
 
-const server = app.listen(PORT, '127.0.0.1', () => {
-  console.log(`Gestor Estoque API em http://127.0.0.1:${PORT}`);
+function printListenInfo() {
+  const host = os.hostname();
+  console.log(`Gestor Estoque API`);
+  console.log(`  Local:   http://127.0.0.1:${PORT}`);
+  console.log(`  Host:    http://${host}:${PORT}`);
+  for (const n of lanAddresses()) {
+    console.log(`  Rede:    http://${n.address}:${PORT}  (${n.interface})`);
+  }
+  console.log('Mantenha esta janela aberta. No celular use o IP/hostname da rede + porta.');
+}
+
+const server = app.listen(PORT, '0.0.0.0', () => {
+  printListenInfo();
 });
 
 server.on('error', (err) => {
@@ -29,4 +53,4 @@ server.on('error', (err) => {
   }
 });
 
-module.exports = { app, PORT };
+module.exports = { app, PORT, lanAddresses };

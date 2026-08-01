@@ -9,9 +9,17 @@ const state = {
   modulos: {},
   estoqueLista: [],
   selecionado: null,
+  isNovo: false,
+  buscaAplicada: '',
+  buscaAnterior: '',
+  alteracoesLista: [],
+  alteracoesTipo: 'todos',
   niveis: { nivel1: [], nivel2: [] },
   grupos: [],
+  unidades: [],
 };
+
+let scanControls = null;
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -118,21 +126,25 @@ function setEmitenteUI(emitente) {
   $('#side-empresa').textContent = nome;
   document.title = `${nome} — Gestor Estoque`;
 
-  const logoEls = [
-    ['#login-logo', '#login-logo-placeholder'],
-    ['#side-logo', '#side-logo-placeholder'],
+  const hasLogo = !!state.emitente.logo;
+  const pairs = [
+    ['#login-logo', '#login-logo-placeholder', '#login-logo-wrap'],
+    ['#side-logo', '#side-logo-placeholder', '#side-logo-wrap'],
   ];
-  for (const [imgSel, phSel] of logoEls) {
+  for (const [imgSel, phSel, wrapSel] of pairs) {
     const img = $(imgSel);
     const ph = $(phSel);
-    if (state.emitente.logo) {
+    const wrap = $(wrapSel);
+    if (hasLogo) {
       img.src = state.emitente.logo;
       img.hidden = false;
-      ph.hidden = true;
+      if (ph) ph.hidden = true;
+      if (wrap) wrap.classList.add('has-logo');
     } else {
       img.removeAttribute('src');
       img.hidden = true;
-      ph.hidden = false;
+      if (ph) ph.hidden = false;
+      if (wrap) wrap.classList.remove('has-logo');
     }
   }
 }
@@ -145,47 +157,44 @@ async function bootstrap() {
   if (cfgRes.offline) {
     setServiceStatus(false, cfgRes.error);
     setEmitenteUI({ nome_fanta: 'Gestor Estoque', logo: null });
-    state.config = {
-      host: '127.0.0.1',
-      port: 3050,
-      database: '',
-      user: 'SYSDBA',
-      sistema: 'clipp',
-      tema: 'claro',
-    };
-    fillConfigForm(state.config);
+    state.config = { host: '127.0.0.1', port: 3050, database: '', user: 'SYSDBA', sistema: 'clipp', tema: 'claro' };
     return;
   }
 
   state.config = cfgRes.config;
   state.modulos = cfgRes.modulos || {};
   applyTheme(state.config.tema);
-  $('#tema-rapido').value = state.config.tema || 'claro';
-  fillConfigForm(state.config);
+  if ($('#tema-rapido')) $('#tema-rapido').value = state.config.tema || 'claro';
 
   const conn = await api('/connect', { method: 'POST', body: state.config });
   if (conn.ok) {
-    setServiceStatus(true, `Conectado · Firebird ${conn.fbVersion} · ${conn.emitente?.nome_fanta || ''}`);
+    setServiceStatus(true, `Conectado · ${conn.emitente?.nome_fanta || ''}`);
     setEmitenteUI(conn.emitente);
     applyTheme(state.config.tema, conn.emitente?.logo);
     await loadFuncionarios();
   } else {
-    setServiceStatus(true, `Painel online, base offline: ${conn.error || 'falha na conexão Firebird'}`);
+    setServiceStatus(true, `Painel online, base offline: ${conn.error || 'falha Firebird'}`);
     setEmitenteUI({ nome_fanta: 'Gestor Estoque', logo: null });
-    // Ainda lista supervisor local para não travar a tela
-    const sel = $('#login-usuario');
-    sel.innerHTML = '<option value="">Selecione o usuário</option><option value="0">SUPERVISOR (Supervisor)</option>';
+    $('#login-usuario').innerHTML = '<option value="">Selecione o usuário</option><option value="0">SUPERVISOR (Supervisor)</option>';
   }
 }
 
-function fillConfigForm(cfg) {
-  $('#cfg-database').value = cfg.database || '';
-  $('#cfg-host').value = cfg.host || '127.0.0.1';
-  $('#cfg-port').value = cfg.port || 3050;
-  $('#cfg-user').value = cfg.user || 'SYSDBA';
-  $('#cfg-password').value = '';
-  $('#cfg-sistema').value = cfg.sistema || 'clipp';
-  $('#cfg-tema').value = cfg.tema || 'claro';
+async function loadUnidades() {
+  const res = await api('/unidades');
+  state.unidades = res.unidades || [];
+}
+
+function optionsUnidades(selected) {
+  const cur = String(selected || '').trim();
+  const opts = ['<option value="">—</option>'];
+  for (const u of state.unidades) {
+    const sel = u.unidade === cur ? 'selected' : '';
+    opts.push(`<option value="${escapeAttr(u.unidade)}" ${sel}>${escapeHtml(u.unidade)} — ${escapeHtml(u.descricao)}</option>`);
+  }
+  if (cur && !state.unidades.some((u) => u.unidade === cur)) {
+    opts.push(`<option value="${escapeAttr(cur)}" selected>${escapeHtml(cur)}</option>`);
+  }
+  return opts.join('');
 }
 
 async function loadFuncionarios() {
@@ -206,82 +215,6 @@ $('#toggle-senha').addEventListener('click', () => {
   input.type = input.type === 'password' ? 'text' : 'password';
 });
 
-$('#btn-abrir-config').addEventListener('click', () => {
-  fillConfigForm(state.config || {});
-  $('#cfg-msg').hidden = true;
-  $('#dlg-config').showModal();
-});
-
-$('#cfg-browse').addEventListener('click', async () => {
-  if (window.desktop?.openFile) {
-    const file = await window.desktop.openFile({
-      properties: ['openFile'],
-      filters: [{ name: 'Firebird', extensions: ['fdb', 'FDB'] }],
-    });
-    if (file) $('#cfg-database').value = file;
-  } else {
-    alert('No navegador, cole o caminho completo do arquivo .FDB.');
-  }
-});
-
-$('#cfg-testar').addEventListener('click', async () => {
-  const body = readConfigForm();
-  $('#cfg-msg').hidden = false;
-  $('#cfg-msg').textContent = 'Testando…';
-  const saved = await api('/config', { method: 'POST', body });
-  if (saved.offline) {
-    $('#cfg-msg').textContent = saved.error;
-    return;
-  }
-  const res = await api('/connect', { method: 'POST', body });
-  if (res.ok) {
-    state.config = { ...state.config, ...body, password: undefined };
-    setEmitenteUI(res.emitente);
-    applyTheme(body.tema, res.emitente?.logo);
-    setServiceStatus(true, `Conectado · Firebird ${res.fbVersion} · ${res.emitente?.nome_fanta || ''}`);
-    await loadFuncionarios();
-    $('#cfg-msg').textContent = `Conectado (Firebird ${res.fbVersion}). ${res.emitente?.nome_fanta || ''}`;
-  } else {
-    $('#cfg-msg').textContent = res.error || 'Falha na conexão. Confira se o Firebird Server está rodando e o caminho do .FDB.';
-  }
-});
-
-$('#form-config').addEventListener('submit', async (e) => {
-  e.preventDefault();
-  const body = readConfigForm();
-  $('#cfg-msg').hidden = false;
-  $('#cfg-msg').textContent = 'Salvando…';
-  const saved = await api('/config', { method: 'POST', body });
-  if (!saved.ok) {
-    $('#cfg-msg').textContent = saved.error || 'Não foi possível salvar a configuração.';
-    return;
-  }
-  state.config = saved.config;
-  const conn = await api('/connect', { method: 'POST', body });
-  if (conn.ok) {
-    setEmitenteUI(conn.emitente);
-    applyTheme(body.tema, conn.emitente?.logo);
-    setServiceStatus(true, `Conectado · Firebird ${conn.fbVersion} · ${conn.emitente?.nome_fanta || ''}`);
-    await loadFuncionarios();
-    $('#dlg-config').close();
-  } else {
-    setServiceStatus(true, `Config salva, base offline: ${conn.error || ''}`);
-    $('#cfg-msg').textContent = `Configuração salva. Conexão Firebird falhou: ${conn.error || 'erro desconhecido'}. Você pode corrigir o caminho/host e testar de novo.`;
-  }
-});
-
-function readConfigForm() {
-  return {
-    database: $('#cfg-database').value.trim(),
-    host: $('#cfg-host').value.trim(),
-    port: Number($('#cfg-port').value) || 3050,
-    user: $('#cfg-user').value.trim(),
-    password: $('#cfg-password').value,
-    sistema: $('#cfg-sistema').value,
-    tema: $('#cfg-tema').value,
-  };
-}
-
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#login-erro').hidden = true;
@@ -301,18 +234,38 @@ function enterApp() {
   $('#view-login').hidden = true;
   $('#view-app').hidden = false;
   $('#user-nome').textContent = state.usuario.nome;
-  $('#nav-usuarios').hidden = !can('usuarios', 'acesso');
-  showPage('estoque');
-  loadEstoque();
+  const canUsers = can('usuarios', 'acesso');
+  const canAlt = can('alteracoes', 'acesso');
+  const canEst = can('estoque', 'acesso');
+  $('#nav-usuarios').hidden = !canUsers;
+  if ($('#nav-usuarios-mobile')) $('#nav-usuarios-mobile').hidden = !canUsers;
+  $('#nav-alteracoes').hidden = !canAlt;
+  if ($('#nav-alteracoes-mobile')) $('#nav-alteracoes-mobile').hidden = !canAlt;
+  if ($('#dash-alteracoes')) $('#dash-alteracoes').hidden = !canAlt;
+  $('#nav-estoque').hidden = !canEst;
+  if ($('#nav-estoque-mobile')) $('#nav-estoque-mobile').hidden = !canEst;
+  if ($('#dash-estoque')) $('#dash-estoque').hidden = !canEst;
+  showPage('dashboard');
+  loadUnidades();
 }
 
-$('#btn-logout').addEventListener('click', () => {
+function trocarUsuario() {
+  stopScanner();
   state.usuario = null;
   state.selecionado = null;
+  state.isNovo = false;
   $('#login-senha').value = '';
   $('#view-app').hidden = true;
   $('#view-login').hidden = false;
-});
+  document.body.classList.remove('sidebar-open');
+  loadFuncionarios();
+}
+
+$('#btn-logout').addEventListener('click', trocarUsuario);
+$('#btn-trocar-usuario').addEventListener('click', trocarUsuario);
+$('#btn-trocar-usuario-top').addEventListener('click', trocarUsuario);
+$('#btn-trocar-mobile')?.addEventListener('click', trocarUsuario);
+$('#btn-menu-mobile')?.addEventListener('click', () => document.body.classList.toggle('sidebar-open'));
 
 $('#tema-rapido').addEventListener('change', async (e) => {
   const tema = e.target.value;
@@ -321,35 +274,131 @@ $('#tema-rapido').addEventListener('change', async (e) => {
   applyTheme(tema, state.emitente.logo);
 });
 
+function setNavActive(page) {
+  $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
+  $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
+}
+
 $$('.nav-btn').forEach((btn) => {
   btn.addEventListener('click', () => {
-    $$('.nav-btn').forEach((b) => b.classList.remove('active'));
-    btn.classList.add('active');
+    document.body.classList.remove('sidebar-open');
     showPage(btn.dataset.page);
   });
 });
+$$('#mobile-nav [data-page]').forEach((btn) => {
+  btn.addEventListener('click', () => showPage(btn.dataset.page));
+});
+$('#dash-estoque')?.addEventListener('click', () => showPage('estoque'));
+$('#dash-alteracoes')?.addEventListener('click', () => showPage('alteracoes'));
 
-function showPage(page) {
-  $('#page-estoque').hidden = page !== 'estoque';
-  $('#page-usuarios').hidden = page !== 'usuarios';
-  $('#page-title').textContent = page === 'usuarios' ? 'Usuários' : 'Estoque';
-  $('#page-sub').textContent = page === 'usuarios' ? 'Permissões por módulo' : 'Ficha, preços e quantidades';
-  if (page === 'usuarios') loadUsuarios();
+function scrollAppTop() {
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+  const main = document.querySelector('.main');
+  if (main) main.scrollTop = 0;
+  $$('.page').forEach((p) => { p.scrollTop = 0; });
+  const list = $('#estoque-lista');
+  if (list) list.scrollTop = 0;
+  const detail = $('#estoque-detalhe');
+  if (detail) detail.scrollTop = 0;
+  const alt = $('#alteracoes-lista');
+  if (alt) alt.scrollTop = 0;
 }
 
-$('#btn-buscar-estoque').addEventListener('click', () => loadEstoque());
+function showPage(page) {
+  if (page === 'alteracoes' && !can('alteracoes', 'acesso')) {
+    alert('Sem permissão para o relatório de alterações.');
+    page = 'dashboard';
+  }
+  if (page === 'estoque' && !can('estoque', 'acesso')) {
+    alert('Sem permissão de estoque.');
+    page = 'dashboard';
+  }
+
+  setNavActive(page);
+  if ($('#page-dashboard')) $('#page-dashboard').hidden = page !== 'dashboard';
+  $('#page-estoque').hidden = page !== 'estoque';
+  if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
+  $('#page-usuarios').hidden = page !== 'usuarios';
+
+  if (page === 'dashboard') {
+    $('#page-title').textContent = 'Início';
+    $('#page-sub').textContent = 'Escolha um módulo';
+  } else if (page === 'usuarios') {
+    $('#page-title').textContent = 'Usuários';
+    $('#page-sub').textContent = 'Permissões por módulo';
+    loadUsuarios();
+  } else if (page === 'alteracoes') {
+    $('#page-title').textContent = 'Alterações';
+    $('#page-sub').textContent = 'Histórico de saldos editados no painel';
+    const escopoWrap = $('#alt-escopo-wrap');
+    if (escopoWrap) escopoWrap.hidden = !state.usuario?.supervisor;
+    loadAlteracoes();
+  } else if (page === 'estoque') {
+    showEstoqueLista();
+    buscarEstoque(state.buscaAplicada, { keepHistory: true });
+  }
+  scrollAppTop();
+}
+
+function showEstoqueLista() {
+  state.selecionado = null;
+  state.isNovo = false;
+  $('#estoque-lista-view').hidden = false;
+  $('#estoque-edit-view').hidden = true;
+  $('#page-title').textContent = 'Estoque';
+  $('#page-sub').textContent = 'Toque em um produto para editar';
+  renderEstoqueLista();
+  scrollAppTop();
+}
+
+function showEstoqueEdicao() {
+  $('#estoque-lista-view').hidden = true;
+  $('#estoque-edit-view').hidden = false;
+  $('#page-title').textContent = state.isNovo ? 'Novo produto' : 'Editar produto';
+  $('#page-sub').textContent = 'Altere os dados e salve ou cancele';
+  scrollAppTop();
+}
+
+$('#btn-buscar-estoque').addEventListener('click', () => {
+  buscarEstoque($('#estoque-busca').value);
+});
 $('#estoque-busca').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') loadEstoque();
+  if (e.key === 'Enter') buscarEstoque($('#estoque-busca').value);
+});
+$('#estoque-busca').addEventListener('input', syncLimparBuscaBtn);
+$('#btn-limpar-busca')?.addEventListener('click', () => {
+  const anterior = state.buscaAnterior;
+  state.buscaAnterior = '';
+  buscarEstoque(anterior, { fromClear: true });
+  $('#estoque-busca')?.focus();
 });
 
+function syncLimparBuscaBtn() {
+  const btn = $('#btn-limpar-busca');
+  if (!btn) return;
+  const hasText = !!String($('#estoque-busca')?.value || '').trim();
+  const hasPrev = state.buscaAnterior !== '' || state.buscaAplicada !== '';
+  btn.hidden = !(hasText || hasPrev);
+}
+
+function buscarEstoque(q, opts = {}) {
+  const next = String(q || '').trim();
+  if (!opts.keepHistory && !opts.fromClear && next !== state.buscaAplicada) {
+    state.buscaAnterior = state.buscaAplicada;
+  }
+  state.buscaAplicada = next;
+  if ($('#estoque-busca')) $('#estoque-busca').value = next;
+  syncLimparBuscaBtn();
+  return loadEstoque();
+}
+
 async function loadEstoque() {
-  const q = $('#estoque-busca').value.trim();
+  const q = state.buscaAplicada || $('#estoque-busca').value.trim();
   const res = await api(`/estoque?q=${encodeURIComponent(q)}`);
   state.estoqueLista = res.itens || [];
   renderEstoqueLista();
-  if (!state.selecionado) {
-    $('#estoque-detalhe').innerHTML = '<p class="empty">Selecione um produto</p>';
-  }
 }
 
 function renderEstoqueLista() {
@@ -416,21 +465,108 @@ async function openProduto(idIdentificador) {
     alert(det.error || 'Erro ao abrir produto');
     return;
   }
+  if (!state.unidades.length) await loadUnidades();
+  state.isNovo = false;
   state.selecionado = det.item;
   state.grupos = grupos.grupos || [];
   state.niveis = niveis;
-  renderEstoqueLista();
+  $('#edit-produto-nome').textContent = det.item.descricao || 'Produto';
+  $('#edit-produto-meta').textContent = `#${det.item.id_estoque} · ID ${det.item.id_identificador}`;
+  showEstoqueEdicao();
   renderDetalhe();
 }
 
-function renderDetalhe() {
+async function abrirNovoProduto() {
+  if (!state.unidades.length) await loadUnidades();
+  const [grupos, niveis] = await Promise.all([api('/grupos'), api('/niveis')]);
+  state.grupos = grupos.grupos || [];
+  state.niveis = niveis;
+  state.isNovo = true;
+  state.selecionado = {
+    id_estoque: null,
+    id_identificador: null,
+    descricao: '',
+    id_grupo: null,
+    grupo: '',
+    uni_medida: 'UN',
+    prc_venda: 0.01,
+    prc_custo: 0,
+    qtd_atual: 0,
+    cod_barras: '',
+    referencia: '',
+    desc_cmpl: '',
+    grade_serie: 'N',
+    controla_lote: false,
+    id_nivel1: null,
+    id_nivel2: null,
+    lotes: [],
+    seriais: [],
+  };
+  $('#edit-produto-nome').textContent = 'Novo produto';
+  $('#edit-produto-meta').textContent = 'Preencha a ficha e salve';
+  showEstoqueEdicao();
+  renderDetalhe();
+}
+
+$('#btn-cancelar-produto').addEventListener('click', () => {
+  showEstoqueLista();
+  loadEstoque();
+});
+
+$('#btn-novo-produto')?.addEventListener('click', () => abrirNovoProduto());
+
+$('#btn-salvar-produto').addEventListener('click', async () => {
   const it = state.selecionado;
   if (!it) return;
   const verCusto = podeVerCusto();
   const editarVenda = podeEditarPrecoVenda();
   const editarCusto = podeEditarCusto();
-  const editarFicha = can('estoque', 'acesso') && (state.usuario.supervisor || ['editar', 'total'].includes(state.usuario.permissoes?.estoque?.ficha));
-  const editarQtd = can('estoque', 'acesso') && (state.usuario.supervisor || ['editar', 'total'].includes(state.usuario.permissoes?.estoque?.quantidades));
+  const editarFicha = can('estoque', 'acesso') && (state.usuario.supervisor || ['editar', 'total'].includes(state.usuario.permissoes?.estoque?.ficha) || state.isNovo);
+  const editarQtd = can('estoque', 'acesso') && (state.usuario.supervisor || ['editar', 'total'].includes(state.usuario.permissoes?.estoque?.quantidades) || state.isNovo);
+
+  const body = {
+    usuarioNome: state.usuario.nome,
+    idFuncionario: state.usuario.id,
+  };
+
+  if (editarFicha) {
+    if ($('#f-descricao')) body.descricao = $('#f-descricao').value;
+    if ($('#f-grupo')) body.id_grupo = $('#f-grupo').value === '' ? null : Number($('#f-grupo').value);
+    if ($('#f-un')) body.uni_medida = $('#f-un').value;
+    if ($('#f-barras')) body.cod_barras = $('#f-barras').value;
+    if ($('#f-ref')) body.referencia = $('#f-ref').value;
+    if ($('#f-cmpl')) body.desc_cmpl = $('#f-cmpl').value;
+    if ($('#g-cor')) body.id_nivel1 = $('#g-cor').value === '' ? null : Number($('#g-cor').value);
+    if ($('#g-tam')) body.id_nivel2 = $('#g-tam').value === '' ? null : Number($('#g-tam').value);
+  }
+  if ((editarVenda || state.isNovo) && $('#p-venda')) body.prc_venda = Number($('#p-venda').value);
+  if ((editarCusto || state.isNovo) && $('#p-custo') && (verCusto || state.isNovo)) body.prc_custo = Number($('#p-custo').value);
+  if (editarQtd && $('#q-atual')) body.qtd_atual = Number($('#q-atual').value);
+
+  if (!String(body.descricao || it.descricao || '').trim() && state.isNovo) {
+    return alert('Informe a descrição do produto.');
+  }
+
+  let res;
+  if (state.isNovo) {
+    res = await api('/estoque', { method: 'POST', body });
+  } else {
+    res = await api(`/estoque/${it.id_identificador}`, { method: 'PUT', body });
+  }
+  if (!res.ok) return alert(res.error || 'Erro ao salvar');
+  alert(state.isNovo ? 'Produto cadastrado.' : 'Produto salvo.');
+  showEstoqueLista();
+  await loadEstoque();
+});
+
+function renderDetalhe() {
+  const it = state.selecionado;
+  if (!it) return;
+  const editarFicha = state.isNovo || (can('estoque', 'acesso') && (state.usuario.supervisor || ['editar', 'total'].includes(state.usuario.permissoes?.estoque?.ficha)));
+  const editarQtd = state.isNovo || (can('estoque', 'acesso') && (state.usuario.supervisor || ['editar', 'total'].includes(state.usuario.permissoes?.estoque?.quantidades)));
+  const editarVenda = state.isNovo || podeEditarPrecoVenda();
+  const editarCusto = state.isNovo || podeEditarCusto();
+  const verCusto = state.isNovo || podeVerCusto();
   const showGrade = it.grade_serie === 'G';
   const showSerial = it.grade_serie === 'S';
   const showLote = !!it.controla_lote;
@@ -444,19 +580,23 @@ function renderDetalhe() {
     </div>
     <div class="tab-pane" data-pane="ficha">
       <div class="form-grid">
-        <label>ID Estoque<input value="${it.id_estoque}" disabled /></label>
-        <label>ID Identificador<input value="${it.id_identificador}" disabled /></label>
-        <label class="full">Descrição<input id="f-descricao" value="${escapeAttr(it.descricao)}" ${editarFicha ? '' : 'disabled'} /></label>
+        <label>ID Estoque<input value="${it.id_estoque ?? 'novo'}" disabled /></label>
+        <label>ID Identificador<input value="${it.id_identificador ?? 'novo'}" disabled /></label>
+        <label class="full">Descrição<input id="f-descricao" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
         <label class="full">Grupo
           <div class="input-row">
-            <select id="f-grupo" ${editarFicha ? '' : 'disabled'}>
+            <select id="f-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>
               <option value="">—</option>
               ${state.grupos.map((g) => `<option value="${g.id_grupo}" ${Number(g.id_grupo) === Number(it.id_grupo) ? 'selected' : ''}>${escapeHtml(g.descricao)}</option>`).join('')}
             </select>
-            <button type="button" class="btn small" id="btn-novo-grupo" ${editarFicha ? '' : 'disabled'}>+</button>
+            <button type="button" class="btn small" id="btn-novo-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>+</button>
           </div>
         </label>
-        <label>Unid. medida<input id="f-un" value="${escapeAttr(it.uni_medida)}" ${editarFicha ? '' : 'disabled'} /></label>
+        <label>Unid. medida
+          <select id="f-un" ${editarFicha || state.isNovo ? '' : 'disabled'}>
+            ${optionsUnidades(it.uni_medida)}
+          </select>
+        </label>
         <label>Qtd atual<input value="${fmtNum(it.qtd_atual)}" disabled /></label>
         <label>Cód. barras<input id="f-barras" value="${escapeAttr(it.cod_barras)}" ${editarFicha ? '' : 'disabled'} /></label>
         <label>Referência<input id="f-ref" value="${escapeAttr(it.referencia)}" ${editarFicha ? '' : 'disabled'} /></label>
@@ -464,7 +604,6 @@ function renderDetalhe() {
         <label>Preço venda<input value="${fmtMoney(it.prc_venda)}" disabled /></label>
         <label>Preço custo<input class="${verCusto ? '' : 'masked'}" value="${verCusto ? fmtMoney(it.prc_custo) : '****'}" disabled /></label>
       </div>
-      ${editarFicha ? '<button class="btn primary" id="btn-salvar-ficha" style="margin-top:1rem">Salvar ficha</button>' : ''}
     </div>
     <div class="tab-pane" data-pane="precos" hidden>
       <div class="form-grid">
@@ -475,7 +614,6 @@ function renderDetalhe() {
         </label>
         <p class="hint full">${verCusto ? `Margem: ${fmtMargem(it.prc_venda, it.prc_custo)}` : 'Custo oculto pela permissão do usuário.'}</p>
       </div>
-      ${editarVenda || editarCusto ? '<button class="btn primary" id="btn-salvar-precos" style="margin-top:1rem">Salvar preços</button>' : ''}
     </div>
     <div class="tab-pane" data-pane="quantidades" hidden>
       <label>Quantidade atual (banco)
@@ -492,7 +630,6 @@ function renderDetalhe() {
         </div>
       </div>
       <div id="q-diff" class="diff-box">Diferença: 0</div>
-      ${editarQtd ? '<button class="btn primary" id="btn-salvar-qtd" style="margin-top:1rem">Salvar contagem</button>' : ''}
     </div>
     <div class="tab-pane" data-pane="controle" hidden>
       ${showGrade ? `
@@ -511,7 +648,6 @@ function renderDetalhe() {
             </select>
           </label>
         </div>
-        ${editarFicha ? '<button class="btn primary" id="btn-salvar-grade">Salvar grade</button>' : ''}
       ` : ''}
       ${showLote ? `
         <h3 class="section-title">Lotes</h3>
@@ -602,69 +738,6 @@ function renderDetalhe() {
     opt.selected = true;
     sel.appendChild(opt);
   });
-
-  $('#btn-salvar-ficha')?.addEventListener('click', async () => {
-    const res = await api(`/estoque/${it.id_identificador}`, {
-      method: 'PUT',
-      body: {
-        descricao: $('#f-descricao').value,
-        id_grupo: $('#f-grupo').value === '' ? null : Number($('#f-grupo').value),
-        uni_medida: $('#f-un').value,
-        cod_barras: $('#f-barras').value,
-        referencia: $('#f-ref').value,
-        desc_cmpl: $('#f-cmpl').value,
-        usuarioNome: state.usuario.nome,
-        idFuncionario: state.usuario.id,
-      },
-    });
-    if (!res.ok) return alert(res.error || 'Erro ao salvar');
-    await openProduto(it.id_identificador);
-    alert('Ficha salva.');
-  });
-
-  $('#btn-salvar-precos')?.addEventListener('click', async () => {
-    const body = {
-      usuarioNome: state.usuario.nome,
-      idFuncionario: state.usuario.id,
-    };
-    if (editarVenda) body.prc_venda = Number($('#p-venda').value);
-    if (editarCusto) body.prc_custo = Number($('#p-custo').value);
-    const res = await api(`/estoque/${it.id_identificador}`, { method: 'PUT', body });
-    if (!res.ok) return alert(res.error || 'Erro ao salvar');
-    await openProduto(it.id_identificador);
-    alert('Preços salvos.');
-  });
-
-  $('#btn-salvar-qtd')?.addEventListener('click', async () => {
-    const nova = Number($('#q-atual').value);
-    const res = await api(`/estoque/${it.id_identificador}`, {
-      method: 'PUT',
-      body: {
-        qtd_atual: nova,
-        usuarioNome: state.usuario.nome,
-        idFuncionario: state.usuario.id,
-      },
-    });
-    if (!res.ok) return alert(res.error || 'Erro ao salvar');
-    await openProduto(it.id_identificador);
-    await loadEstoque();
-    alert('Quantidade salva e registrada em tb_est_saldo_alterado.');
-  });
-
-  $('#btn-salvar-grade')?.addEventListener('click', async () => {
-    const res = await api(`/estoque/${it.id_identificador}`, {
-      method: 'PUT',
-      body: {
-        id_nivel1: $('#g-cor').value === '' ? null : Number($('#g-cor').value),
-        id_nivel2: $('#g-tam').value === '' ? null : Number($('#g-tam').value),
-        usuarioNome: state.usuario.nome,
-        idFuncionario: state.usuario.id,
-      },
-    });
-    if (!res.ok) return alert(res.error || 'Erro ao salvar');
-    await openProduto(it.id_identificador);
-    alert('Grade salva.');
-  });
 }
 
 async function loadUsuarios() {
@@ -704,6 +777,12 @@ function renderUsuarios() {
             ${permOptions(['nenhum', 'visualizar', 'editar'], u.permissoes?.estoque?.quantidades || 'nenhum')}
           </select>
         </label>
+        <label>Relatório Alterações
+          <select data-perm="alteracoes.acesso" ${u.supervisor ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.alteracoes?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.alteracoes?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
         <label>Usuários
           <select data-perm="usuarios.acesso" ${u.supervisor ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.usuarios?.acesso ? 'selected' : ''}>Sim</option>
@@ -737,6 +816,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
           precos: $('[data-perm="estoque.precos"]', card).value,
           quantidades: $('[data-perm="estoque.quantidades"]', card).value,
         },
+        alteracoes: {
+          acesso: $('[data-perm="alteracoes.acesso"]', card).value === 'true',
+        },
         usuarios: {
           acesso: $('[data-perm="usuarios.acesso"]', card).value === 'true',
         },
@@ -754,6 +836,447 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
   state.usuarios = res.usuarios;
   renderUsuarios();
   alert('Usuários atualizados.');
+});
+
+function fmtDataHora(data, hora) {
+  const d = data ? new Date(data) : null;
+  let ds = '—';
+  if (d && !Number.isNaN(d.getTime())) {
+    ds = d.toLocaleDateString('pt-BR');
+  } else if (data != null) {
+    ds = String(data).slice(0, 10);
+  }
+  let hs = '';
+  if (hora != null) {
+    if (hora instanceof Date) {
+      hs = hora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    } else {
+      hs = String(hora).slice(0, 8);
+    }
+  }
+  return hs ? `${ds} ${hs}` : ds;
+}
+
+async function loadAlteracoes() {
+  const box = $('#alteracoes-lista');
+  if (box) box.innerHTML = '<p class="empty">Carregando…</p>';
+  const dias = Number($('#alt-dias')?.value || 30);
+  const q = String($('#alt-busca')?.value || '').trim();
+  const todos = state.usuario?.supervisor && $('#alt-escopo')?.value === 'todos';
+  const tipo = state.alteracoesTipo || 'todos';
+  const params = new URLSearchParams({
+    idUsuario: String(state.usuario?.id ?? 0),
+    supervisor: state.usuario?.supervisor ? '1' : '0',
+    todos: todos ? '1' : '0',
+    dias: String(dias),
+    tipo,
+    q,
+  });
+  const res = await api(`/alteracoes?${params.toString()}`);
+  if (!res.ok) {
+    if (box) box.innerHTML = `<p class="empty">${escapeHtml(res.error || 'Erro ao carregar')}</p>`;
+    return;
+  }
+  state.alteracoesLista = res.itens || [];
+  renderAlteracoes();
+}
+
+function tipoAlteracaoLabel(tipo) {
+  const map = {
+    quantidade: 'Quantidade',
+    precos: 'Preços',
+    ficha: 'Ficha',
+    cadastro: 'Cadastro',
+  };
+  return map[tipo] || tipo || 'Alteração';
+}
+
+function renderAlteracoes() {
+  const box = $('#alteracoes-lista');
+  if (!box) return;
+  const listPanel = box.closest('.list-panel') || box.parentElement;
+  let head = listPanel.querySelector('.list-panel-head');
+  if (!head) {
+    head = document.createElement('div');
+    head.className = 'list-panel-head';
+    head.innerHTML = '<strong>Movimentações</strong><span data-count></span>';
+    listPanel.insertBefore(head, box);
+  }
+  const n = state.alteracoesLista.length;
+  const tipoLabel = tipoAlteracaoLabel(state.alteracoesTipo === 'todos' ? '' : state.alteracoesTipo);
+  head.querySelector('strong').textContent = state.alteracoesTipo === 'todos' ? 'Todas as alterações' : tipoLabel;
+  head.querySelector('[data-count]').textContent = `${n} registro${n === 1 ? '' : 's'}`;
+
+  if (!n) {
+    box.innerHTML = '<p class="empty">Nenhuma alteração encontrada neste filtro</p>';
+    return;
+  }
+
+  box.innerHTML = state.alteracoesLista.map((it) => {
+    const tipo = it.tipo || 'ficha';
+    const isQty = tipo === 'quantidade';
+    const diff = Number(it.diferenca || 0);
+    const side = isQty
+      ? `<span class="stock-badge ${diff > 0 ? 'ok' : diff < 0 ? 'zero' : ''}">${diff > 0 ? '+' : ''}${fmtNum(diff)} ${escapeHtml(it.uni_medida || '')}</span>
+         <span class="item-price">${fmtNum(it.saldo_antigo)} → ${fmtNum(it.saldo_novo)}</span>`
+      : `<span class="chip-tipo ${escapeAttr(tipo)}">${escapeHtml(tipoAlteracaoLabel(tipo))}</span>
+         <span class="item-price">${escapeHtml(it.resumo || '—')}</span>`;
+    const detalhe = it.detalhe || (isQty ? '' : '');
+    return `
+      <div class="item-row alt-row">
+        <div class="item-avatar alt-${escapeAttr(tipo)}" aria-hidden="true">${isQty ? 'Δ' : tipo === 'precos' ? 'R$' : tipo === 'cadastro' ? '+' : 'F'}</div>
+        <div class="item-main">
+          <strong title="${escapeAttr(it.descricao)}">${escapeHtml(it.descricao || 'Produto')}</strong>
+          <div class="item-meta">
+            <span class="chip">${escapeHtml(fmtDataHora(it.data, it.hora))}</span>
+            <span class="chip">#${it.id_estoque || '—'}</span>
+            ${it.cod_barras ? `<span class="chip">${escapeHtml(it.cod_barras)}</span>` : ''}
+            <span class="chip">${escapeHtml(it.funcionario || '—')}</span>
+            ${state.alteracoesTipo === 'todos' ? `<span class="chip chip-tipo ${escapeAttr(tipo)}">${escapeHtml(tipoAlteracaoLabel(tipo))}</span>` : ''}
+          </div>
+          ${detalhe ? `<p class="alt-obs">${escapeHtml(detalhe)}</p>` : ''}
+          ${it.observacao && it.observacao !== detalhe ? `<p class="alt-obs">${escapeHtml(it.observacao)}</p>` : ''}
+        </div>
+        <div class="item-side">${side}</div>
+      </div>`;
+  }).join('');
+}
+
+$('#btn-buscar-alt')?.addEventListener('click', () => loadAlteracoes());
+$('#alt-dias')?.addEventListener('change', () => loadAlteracoes());
+$('#alt-escopo')?.addEventListener('change', () => loadAlteracoes());
+$('#alt-busca')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loadAlteracoes();
+});
+$('#alt-busca')?.addEventListener('input', () => {
+  const btn = $('#btn-limpar-alt');
+  if (btn) btn.hidden = !String($('#alt-busca').value || '').trim();
+});
+$('#btn-limpar-alt')?.addEventListener('click', () => {
+  if ($('#alt-busca')) $('#alt-busca').value = '';
+  const btn = $('#btn-limpar-alt');
+  if (btn) btn.hidden = true;
+  loadAlteracoes();
+});
+$$('#alt-tabs [data-alt-tipo]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    state.alteracoesTipo = btn.dataset.altTipo || 'todos';
+    $$('#alt-tabs [data-alt-tipo]').forEach((b) => b.classList.toggle('active', b === btn));
+    loadAlteracoes();
+  });
+});
+
+function stopScanner() {
+  if (scanControls?.timer) clearInterval(scanControls.timer);
+  if (scanControls?.reader?.reset) {
+    try { scanControls.reader.reset(); } catch { /* ignore */ }
+  }
+  if (scanControls?.stream) {
+    scanControls.stream.getTracks().forEach((t) => t.stop());
+  }
+  scanControls = null;
+  const video = $('#scan-video');
+  if (video) {
+    video.srcObject = null;
+    video.hidden = true;
+  }
+}
+
+function normalizeBarcodeNumber(raw) {
+  const text = String(raw || '').trim();
+  if (!text) return '';
+
+  // Remove espaços e caracteres comuns de formatação
+  const compact = text.replace(/[\s\-._]/g, '');
+
+  // Se já for só dígitos, usa direto
+  if (/^\d{4,18}$/.test(compact)) return compact;
+
+  // Extrai a maior sequência numérica (código de barras impresso)
+  const matches = compact.match(/\d{4,18}/g) || text.match(/\d{4,18}/g) || [];
+  if (!matches.length) return '';
+  matches.sort((a, b) => b.length - a.length);
+  return matches[0];
+}
+
+function pickBestBarcode(candidates) {
+  const uniq = [...new Set(candidates.filter(Boolean))];
+  if (!uniq.length) return '';
+  uniq.sort((a, b) => {
+    if (a.length === 13 && b.length !== 13) return -1;
+    if (b.length === 13 && a.length !== 13) return 1;
+    if (a.length === 8 && b.length !== 8) return -1;
+    if (b.length === 8 && a.length !== 8) return 1;
+    if (a.length === 12 && b.length !== 12) return -1;
+    if (b.length === 12 && a.length !== 12) return 1;
+    return b.length - a.length;
+  });
+  return uniq[0];
+}
+
+function applyScannedCode(value) {
+  const code = normalizeBarcodeNumber(value);
+  if (!code) return false;
+  stopScanner();
+  $('#dlg-scan')?.close();
+  scrollAppTop();
+  buscarEstoque(code);
+  return true;
+}
+
+function getZxingReader() {
+  const ZXing = window.ZXingBrowser || window.ZXing;
+  if (!ZXing?.BrowserMultiFormatReader) return null;
+  return new ZXing.BrowserMultiFormatReader();
+}
+
+const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'codabar'];
+
+async function loadImageElement(url) {
+  const img = new Image();
+  img.decoding = 'async';
+  await new Promise((resolve, reject) => {
+    img.onload = resolve;
+    img.onerror = reject;
+    img.src = url;
+  });
+  return img;
+}
+
+function canvasVariantsFromImage(img) {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  if (!w || !h) return [];
+
+  const variants = [];
+  const pushVariant = (sx, sy, sw, sh, scale, mode) => {
+    const cw = Math.max(1, Math.round(sw * scale));
+    const ch = Math.max(1, Math.round(sh * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = cw;
+    canvas.height = ch;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+
+    if (mode !== 'raw') {
+      const data = ctx.getImageData(0, 0, cw, ch);
+      const px = data.data;
+      for (let i = 0; i < px.length; i += 4) {
+        let y = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+        if (mode === 'contrast') {
+          y = (y - 128) * 1.55 + 128;
+        } else if (mode === 'threshold') {
+          y = y > 140 ? 255 : 0;
+        } else if (mode === 'invert') {
+          y = 255 - y;
+        }
+        y = Math.max(0, Math.min(255, y));
+        px[i] = px[i + 1] = px[i + 2] = y;
+      }
+      ctx.putImageData(data, 0, 0);
+    }
+    variants.push(canvas);
+  };
+
+  // Original e com contraste em escalas úteis
+  for (const scale of [1, 1.6, 0.75]) {
+    pushVariant(0, 0, w, h, scale, 'raw');
+    pushVariant(0, 0, w, h, scale, 'contrast');
+  }
+
+  // Recorte central (usuário costuma centralizar o código)
+  const cx = Math.round(w * 0.08);
+  const cy = Math.round(h * 0.22);
+  const cw = Math.round(w * 0.84);
+  const ch = Math.round(h * 0.56);
+  pushVariant(cx, cy, cw, ch, 1.4, 'contrast');
+  pushVariant(cx, cy, cw, ch, 1.8, 'threshold');
+  pushVariant(cx, cy, cw, ch, 1.4, 'invert');
+
+  // Faixa horizontal (barras de produto)
+  const bx = Math.round(w * 0.05);
+  const by = Math.round(h * 0.35);
+  const bw = Math.round(w * 0.9);
+  const bh = Math.round(h * 0.3);
+  pushVariant(bx, by, bw, bh, 2, 'contrast');
+  pushVariant(bx, by, bw, bh, 2.2, 'threshold');
+
+  return variants;
+}
+
+async function detectWithBarcodeDetector(source) {
+  if (!('BarcodeDetector' in window)) return [];
+  try {
+    const detector = new BarcodeDetector({ formats: BARCODE_FORMATS });
+    const codes = await detector.detect(source);
+    return codes.map((c) => normalizeBarcodeNumber(c.rawValue)).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+async function detectWithZxingCanvas(canvas) {
+  const reader = getZxingReader();
+  if (!reader) return [];
+  try {
+    const result = await reader.decodeFromCanvas(canvas);
+    const n = normalizeBarcodeNumber(result?.getText?.() || result?.text || '');
+    return n ? [n] : [];
+  } catch {
+    return [];
+  }
+}
+
+async function decodeBarcodeFromImageUrl(url) {
+  const candidates = [];
+  const img = await loadImageElement(url);
+
+  // 1) Imagem original
+  candidates.push(...await detectWithBarcodeDetector(img));
+  try {
+    const bitmap = await createImageBitmap(img);
+    candidates.push(...await detectWithBarcodeDetector(bitmap));
+    bitmap.close?.();
+  } catch { /* ignore */ }
+
+  try {
+    const reader = getZxingReader();
+    if (reader) {
+      const result = await reader.decodeFromImageUrl(url);
+      const n = normalizeBarcodeNumber(result?.getText?.() || result?.text || '');
+      if (n) candidates.push(n);
+    }
+  } catch { /* ignore */ }
+
+  if (pickBestBarcode(candidates)) return pickBestBarcode(candidates);
+
+  // 2) Variantes processadas (contraste / recorte / threshold)
+  const variants = canvasVariantsFromImage(img);
+  for (const canvas of variants) {
+    candidates.push(...await detectWithBarcodeDetector(canvas));
+    candidates.push(...await detectWithZxingCanvas(canvas));
+    const best = pickBestBarcode(candidates);
+    if (best) return best;
+  }
+
+  return pickBestBarcode(candidates);
+}
+
+async function startScanner() {
+  const dlg = $('#dlg-scan');
+  const msg = $('#scan-msg');
+  const preview = $('#scan-preview');
+  const liveBtn = $('#btn-scan-live');
+  if (!dlg) return;
+
+  stopScanner();
+  if (preview) {
+    preview.hidden = true;
+    preview.removeAttribute('src');
+  }
+  dlg.showModal();
+  msg.textContent = 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
+
+  // Leitura ao vivo só em contexto seguro (HTTPS/localhost)
+  if (liveBtn) {
+    liveBtn.hidden = !(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
+  }
+}
+
+async function startLiveScanner() {
+  const video = $('#scan-video');
+  const msg = $('#scan-msg');
+  const preview = $('#scan-preview');
+  if (!video || !msg) return;
+
+  if (!window.isSecureContext) {
+    msg.textContent = 'Leitura ao vivo precisa de HTTPS. Use “Abrir câmera / galeria”.';
+    return;
+  }
+
+  try {
+    if (preview) preview.hidden = true;
+    video.hidden = false;
+    msg.textContent = 'Abrindo câmera ao vivo…';
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: { ideal: 'environment' } },
+      audio: false,
+    });
+    video.srcObject = stream;
+    await video.play();
+
+    const reader = getZxingReader();
+    scanControls = { stream, reader, timer: null };
+
+    if (reader?.decodeFromVideoDevice) {
+      // Alguns builds usam deviceId null = default
+      await reader.decodeFromVideoDevice(undefined, video, (result, err) => {
+        if (result) applyScannedCode(result.getText());
+        void err;
+      });
+      msg.textContent = 'Aponte para o código de barras…';
+      return;
+    }
+
+    if ('BarcodeDetector' in window) {
+      const detector = new BarcodeDetector({
+        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'codabar'],
+      });
+      msg.textContent = 'Aponte para o código de barras…';
+      scanControls.timer = setInterval(async () => {
+        try {
+          const codes = await detector.detect(video);
+          if (codes[0]?.rawValue) applyScannedCode(codes[0].rawValue);
+        } catch { /* ignore */ }
+      }, 450);
+      return;
+    }
+
+    msg.textContent = 'Leitura ao vivo indisponível neste navegador. Use a foto do código.';
+  } catch (err) {
+    msg.textContent = `Não foi possível abrir a câmera ao vivo: ${err.message}. Use “Abrir câmera / galeria”.`;
+  }
+}
+
+async function onScanFileSelected(file) {
+  const msg = $('#scan-msg');
+  const preview = $('#scan-preview');
+  if (!file) return;
+  msg.textContent = 'Lendo número do código…';
+  const url = URL.createObjectURL(file);
+  if (preview) {
+    preview.src = url;
+    preview.hidden = false;
+  }
+  $('#scan-video').hidden = true;
+  try {
+    const code = await decodeBarcodeFromImageUrl(url);
+    if (!applyScannedCode(code)) {
+      msg.textContent = 'Não encontrei o número. Tire outra foto mais perto, com boa luz e só o código.';
+    }
+  } catch (err) {
+    msg.textContent = `Não foi possível ler o número do código. Tire outra foto mais perto. (${err.message || 'erro'})`;
+  } finally {
+    // mantém preview; revoga depois de um tempo
+    setTimeout(() => URL.revokeObjectURL(url), 30000);
+  }
+}
+
+$('#btn-scan-barras')?.addEventListener('click', () => startScanner());
+$('#btn-scan-fechar')?.addEventListener('click', () => {
+  stopScanner();
+  $('#dlg-scan')?.close();
+});
+$('#btn-scan-foto')?.addEventListener('click', () => {
+  $('#scan-file')?.click();
+});
+$('#btn-scan-live')?.addEventListener('click', () => startLiveScanner());
+$('#scan-file')?.addEventListener('change', (e) => {
+  const file = e.target.files && e.target.files[0];
+  onScanFileSelected(file);
+  e.target.value = '';
 });
 
 function escapeHtml(s) {

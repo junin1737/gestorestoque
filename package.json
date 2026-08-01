@@ -1,53 +1,88 @@
 {
   "name": "gestor-estoque",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Painel Administrativo de Estoque - MT Automações",
+  "author": "MT Automações",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/junin1737/gestorestoque.git"
+  },
   "main": "main.js",
   "scripts": {
-    "start": "node server/index.js",
+    "start": "electron .",
+    "server": "node server/index.js",
     "electron": "electron .",
-    "build": "electron-builder --win --x64"
+    "build": "electron-builder --win --x64",
+    "build:dir": "electron-builder --win --x64 --dir"
   },
   "dependencies": {
+    "@zxing/browser": "^0.2.1",
     "express": "^4.18.2",
-    "node-firebird": "^1.1.6"
+    "node-firebird": "^1.1.6",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "electron": "^31.7.7",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.mt.gestor-estoque",
+    "appId": "com.mtautomacoes.gestor-estoque",
     "productName": "Gestor Estoque",
-    "copyright": "MT Automações",
+    "copyright": "Copyright © MT Automações",
+    "asar": true,
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "main.js",
       "preload.js",
-      "server/**",
+      "server/**/*",
+      "Painel/**/*",
       "package.json",
-      "node_modules/**",
-      "Painel/**",
-      "MTdll/**"
+      "!**/node_modules/*/{CHANGELOG.md,README.md,README,readme.md,readme}",
+      "!**/node_modules/*/{test,__tests__,tests,powered-test,example,examples}",
+      "!**/node_modules/*.d.ts",
+      "!docs/**/*",
+      "!dist/**/*",
+      "!build/**/*",
+      "!.git/**/*",
+      "!.cursor/**/*"
     ],
     "extraResources": [
       {
         "from": "MTdll/",
         "to": "MTdll/",
-        "filter": ["**/*.dll", "**/*.DLL", "**/.gitkeep"]
+        "filter": [
+          "**/*.dll",
+          "**/*.DLL"
+        ]
       }
     ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "artifactName": "GestorEstoque-Setup-${version}.${ext}",
+      "publisherName": "MT Automações",
+      "signAndEditExecutable": false
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": true,
       "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Gestor Estoque"
+      "shortcutName": "Gestor Estoque",
+      "runAfterFinish": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "installer.nsh"
     }
   }
 }
