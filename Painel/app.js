@@ -849,21 +849,14 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
 });
 
 function fmtDataHora(data, hora, dataHoraPronta) {
-  if (dataHoraPronta && /^\d{2}\/\d{2}\/\d{4}/.test(String(dataHoraPronta))) {
-    return String(dataHoraPronta);
-  }
+  const ready = String(dataHoraPronta || '').trim();
+  if (/^\d{2}\/\d{2}\/\d{4} \d{2}:\d{2}:\d{2}$/.test(ready)) return ready;
+  if (/^\d{2}\/\d{2}\/\d{4}$/.test(ready)) return ready;
 
-  const pad = (n) => String(n).padStart(2, '0');
+  const pad = (n) => String(Math.trunc(Number(n) || 0)).padStart(2, '0');
 
   let y; let mo; let d;
-  if (data instanceof Date && !Number.isNaN(data.getTime())) {
-    const iso = data.toISOString();
-    if (/T00:00:00/.test(iso)) {
-      y = data.getUTCFullYear(); mo = data.getUTCMonth() + 1; d = data.getUTCDate();
-    } else {
-      y = data.getFullYear(); mo = data.getMonth() + 1; d = data.getDate();
-    }
-  } else if (data != null && data !== '') {
+  if (data != null && data !== '') {
     const s = String(data);
     let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
     if (m) { y = +m[1]; mo = +m[2]; d = +m[3]; }
@@ -872,33 +865,17 @@ function fmtDataHora(data, hora, dataHoraPronta) {
       if (m) { d = +m[1]; mo = +m[2]; y = +m[3]; }
     }
   }
-  if (!y) return '—';
+  if (!y) return ready || '—';
 
   let hh = 0; let mi = 0; let ss = 0; let hasTime = false;
-  if (hora instanceof Date && !Number.isNaN(hora.getTime())) {
-    hasTime = true;
-    const iso = hora.toISOString();
-    if (hora.getFullYear() < 1980 || /1970-01-01/.test(iso)) {
-      hh = hora.getUTCHours(); mi = hora.getUTCMinutes(); ss = hora.getUTCSeconds();
-    } else {
-      hh = hora.getHours(); mi = hora.getMinutes(); ss = hora.getSeconds();
-    }
-  } else if (hora != null && hora !== '') {
-    const s = String(hora);
-    let m = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (hora != null && hora !== '') {
+    const s = String(hora).trim();
+    let m = s.match(/T(\d{2}):(\d{2}):(\d{2})/i);
+    if (!m) m = s.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+    if (!m) m = s.match(/\s(\d{1,2}):(\d{2})(?::(\d{2}))?/);
     if (m) {
       hasTime = true;
       hh = +m[1]; mi = +m[2]; ss = +(m[3] || 0);
-    } else {
-      const dt = new Date(s);
-      if (!Number.isNaN(dt.getTime())) {
-        hasTime = true;
-        if (dt.getFullYear() < 1980 || /1970-01-01/.test(s)) {
-          hh = dt.getUTCHours(); mi = dt.getUTCMinutes(); ss = dt.getUTCSeconds();
-        } else {
-          hh = dt.getHours(); mi = dt.getMinutes(); ss = dt.getSeconds();
-        }
-      }
     }
   }
 

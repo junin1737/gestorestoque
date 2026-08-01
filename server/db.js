@@ -155,6 +155,12 @@ function stockTables(useManage) {
   const genGrupo = useManage && generatorExists('GEN_TB_EST_GRUPO_2_ID')
     ? 'GEN_TB_EST_GRUPO_2_ID'
     : 'GEN_TB_EST_GRUPO_ID';
+  const genEstoque = useManage && generatorExists('GEN_TB_ESTOQUE_2_ID')
+    ? 'GEN_TB_ESTOQUE_2_ID'
+    : 'GEN_TB_ESTOQUE_ID';
+  const genIdentificador = useManage && generatorExists('GEN_TB_EST_IDENTIFICADOR_2_ID')
+    ? 'GEN_TB_EST_IDENTIFICADOR_2_ID'
+    : 'GEN_TB_EST_IDENTIFICADOR_ID';
   return {
     estoque,
     identificador,
@@ -167,6 +173,8 @@ function stockTables(useManage) {
     nivel2,
     genSaldo,
     genGrupo,
+    genEstoque,
+    genIdentificador,
   };
 }
 

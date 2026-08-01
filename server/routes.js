@@ -29,6 +29,7 @@ const {
   logProductCreate,
   hasAuditTable,
 } = require('./audit');
+const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora } = require('./datetime');
 
 const router = express.Router();
 
@@ -331,6 +332,23 @@ function mapProdutoRow(r) {
   };
 }
 
+async function nextTableId(db, generatorName, tableName, idColumn) {
+  if (generatorName) {
+    try {
+      const rows = await query(db, `SELECT GEN_ID(${generatorName}, 1) AS ID FROM RDB$DATABASE`);
+      const id = Number(rows[0].ID);
+      if (Number.isFinite(id) && id > 0) return id;
+    } catch {
+      /* fallback MAX */
+    }
+  }
+  const max = await query(
+    db,
+    `SELECT COALESCE(MAX(${idColumn}), 0) + 1 AS ID FROM ${tableName}`
+  );
+  return Number(max[0].ID);
+}
+
 router.get('/estoque', async (req, res) => {
   try {
     const busca = String(req.query.q || '').trim();
@@ -488,32 +506,39 @@ router.post('/estoque', async (req, res) => {
 
     const created = await withDb(async (db, appCfg) => {
       const targets = activeTargets(appCfg);
+      // IDs separados: em grade vários identificadores compartilham o mesmo ID_ESTOQUE
+      const tPrimary = targets[0].tables;
+      const idEstoque = await nextTableId(db, tPrimary.genEstoque, tPrimary.estoque, 'ID_ESTOQUE');
+      const idIdentificador = await nextTableId(
+        db,
+        tPrimary.genIdentificador,
+        tPrimary.identificador,
+        'ID_IDENTIFICADOR'
+      );
+
       let first = null;
       for (const target of targets) {
         const t = target.tables;
-        const gen = await query(db, `SELECT GEN_ID(GEN_TB_ESTOQUE_ID, 1) AS ID FROM RDB$DATABASE`);
-        const id = Number(gen[0].ID);
-
         await query(
           db,
           `INSERT INTO ${t.estoque}
             (ID_ESTOQUE, DESCRICAO, STATUS, ID_GRUPO, UNI_MEDIDA, PRC_VENDA, PRC_CUSTO, GRADE_SERIE, ID_TIPOITEM, FRACIONADO)
            VALUES (?, ?, 'A', ?, ?, ?, ?, ?, '0', 'N')`,
-          [id, descricao, idGrupo, uni, prcVenda, prcCusto, gradeSerie]
+          [idEstoque, descricao, idGrupo, uni, prcVenda, prcCusto, gradeSerie]
         );
         await query(
           db,
           `INSERT INTO ${t.identificador} (ID_IDENTIFICADOR, ID_ESTOQUE) VALUES (?, ?)`,
-          [id, id]
+          [idIdentificador, idEstoque]
         );
         await query(
           db,
           `INSERT INTO ${t.produto}
             (ID_IDENTIFICADOR, QTD_ATUAL, COD_BARRA, REFERENCIA, DESC_CMPL, CONTROLA_LOTE_VENDA, STATUS)
            VALUES (?, ?, ?, ?, ?, 'N', 'A')`,
-          [id, qtd, codBarras || null, referencia || null, descCmpl || null]
+          [idIdentificador, qtd, codBarras || null, referencia || null, descCmpl || null]
         );
-        if (!first) first = { id_estoque: id, id_identificador: id };
+        if (!first) first = { id_estoque: idEstoque, id_identificador: idIdentificador };
       }
       if (first) {
         try {
@@ -530,6 +555,7 @@ router.post('/estoque', async (req, res) => {
               prcCusto != null ? `Custo: ${prcCusto}` : null,
               `Qtd: ${qtd}`,
               codBarras ? `Barras: ${codBarras}` : null,
+              `Estoque #${idEstoque} / Ident. #${idIdentificador}`,
             ].filter(Boolean).join(' | '),
           });
         } catch (e) {
@@ -667,13 +693,14 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
             nextId = Number(max[0].ID);
           }
           const obs = `Alterado via painel - ${usuarioNome}`;
+          const agora = localNow();
           try {
             await query(
               db,
               `INSERT INTO ${t.saldo}
                 (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO, OBSERVACAO)
-               VALUES (?, CURRENT_DATE, ?, ?, ?, ?, CURRENT_TIME, ?, ?)`,
-              [nextId, id, qtdAntiga, novaQtd, prcMedio, idFuncionario || 0, obs]
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              [nextId, agora.dataSql, id, qtdAntiga, novaQtd, prcMedio, agora.horaSql, idFuncionario || 0, obs]
             );
           } catch (e) {
             if (String(e.message || '').includes('OBSERVACAO')) {
@@ -681,8 +708,8 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
                 db,
                 `INSERT INTO ${t.saldo}
                   (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO)
-                 VALUES (?, CURRENT_DATE, ?, ?, ?, ?, CURRENT_TIME, ?)`,
-                [nextId, id, qtdAntiga, novaQtd, prcMedio, idFuncionario || 0]
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                [nextId, agora.dataSql, id, qtdAntiga, novaQtd, prcMedio, agora.horaSql, idFuncionario || 0]
               );
             } else throw e;
           }
@@ -733,93 +760,17 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
   }
 });
 
-function pad2(n) {
-  return String(n).padStart(2, '0');
-}
-
-/** Formata DATA/HORA do Firebird para dd/MM/yyyy HH:mm:ss */
-function formatBrDateTime(data, hora) {
-  let y; let m; let d;
-  if (data instanceof Date && !Number.isNaN(data.getTime())) {
-    // DATE do Firebird costuma vir como meia-noite UTC
-    const iso = data.toISOString();
-    if (/T00:00:00/.test(iso)) {
-      y = data.getUTCFullYear();
-      m = data.getUTCMonth() + 1;
-      d = data.getUTCDate();
-    } else {
-      y = data.getFullYear();
-      m = data.getMonth() + 1;
-      d = data.getDate();
-    }
-  } else if (data != null && data !== '') {
-    const s = String(data);
-    let match = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (match) {
-      y = Number(match[1]); m = Number(match[2]); d = Number(match[3]);
-    } else {
-      match = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
-      if (match) {
-        d = Number(match[1]); m = Number(match[2]); y = Number(match[3]);
-      }
-    }
-  }
-  if (!y) return '—';
-
-  let hh = 0; let mm = 0; let ss = 0; let hasTime = false;
-  if (hora instanceof Date && !Number.isNaN(hora.getTime())) {
-    hasTime = true;
-    const iso = hora.toISOString();
-    // TIME do Firebird frequentemente serializa em 1970-01-01T...Z
-    if (hora.getFullYear() < 1980 || /1970-01-01/.test(iso)) {
-      hh = hora.getUTCHours();
-      mm = hora.getUTCMinutes();
-      ss = hora.getUTCSeconds();
-    } else {
-      hh = hora.getHours();
-      mm = hora.getMinutes();
-      ss = hora.getSeconds();
-    }
-  } else if (hora != null && hora !== '') {
-    const s = String(hora);
-    let match = s.match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
-    if (match) {
-      hasTime = true;
-      hh = Number(match[1]);
-      mm = Number(match[2]);
-      ss = Number(match[3] || 0);
-    } else {
-      const dt = new Date(s);
-      if (!Number.isNaN(dt.getTime())) {
-        hasTime = true;
-        if (dt.getFullYear() < 1980 || /1970-01-01/.test(s)) {
-          hh = dt.getUTCHours();
-          mm = dt.getUTCMinutes();
-          ss = dt.getUTCSeconds();
-        } else {
-          hh = dt.getHours();
-          mm = dt.getMinutes();
-          ss = dt.getSeconds();
-        }
-      }
-    }
-  }
-
-  const datePart = `${pad2(d)}/${pad2(m)}/${y}`;
-  if (!hasTime) return datePart;
-  return `${datePart} ${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
-}
-
 function mapSaldoAlteracao(r) {
   const antigo = Number(r.SALDO_ANTIGO || 0);
   const novo = Number(r.SALDO_NOVO || 0);
+  const parts = mapExtractParts(r);
   return {
     id: `q-${Number(r.ID)}`,
     origem: 'saldo',
     tipo: 'quantidade',
     data: r.DATA,
     hora: r.HORA,
-    data_hora: formatBrDateTime(r.DATA, r.HORA),
+    data_hora: formatBrDateTime(r.DATA, r.HORA, parts),
     id_identificador: Number(r.ID_IDENTIFICADOR),
     id_estoque: Number(r.ID_ESTOQUE),
     descricao: String(r.DESCRICAO || '').trim(),
@@ -837,13 +788,14 @@ function mapSaldoAlteracao(r) {
 }
 
 function mapGestorAlteracao(r) {
+  const parts = mapExtractParts(r);
   return {
     id: `g-${Number(r.ID)}`,
     origem: 'gestor',
     tipo: String(r.TIPO || 'ficha').trim().toLowerCase(),
     data: r.DATA,
     hora: r.HORA,
-    data_hora: formatBrDateTime(r.DATA, r.HORA),
+    data_hora: formatBrDateTime(r.DATA, r.HORA, parts),
     id_identificador: Number(r.ID_IDENTIFICADOR),
     id_estoque: Number(r.ID_ESTOQUE),
     descricao: String(r.DESCRICAO || '').trim(),
@@ -895,12 +847,14 @@ router.get('/alteracoes', async (req, res) => {
           if (hasObs) params.push(busca);
         }
         const obsSelect = hasObs ? 'S.OBSERVACAO' : `CAST(NULL AS VARCHAR(200)) AS OBSERVACAO`;
+        const extract = sqlExtractDataHora('S.DATA', 'S.HORA');
         const rows = await query(
           db,
           `SELECT FIRST 400
             S.ID, S.DATA, S.HORA, S.ID_IDENTIFICADOR,
             S.SALDO_ANTIGO, S.SALDO_NOVO, S.ID_FUNCIONARIO,
             ${obsSelect},
+            ${extract},
             E.ID_ESTOQUE, E.DESCRICAO, E.UNI_MEDIDA,
             P.COD_BARRA AS COD_BARRAS,
             F.NOME AS FUNCIONARIO
@@ -941,11 +895,13 @@ router.get('/alteracoes', async (req, res) => {
             )`);
             params.push(busca, busca, busca, busca, busca);
           }
+          const extract = sqlExtractDataHora('A.DATA', 'A.HORA');
           const rows = await query(
             db,
             `SELECT FIRST 400
               A.ID, A.DATA, A.HORA, A.ID_IDENTIFICADOR, A.ID_ESTOQUE,
               A.TIPO, A.RESUMO, A.DETALHE, A.ID_FUNCIONARIO, A.USUARIO, A.OBSERVACAO,
+              ${extract},
               E.DESCRICAO, E.UNI_MEDIDA, P.COD_BARRA AS COD_BARRAS,
               F.NOME AS FUNCIONARIO
             FROM ${AUDIT_TABLE} A

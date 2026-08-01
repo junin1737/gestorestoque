@@ -1,5 +1,6 @@
 'use strict';
 const { query, hasTable, columnExists, refreshTables, refreshGenerators } = require('./db');
+const { localNow } = require('./datetime');
 
 const AUDIT_TABLE = 'GESTOR_EST_ALTERACAO';
 const AUDIT_GEN = 'GEN_GESTOR_EST_ALTERACAO_ID';
@@ -92,13 +93,16 @@ async function nextAuditId(db) {
 async function insertAudit(db, entry) {
   if (!hasTable(AUDIT_TABLE)) await ensureAuditSchema(db);
   const id = await nextAuditId(db);
+  const agora = localNow();
   await query(
     db,
     `INSERT INTO ${AUDIT_TABLE}
       (ID, DATA, HORA, ID_IDENTIFICADOR, ID_ESTOQUE, TIPO, RESUMO, DETALHE, ID_FUNCIONARIO, USUARIO, OBSERVACAO)
-     VALUES (?, CURRENT_DATE, CURRENT_TIME, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       id,
+      agora.dataSql,
+      agora.horaSql,
       Number(entry.id_identificador) || 0,
       Number(entry.id_estoque) || 0,
       String(entry.tipo || 'ficha').slice(0, 20),
