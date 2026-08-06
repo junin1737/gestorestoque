@@ -327,7 +327,7 @@ function mapProdutoRow(r) {
     id_nivel2: r.ID_NIVEL2 == null ? null : Number(r.ID_NIVEL2),
     cor: String(r.COR || '').trim(),
     tamanho: String(r.TAMANHO || '').trim(),
-    status: String(r.STATUS || 'A').trim(),
+    status: String(r.STATUS || 'A').trim().toUpperCase() === 'I' ? 'I' : 'A',
   };
 }
 
@@ -351,6 +351,7 @@ async function nextTableId(db, generatorName, tableName, idColumn) {
 router.get('/estoque', async (req, res) => {
   try {
     const busca = String(req.query.q || '').trim();
+    const statusFiltro = String(req.query.status || 'A').trim().toUpperCase();
     const data = await withDb(async (db, appCfg) => {
       const targets = activeTargets(appCfg);
       const t = targets[0].tables;
@@ -366,7 +367,13 @@ router.get('/estoque', async (req, res) => {
         )`);
         params.push(busca, busca, busca, busca, busca);
       }
-      where.push(`(E.STATUS = 'A' OR E.STATUS IS NULL)`);
+      if (statusFiltro === 'I') {
+        where.push(`E.STATUS = 'I'`);
+      } else if (statusFiltro === 'ALL' || statusFiltro === '*') {
+        /* todos */
+      } else {
+        where.push(`(E.STATUS = 'A' OR E.STATUS IS NULL)`);
+      }
       const sql = `
         SELECT FIRST 200
           E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
@@ -380,7 +387,7 @@ router.get('/estoque', async (req, res) => {
         LEFT JOIN ${t.grupo} G ON G.ID_GRUPO = E.ID_GRUPO
         LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
         LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
-        WHERE ${where.join(' AND ')}
+        ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
         ORDER BY E.ID_ESTOQUE DESC, I.ID_IDENTIFICADOR DESC`;
       const rows = await query(db, sql, params);
       return rows.map(mapProdutoRow);
@@ -522,8 +529,17 @@ router.post('/estoque', async (req, res) => {
           db,
           `INSERT INTO ${t.estoque}
             (ID_ESTOQUE, DESCRICAO, STATUS, ID_GRUPO, UNI_MEDIDA, PRC_VENDA, PRC_CUSTO, GRADE_SERIE, ID_TIPOITEM, FRACIONADO)
-           VALUES (?, ?, 'A', ?, ?, ?, ?, ?, '0', 'N')`,
-          [idEstoque, descricao, idGrupo, uni, prcVenda, prcCusto, gradeSerie]
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, '0', 'N')`,
+          [
+            idEstoque,
+            descricao,
+            String(body.status || 'A').trim().toUpperCase() === 'I' ? 'I' : 'A',
+            idGrupo,
+            uni,
+            prcVenda,
+            prcCusto,
+            gradeSerie,
+          ]
         );
         await query(
           db,
@@ -611,7 +627,7 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
         const cur = await query(
           db,
           `SELECT E.ID_ESTOQUE, E.DESCRICAO, E.ID_GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO,
-                  E.GRADE_SERIE, P.QTD_ATUAL, P.PRC_MEDIO, P.COD_BARRA, P.REFERENCIA, P.DESC_CMPL,
+                  E.GRADE_SERIE, E.STATUS, P.QTD_ATUAL, P.PRC_MEDIO, P.COD_BARRA, P.REFERENCIA, P.DESC_CMPL,
                   P.CONTROLA_LOTE_VENDA, P.ID_NIVEL1, P.ID_NIVEL2
            FROM ${t.estoque} E
            JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
@@ -624,6 +640,7 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
         const idEstoque = Number(row.ID_ESTOQUE);
         const qtdAntiga = Number(row.QTD_ATUAL || 0);
         const prcMedio = Number(row.PRC_MEDIO || row.PRC_CUSTO || 0);
+        const statusAtual = String(row.STATUS || 'A').trim().toUpperCase() === 'I' ? 'I' : 'A';
 
         const antes = {
           descricao: String(row.DESCRICAO || '').trim(),
@@ -632,6 +649,7 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
           prc_venda: Number(row.PRC_VENDA || 0),
           prc_custo: Number(row.PRC_CUSTO || 0),
           grade_serie: String(row.GRADE_SERIE || 'N').trim().toUpperCase(),
+          status: statusAtual,
           qtd_atual: qtdAntiga,
           cod_barras: String(row.COD_BARRA || '').trim(),
           referencia: String(row.REFERENCIA || '').trim(),
@@ -653,6 +671,12 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
         if (body.prc_venda !== undefined) { estSets.push('PRC_VENDA = ?'); estParams.push(Number(body.prc_venda)); }
         if (body.prc_custo !== undefined) { estSets.push('PRC_CUSTO = ?'); estParams.push(Number(body.prc_custo)); }
         if (body.grade_serie !== undefined) { estSets.push('GRADE_SERIE = ?'); estParams.push(String(body.grade_serie)); }
+        let statusNovo = null;
+        if (body.status !== undefined) {
+          statusNovo = String(body.status).trim().toUpperCase() === 'I' ? 'I' : 'A';
+          estSets.push('STATUS = ?');
+          estParams.push(statusNovo);
+        }
         if (estSets.length) {
           estParams.push(idEstoque);
           await query(db, `UPDATE ${t.estoque} SET ${estSets.join(', ')} WHERE ID_ESTOQUE = ?`, estParams);
@@ -729,6 +753,7 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
             ...(body.id_nivel1 !== undefined ? { id_nivel1: body.id_nivel1 === '' || body.id_nivel1 == null ? null : Number(body.id_nivel1) } : {}),
             ...(body.id_nivel2 !== undefined ? { id_nivel2: body.id_nivel2 === '' || body.id_nivel2 == null ? null : Number(body.id_nivel2) } : {}),
             ...(body.controla_lote !== undefined ? { controla_lote: !!body.controla_lote } : {}),
+            ...(statusNovo != null ? { status: statusNovo } : {}),
             ...(novaQtd !== null ? { qtd_atual: novaQtd } : {}),
           };
         }

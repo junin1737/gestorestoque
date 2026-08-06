@@ -16,12 +16,17 @@ const FIELD_META = {
   id_nivel1: { tipo: 'ficha', label: 'Cor' },
   id_nivel2: { tipo: 'ficha', label: 'Tamanho' },
   controla_lote: { tipo: 'ficha', label: 'Controla lote' },
+  status: { tipo: 'ficha', label: 'Status' },
   prc_venda: { tipo: 'precos', label: 'Preço venda' },
   prc_custo: { tipo: 'precos', label: 'Preço custo' },
   qtd_atual: { tipo: 'quantidade', label: 'Quantidade' },
 };
 
-function fmtAuditVal(v) {
+function fmtAuditVal(v, campo) {
+  if (campo === 'status') {
+    const s = String(v || 'A').trim().toUpperCase();
+    return s === 'I' ? 'Inativo' : 'Ativo';
+  }
   if (v == null || v === '') return '—';
   if (typeof v === 'boolean') return v ? 'Sim' : 'Não';
   if (typeof v === 'number' && Number.isFinite(v)) {
@@ -126,8 +131,8 @@ function collectChanges(antes, depois) {
     byTipo[meta.tipo].push({
       campo,
       label: meta.label,
-      antigo: fmtAuditVal(antigo),
-      novo: fmtAuditVal(novo),
+      antigo: fmtAuditVal(antigo, campo),
+      novo: fmtAuditVal(novo, campo),
     });
   }
   return byTipo;

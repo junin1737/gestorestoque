@@ -29,7 +29,7 @@
             android:name=".PortraitCaptureActivity"
             android:screenOrientation="portrait"
             android:stateNotNeeded="true"
-            android:theme="@style/Theme.GestorEstoque"
+            android:theme="@style/zxing_CaptureTheme"
             android:windowSoftInputMode="stateAlwaysHidden" />
     </application>
 </manifest>

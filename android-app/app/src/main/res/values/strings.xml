@@ -18,4 +18,5 @@
     <string name="camera_denied">Permissão de câmera negada.</string>
     <string name="scan_canceled">Leitura cancelada.</string>
     <string name="scan_barcode_hint">Aponte para o código de barras do produto</string>
+    <string name="scan_product">Ler código</string>
 </resources>

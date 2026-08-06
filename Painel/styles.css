@@ -438,6 +438,24 @@ input, select, textarea {
   background: var(--ok-bg);
   color: var(--ok);
 }
+.item-row.inactive {
+  opacity: 0.72;
+}
+.chip-ativo {
+  color: var(--ok);
+  background: var(--ok-bg);
+}
+.chip-inativo {
+  color: var(--danger);
+  background: var(--danger-bg);
+}
+.status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0.35rem 0 0.5rem;
+}
 .item-price {
   font-size: var(--fs-xs);
   color: var(--muted);

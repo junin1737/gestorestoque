@@ -31,9 +31,12 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
+import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.zxing.client.android.Intents;
 import com.journeyapps.barcodescanner.ScanContract;
 import com.journeyapps.barcodescanner.ScanOptions;
+
+import org.json.JSONObject;
 
 import java.util.Arrays;
 
@@ -51,7 +54,6 @@ public class MainActivity extends AppCompatActivity {
     private ProgressBar progress;
     private TextView status;
     private PermissionRequest pendingPermissionRequest;
-    private boolean scanningBarcode;
 
     private final ActivityResultLauncher<ScanOptions> qrLauncher =
             registerForActivityResult(new ScanContract(), result -> {
@@ -70,7 +72,6 @@ public class MainActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<ScanOptions> barcodeLauncher =
             registerForActivityResult(new ScanContract(), result -> {
-                scanningBarcode = false;
                 if (result.getContents() == null) {
                     Toast.makeText(this, R.string.scan_canceled, Toast.LENGTH_SHORT).show();
                     return;
@@ -94,6 +95,8 @@ public class MainActivity extends AppCompatActivity {
         Button btnConnect = findViewById(R.id.btn_connect);
         Button btnScanQr = findViewById(R.id.btn_scan_qr);
         Button btnChange = findViewById(R.id.btn_change_server);
+        Button btnScanProduct = findViewById(R.id.btn_scan_product);
+        FloatingActionButton fabScan = findViewById(R.id.fab_scan_barcode);
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean firstConnection = !prefs.contains(KEY_URL);
@@ -104,9 +107,13 @@ public class MainActivity extends AppCompatActivity {
 
         setupWebView();
 
+        View.OnClickListener openBarcode = v -> startBarcodeScan();
         btnScanQr.setOnClickListener(v -> startQrScan());
         btnConnect.setOnClickListener(v -> connect());
         btnChange.setOnClickListener(v -> showConnectPanel());
+        btnScanProduct.setOnClickListener(openBarcode);
+        fabScan.setOnClickListener(openBarcode);
+
         urlInput.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_GO
                     || (event != null && event.getKeyCode() == KeyEvent.KEYCODE_ENTER
@@ -140,7 +147,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startQrScan() {
-        scanningBarcode = false;
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
@@ -161,7 +167,6 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startBarcodeScan() {
-        scanningBarcode = true;
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
@@ -192,11 +197,47 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void deliverBarcodeToWeb(String raw) {
-        String safe = raw.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "").replace("\r", "");
-        webView.post(() -> webView.evaluateJavascript(
-                "window.applyScannedCodeFromApp && window.applyScannedCodeFromApp('" + safe + "');",
-                null
-        ));
+        try {
+            JSONObject payload = new JSONObject();
+            payload.put("code", raw);
+            final String js = "(function(p){"
+                    + "var c=p&&p.code;"
+                    + "if(!c)return;"
+                    + "if(typeof window.applyScannedCodeFromApp==='function'){"
+                    + "  window.applyScannedCodeFromApp(c);return;"
+                    + "}"
+                    + "var inp=document.getElementById('estoque-busca');"
+                    + "if(inp){inp.value=c;inp.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "  var btn=document.getElementById('btn-buscar-estoque');"
+                    + "  if(btn)btn.click();}"
+                    + "})(" + payload + ");";
+            webView.post(() -> webView.evaluateJavascript(js, null));
+            Toast.makeText(this, "Código: " + raw, Toast.LENGTH_SHORT).show();
+        } catch (Exception e) {
+            Toast.makeText(this, "Lido, mas falhou ao enviar ao painel: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void injectNativeHooks(WebView view) {
+        // Garante ponte nativa mesmo se o JS do painel estiver em cache antigo
+        String js = "(function(){"
+                + "window.__GESTOR_APP__=true;"
+                + "function openNative(e){"
+                + "  try{"
+                + "    if(e){e.preventDefault();e.stopImmediatePropagation();}"
+                + "    if(window.GestorApp){window.GestorApp.scanBarcode();}"
+                + "  }catch(err){}"
+                + "  return false;"
+                + "}"
+                + "var btn=document.getElementById('btn-scan-barras');"
+                + "if(btn && !btn.__gestorNativeBound){"
+                + "  btn.__gestorNativeBound=true;"
+                + "  btn.addEventListener('click',openNative,true);"
+                + "}"
+                + "var m=document.querySelector('meta[name=viewport]');"
+                + "if(m)m.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');"
+                + "})();";
+        view.evaluateJavascript(js, null);
     }
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
@@ -230,14 +271,9 @@ public class MainActivity extends AppCompatActivity {
             public void onPageFinished(WebView view, String url) {
                 progress.setVisibility(View.GONE);
                 status.setText("");
-                view.evaluateJavascript(
-                        "(function(){"
-                                + "window.__GESTOR_APP__=true;"
-                                + "var m=document.querySelector('meta[name=viewport]');"
-                                + "if(m)m.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');"
-                                + "})();",
-                        null
-                );
+                injectNativeHooks(view);
+                // Reaplica após o app.js registrar listeners
+                view.postDelayed(() -> injectNativeHooks(view), 600);
             }
 
             @Override
@@ -373,7 +409,10 @@ public class MainActivity extends AppCompatActivity {
     private class GestorJsBridge {
         @JavascriptInterface
         public void scanBarcode() {
-            runOnUiThread(MainActivity.this::startBarcodeScan);
+            runOnUiThread(() -> {
+                Toast.makeText(MainActivity.this, R.string.scan_barcode_hint, Toast.LENGTH_SHORT).show();
+                startBarcodeScan();
+            });
         }
 
         @JavascriptInterface

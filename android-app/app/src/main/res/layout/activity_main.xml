@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg">
@@ -144,10 +145,24 @@
                 android:textStyle="bold" />
 
             <Button
+                android:id="@+id/btn_scan_product"
+                android:layout_width="wrap_content"
+                android:layout_height="36dp"
+                android:layout_marginEnd="6dp"
+                android:backgroundTint="@color/brand"
+                android:minWidth="0dp"
+                android:paddingLeft="12dp"
+                android:paddingRight="12dp"
+                android:text="@string/scan_product"
+                android:textAllCaps="false"
+                android:textColor="@android:color/white"
+                android:textSize="12sp" />
+
+            <Button
                 android:id="@+id/btn_change_server"
                 android:layout_width="wrap_content"
                 android:layout_height="36dp"
-                android:backgroundTint="@color/brand"
+                android:backgroundTint="#2A6B4E"
                 android:minWidth="0dp"
                 android:paddingLeft="12dp"
                 android:paddingRight="12dp"
@@ -157,11 +172,27 @@
                 android:textSize="12sp" />
         </LinearLayout>
 
-        <WebView
-            android:id="@+id/webview"
+        <FrameLayout
             android:layout_width="match_parent"
             android:layout_height="0dp"
-            android:layout_weight="1" />
+            android:layout_weight="1">
+
+            <WebView
+                android:id="@+id/webview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+
+            <com.google.android.material.floatingactionbutton.FloatingActionButton
+                android:id="@+id/fab_scan_barcode"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|end"
+                android:layout_margin="18dp"
+                android:contentDescription="@string/scan_product"
+                android:src="@android:drawable/ic_menu_camera"
+                app:backgroundTint="@color/brand"
+                app:tint="@android:color/white" />
+        </FrameLayout>
     </LinearLayout>
 
     <ProgressBar

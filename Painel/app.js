@@ -12,6 +12,7 @@ const state = {
   isNovo: false,
   buscaAplicada: '',
   buscaAnterior: '',
+  estoqueStatus: 'A',
   alteracoesLista: [],
   alteracoesTipo: 'todos',
   niveis: { nivel1: [], nivel2: [] },
@@ -364,6 +365,10 @@ function showEstoqueEdicao() {
 $('#btn-buscar-estoque').addEventListener('click', () => {
   buscarEstoque($('#estoque-busca').value);
 });
+$('#estoque-status-filtro')?.addEventListener('change', (e) => {
+  state.estoqueStatus = String(e.target.value || 'A').toUpperCase();
+  loadEstoque();
+});
 $('#estoque-busca').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') buscarEstoque($('#estoque-busca').value);
 });
@@ -396,7 +401,8 @@ function buscarEstoque(q, opts = {}) {
 
 async function loadEstoque() {
   const q = state.buscaAplicada || $('#estoque-busca').value.trim();
-  const res = await api(`/estoque?q=${encodeURIComponent(q)}`);
+  const status = state.estoqueStatus || 'A';
+  const res = await api(`/estoque?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}`);
   state.estoqueLista = res.itens || [];
   renderEstoqueLista();
 }
@@ -423,6 +429,7 @@ function renderEstoqueLista() {
   box.innerHTML = state.estoqueLista.map((it) => {
     const qtd = Number(it.qtd_atual || 0);
     const stockClass = qtd <= 0 ? 'zero' : qtd <= 5 ? 'low' : '';
+    const inativo = String(it.status || 'A').toUpperCase() === 'I';
     const initials = String(it.descricao || '?')
       .split(/\s+/)
       .filter(Boolean)
@@ -431,13 +438,14 @@ function renderEstoqueLista() {
       .join('')
       .toUpperCase();
     return `
-    <div class="item-row ${state.selecionado?.id_identificador === it.id_identificador ? 'active' : ''}"
+    <div class="item-row ${state.selecionado?.id_identificador === it.id_identificador ? 'active' : ''} ${inativo ? 'inactive' : ''}"
          data-id="${it.id_identificador}">
       <div class="item-avatar" aria-hidden="true">${escapeHtml(initials || '#')}</div>
       <div class="item-main">
         <strong title="${escapeAttr(it.descricao)}">${escapeHtml(it.descricao)}</strong>
         <div class="item-meta">
           <span class="chip">#${it.id_estoque}</span>
+          ${inativo ? '<span class="chip chip-inativo">Inativo</span>' : '<span class="chip chip-ativo">Ativo</span>'}
           ${it.grupo ? `<span class="chip">${escapeHtml(it.grupo)}</span>` : ''}
           ${it.cod_barras ? `<span class="chip">${escapeHtml(it.cod_barras)}</span>` : ''}
           ${it.referencia ? `<span class="chip">${escapeHtml(it.referencia)}</span>` : ''}
@@ -497,6 +505,7 @@ async function abrirNovoProduto() {
     desc_cmpl: '',
     grade_serie: 'N',
     controla_lote: false,
+    status: 'A',
     id_nivel1: null,
     id_nivel2: null,
     lotes: [],
@@ -536,6 +545,7 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
     if ($('#f-barras')) body.cod_barras = $('#f-barras').value;
     if ($('#f-ref')) body.referencia = $('#f-ref').value;
     if ($('#f-cmpl')) body.desc_cmpl = $('#f-cmpl').value;
+    if ($('#f-status')) body.status = $('#f-status').value === 'I' ? 'I' : 'A';
     if ($('#g-cor')) body.id_nivel1 = $('#g-cor').value === '' ? null : Number($('#g-cor').value);
     if ($('#g-tam')) body.id_nivel2 = $('#g-tam').value === '' ? null : Number($('#g-tam').value);
   }
@@ -600,7 +610,20 @@ function renderDetalhe() {
         <label>Qtd atual<input value="${fmtNum(it.qtd_atual)}" disabled /></label>
         <label>Cód. barras<input id="f-barras" value="${escapeAttr(it.cod_barras)}" ${editarFicha ? '' : 'disabled'} /></label>
         <label>Referência<input id="f-ref" value="${escapeAttr(it.referencia)}" ${editarFicha ? '' : 'disabled'} /></label>
+        <label>Status
+          <select id="f-status" ${editarFicha && !state.isNovo ? '' : (state.isNovo ? '' : 'disabled')}>
+            <option value="A" ${String(it.status || 'A').toUpperCase() !== 'I' ? 'selected' : ''}>Ativo</option>
+            <option value="I" ${String(it.status || 'A').toUpperCase() === 'I' ? 'selected' : ''}>Inativo</option>
+          </select>
+        </label>
         <label class="full">Desc. complementar<input id="f-cmpl" value="${escapeAttr(it.desc_cmpl)}" ${editarFicha ? '' : 'disabled'} /></label>
+        ${!state.isNovo && editarFicha ? `
+        <div class="full status-actions">
+          <button type="button" class="btn ${String(it.status || 'A').toUpperCase() === 'I' ? 'ok' : 'outline'}" id="btn-toggle-status">
+            ${String(it.status || 'A').toUpperCase() === 'I' ? 'Ativar produto' : 'Inativar produto'}
+          </button>
+          <span class="hint">Altera o campo STATUS na base (Clipp e ManagePro).</span>
+        </div>` : ''}
         <label>Preço venda<input value="${fmtMoney(it.prc_venda)}" disabled /></label>
         <label>Preço custo<input class="${verCusto ? '' : 'masked'}" value="${verCusto ? fmtMoney(it.prc_custo) : '****'}" disabled /></label>
       </div>
@@ -724,6 +747,28 @@ function renderDetalhe() {
   qRem?.addEventListener('input', updateDiffFromAddRem);
   qAtual?.addEventListener('input', updateAddRemFromAtual);
   updateDiffFromAddRem();
+
+  $('#btn-toggle-status')?.addEventListener('click', async () => {
+    const atual = String(it.status || 'A').toUpperCase() === 'I' ? 'I' : 'A';
+    const proximo = atual === 'I' ? 'A' : 'I';
+    const ok = confirm(proximo === 'I'
+      ? 'Inativar este produto na base (STATUS = I)?'
+      : 'Ativar este produto na base (STATUS = A)?');
+    if (!ok) return;
+    const res = await api(`/estoque/${it.id_identificador}`, {
+      method: 'PUT',
+      body: {
+        status: proximo,
+        usuarioNome: state.usuario.nome,
+        idFuncionario: state.usuario.id,
+      },
+    });
+    if (!res.ok) return alert(res.error || 'Erro ao alterar status');
+    it.status = proximo;
+    if ($('#f-status')) $('#f-status').value = proximo;
+    alert(proximo === 'I' ? 'Produto inativado.' : 'Produto ativado.');
+    renderDetalhe();
+  });
 
   $('#btn-novo-grupo')?.addEventListener('click', async () => {
     const nome = prompt('Nome do novo grupo:');
@@ -1194,12 +1239,14 @@ async function decodeBarcodeFromImageUrl(url) {
 }
 
 async function startScanner() {
-  // No APK, usa câmera nativa (HTTP da rede local não permite getUserMedia no WebView).
-  if (window.GestorApp?.scanBarcode) {
-    try {
+  // No APK Android: câmera nativa (WebView em HTTP local não abre getUserMedia).
+  try {
+    if (window.GestorApp && typeof window.GestorApp.scanBarcode === 'function') {
       window.GestorApp.scanBarcode();
       return;
-    } catch { /* fallback abaixo */ }
+    }
+  } catch (err) {
+    console.warn('GestorApp.scanBarcode falhou', err);
   }
 
   const dlg = $('#dlg-scan');
@@ -1216,12 +1263,9 @@ async function startScanner() {
   dlg.showModal();
   msg.textContent = 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
 
-  // Leitura ao vivo só em contexto seguro (HTTPS/localhost) ou app nativo
-  const canLive = !!(navigator.mediaDevices?.getUserMedia && (window.isSecureContext || window.__GESTOR_APP__));
+  const canLive = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
+    && (window.isSecureContext || window.__GESTOR_APP__));
   if (liveBtn) liveBtn.hidden = !canLive;
-  if (canLive && window.__GESTOR_APP__) {
-    startLiveScanner();
-  }
 }
 
 async function startLiveScanner() {
