@@ -205,6 +205,33 @@ async function fetchRemotePackageVersion() {
   };
 }
 
+async function fetchReleaseAssetByTag(version) {
+  const tag = String(version || '').replace(/^v/i, '').trim();
+  if (!tag) return null;
+  const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/releases/tags/v${tag}`;
+  try {
+    const release = await httpsGetJson(url);
+    const assets = release.assets || [];
+    const setup = assets.find((a) => /GestorEstoque-Setup-.*\.exe$/i.test(a.name))
+      || assets.find((a) => /\.exe$/i.test(a.name));
+    return {
+      tag: String(release.tag_name || '').replace(/^v/i, ''),
+      name: release.name || release.tag_name,
+      body: release.body || '',
+      htmlUrl: release.html_url,
+      asset: setup
+        ? {
+          name: setup.name,
+          url: setup.browser_download_url,
+          size: setup.size,
+        }
+        : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchLatestReleaseAsset() {
   const url = `https://api.github.com/repos/${GH_OWNER}/${GH_REPO}/releases/latest`;
   try {
@@ -245,20 +272,24 @@ function getLocalVersion() {
 async function checkForGitUpdate() {
   const localVersion = getLocalVersion();
   const remotePkg = await fetchRemotePackageVersion();
-  const release = await fetchLatestReleaseAsset();
+  const gitVersion = String(remotePkg.version || '').trim() || '0.0.0';
 
-  const candidates = [remotePkg.version, release?.tag].filter(Boolean);
-  let remoteVersion = remotePkg.version || '0.0.0';
-  for (const v of candidates) {
-    if (cmpVersion(v, remoteVersion) > 0) remoteVersion = v;
+  // Baixa o instalador da release da versão do package.json (não a "latest" antiga)
+  let release = await fetchReleaseAssetByTag(gitVersion);
+  if (!release?.asset) {
+    release = await fetchLatestReleaseAsset();
   }
 
-  const available = cmpVersion(remoteVersion, localVersion) > 0;
+  const remoteVersion = (release?.asset && release.tag)
+    ? release.tag
+    : gitVersion;
+
+  const available = cmpVersion(remoteVersion, localVersion) > 0 && !!release?.asset;
   return {
     available,
     localVersion,
     remoteVersion,
-    gitVersion: remotePkg.version,
+    gitVersion,
     release,
     downloadUrl: release?.asset?.url || null,
     assetName: release?.asset?.name || null,
