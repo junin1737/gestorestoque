@@ -392,14 +392,22 @@ router.get('/estoque', async (req, res) => {
       const where = [];
       const params = [];
       if (busca) {
-        where.push(`(
-          UPPER(E.DESCRICAO) CONTAINING UPPER(?)
-          OR UPPER(P.COD_BARRA) CONTAINING UPPER(?)
-          OR UPPER(P.REFERENCIA) CONTAINING UPPER(?)
-          OR CAST(E.ID_ESTOQUE AS VARCHAR(20)) CONTAINING ?
-          OR CAST(I.ID_IDENTIFICADOR AS VARCHAR(20)) CONTAINING ?
-        )`);
-        params.push(busca, busca, busca, busca, busca);
+        const soNumero = /^\d+$/.test(busca);
+        if (soNumero) {
+          where.push(`(
+            I.ID_IDENTIFICADOR = ?
+            OR CAST(I.ID_IDENTIFICADOR AS VARCHAR(20)) STARTING WITH ?
+            OR TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) = ?
+          )`);
+          params.push(Number(busca), busca, busca);
+        } else {
+          where.push(`(
+            UPPER(E.DESCRICAO) CONTAINING UPPER(?)
+            OR UPPER(P.COD_BARRA) CONTAINING UPPER(?)
+            OR UPPER(P.REFERENCIA) CONTAINING UPPER(?)
+          )`);
+          params.push(busca, busca, busca);
+        }
       }
       if (statusFiltro === 'I') {
         where.push(`E.STATUS = 'I'`);
@@ -408,6 +416,9 @@ router.get('/estoque', async (req, res) => {
       } else {
         where.push(`(E.STATUS = 'A' OR E.STATUS IS NULL)`);
       }
+      const orderBy = busca && /^\d+$/.test(busca)
+        ? 'I.ID_IDENTIFICADOR ASC'
+        : 'E.ID_ESTOQUE DESC, I.ID_IDENTIFICADOR DESC';
       const sql = `
         SELECT FIRST 200
           E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
@@ -422,7 +433,7 @@ router.get('/estoque', async (req, res) => {
         LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
         LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-        ORDER BY E.ID_ESTOQUE DESC, I.ID_IDENTIFICADOR DESC`;
+        ORDER BY ${orderBy}`;
       const rows = await query(db, sql, params);
       return rows.map(mapProdutoRow);
     });

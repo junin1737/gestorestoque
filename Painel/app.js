@@ -507,6 +507,7 @@ function renderEstoqueLista() {
       <div class="item-main">
         <strong title="${escapeAttr(it.descricao)}">${escapeHtml(it.descricao)}</strong>
         <div class="item-meta">
+          <span class="chip">ID ${it.id_identificador}</span>
           <span class="chip">#${it.id_estoque}</span>
           ${inativo ? '<span class="chip chip-inativo">Inativo</span>' : '<span class="chip chip-ativo">Ativo</span>'}
           ${it.grupo ? `<span class="chip">${escapeHtml(it.grupo)}</span>` : ''}
