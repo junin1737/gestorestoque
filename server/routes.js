@@ -331,6 +331,40 @@ function mapProdutoRow(r) {
   };
 }
 
+async function findProdutoPorBarras(db, appCfg, code, exceptIdIdentificador) {
+  const barra = String(code || '').trim();
+  if (!barra) return null;
+  for (const target of activeTargets(appCfg)) {
+    const t = target.tables;
+    if (!hasTable(t.produto)) continue;
+    const params = [barra];
+    let sql = `SELECT FIRST 1 I.ID_IDENTIFICADOR, E.ID_ESTOQUE, E.DESCRICAO, P.COD_BARRA
+       FROM ${t.produto} P
+       JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
+       JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+      WHERE TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) = ?`;
+    if (exceptIdIdentificador) {
+      sql += ' AND I.ID_IDENTIFICADOR <> ?';
+      params.push(Number(exceptIdIdentificador));
+    }
+    const rows = await query(db, sql, params);
+    if (!rows.length) continue;
+    const r = rows[0];
+    return {
+      id_identificador: Number(r.ID_IDENTIFICADOR),
+      id_estoque: Number(r.ID_ESTOQUE),
+      descricao: String(r.DESCRICAO || '').trim(),
+      cod_barras: String(r.COD_BARRA || '').trim(),
+    };
+  }
+  return null;
+}
+
+function mensagemBarrasDuplicado(item) {
+  const nome = item && item.descricao ? ` no produto “${item.descricao}”` : '';
+  return `Este código de barras já está cadastrado${nome}.`;
+}
+
 async function nextTableId(db, generatorName, tableName, idColumn) {
   if (generatorName) {
     try {
@@ -395,6 +429,17 @@ router.get('/estoque', async (req, res) => {
     res.json({ ok: true, itens: data });
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/estoque/codigo-barras', async (req, res) => {
+  const code = String(req.query.code || '').trim();
+  if (!code) return res.json({ ok: true, item: null });
+  try {
+    const item = await withDb((db, appCfg) => findProdutoPorBarras(db, appCfg, code));
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, item: null });
   }
 });
 
@@ -511,6 +556,10 @@ router.post('/estoque', async (req, res) => {
     const idFuncionario = Number(body.idFuncionario || 0);
 
     const created = await withDb(async (db, appCfg) => {
+      if (codBarras) {
+        const dup = await findProdutoPorBarras(db, appCfg, codBarras);
+        if (dup) throw new Error(mensagemBarrasDuplicado(dup));
+      }
       const targets = activeTargets(appCfg);
       // IDs separados: em grade vários identificadores compartilham o mesmo ID_ESTOQUE
       const tPrimary = targets[0].tables;
@@ -617,6 +666,11 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
     const usuarioNome = String(body.usuarioNome || 'usuário').trim();
     const idFuncionario = Number(body.idFuncionario || 0);
     const result = await withDb(async (db, appCfg) => {
+      const barra = body.cod_barras !== undefined ? String(body.cod_barras || '').trim() : '';
+      if (barra) {
+        const dup = await findProdutoPorBarras(db, appCfg, barra, id);
+        if (dup) throw new Error(mensagemBarrasDuplicado(dup));
+      }
       const targets = activeTargets(appCfg);
       let updated = null;
       let snapshotAntes = null;

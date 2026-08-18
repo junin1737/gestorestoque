@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#1e3a5f" />
   <title>Gestor Estoque</title>
-  <link rel="stylesheet" href="styles.css?v=115-icon" />
+  <link rel="stylesheet" href="styles.css?v=116" />
 </head>
 <body>
   <div id="app">
@@ -247,8 +247,18 @@
         </div>
       </div>
     </dialog>
+
+    <dialog id="dlg-msg" class="dlg">
+      <div class="dlg-card msg-card">
+        <p id="dlg-msg-text"></p>
+        <div class="dlg-actions">
+          <button type="button" id="dlg-msg-ok" class="btn primary">OK</button>
+        </div>
+      </div>
+    </dialog>
+    <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=115-icon"></script>
-  <script src="app.js?v=115-icon"></script>
+  <script src="vendor/zxing-browser.min.js?v=116"></script>
+  <script src="app.js?v=116"></script>
 </body>
 </html>

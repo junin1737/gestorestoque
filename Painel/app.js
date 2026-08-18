@@ -22,6 +22,7 @@ const state = {
 };
 
 let scanControls = null;
+let toastTimer = null;
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
@@ -31,6 +32,34 @@ const CAMERA_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9
 window.setGestorScanTarget = (target) => {
   state.scanTarget = target === 'ficha' ? 'ficha' : 'search';
 };
+
+function showToast(message) {
+  const el = $('#app-toast');
+  if (!el) return;
+  el.textContent = message;
+  el.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.hidden = true; }, 2800);
+}
+
+function showMsg(message) {
+  const dlg = $('#dlg-msg');
+  const text = $('#dlg-msg-text');
+  const ok = $('#dlg-msg-ok');
+  if (!dlg || !text) {
+    window.console?.warn(message);
+    return;
+  }
+  text.textContent = String(message || '');
+  const close = () => {
+    try { dlg.close(); } catch { /* ignore */ }
+  };
+  ok.onclick = close;
+  dlg.onclose = close;
+  if (!dlg.open) dlg.showModal();
+}
+
+window.alert = (message) => showMsg(message);
 
 async function api(path, options = {}) {
   let res;
@@ -339,11 +368,11 @@ function scrollAppTop() {
 
 function showPage(page) {
   if (page === 'alteracoes' && !can('alteracoes', 'acesso')) {
-    alert('Sem permissão para o relatório de alterações.');
+    showMsg('Sem permissão para o relatório de alterações.');
     page = 'dashboard';
   }
   if (page === 'estoque' && !can('estoque', 'acesso')) {
-    alert('Sem permissão de estoque.');
+    showMsg('Sem permissão de estoque.');
     page = 'dashboard';
   }
 
@@ -504,7 +533,7 @@ async function openProduto(idIdentificador) {
     api('/niveis'),
   ]);
   if (!det.ok) {
-    alert(det.error || 'Erro ao abrir produto');
+    showMsg(det.error || 'Erro ao abrir produto');
     return;
   }
   if (!state.unidades.length) await loadUnidades();
@@ -588,7 +617,7 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   if (editarQtd && $('#q-atual')) body.qtd_atual = Number($('#q-atual').value);
 
   if (!String(body.descricao || it.descricao || '').trim() && state.isNovo) {
-    return alert('Informe a descrição do produto.');
+    return showMsg('Informe a descrição do produto.');
   }
 
   let res;
@@ -597,8 +626,8 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   } else {
     res = await api(`/estoque/${it.id_identificador}`, { method: 'PUT', body });
   }
-  if (!res.ok) return alert(res.error || 'Erro ao salvar');
-  alert(state.isNovo ? 'Produto cadastrado.' : 'Produto salvo.');
+  if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
+  showToast(state.isNovo ? 'Produto cadastrado com sucesso.' : 'Dados alterados com sucesso.');
   showEstoqueLista();
   await loadEstoque();
 });
@@ -803,10 +832,10 @@ function renderDetalhe() {
         idFuncionario: state.usuario.id,
       },
     });
-    if (!res.ok) return alert(res.error || 'Erro ao alterar status');
+    if (!res.ok) return showMsg(res.error || 'Erro ao alterar status');
     it.status = proximo;
     if ($('#f-status')) $('#f-status').value = proximo;
-    alert(proximo === 'I' ? 'Produto inativado.' : 'Produto ativado.');
+    showToast(proximo === 'I' ? 'Produto inativado.' : 'Produto ativado.');
     renderDetalhe();
   });
 
@@ -819,7 +848,7 @@ function renderDetalhe() {
     const nome = prompt('Nome do novo grupo:');
     if (!nome) return;
     const res = await api('/grupos', { method: 'POST', body: { descricao: nome } });
-    if (!res.ok) return alert(res.error || 'Erro ao criar grupo');
+    if (!res.ok) return showMsg(res.error || 'Erro ao criar grupo');
     state.grupos.push(res.grupo);
     const sel = $('#f-grupo');
     const opt = document.createElement('option');
@@ -932,10 +961,10 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     method: 'POST',
     body: { supervisorSenha: senhaSup, usuarios },
   });
-  if (!res.ok) return alert(res.error || 'Erro ao salvar');
+  if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
   state.usuarios = res.usuarios;
   renderUsuarios();
-  alert('Usuários atualizados.');
+  showToast('Usuários atualizados.');
 });
 
 function fmtDataHora(data, hora, dataHoraPronta) {
@@ -1130,12 +1159,23 @@ function pickBestBarcode(candidates) {
   return uniq[0];
 }
 
-function applyScannedCode(value) {
+async function applyScannedCode(value) {
   const code = normalizeBarcodeNumber(value);
   if (!code) return false;
   stopScanner();
   $('#dlg-scan')?.close();
   if (state.scanTarget === 'ficha') {
+    const exceptId = state.isNovo ? null : state.selecionado?.id_identificador;
+    const found = await api(`/estoque/codigo-barras?code=${encodeURIComponent(code)}`);
+    const dup = found?.item && Number(found.item.id_identificador) !== Number(exceptId || 0);
+    if (dup) {
+      showMsg(
+        found.item.descricao
+          ? `Este código de barras já está cadastrado no produto “${found.item.descricao}”.`
+          : 'Este código de barras já está cadastrado.'
+      );
+      return true;
+    }
     const inp = $('#f-barras');
     if (inp && !inp.disabled) {
       inp.value = code;
@@ -1446,5 +1486,5 @@ function fmtDate(d) {
 
 bootstrap().catch((err) => {
   console.error(err);
-  alert('Falha ao iniciar: ' + err.message);
+  showMsg('Falha ao iniciar: ' + err.message);
 });

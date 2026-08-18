@@ -245,6 +245,33 @@ input, select, textarea {
   border-radius: var(--radius); padding: 1.25rem; border: 1px solid var(--border);
 }
 .dlg-actions { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
+.msg-card p {
+  margin: 0 0 1rem;
+  font-size: 1.05rem;
+  font-weight: 650;
+  line-height: 1.35;
+  color: var(--text);
+}
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(1.1rem + var(--nav-h) + var(--safe-b));
+  transform: translateX(-50%);
+  z-index: 90;
+  max-width: min(92vw, 420px);
+  padding: 0.8rem 1.2rem;
+  border-radius: 999px;
+  background: var(--primary);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  text-align: center;
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+@media (min-width: 981px) {
+  .toast { bottom: 1.25rem; }
+}
 
 /* APP */
 .app-view { display: grid; grid-template-columns: 250px 1fr; min-height: 100vh; min-height: 100dvh; }
