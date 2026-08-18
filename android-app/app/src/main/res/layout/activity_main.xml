@@ -190,6 +190,7 @@
                 android:layout_margin="18dp"
                 android:contentDescription="@string/scan_product"
                 android:src="@android:drawable/ic_menu_camera"
+                android:visibility="gone"
                 app:backgroundTint="@color/brand"
                 app:tint="@android:color/white" />
         </FrameLayout>

@@ -222,17 +222,21 @@ public class MainActivity extends AppCompatActivity {
         // Garante ponte nativa mesmo se o JS do painel estiver em cache antigo
         String js = "(function(){"
                 + "window.__GESTOR_APP__=true;"
-                + "function openNative(e){"
-                + "  try{"
-                + "    if(e){e.preventDefault();e.stopImmediatePropagation();}"
-                + "    if(window.GestorApp){window.GestorApp.scanBarcode();}"
-                + "  }catch(err){}"
-                + "  return false;"
-                + "}"
-                + "var btn=document.getElementById('btn-scan-barras');"
-                + "if(btn && !btn.__gestorNativeBound){"
-                + "  btn.__gestorNativeBound=true;"
-                + "  btn.addEventListener('click',openNative,true);"
+                + "if(!document.__gestorScanDelegate){"
+                + "  document.__gestorScanDelegate=true;"
+                + "  document.addEventListener('click',function(e){"
+                + "    var n=e.target,t=null;"
+                + "    while(n&&n!==document){"
+                + "      if(n.id==='btn-scan-barras'||n.id==='btn-scan-ficha-barras'){t=n;break;}"
+                + "      n=n.parentElement||n.parentNode;"
+                + "    }"
+                + "    if(!t||t.disabled)return;"
+                + "    e.preventDefault();e.stopImmediatePropagation();"
+                + "    if(typeof window.setGestorScanTarget==='function'){"
+                + "      window.setGestorScanTarget(t.id==='btn-scan-ficha-barras'?'ficha':'search');"
+                + "    }"
+                + "    try{if(window.GestorApp){window.GestorApp.scanBarcode();}}catch(err){}"
+                + "  },true);"
                 + "}"
                 + "var m=document.querySelector('meta[name=viewport]');"
                 + "if(m)m.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');"
@@ -250,7 +254,8 @@ public class MainActivity extends AppCompatActivity {
         settings.setAllowFileAccess(true);
         settings.setAllowContentAccess(true);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
-        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+        settings.setCacheMode(WebSettings.LOAD_NO_CACHE);
+        webView.clearCache(true);
         settings.setUseWideViewPort(true);
         settings.setLoadWithOverviewMode(true);
         settings.setTextZoom(100);

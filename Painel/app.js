@@ -13,6 +13,7 @@ const state = {
   buscaAplicada: '',
   buscaAnterior: '',
   estoqueStatus: 'A',
+  scanTarget: 'search',
   alteracoesLista: [],
   alteracoesTipo: 'todos',
   niveis: { nivel1: [], nivel2: [] },
@@ -24,6 +25,12 @@ let scanControls = null;
 
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
+
+const CAMERA_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
+
+window.setGestorScanTarget = (target) => {
+  state.scanTarget = target === 'ficha' ? 'ficha' : 'search';
+};
 
 async function api(path, options = {}) {
   let res;
@@ -346,6 +353,7 @@ function showPage(page) {
 function showEstoqueLista() {
   state.selecionado = null;
   state.isNovo = false;
+  state.scanTarget = 'search';
   $('#estoque-lista-view').hidden = false;
   $('#estoque-edit-view').hidden = true;
   $('#page-title').textContent = 'Estoque';
@@ -363,6 +371,9 @@ function showEstoqueEdicao() {
 }
 
 $('#btn-buscar-estoque').addEventListener('click', () => {
+  buscarEstoque($('#estoque-busca').value);
+});
+$('#btn-icon-buscar')?.addEventListener('click', () => {
   buscarEstoque($('#estoque-busca').value);
 });
 $('#estoque-status-filtro')?.addEventListener('change', (e) => {
@@ -608,7 +619,13 @@ function renderDetalhe() {
           </select>
         </label>
         <label>Qtd atual<input value="${fmtNum(it.qtd_atual)}" disabled /></label>
-        <label>Cód. barras<input id="f-barras" value="${escapeAttr(it.cod_barras)}" ${editarFicha ? '' : 'disabled'} /></label>
+        <div class="full field">
+          <span>Cód. barras</span>
+          <div class="input-row barcode-row">
+            <input id="f-barras" value="${escapeAttr(it.cod_barras)}" ${editarFicha ? '' : 'disabled'} />
+            ${editarFicha ? `<button type="button" id="btn-scan-ficha-barras" class="btn icon-cam" title="Ler código de barras" aria-label="Ler código de barras">${CAMERA_ICON_SVG}</button>` : ''}
+          </div>
+        </div>
         <label>Referência<input id="f-ref" value="${escapeAttr(it.referencia)}" ${editarFicha ? '' : 'disabled'} /></label>
         <label>Status
           <select id="f-status" ${editarFicha && !state.isNovo ? '' : (state.isNovo ? '' : 'disabled')}>
@@ -768,6 +785,11 @@ function renderDetalhe() {
     if ($('#f-status')) $('#f-status').value = proximo;
     alert(proximo === 'I' ? 'Produto inativado.' : 'Produto ativado.');
     renderDetalhe();
+  });
+
+  $('#btn-scan-ficha-barras')?.addEventListener('click', () => {
+    if ($('#btn-scan-ficha-barras').disabled) return;
+    startScanner('ficha');
   });
 
   $('#btn-novo-grupo')?.addEventListener('click', async () => {
@@ -1090,6 +1112,16 @@ function applyScannedCode(value) {
   if (!code) return false;
   stopScanner();
   $('#dlg-scan')?.close();
+  if (state.scanTarget === 'ficha') {
+    const inp = $('#f-barras');
+    if (inp && !inp.disabled) {
+      inp.value = code;
+      inp.dispatchEvent(new Event('input', { bubbles: true }));
+      inp.focus();
+    }
+    state.scanTarget = 'search';
+    return true;
+  }
   scrollAppTop();
   buscarEstoque(code);
   return true;
@@ -1238,7 +1270,8 @@ async function decodeBarcodeFromImageUrl(url) {
   return pickBestBarcode(candidates);
 }
 
-async function startScanner() {
+async function startScanner(target = 'search') {
+  state.scanTarget = target === 'ficha' ? 'ficha' : 'search';
   // No APK Android: câmera nativa (WebView em HTTP local não abre getUserMedia).
   try {
     if (window.GestorApp && typeof window.GestorApp.scanBarcode === 'function') {
@@ -1347,9 +1380,10 @@ async function onScanFileSelected(file) {
   }
 }
 
-$('#btn-scan-barras')?.addEventListener('click', () => startScanner());
+$('#btn-scan-barras')?.addEventListener('click', () => startScanner('search'));
 $('#btn-scan-fechar')?.addEventListener('click', () => {
   stopScanner();
+  state.scanTarget = 'search';
   $('#dlg-scan')?.close();
 });
 $('#btn-scan-foto')?.addEventListener('click', () => {
