@@ -1,6 +1,10 @@
 # Projeto Android separado (WebView do painel).
 # Não altera o Electron/servidor/painel existentes.
 
+Ícone:
+  node android-app/scripts/generate-launcher-icon.js
+  (usa TB_EMITENTE.LOGO ou as iniciais do NOME_FANTA)
+
 Gera o APK:
   cd android-app
   .\gradlew.bat assembleRelease

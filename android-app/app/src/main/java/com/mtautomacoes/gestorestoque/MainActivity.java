@@ -20,6 +20,7 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
+import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -53,6 +54,8 @@ public class MainActivity extends AppCompatActivity {
     private EditText urlInput;
     private ProgressBar progress;
     private TextView status;
+    private ImageView imgEmitente;
+    private TextView txtEmpresa;
     private PermissionRequest pendingPermissionRequest;
 
     private final ActivityResultLauncher<ScanOptions> qrLauncher =
@@ -92,6 +95,8 @@ public class MainActivity extends AppCompatActivity {
         urlInput = findViewById(R.id.url_input);
         progress = findViewById(R.id.progress);
         status = findViewById(R.id.status);
+        imgEmitente = findViewById(R.id.img_emitente);
+        txtEmpresa = findViewById(R.id.txt_empresa);
         Button btnConnect = findViewById(R.id.btn_connect);
         Button btnScanQr = findViewById(R.id.btn_scan_qr);
         Button btnChange = findViewById(R.id.btn_change_server);
@@ -106,6 +111,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         setupWebView();
+        EmitenteIcon.restore(this, imgEmitente, txtEmpresa);
 
         View.OnClickListener openBarcode = v -> startBarcodeScan();
         btnScanQr.setOnClickListener(v -> startQrScan());
@@ -279,6 +285,10 @@ public class MainActivity extends AppCompatActivity {
                 injectNativeHooks(view);
                 // Reaplica após o app.js registrar listeners
                 view.postDelayed(() -> injectNativeHooks(view), 600);
+                String server = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_URL, "");
+                if (!server.isEmpty()) {
+                    EmitenteIcon.fetchFromServer(MainActivity.this, imgEmitente, txtEmpresa, server);
+                }
             }
 
             @Override
@@ -343,6 +353,7 @@ public class MainActivity extends AppCompatActivity {
     private void connectWithUrl(String url) {
         urlInput.setText(url);
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, url).apply();
+        EmitenteIcon.fetchFromServer(this, imgEmitente, txtEmpresa, url);
         connectPanel.setVisibility(View.GONE);
         browserPanel.setVisibility(View.VISIBLE);
         status.setText(R.string.loading);
@@ -423,6 +434,12 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public boolean isNativeApp() {
             return true;
+        }
+
+        @JavascriptInterface
+        public void setEmitente(String nome, String logoDataUrl) {
+            runOnUiThread(() -> EmitenteIcon.applyFromJs(
+                    MainActivity.this, imgEmitente, txtEmpresa, nome, logoDataUrl));
         }
     }
 }

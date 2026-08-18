@@ -8,5 +8,6 @@ android-app/local.properties
 android-app/.gradle/
 android-app/app/build/
 android-app/build/
+android-app/scripts/.cache/
 *.apk
 *.apk.idsig

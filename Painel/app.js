@@ -127,12 +127,28 @@ function extractAccent(url) {
   });
 }
 
+function initialsFromName(name) {
+  const raw = String(name || '').trim();
+  const skip = /^(de|da|do|das|dos|e|the|and)$/i;
+  const parts = raw.split(/\s+/).filter((w) => w && !skip.test(w));
+  if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
+  const letters = raw.replace(/[^A-Za-z0-9À-ÿ]/g, '');
+  if (letters.length >= 2) return letters.slice(0, 2).toUpperCase();
+  if (letters.length === 1) return (letters + letters).toUpperCase();
+  return 'GE';
+}
+
 function setEmitenteUI(emitente) {
   state.emitente = emitente || { nome_fanta: '', logo: null };
   const nome = state.emitente.nome_fanta || 'Gestor Estoque';
   $('#login-empresa').textContent = nome;
   $('#side-empresa').textContent = nome;
   document.title = `${nome} — Gestor Estoque`;
+  const ini = initialsFromName(nome);
+  const loginPh = $('#login-logo-placeholder');
+  const sidePh = $('#side-logo-placeholder');
+  if (loginPh) loginPh.textContent = ini;
+  if (sidePh) sidePh.textContent = ini;
 
   const hasLogo = !!state.emitente.logo;
   const pairs = [
@@ -154,6 +170,13 @@ function setEmitenteUI(emitente) {
       if (ph) ph.hidden = false;
       if (wrap) wrap.classList.remove('has-logo');
     }
+  }
+  try {
+    if (window.GestorApp && typeof window.GestorApp.setEmitente === 'function') {
+      window.GestorApp.setEmitente(nome, state.emitente.logo || '');
+    }
+  } catch {
+    /* APK antigo ou logo grande demais para a ponte */
   }
 }
 
