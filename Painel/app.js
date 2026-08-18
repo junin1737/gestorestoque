@@ -13,6 +13,7 @@ const state = {
   buscaAplicada: '',
   buscaAnterior: '',
   estoqueStatus: 'A',
+  buscaBarras: false,
   scanTarget: 'search',
   alteracoesLista: [],
   alteracoesTipo: 'todos',
@@ -457,6 +458,7 @@ function buscarEstoque(q, opts = {}) {
     state.buscaAnterior = state.buscaAplicada;
   }
   state.buscaAplicada = next;
+  state.buscaBarras = !!opts.barras || (next.length > 5 && /^\d+$/.test(next));
   if ($('#estoque-busca')) $('#estoque-busca').value = next;
   syncLimparBuscaBtn();
   return loadEstoque();
@@ -465,7 +467,8 @@ function buscarEstoque(q, opts = {}) {
 async function loadEstoque() {
   const q = state.buscaAplicada || $('#estoque-busca').value.trim();
   const status = state.estoqueStatus || 'A';
-  const res = await api(`/estoque?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}`);
+  const barras = state.buscaBarras && String(q).length > 5 ? '&barras=1' : '';
+  const res = await api(`/estoque?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}${barras}`);
   state.estoqueLista = res.itens || [];
   renderEstoqueLista();
 }
@@ -1187,7 +1190,7 @@ async function applyScannedCode(value) {
     return true;
   }
   scrollAppTop();
-  buscarEstoque(code);
+  buscarEstoque(code, { barras: String(code).length > 5 });
   return true;
 }
 

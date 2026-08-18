@@ -393,13 +393,19 @@ router.get('/estoque', async (req, res) => {
       const params = [];
       if (busca) {
         const soNumero = /^\d+$/.test(busca);
-        if (soNumero) {
+        const porBarras = String(req.query.barras || '') === '1' || (soNumero && busca.length > 5);
+        if (porBarras && busca.length > 5) {
+          where.push(`(
+            TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) = ?
+            OR TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) CONTAINING ?
+          )`);
+          params.push(busca, busca);
+        } else if (soNumero) {
           where.push(`(
             I.ID_IDENTIFICADOR = ?
             OR CAST(I.ID_IDENTIFICADOR AS VARCHAR(20)) STARTING WITH ?
-            OR TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) = ?
           )`);
-          params.push(Number(busca), busca, busca);
+          params.push(Number(busca), busca);
         } else {
           where.push(`(
             UPPER(E.DESCRICAO) CONTAINING UPPER(?)
@@ -416,7 +422,7 @@ router.get('/estoque', async (req, res) => {
       } else {
         where.push(`(E.STATUS = 'A' OR E.STATUS IS NULL)`);
       }
-      const orderBy = busca && /^\d+$/.test(busca)
+      const orderBy = busca && /^\d+$/.test(busca) && busca.length <= 5
         ? 'I.ID_IDENTIFICADOR ASC'
         : 'E.ID_ESTOQUE DESC, I.ID_IDENTIFICADOR DESC';
       const sql = `
