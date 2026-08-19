@@ -4,6 +4,9 @@
  * Módulo isolado para migração futura ao replicador (sessões JSON + API REST).
  */
 const ImportacaoNfe = (() => {
+  /** Desativar consulta/gravação até integração SEFAZ estar pronta. */
+  const EM_DESENVOLVIMENTO = true;
+
   const state = {
     sessao: null,
     itemIndex: 0,
@@ -517,7 +520,29 @@ const ImportacaoNfe = (() => {
     });
   }
 
+  function applyDevLock() {
+    const page = $('#page-importacao');
+    if (!page) return;
+    page.classList.toggle('imp-dev-locked', EM_DESENVOLVIMENTO);
+    const lockIds = [
+      '#imp-chave', '#imp-btn-consultar', '#imp-btn-scan-chave', '#imp-btn-demo',
+      '#imp-btn-financeiro', '#imp-btn-confirmar', '#imp-voltar-inicio',
+    ];
+    lockIds.forEach((sel) => {
+      const el = $(sel);
+      if (el) el.disabled = EM_DESENVOLVIMENTO;
+    });
+  }
+
+  function avisoDesenvolvimento() {
+    deps.showMsg?.('Importação de NF-e em desenvolvimento. Esta função ainda não está disponível.');
+  }
+
   async function consultarChave() {
+    if (EM_DESENVOLVIMENTO) {
+      avisoDesenvolvimento();
+      return;
+    }
     const chave = String($('#imp-chave')?.value || '').replace(/\D/g, '');
     if (chave.length !== 44) {
       deps.showMsg?.('Informe a chave de acesso com 44 dígitos.');
@@ -539,10 +564,17 @@ const ImportacaoNfe = (() => {
   }
 
   function onPageEnter() {
+    applyDevLock();
     showView('inicio');
-    loadSessoesEmAndamento();
+    if (!EM_DESENVOLVIMENTO) loadSessoesEmAndamento();
+    else {
+      const box = $('#imp-sessoes-lista');
+      if (box) box.innerHTML = '<p class="empty">Módulo em desenvolvimento</p>';
+    }
     $('#page-title').textContent = 'Importar NF-e';
-    $('#page-sub').textContent = 'Protótipo — conferência por item';
+    $('#page-sub').textContent = EM_DESENVOLVIMENTO
+      ? 'Em desenvolvimento — indisponível por enquanto'
+      : 'Protótipo — conferência por item';
   }
 
   function bindEvents() {
@@ -551,9 +583,17 @@ const ImportacaoNfe = (() => {
       if (e.key === 'Enter') consultarChave();
     });
     $('#imp-btn-scan-chave')?.addEventListener('click', () => {
+      if (EM_DESENVOLVIMENTO) {
+        avisoDesenvolvimento();
+        return;
+      }
       deps.startScanner?.('importacao');
     });
     $('#imp-btn-demo')?.addEventListener('click', () => {
+      if (EM_DESENVOLVIMENTO) {
+        avisoDesenvolvimento();
+        return;
+      }
       const demo = '35260821234567890123456789012345678901234567';
       const inp = $('#imp-chave');
       if (inp) inp.value = demo;
@@ -564,6 +604,10 @@ const ImportacaoNfe = (() => {
       showView('financeiro');
     });
     $('#imp-btn-confirmar')?.addEventListener('click', async () => {
+      if (EM_DESENVOLVIMENTO) {
+        avisoDesenvolvimento();
+        return;
+      }
       if (!state.sessao) return;
       const res = await api(`/importacao/sessoes/${state.sessao.id}/confirmar`, { method: 'POST' });
       if (res.ok) {
@@ -580,6 +624,10 @@ const ImportacaoNfe = (() => {
   }
 
   function applyScannedChave(code) {
+    if (EM_DESENVOLVIMENTO) {
+      avisoDesenvolvimento();
+      return true;
+    }
     const chave = String(code || '').replace(/\D/g, '');
     if (chave.length >= 44) {
       const inp = $('#imp-chave');
@@ -593,6 +641,7 @@ const ImportacaoNfe = (() => {
   function init(options) {
     deps = options || {};
     bindEvents();
+    applyDevLock();
   }
 
   return { init, onPageEnter, applyScannedChave, getView: () => state.view };

@@ -6,12 +6,13 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { getAppDataDir } = require('./config');
 
-const DATA_DIR = path.join(__dirname, '..', 'AppData');
-const STORE_FILE = path.join(DATA_DIR, 'importacao-sessoes.json');
+const STORE_FILE = path.join(getAppDataDir(), 'importacao-sessoes.json');
 
 function ensureStore() {
-  if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+  const dir = path.dirname(STORE_FILE);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   if (!fs.existsSync(STORE_FILE)) {
     fs.writeFileSync(STORE_FILE, JSON.stringify({ sessoes: [] }, null, 2), 'utf8');
   }
