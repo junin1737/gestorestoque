@@ -322,6 +322,41 @@
   color: var(--primary);
 }
 
+.imp-vinc-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+  margin-bottom: 0.65rem;
+}
+
+.imp-vinc-nota input[readonly] {
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.imp-nota-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
+  margin-top: 0.35rem;
+  font-size: 0.72rem;
+  color: var(--muted);
+}
+
+.imp-nota-meta strong {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.imp-vinc-estoque .imp-busca-prod {
+  margin-bottom: 0.35rem;
+}
+
+.imp-vinc-atual {
+  margin-top: 0.35rem;
+}
+
 .imp-xml-strip {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -535,7 +570,8 @@
 @media (max-width: 640px) {
   .imp-fields,
   .imp-parc-row,
-  .imp-xml-strip {
+  .imp-xml-strip,
+  .imp-vinc-pair {
     grid-template-columns: 1fr;
   }
 

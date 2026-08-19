@@ -122,12 +122,17 @@ const ImportacaoNfe = (() => {
     if (!box || !s) return;
     box.innerHTML = s.itens.map((it, idx) => {
       const [lbl, cls] = statusLabel(it.status);
+      const vinc = it.sistema?.id_identificador
+        ? `→ ID ${it.sistema.id_identificador} · ${it.sistema.descricao}`
+        : it.sistema?.criar_novo
+          ? '→ Criar novo produto'
+          : '→ Sem vínculo';
       return `
         <button type="button" class="imp-item-row ${cls}" data-idx="${idx}">
           <span class="imp-item-num">${it.nItem}</span>
           <div class="imp-item-main">
-            <strong>${esc(it.xml?.xProd || it.sistema?.descricao)}</strong>
-            <span class="hint">${esc(it.xml?.cProd || '')} · EAN ${esc(it.xml?.cEAN || '—')} · ${num(it.xml?.qCom)} ${esc(it.xml?.uCom || '')}</span>
+            <strong>${esc(it.xml?.xProd)}</strong>
+            <span class="hint">${esc(it.xml?.cProd || '')} · ${num(it.xml?.qCom)} ${esc(it.xml?.uCom || '')} · ${esc(vinc)}</span>
           </div>
           <span class="imp-status ${cls}">${lbl}</span>
         </button>
@@ -151,6 +156,9 @@ const ImportacaoNfe = (() => {
 
   function openItem(idx) {
     state.itemIndex = idx;
+    const it = itemAt(idx);
+    const semVinculo = !it?.sistema?.id_identificador && !it?.sistema?.criar_novo;
+    state.buscaProduto = semVinculo ? (it?.xml?.xProd || '') : '';
     renderItemScreen();
     showView('item');
   }
@@ -187,7 +195,6 @@ const ImportacaoNfe = (() => {
     const xml = it.xml || {};
     const imp = xml.imposto || {};
     const trib = sys.tributos || {};
-    const match = it.match;
     const total = s?.itens?.length || 0;
     const [stLbl, stCls] = statusLabel(it.status);
 
@@ -207,41 +214,40 @@ const ImportacaoNfe = (() => {
         <section class="imp-section">
           <header class="imp-section-head">
             <h4>Vinculação do produto</h4>
-            <span class="hint">XML → Estoque</span>
+            <span class="hint">Nota fiscal × Estoque</span>
           </header>
-          <div class="imp-xml-strip">
-            <div><span class="hint">Fornecedor</span><strong>${esc(xml.cProd)}</strong></div>
-            <div><span class="hint">EAN</span><strong>${esc(xml.cEAN || '—')}</strong></div>
-            <div class="full"><span class="hint">Descrição XML</span><strong>${esc(xml.xProd)}</strong></div>
-          </div>
-          ${match ? `
-            <div class="imp-match ok">
-              <strong>Sugestão (${esc(match.origem_match || 'auto')}) · ${match.confianca || 0}%</strong>
-              <span>ID ${esc(match.id_identificador)} · ${esc(match.descricao)}</span>
+          <div class="imp-vinc-pair">
+            <div class="imp-vinc-nota">
+              <label class="imp-field">
+                <span>Produto na nota</span>
+                <input type="text" readonly value="${esc(xml.xProd)}" />
+              </label>
+              <div class="imp-nota-meta">
+                <span>Cód. fornec. <strong>${esc(xml.cProd || '—')}</strong></span>
+                <span>EAN <strong>${esc(xml.cEAN || '—')}</strong></span>
+                <span>Qtd <strong>${num(xml.qCom)} ${esc(xml.uCom || '')}</strong></span>
+              </div>
             </div>
-          ` : `
-            <div class="imp-match warn">
-              <strong>Sem correspondência automática</strong>
-              <span>Busque ou crie um produto</span>
-            </div>
-          `}
-          <div class="imp-vinc-acoes">
-            <div class="search-field imp-busca-prod">
-              <input id="imp-busca-prod" type="search" placeholder="Buscar por EAN, ID ou descrição…" value="${esc(state.buscaProduto)}" />
-            </div>
-            <div id="imp-prod-resultados" class="imp-prod-list"></div>
-            <div class="imp-vinc-btns">
-              <button type="button" class="btn small" id="imp-usar-sugestao" ${match ? '' : 'hidden'}>Usar sugestão</button>
-              <button type="button" class="btn small outline" id="imp-criar-novo">Criar como novo</button>
-              <button type="button" class="btn small outline" id="imp-limpar-vinc">Limpar vínculo</button>
-            </div>
-            <div class="imp-vinc-atual" id="imp-vinc-atual">
-              ${sys.id_identificador
+            <div class="imp-vinc-estoque">
+              <label class="imp-field">
+                <span>Vincular no estoque</span>
+                <div class="search-field imp-busca-prod">
+                  <input id="imp-busca-prod" type="search" placeholder="Buscar por ID, EAN ou descrição…" value="${esc(state.buscaProduto)}" />
+                </div>
+              </label>
+              <div id="imp-prod-resultados" class="imp-prod-list"></div>
+              <div class="imp-vinc-atual" id="imp-vinc-atual">
+                ${sys.id_identificador
     ? `<span class="chip ok">Vinculado: ID ${esc(sys.id_identificador)} · ${esc(sys.descricao)}</span>`
     : sys.criar_novo
-      ? '<span class="chip warn">Será criado como novo produto</span>'
-      : '<span class="chip pending">Não vinculado</span>'}
+      ? `<span class="chip warn">Será criado: ${esc(sys.descricao || xml.xProd)}</span>`
+      : '<span class="chip pending">Nenhum produto vinculado — busque acima</span>'}
+              </div>
             </div>
+          </div>
+          <div class="imp-vinc-btns">
+            <button type="button" class="btn small outline" id="imp-criar-novo">Criar como novo produto</button>
+            <button type="button" class="btn small outline" id="imp-limpar-vinc">Limpar vínculo</button>
           </div>
         </section>
 
@@ -252,7 +258,7 @@ const ImportacaoNfe = (() => {
             <span class="hint">Quantidades e preços</span>
           </header>
           <div class="imp-fields">
-            ${field('Descrição (sistema)', 'imp-desc', sys.descricao)}
+            ${field('Descrição (cadastro)', 'imp-desc', sys.descricao || xml.xProd, { readonly: !sys.id_identificador && !sys.criar_novo })}
             ${field('Unidade', 'imp-uni', sys.uni_medida, { half: true })}
             ${field('Quantidade', 'imp-qtd', sys.qtd, { type: 'number', step: '0.0001', half: true })}
             ${field('Preço custo (unit.)', 'imp-custo', sys.prc_custo, { type: 'number', step: '0.0001', half: true })}
@@ -318,17 +324,21 @@ const ImportacaoNfe = (() => {
   async function loadProdutosBusca(q) {
     const box = $('#imp-prod-resultados');
     if (!box) return;
-    const res = await api(`/importacao/produtos?q=${encodeURIComponent(q || '')}`);
-    const list = res.itens || [];
-    if (!list.length) {
-      box.innerHTML = '<p class="hint">Nenhum produto encontrado</p>';
+    if (!String(q || '').trim()) {
+      box.innerHTML = '<p class="hint">Digite para buscar produtos do estoque</p>';
       return;
     }
-    box.innerHTML = list.map((p) => `
-      <button type="button" class="imp-prod-opt" data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-ean="${esc(p.cod_barras)}">
+    const res = await deps.api(`/estoque?q=${encodeURIComponent(q)}`);
+    const list = res.itens || [];
+    if (!list.length) {
+      box.innerHTML = '<p class="hint">Nenhum produto encontrado no estoque</p>';
+      return;
+    }
+    box.innerHTML = list.slice(0, 20).map((p) => `
+      <button type="button" class="imp-prod-opt" data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-ean="${esc(p.cod_barras || '')}" data-uni="${esc(p.uni_medida || '')}" data-custo="${p.prc_custo ?? ''}" data-venda="${p.prc_venda ?? ''}">
         <strong>ID ${p.id_identificador}</strong>
         <span>${esc(p.descricao)}</span>
-        <span class="hint">EAN ${esc(p.cod_barras || '—')}</span>
+        <span class="hint">EAN ${esc(p.cod_barras || '—')}${p.referencia ? ` · Ref. ${esc(p.referencia)}` : ''}</span>
       </button>
     `).join('');
     $$('.imp-prod-opt', box).forEach((btn) => {
@@ -337,6 +347,9 @@ const ImportacaoNfe = (() => {
           id_identificador: Number(btn.dataset.id),
           descricao: btn.dataset.desc,
           cod_barras: btn.dataset.ean,
+          uni_medida: btn.dataset.uni || undefined,
+          prc_custo: btn.dataset.custo !== '' ? Number(btn.dataset.custo) : undefined,
+          prc_venda: btn.dataset.venda !== '' ? Number(btn.dataset.venda) : undefined,
           criar_novo: false,
         });
       });
@@ -346,7 +359,11 @@ const ImportacaoNfe = (() => {
   function applyVinculo(patch) {
     const it = itemAt(state.itemIndex);
     if (!it) return;
-    it.sistema = { ...it.sistema, ...patch };
+    const merged = { ...patch };
+    if (merged.prc_custo === undefined) delete merged.prc_custo;
+    if (merged.prc_venda === undefined) delete merged.prc_venda;
+    if (merged.uni_medida === undefined) delete merged.uni_medida;
+    it.sistema = { ...it.sistema, ...merged };
     if (patch.id_identificador) {
       it.match = {
         id_identificador: patch.id_identificador,
@@ -357,6 +374,7 @@ const ImportacaoNfe = (() => {
       };
       it.sistema.criar_novo = false;
     }
+    state.buscaProduto = patch.id_identificador ? patch.descricao : state.buscaProduto;
     renderItemScreen();
   }
 
@@ -433,15 +451,6 @@ const ImportacaoNfe = (() => {
       const next = state.itemIndex < (state.sessao?.itens?.length || 0) - 1;
       await saveItem({ next, back: !next });
     });
-    $('#imp-usar-sugestao')?.addEventListener('click', () => {
-      if (!it.match) return;
-      applyVinculo({
-        id_identificador: it.match.id_identificador,
-        descricao: it.match.descricao,
-        cod_barras: it.match.cod_barras || '',
-        criar_novo: false,
-      });
-    });
     $('#imp-criar-novo')?.addEventListener('click', () => {
       applyVinculo({
         id_identificador: null,
@@ -456,7 +465,10 @@ const ImportacaoNfe = (() => {
       if (!item) return;
       item.match = null;
       item.sistema.id_identificador = null;
+      item.sistema.descricao = '';
+      item.sistema.cod_barras = '';
       item.sistema.criar_novo = false;
+      state.buscaProduto = item.xml?.xProd || '';
       renderItemScreen();
     });
     let buscaTimer;
