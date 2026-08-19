@@ -31,7 +31,7 @@ const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const CAMERA_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
 
 window.setGestorScanTarget = (target) => {
-  state.scanTarget = target === 'ficha' ? 'ficha' : 'search';
+  state.scanTarget = ['ficha', 'importacao'].includes(target) ? target : 'search';
 };
 
 function showToast(message) {
@@ -306,6 +306,10 @@ function enterApp() {
   $('#nav-estoque').hidden = !canEst;
   if ($('#nav-estoque-mobile')) $('#nav-estoque-mobile').hidden = !canEst;
   if ($('#dash-estoque')) $('#dash-estoque').hidden = !canEst;
+  const showImp = canEst;
+  if ($('#nav-importacao')) $('#nav-importacao').hidden = !showImp;
+  if ($('#nav-importacao-mobile')) $('#nav-importacao-mobile').hidden = !showImp;
+  if ($('#dash-importacao')) $('#dash-importacao').hidden = !showImp;
   showPage('dashboard');
   loadUnidades();
 }
@@ -350,6 +354,7 @@ $$('#mobile-nav [data-page]').forEach((btn) => {
   btn.addEventListener('click', () => showPage(btn.dataset.page));
 });
 $('#dash-estoque')?.addEventListener('click', () => showPage('estoque'));
+$('#dash-importacao')?.addEventListener('click', () => showPage('importacao'));
 $('#dash-alteracoes')?.addEventListener('click', () => showPage('alteracoes'));
 
 function scrollAppTop() {
@@ -376,10 +381,15 @@ function showPage(page) {
     showMsg('Sem permissão de estoque.');
     page = 'dashboard';
   }
+  if (page === 'importacao' && !can('estoque', 'acesso')) {
+    showMsg('Sem permissão para importação.');
+    page = 'dashboard';
+  }
 
   setNavActive(page);
   if ($('#page-dashboard')) $('#page-dashboard').hidden = page !== 'dashboard';
   $('#page-estoque').hidden = page !== 'estoque';
+  if ($('#page-importacao')) $('#page-importacao').hidden = page !== 'importacao';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
 
@@ -399,6 +409,8 @@ function showPage(page) {
   } else if (page === 'estoque') {
     showEstoqueLista();
     buscarEstoque(state.buscaAplicada, { keepHistory: true });
+  } else if (page === 'importacao') {
+    window.ImportacaoNfe?.onPageEnter();
   }
   scrollAppTop();
 }
@@ -1189,6 +1201,16 @@ async function applyScannedCode(value) {
     state.scanTarget = 'search';
     return true;
   }
+  if (state.scanTarget === 'importacao') {
+    const chave = String(value || code || '').replace(/\D/g, '').slice(0, 44);
+    if (chave.length === 44 && window.ImportacaoNfe?.applyScannedChave(chave)) {
+      state.scanTarget = 'search';
+      return true;
+    }
+    showMsg('Chave inválida. A NF-e deve ter 44 dígitos numéricos.');
+    state.scanTarget = 'search';
+    return true;
+  }
   scrollAppTop();
   buscarEstoque(code, { barras: String(code).length > 5 });
   return true;
@@ -1338,7 +1360,7 @@ async function decodeBarcodeFromImageUrl(url) {
 }
 
 async function startScanner(target = 'search') {
-  state.scanTarget = target === 'ficha' ? 'ficha' : 'search';
+  state.scanTarget = ['ficha', 'importacao'].includes(target) ? target : 'search';
   // No APK Android: câmera nativa (WebView em HTTP local não abre getUserMedia).
   try {
     if (window.GestorApp && typeof window.GestorApp.scanBarcode === 'function') {
@@ -1487,6 +1509,17 @@ function fmtDate(d) {
   if (Number.isNaN(dt.getTime())) return String(d).slice(0, 10);
   return dt.toLocaleDateString('pt-BR');
 }
+
+window.ImportacaoNfe?.init({
+  api,
+  showMsg,
+  showToast,
+  escapeHtml,
+  fmtMoney,
+  fmtNum,
+  scrollAppTop,
+  startScanner,
+});
 
 bootstrap().catch((err) => {
   console.error(err);

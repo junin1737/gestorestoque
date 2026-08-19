@@ -5,7 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#1e3a5f" />
   <title>Gestor Estoque</title>
-  <link rel="stylesheet" href="styles.css?v=118" />
+  <link rel="stylesheet" href="styles.css?v=119" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=119" />
 </head>
 <body>
   <div id="app">
@@ -62,6 +63,7 @@
         <nav class="side-nav">
           <button class="nav-btn active" data-page="dashboard">Início</button>
           <button class="nav-btn" data-page="estoque" id="nav-estoque">Estoque</button>
+          <button class="nav-btn" data-page="importacao" id="nav-importacao">Importar NF-e</button>
           <button class="nav-btn" data-page="alteracoes" id="nav-alteracoes">Alterações</button>
           <button class="nav-btn" data-page="usuarios" id="nav-usuarios">Usuários</button>
         </nav>
@@ -106,6 +108,18 @@
               </span>
               <strong>Estoque</strong>
               <span>Produtos, preços e quantidades</span>
+            </button>
+            <button type="button" id="dash-importacao" class="dash-card">
+              <span class="dash-icon nfe" aria-hidden="true">
+                <svg viewBox="0 0 64 64" width="64" height="64" fill="none">
+                  <rect x="10" y="8" width="44" height="52" rx="4" fill="#e8f0fe" stroke="#2f6fed" stroke-width="2"/>
+                  <path d="M18 20h28M18 28h20M18 36h24M18 44h16" stroke="#1e3a5f" stroke-width="2" stroke-linecap="round"/>
+                  <rect x="38" y="38" width="18" height="18" rx="3" fill="#2f6fed"/>
+                  <path d="M42 47h10M47 42v10" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
+                </svg>
+              </span>
+              <strong>Importar NF-e</strong>
+              <span>Entrada com conferência por item</span>
             </button>
             <button type="button" id="dash-alteracoes" class="dash-card" hidden>
               <span class="dash-icon report" aria-hidden="true">
@@ -169,6 +183,55 @@
           </div>
         </div>
 
+        <!-- IMPORTAÇÃO NF-e (protótipo) -->
+        <div id="page-importacao" class="page" hidden>
+          <div id="imp-view-inicio">
+            <div class="imp-capture-card">
+              <h3>Localizar NF-e</h3>
+              <p class="hint">Digite a chave de acesso, leia o código de barras ou use a demonstração.</p>
+              <div class="imp-capture-row">
+                <div class="search-field">
+                  <input id="imp-chave" type="text" inputmode="numeric" maxlength="54"
+                    placeholder="Chave de acesso (44 dígitos)" autocomplete="off" />
+                </div>
+                <button type="button" id="imp-btn-scan-chave" class="btn icon-cam" title="Ler chave" aria-label="Ler chave">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+                </button>
+                <button type="button" id="imp-btn-consultar" class="btn primary">Consultar</button>
+              </div>
+              <div class="imp-actions-inline">
+                <button type="button" id="imp-btn-demo" class="btn outline small">Carregar demonstração</button>
+                <span class="hint">Protótipo: consulta simulada no servidor (sem SEFAZ ainda)</span>
+              </div>
+            </div>
+            <div class="imp-sessoes-panel">
+              <h3>Importações em andamento</h3>
+              <div id="imp-sessoes-lista"></div>
+            </div>
+          </div>
+
+          <div id="imp-view-sessao" hidden>
+            <div class="imp-sessao-toolbar">
+              <button type="button" class="btn" id="imp-voltar-inicio">← Nova consulta</button>
+              <button type="button" class="btn outline" id="imp-btn-financeiro">Financeiro</button>
+              <button type="button" class="btn primary" id="imp-btn-confirmar" disabled>Confirmar gravação</button>
+            </div>
+            <div id="imp-sessao-resumo"></div>
+            <div class="panel list-panel list-panel-full">
+              <div class="list-panel-head"><span>Toque no item para conferir (vinculação, preços e tributos)</span></div>
+              <div id="imp-itens-lista"></div>
+            </div>
+          </div>
+
+          <div id="imp-view-item" hidden>
+            <div id="imp-item-host"></div>
+          </div>
+
+          <div id="imp-view-financeiro" hidden>
+            <div id="imp-fin-host"></div>
+          </div>
+        </div>
+
         <!-- ALTERAÇÕES -->
         <div id="page-alteracoes" class="page" hidden>
           <div class="toolbar alteracoes-toolbar">
@@ -217,6 +280,7 @@
         <nav class="mobile-nav" id="mobile-nav">
           <button type="button" data-page="dashboard" class="active">Início</button>
           <button type="button" data-page="estoque" id="nav-estoque-mobile">Estoque</button>
+          <button type="button" data-page="importacao" id="nav-importacao-mobile">NF-e</button>
           <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile" hidden>Alterações</button>
           <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
           <button type="button" id="btn-trocar-mobile">Trocar</button>
@@ -258,7 +322,8 @@
     </dialog>
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=118"></script>
-  <script src="app.js?v=118"></script>
+  <script src="vendor/zxing-browser.min.js?v=119"></script>
+  <script src="importacao-nfe.js?v=119"></script>
+  <script src="app.js?v=119"></script>
 </body>
 </html>

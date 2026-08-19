@@ -1043,4 +1043,69 @@ router.get('/niveis', async (_req, res) => {
   }
 });
 
+const importacaoStaging = require('./importacao-staging');
+
+router.get('/importacao/sessoes', (_req, res) => {
+  try {
+    res.json({ ok: true, sessoes: importacaoStaging.listSessoes() });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, sessoes: [] });
+  }
+});
+
+router.post('/importacao/sessoes', (req, res) => {
+  try {
+    const chave = String(req.body?.chave || '').replace(/\D/g, '');
+    const out = importacaoStaging.createSessao(chave);
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/sessoes/:id', (req, res) => {
+  try {
+    const sessao = importacaoStaging.getSessao(req.params.id);
+    if (!sessao) return res.json({ ok: false, error: 'Sessão não encontrada' });
+    res.json({ ok: true, sessao });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.put('/importacao/sessoes/:id/itens/:nItem', (req, res) => {
+  try {
+    const out = importacaoStaging.updateItem(req.params.id, req.params.nItem, req.body || {});
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.put('/importacao/sessoes/:id/financeiro', (req, res) => {
+  try {
+    const out = importacaoStaging.updateFinanceiro(req.params.id, req.body || {});
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/sessoes/:id/confirmar', (req, res) => {
+  try {
+    const out = importacaoStaging.confirmarSessao(req.params.id);
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/produtos', (req, res) => {
+  try {
+    res.json({ ok: true, itens: importacaoStaging.buscarProdutos(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
 module.exports = router;
