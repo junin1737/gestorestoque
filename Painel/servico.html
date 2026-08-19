@@ -17,6 +17,10 @@
         <span class="ico db"></span>
         <span>Banco de dados</span>
       </button>
+      <button class="svc-nav" data-panel="fiscal" title="Certificado NF-e">
+        <span class="ico cert"></span>
+        <span>Certificado NF-e</span>
+      </button>
       <button class="svc-nav" data-panel="sobre" title="Sobre">
         <span class="ico info"></span>
         <span>Sobre</span>
@@ -120,6 +124,64 @@
           <strong id="banco-empresa">—</strong>
           <span id="banco-fb">—</span>
         </div>
+      </section>
+
+      <!-- CERTIFICADO NF-e -->
+      <section id="panel-fiscal" class="svc-panel" hidden>
+        <p class="svc-lead">Configure o certificado digital usado pelo servidor para consultar NF-e. O celular não precisa do certificado.</p>
+
+        <form id="form-fiscal" class="banco-form" autocomplete="off">
+          <label>Tipo de certificado
+            <select id="fiscal-tipo">
+              <option value="a1">A1 — arquivo (.pfx / .p12)</option>
+              <option value="windows">Instalado no Windows (A3 / repositório)</option>
+            </select>
+          </label>
+
+          <div id="fiscal-a1-fields">
+            <label>Arquivo do certificado (.pfx)
+              <div class="row">
+                <input id="fiscal-arquivo" type="text" placeholder="C:\...\certificado.pfx" />
+                <button type="button" id="fiscal-browse" class="btn-teal small">…</button>
+              </div>
+            </label>
+            <label>Senha do certificado
+              <input id="fiscal-senha" type="password" placeholder="Senha do .pfx" autocomplete="new-password" />
+            </label>
+            <p class="hint" id="fiscal-senha-hint">A senha é guardada criptografada neste computador.</p>
+          </div>
+
+          <div id="fiscal-win-fields" hidden>
+            <label>Certificado instalado
+              <div class="row">
+                <select id="fiscal-cert-list">
+                  <option value="">— Carregue a lista —</option>
+                </select>
+                <button type="button" id="fiscal-recarregar" class="btn-outline small">Atualizar</button>
+              </div>
+            </label>
+            <p class="hint">Lista certificados com chave privada em <em>Usuário atual</em> e <em>Máquina local</em>.</p>
+          </div>
+
+          <label>Ambiente SEFAZ
+            <select id="fiscal-ambiente">
+              <option value="homologacao">Homologação (testes)</option>
+              <option value="producao">Produção</option>
+            </select>
+          </label>
+
+          <p id="fiscal-msg" class="hint" hidden></p>
+
+          <div id="fiscal-resultado" class="emitente-card" hidden>
+            <strong id="fiscal-res-titulo">—</strong>
+            <span id="fiscal-res-detalhe">—</span>
+          </div>
+
+          <div class="banco-actions">
+            <button type="button" id="fiscal-testar" class="btn-outline">Testar certificado</button>
+            <button type="submit" class="btn-teal">Salvar configuração</button>
+          </div>
+        </form>
       </section>
 
       <!-- SOBRE -->

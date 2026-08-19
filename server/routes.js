@@ -1108,4 +1108,70 @@ router.get('/importacao/produtos', (req, res) => {
   }
 });
 
+router.get('/fiscal/config', (_req, res) => {
+  try {
+    const certificado = require('./certificado');
+    res.json({ ok: true, fiscal: certificado.publicFiscalConfig() });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/fiscal/config', (req, res) => {
+  try {
+    const certificado = require('./certificado');
+    const body = req.body || {};
+    certificado.saveFiscalConfig({
+      tipo: body.tipo,
+      arquivoPfx: body.arquivoPfx,
+      certStore: body.certStore,
+      thumbprint: body.thumbprint,
+      ambiente: body.ambiente,
+      senha: body.senha,
+    });
+    res.json({ ok: true, fiscal: certificado.publicFiscalConfig() });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/fiscal/certificados', async (_req, res) => {
+  try {
+    const certificado = require('./certificado');
+    const itens = await certificado.listWindowsCertificates();
+    res.json({ ok: true, itens });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.post('/fiscal/testar', async (req, res) => {
+  try {
+    const certificado = require('./certificado');
+    const body = req.body || {};
+    let emitenteCnpj = '';
+    try {
+      const data = await withDb(async (db) => {
+        const rows = await query(db, 'SELECT FIRST 1 CNPJ FROM TB_EMITENTE');
+        return rows[0]?.CNPJ ? String(rows[0].CNPJ).replace(/\D/g, '') : '';
+      });
+      emitenteCnpj = data;
+    } catch {
+      /* base offline */
+    }
+    const out = await certificado.testFiscalConfig({
+      tipo: body.tipo,
+      arquivoPfx: body.arquivoPfx,
+      thumbprint: body.thumbprint,
+      certStore: body.certStore,
+      ambiente: body.ambiente,
+      senha: body.senha,
+      emitenteCnpj,
+    });
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 module.exports = router;

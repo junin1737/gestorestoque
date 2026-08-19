@@ -18,10 +18,11 @@ async function api(path, options = {}) {
 
 function setPanel(name) {
   $$('.svc-nav[data-panel]').forEach((b) => b.classList.toggle('active', b.dataset.panel === name));
-  ['conexao', 'banco', 'sobre'].forEach((p) => {
+  ['conexao', 'banco', 'fiscal', 'sobre'].forEach((p) => {
     const el = $(`#panel-${p}`);
     if (el) el.hidden = p !== name;
   });
+  if (name === 'fiscal') loadFiscal();
 }
 
 $$('.svc-nav[data-panel]').forEach((btn) => {
@@ -123,6 +124,148 @@ $('#cfg-testar').addEventListener('click', () => testOrSave(false));
 $('#form-banco').addEventListener('submit', async (e) => {
   e.preventDefault();
   await testOrSave(true);
+});
+
+function toggleFiscalTipo() {
+  const tipo = $('#fiscal-tipo').value;
+  const a1 = $('#fiscal-a1-fields');
+  const win = $('#fiscal-win-fields');
+  if (a1) a1.hidden = tipo !== 'a1';
+  if (win) win.hidden = tipo !== 'windows';
+}
+
+function readFiscal() {
+  const tipo = $('#fiscal-tipo').value;
+  const body = {
+    tipo,
+    ambiente: $('#fiscal-ambiente').value,
+    arquivoPfx: $('#fiscal-arquivo').value.trim(),
+    thumbprint: '',
+    certStore: 'Cert:\\CurrentUser\\My',
+  };
+  const senha = $('#fiscal-senha').value;
+  if (senha) body.senha = senha;
+
+  if (tipo === 'windows') {
+    const sel = $('#fiscal-cert-list');
+    const opt = sel?.selectedOptions?.[0];
+    body.thumbprint = sel?.value || '';
+    body.certStore = opt?.dataset?.store || 'Cert:\\CurrentUser\\My';
+    delete body.arquivoPfx;
+  }
+  return body;
+}
+
+function showFiscalMsg(text, ok) {
+  const el = $('#fiscal-msg');
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.style.color = ok === false ? 'var(--danger)' : ok === true ? 'var(--ok)' : '';
+}
+
+function showFiscalResultado(titulo, detalhe, visible) {
+  const card = $('#fiscal-resultado');
+  if (!card) return;
+  card.hidden = !visible;
+  if (visible) {
+    $('#fiscal-res-titulo').textContent = titulo;
+    $('#fiscal-res-detalhe').textContent = detalhe;
+  }
+}
+
+async function loadFiscal() {
+  const res = await api('/fiscal/config');
+  if (!res.ok) return;
+  const f = res.fiscal || {};
+  $('#fiscal-tipo').value = f.tipo || 'a1';
+  $('#fiscal-arquivo').value = f.arquivoPfx || '';
+  $('#fiscal-ambiente').value = f.ambiente || 'homologacao';
+  $('#fiscal-senha').value = '';
+  const hint = $('#fiscal-senha-hint');
+  if (hint) {
+    hint.textContent = f.hasSenha
+      ? 'Senha já configurada. Deixe em branco para manter a atual.'
+      : 'A senha é guardada criptografada neste computador.';
+  }
+  toggleFiscalTipo();
+  if (f.tipo === 'windows') await reloadCertList(f.thumbprint);
+}
+
+async function reloadCertList(selectThumb) {
+  showFiscalMsg('Carregando certificados do Windows…');
+  const res = await api('/fiscal/certificados');
+  const sel = $('#fiscal-cert-list');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Selecione —</option>';
+  if (!res.ok) {
+    showFiscalMsg(res.error || 'Falha ao listar certificados', false);
+    return;
+  }
+  for (const c of res.itens || []) {
+    const opt = document.createElement('option');
+    opt.value = c.thumbprint;
+    opt.dataset.store = c.store;
+    opt.textContent = `${c.label} · ${c.subject?.slice(0, 40) || ''}`;
+    if (selectThumb && c.thumbprint === selectThumb) opt.selected = true;
+    sel.appendChild(opt);
+  }
+  showFiscalMsg(`${(res.itens || []).length} certificado(s) com chave privada encontrado(s).`, true);
+  setTimeout(() => showFiscalMsg(''), 3500);
+}
+
+$('#fiscal-tipo')?.addEventListener('change', toggleFiscalTipo);
+
+$('#fiscal-browse')?.addEventListener('click', async () => {
+  if (window.desktop?.openFile) {
+    const file = await window.desktop.openFile({
+      properties: ['openFile'],
+      filters: [{ name: 'Certificado A1', extensions: ['pfx', 'p12', 'PFX', 'P12'] }],
+    });
+    if (file) $('#fiscal-arquivo').value = file;
+  } else {
+    alert('Informe o caminho completo do arquivo .pfx');
+  }
+});
+
+$('#fiscal-recarregar')?.addEventListener('click', () => reloadCertList($('#fiscal-cert-list').value));
+
+async function testarFiscal() {
+  showFiscalResultado('', '', false);
+  showFiscalMsg('Testando certificado…');
+  const body = readFiscal();
+  const res = await api('/fiscal/testar', { method: 'POST', body });
+  if (res.ok) {
+    const c = res.certificado || {};
+    showFiscalMsg(res.message || 'Certificado OK', true);
+    showFiscalResultado(
+      c.subject || 'Certificado válido',
+      `CNPJ ${c.cnpj || '—'} · válido até ${c.notAfter || '—'} · ${res.ambiente || ''}`,
+      true
+    );
+  } else {
+    showFiscalMsg(res.error || 'Falha no teste', false);
+    if (res.certificado) {
+      showFiscalResultado('Certificado encontrado', res.error, true);
+    }
+  }
+}
+
+$('#fiscal-testar')?.addEventListener('click', testarFiscal);
+
+$('#form-fiscal')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  showFiscalMsg('Salvando…');
+  const body = readFiscal();
+  const saved = await api('/fiscal/config', { method: 'POST', body });
+  if (!saved.ok) {
+    showFiscalMsg(saved.error || 'Falha ao salvar', false);
+    return;
+  }
+  $('#fiscal-senha').value = '';
+  await loadFiscal();
+  showFiscalMsg('Configuração fiscal salva.', true);
+  await testarFiscal();
 });
 
 $('#btn-abrir-painel').addEventListener('click', async () => {

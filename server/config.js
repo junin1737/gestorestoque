@@ -46,6 +46,14 @@ function defaultAppConfig() {
     password: 'masterkey',
     sistema: 'clipp', // clipp | managepro | ambos
     tema: 'claro', // claro | escuro | empresa
+    fiscal: {
+      tipo: 'a1',
+      arquivoPfx: '',
+      senhaEnc: '',
+      thumbprint: '',
+      certStore: 'CurrentUser\\My',
+      ambiente: 'homologacao',
+    },
   };
 }
 
