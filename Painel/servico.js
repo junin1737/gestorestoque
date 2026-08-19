@@ -18,12 +18,40 @@ async function api(path, options = {}) {
 
 function setPanel(name) {
   $$('.svc-nav[data-panel]').forEach((b) => b.classList.toggle('active', b.dataset.panel === name));
-  ['conexao', 'banco', 'fiscal', 'sobre'].forEach((p) => {
-    const el = $(`#panel-${p}`);
-    if (el) el.hidden = p !== name;
-  });
-  if (name === 'fiscal') loadFiscal();
+  $('#panel-conexao').hidden = name !== 'conexao';
+  $('#panel-config').hidden = name !== 'config';
+
+  const titles = {
+    conexao: ['Conexão', 'Acesso ao painel pelo celular ou navegador'],
+    config: ['Configuração', 'Banco, certificado digital e preferências do serviço'],
+  };
+  const [t, s] = titles[name] || titles.conexao;
+  if ($('#svc-page-title')) $('#svc-page-title').textContent = t;
+  if ($('#svc-page-sub')) $('#svc-page-sub').textContent = s;
+
+  if (name === 'config') {
+    setConfigTab(stateConfigTab || 'banco');
+  }
 }
+
+let stateConfigTab = 'banco';
+
+function setConfigTab(tab) {
+  stateConfigTab = tab;
+  $$('.svc-tab[data-config-tab]').forEach((b) => {
+    b.classList.toggle('active', b.dataset.configTab === tab);
+  });
+  $$('.config-tab-pane').forEach((pane) => {
+    pane.hidden = pane.id !== `config-tab-${tab}`;
+  });
+  if (tab === 'fiscal') loadFiscal();
+  if (tab === 'banco') refreshDbMaintenance();
+  if (tab === 'sistema') loadSobre();
+}
+
+$$('.svc-tab[data-config-tab]').forEach((btn) => {
+  btn.addEventListener('click', () => setConfigTab(btn.dataset.configTab));
+});
 
 $$('.svc-nav[data-panel]').forEach((btn) => {
   btn.addEventListener('click', () => setPanel(btn.dataset.panel));

@@ -13,19 +13,11 @@
         <span class="ico net"></span>
         <span>Conexão</span>
       </button>
-      <button class="svc-nav" data-panel="banco" title="Banco de dados">
-        <span class="ico db"></span>
-        <span>Banco de dados</span>
+      <button class="svc-nav" data-panel="config" title="Configuração">
+        <span class="ico cfg"></span>
+        <span>Configuração</span>
       </button>
-      <button class="svc-nav" data-panel="fiscal" title="Certificado NF-e">
-        <span class="ico cert"></span>
-        <span>Certificado NF-e</span>
-      </button>
-      <button class="svc-nav" data-panel="sobre" title="Sobre">
-        <span class="ico info"></span>
-        <span>Sobre</span>
-      </button>
-      <button class="svc-nav" id="btn-sair" title="Sair">
+      <button class="svc-nav svc-nav-bottom" id="btn-sair" title="Sair">
         <span class="ico exit"></span>
         <span>Sair</span>
       </button>
@@ -34,188 +26,193 @@
     <main class="svc-main">
       <header class="svc-header">
         <div class="svc-brand-mark" aria-hidden="true"></div>
-        <div>
-          <h1>Gestor Estoque</h1>
-          <p>Servidor de acesso móvel — MT Automações</p>
+        <div class="svc-header-text">
+          <h1 id="svc-page-title">Conexão</h1>
+          <p id="svc-page-sub">Acesso ao painel pelo celular ou navegador</p>
+        </div>
+        <div class="svc-header-status">
+          <span id="status-dot" class="dot on"></span>
+          <span id="status-text">Servidor em execução…</span>
         </div>
       </header>
 
-      <!-- CONEXÃO -->
+      <!-- ═══ CONEXÃO ═══ -->
       <section id="panel-conexao" class="svc-panel">
-        <p class="svc-lead">Inicie o serviço e informe os dados abaixo no celular, ou escaneie o QR Code.</p>
-
-        <div class="svc-grid">
-          <div class="svc-col">
+        <div class="svc-cards-2">
+          <div class="svc-card">
+            <h2 class="svc-card-title">Endereço de acesso</h2>
             <div class="field">
-              <label>Endereço IP</label>
+              <label>IP na rede</label>
               <div id="svc-ip" class="ip-value">—</div>
             </div>
-            <div class="field">
-              <label>Porta para conexão</label>
-              <input id="svc-porta" type="text" readonly value="5077" />
+            <div class="field-row">
+              <div class="field">
+                <label>Porta</label>
+                <input id="svc-porta" type="text" readonly value="5077" />
+              </div>
+              <div class="field">
+                <label>Hostname</label>
+                <div id="svc-host" class="field-value muted">—</div>
+              </div>
             </div>
             <div class="field">
               <label>URL do painel</label>
               <a id="svc-url" class="url-link" href="#" target="_blank">—</a>
             </div>
-            <div class="field">
-              <label>Hostname</label>
-              <div id="svc-host" class="muted">—</div>
-            </div>
             <div id="svc-alts" class="alts muted"></div>
           </div>
 
-          <div class="svc-ou">Ou</div>
-
-          <div class="svc-col qr-col">
-            <label>Escaneie o QR Code</label>
+          <div class="svc-card svc-card-center">
+            <h2 class="svc-card-title">QR Code</h2>
             <div class="qr-frame">
               <img id="svc-qr" alt="QR Code de acesso" />
             </div>
-            <p class="hint">Aponte a câmera do celular — abre o navegador com o painel.</p>
+            <p class="hint center">Escaneie com a câmera do celular para abrir o painel.</p>
           </div>
         </div>
 
-        <div class="svc-footer-status">
+        <div class="svc-action-bar">
           <button type="button" id="btn-toggle-svc" class="btn-stop" title="Parar serviço">
             <span class="stop-icon"></span>
           </button>
-          <div>
+          <div class="svc-action-text">
             <strong id="btn-toggle-label">Parar serviço</strong>
-            <div class="status-line">
-              <span id="status-dot" class="dot on"></span>
-              <span id="status-text">Servidor em execução…</span>
-            </div>
+            <span class="hint">Interrompe o acesso pelo celular neste computador</span>
           </div>
           <button type="button" id="btn-abrir-painel" class="btn-teal">Abrir painel neste PC</button>
         </div>
       </section>
 
-      <!-- BANCO -->
-      <section id="panel-banco" class="svc-panel" hidden>
-        <p class="svc-lead">Configure o caminho da base Firebird neste computador (servidor).</p>
+      <!-- ═══ CONFIGURAÇÃO ═══ -->
+      <section id="panel-config" class="svc-panel" hidden>
+        <nav class="svc-tabs" role="tablist">
+          <button type="button" class="svc-tab active" data-config-tab="banco">Banco de dados</button>
+          <button type="button" class="svc-tab" data-config-tab="fiscal">Certificado NF-e</button>
+          <button type="button" class="svc-tab" data-config-tab="sistema">Sistema</button>
+        </nav>
 
-        <form id="form-banco" class="banco-form" autocomplete="off">
-          <label>Arquivo da base (.FDB)
-            <div class="row">
-              <input id="cfg-database" type="text" required placeholder="C:\...\CLIPP.FDB" />
-              <button type="button" id="cfg-browse" class="btn-teal small">…</button>
+        <!-- Aba: Banco -->
+        <div id="config-tab-banco" class="config-tab-pane">
+          <p class="svc-lead">Caminho da base Firebird e modo Clipp / ManagePro.</p>
+          <form id="form-banco" class="banco-form" autocomplete="off">
+            <label>Arquivo da base (.FDB)
+              <div class="row">
+                <input id="cfg-database" type="text" required placeholder="C:\...\CLIPP.FDB" />
+                <button type="button" id="cfg-browse" class="btn-teal small">…</button>
+              </div>
+            </label>
+            <div class="row-2">
+              <label>Host Firebird<input id="cfg-host" type="text" /></label>
+              <label>Porta FB<input id="cfg-port" type="number" /></label>
             </div>
-          </label>
-          <div class="row-2">
-            <label>Host Firebird<input id="cfg-host" type="text" /></label>
-            <label>Porta FB<input id="cfg-port" type="number" /></label>
-          </div>
-          <label>Sistema
-            <select id="cfg-sistema">
-              <option value="clipp">Clipp</option>
-              <option value="managepro">ManagePro</option>
-              <option value="ambos">Clipp + ManagePro</option>
-            </select>
-          </label>
-          <p id="banco-msg" class="hint" hidden></p>
-          <div class="banco-actions">
-            <button type="button" id="cfg-testar" class="btn-outline">Testar conexão</button>
-            <button type="submit" class="btn-teal">Salvar configuração</button>
-          </div>
-        </form>
+            <label>Sistema
+              <select id="cfg-sistema">
+                <option value="clipp">Clipp</option>
+                <option value="managepro">ManagePro</option>
+                <option value="ambos">Clipp + ManagePro</option>
+              </select>
+            </label>
+            <p id="banco-msg" class="hint msg-line" hidden></p>
+            <div class="banco-actions">
+              <button type="button" id="cfg-testar" class="btn-outline">Testar conexão</button>
+              <button type="submit" class="btn-teal">Salvar</button>
+            </div>
+          </form>
 
-        <div class="sobre-box banco-manutencao">
-          <h3>Substituir arquivo da base</h3>
-          <p class="hint">Libera a base para você copiar/substituir o <strong>.FDB</strong>. O painel fica pausado até retomar.</p>
-          <p id="banco-manutencao-status" class="hint">Status: operação normal</p>
-          <div class="banco-actions">
-            <button type="button" id="btn-liberar-base" class="btn-outline">Liberar base</button>
-            <button type="button" id="btn-retomar-base" class="btn-teal" hidden>Retomar base</button>
+          <div id="banco-emitente" class="emitente-card" hidden>
+            <strong id="banco-empresa">—</strong>
+            <span id="banco-fb">—</span>
+          </div>
+
+          <div class="sobre-box banco-manutencao">
+            <h3>Substituir arquivo da base</h3>
+            <p class="hint">Libera a base para copiar/substituir o <strong>.FDB</strong>. O painel fica pausado até retomar.</p>
+            <p id="banco-manutencao-status" class="hint">Status: operação normal</p>
+            <div class="banco-actions left">
+              <button type="button" id="btn-liberar-base" class="btn-outline">Liberar base</button>
+              <button type="button" id="btn-retomar-base" class="btn-teal" hidden>Retomar base</button>
+            </div>
           </div>
         </div>
 
-        <div id="banco-emitente" class="emitente-card" hidden>
-          <strong id="banco-empresa">—</strong>
-          <span id="banco-fb">—</span>
-        </div>
-      </section>
-
-      <!-- CERTIFICADO NF-e -->
-      <section id="panel-fiscal" class="svc-panel" hidden>
-        <p class="svc-lead">Configure o certificado digital usado pelo servidor para consultar NF-e. O celular não precisa do certificado.</p>
-
-        <form id="form-fiscal" class="banco-form" autocomplete="off">
-          <label>Tipo de certificado
-            <select id="fiscal-tipo">
-              <option value="a1">A1 — arquivo (.pfx / .p12)</option>
-              <option value="windows">Instalado no Windows (A3 / repositório)</option>
-            </select>
-          </label>
-
-          <div id="fiscal-a1-fields">
-            <label>Arquivo do certificado (.pfx)
-              <div class="row">
-                <input id="fiscal-arquivo" type="text" placeholder="C:\...\certificado.pfx" />
-                <button type="button" id="fiscal-browse" class="btn-teal small">…</button>
-              </div>
+        <!-- Aba: Certificado -->
+        <div id="config-tab-fiscal" class="config-tab-pane" hidden>
+          <p class="svc-lead">Certificado digital no servidor para consulta de NF-e (celular não precisa do certificado).</p>
+          <form id="form-fiscal" class="banco-form" autocomplete="off">
+            <label>Tipo de certificado
+              <select id="fiscal-tipo">
+                <option value="a1">A1 — arquivo (.pfx / .p12)</option>
+                <option value="windows">Instalado no Windows (A3 / repositório)</option>
+              </select>
             </label>
-            <label>Senha do certificado
-              <input id="fiscal-senha" type="password" placeholder="Senha do .pfx" autocomplete="new-password" />
+
+            <div id="fiscal-a1-fields">
+              <label>Arquivo do certificado (.pfx)
+                <div class="row">
+                  <input id="fiscal-arquivo" type="text" placeholder="C:\...\certificado.pfx" />
+                  <button type="button" id="fiscal-browse" class="btn-teal small">…</button>
+                </div>
+              </label>
+              <label>Senha do certificado
+                <input id="fiscal-senha" type="password" placeholder="Senha do .pfx" autocomplete="new-password" />
+              </label>
+              <p class="hint" id="fiscal-senha-hint">A senha é guardada criptografada neste computador.</p>
+            </div>
+
+            <div id="fiscal-win-fields" hidden>
+              <label>Certificado instalado
+                <div class="row">
+                  <select id="fiscal-cert-list">
+                    <option value="">— Carregue a lista —</option>
+                  </select>
+                  <button type="button" id="fiscal-recarregar" class="btn-outline small">Atualizar</button>
+                </div>
+              </label>
+              <p class="hint">Certificados com chave privada (usuário atual e máquina local).</p>
+            </div>
+
+            <label>Ambiente SEFAZ
+              <select id="fiscal-ambiente">
+                <option value="homologacao">Homologação (testes)</option>
+                <option value="producao">Produção</option>
+              </select>
             </label>
-            <p class="hint" id="fiscal-senha-hint">A senha é guardada criptografada neste computador.</p>
-          </div>
 
-          <div id="fiscal-win-fields" hidden>
-            <label>Certificado instalado
-              <div class="row">
-                <select id="fiscal-cert-list">
-                  <option value="">— Carregue a lista —</option>
-                </select>
-                <button type="button" id="fiscal-recarregar" class="btn-outline small">Atualizar</button>
-              </div>
-            </label>
-            <p class="hint">Lista certificados com chave privada em <em>Usuário atual</em> e <em>Máquina local</em>.</p>
-          </div>
-
-          <label>Ambiente SEFAZ
-            <select id="fiscal-ambiente">
-              <option value="homologacao">Homologação (testes)</option>
-              <option value="producao">Produção</option>
-            </select>
-          </label>
-
-          <p id="fiscal-msg" class="hint" hidden></p>
-
-          <div id="fiscal-resultado" class="emitente-card" hidden>
-            <strong id="fiscal-res-titulo">—</strong>
-            <span id="fiscal-res-detalhe">—</span>
-          </div>
-
-          <div class="banco-actions">
-            <button type="button" id="fiscal-testar" class="btn-outline">Testar certificado</button>
-            <button type="submit" class="btn-teal">Salvar configuração</button>
-          </div>
-        </form>
-      </section>
-
-      <!-- SOBRE -->
-      <section id="panel-sobre" class="svc-panel" hidden>
-        <p class="svc-lead">Gestor Estoque — painel administrativo com acesso local e móvel.</p>
-        <ul class="sobre-list">
-          <li>MT Automações — (34) 3674-1937</li>
-          <li><a href="https://www.instagram.com/mtautomacoes" target="_blank" rel="noopener">instagram.com/mtautomacoes</a></li>
-          <li>Versão <strong id="svc-versao">—</strong></li>
-        </ul>
-
-        <div class="sobre-box">
-          <h3>Inicialização</h3>
-          <label class="switch-row">
-            <input type="checkbox" id="chk-inicio-windows" />
-            <span>Iniciar com o Windows</span>
-          </label>
-          <p class="hint" id="inicio-windows-msg">Abre o serviço automaticamente ao ligar o computador.</p>
+            <p id="fiscal-msg" class="hint msg-line" hidden></p>
+            <div id="fiscal-resultado" class="emitente-card" hidden>
+              <strong id="fiscal-res-titulo">—</strong>
+              <span id="fiscal-res-detalhe">—</span>
+            </div>
+            <div class="banco-actions">
+              <button type="button" id="fiscal-testar" class="btn-outline">Testar certificado</button>
+              <button type="submit" class="btn-teal">Salvar</button>
+            </div>
+          </form>
         </div>
 
-        <div class="sobre-box">
-          <h3>Atualizações</h3>
-          <p class="hint" id="update-status">Ao abrir o app, consultamos o GitHub por versões novas.</p>
-          <button type="button" id="btn-verificar-update" class="btn-teal">Verificar atualização agora</button>
+        <!-- Aba: Sistema -->
+        <div id="config-tab-sistema" class="config-tab-pane" hidden>
+          <p class="svc-lead">Inicialização, atualizações e informações do aplicativo.</p>
+          <ul class="sobre-list compact">
+            <li>MT Automações — (34) 3674-1937</li>
+            <li><a href="https://www.instagram.com/mtautomacoes" target="_blank" rel="noopener">instagram.com/mtautomacoes</a></li>
+            <li>Versão instalada: <strong id="svc-versao">—</strong></li>
+          </ul>
+
+          <div class="sobre-box">
+            <h3>Inicialização</h3>
+            <label class="switch-row">
+              <input type="checkbox" id="chk-inicio-windows" />
+              <span>Iniciar com o Windows</span>
+            </label>
+            <p class="hint" id="inicio-windows-msg">Abre o serviço automaticamente ao ligar o computador.</p>
+          </div>
+
+          <div class="sobre-box">
+            <h3>Atualizações</h3>
+            <p class="hint" id="update-status">Ao abrir o app, consultamos o GitHub por versões novas.</p>
+            <button type="button" id="btn-verificar-update" class="btn-teal">Verificar atualização agora</button>
+          </div>
         </div>
       </section>
     </main>
