@@ -1048,7 +1048,20 @@ router.get('/niveis', async (_req, res) => {
 
 const importacaoStaging = require('./importacao-staging');
 
-router.get('/importacao/sessoes', (_req, res) => {
+function importacaoSupervisorOk(req) {
+  const q = req.query?.supervisor;
+  const b = req.body?.supervisor;
+  return q === '1' || q === 'true' || q === true || b === true || b === '1' || b === 'true';
+}
+
+function guardImportacaoSupervisor(req, res) {
+  if (importacaoSupervisorOk(req)) return true;
+  res.json({ ok: false, error: 'Importação NF-e em desenvolvimento — disponível apenas para supervisor.' });
+  return false;
+}
+
+router.get('/importacao/sessoes', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
   try {
     res.json({ ok: true, sessoes: importacaoStaging.listSessoes() });
   } catch (err) {
@@ -1057,6 +1070,7 @@ router.get('/importacao/sessoes', (_req, res) => {
 });
 
 router.post('/importacao/sessoes', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const chave = String(req.body?.chave || '').replace(/\D/g, '');
     const out = importacaoStaging.createSessao(chave);
@@ -1067,6 +1081,7 @@ router.post('/importacao/sessoes', (req, res) => {
 });
 
 router.get('/importacao/sessoes/:id', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const sessao = importacaoStaging.getSessao(req.params.id);
     if (!sessao) return res.json({ ok: false, error: 'Sessão não encontrada' });
@@ -1077,6 +1092,7 @@ router.get('/importacao/sessoes/:id', (req, res) => {
 });
 
 router.put('/importacao/sessoes/:id/itens/:nItem', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const out = importacaoStaging.updateItem(req.params.id, req.params.nItem, req.body || {});
     res.json(out);
@@ -1086,6 +1102,7 @@ router.put('/importacao/sessoes/:id/itens/:nItem', (req, res) => {
 });
 
 router.put('/importacao/sessoes/:id/financeiro', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const out = importacaoStaging.updateFinanceiro(req.params.id, req.body || {});
     res.json(out);
@@ -1095,6 +1112,7 @@ router.put('/importacao/sessoes/:id/financeiro', (req, res) => {
 });
 
 router.post('/importacao/sessoes/:id/confirmar', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const out = importacaoStaging.confirmarSessao(req.params.id);
     res.json(out);
@@ -1104,6 +1122,7 @@ router.post('/importacao/sessoes/:id/confirmar', (req, res) => {
 });
 
 router.get('/importacao/produtos', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
   try {
     res.json({ ok: true, itens: importacaoStaging.buscarProdutos(req.query.q) });
   } catch (err) {

@@ -306,7 +306,7 @@ function enterApp() {
   $('#nav-estoque').hidden = !canEst;
   if ($('#nav-estoque-mobile')) $('#nav-estoque-mobile').hidden = !canEst;
   if ($('#dash-estoque')) $('#dash-estoque').hidden = !canEst;
-  const showImp = canEst;
+  const showImp = !!state.usuario?.supervisor;
   if ($('#nav-importacao')) $('#nav-importacao').hidden = !showImp;
   if ($('#nav-importacao-mobile')) $('#nav-importacao-mobile').hidden = !showImp;
   if ($('#dash-importacao')) $('#dash-importacao').hidden = !showImp;
@@ -381,8 +381,8 @@ function showPage(page) {
     showMsg('Sem permissão de estoque.');
     page = 'dashboard';
   }
-  if (page === 'importacao' && !can('estoque', 'acesso')) {
-    showMsg('Sem permissão para importação.');
+  if (page === 'importacao' && !state.usuario?.supervisor) {
+    showMsg('Importação NF-e em desenvolvimento — disponível apenas para supervisor.');
     page = 'dashboard';
   }
 
@@ -1519,6 +1519,7 @@ window.ImportacaoNfe?.init({
   fmtNum,
   scrollAppTop,
   startScanner,
+  isSupervisor: () => !!state.usuario?.supervisor,
 });
 
 bootstrap().catch((err) => {
