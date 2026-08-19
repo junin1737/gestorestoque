@@ -131,7 +131,8 @@ button, input, select, textarea {
   background: var(--teal); transform: rotate(-40deg);
 }
 
-.svc-lead { margin: 0; color: var(--muted); font-size: 1.05rem; }
+.banco-manutencao { margin-top: 1rem; }
+.banco-manutencao h3 { margin: 0 0 0.35rem; font-size: 1rem; }
 .svc-panel { display: flex; flex-direction: column; gap: 1.25rem; flex: 1; }
 
 .svc-grid {

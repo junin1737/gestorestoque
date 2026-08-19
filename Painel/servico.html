@@ -120,6 +120,16 @@
           </div>
         </form>
 
+        <div class="sobre-box banco-manutencao">
+          <h3>Substituir arquivo da base</h3>
+          <p class="hint">Libera a base para você copiar/substituir o <strong>.FDB</strong>. O painel fica pausado até retomar.</p>
+          <p id="banco-manutencao-status" class="hint">Status: operação normal</p>
+          <div class="banco-actions">
+            <button type="button" id="btn-liberar-base" class="btn-outline">Liberar base</button>
+            <button type="button" id="btn-retomar-base" class="btn-teal" hidden>Retomar base</button>
+          </div>
+        </div>
+
         <div id="banco-emitente" class="emitente-card" hidden>
           <strong id="banco-empresa">—</strong>
           <span id="banco-fb">—</span>

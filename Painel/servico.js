@@ -70,7 +70,55 @@ function fillBanco(cfg) {
 async function loadBanco() {
   const res = await api('/config');
   if (res.ok) fillBanco(res.config);
+  await refreshDbMaintenance();
 }
+
+async function refreshDbMaintenance() {
+  const res = await api('/database/status');
+  const st = $('#banco-manutencao-status');
+  const btnLib = $('#btn-liberar-base');
+  const btnRet = $('#btn-retomar-base');
+  if (!st) return;
+  if (res.ok && res.active) {
+    st.textContent = `Status: LIBERADA — ${res.reason || 'substitua o .FDB e retome'}`;
+    st.style.color = 'var(--danger)';
+    if (btnLib) btnLib.hidden = true;
+    if (btnRet) btnRet.hidden = false;
+  } else {
+    st.textContent = 'Status: operação normal';
+    st.style.color = '';
+    if (btnLib) btnLib.hidden = false;
+    if (btnRet) btnRet.hidden = true;
+  }
+}
+
+$('#btn-liberar-base')?.addEventListener('click', async () => {
+  if (!confirm('Liberar a base? O painel/celular não acessará o Firebird até você clicar em Retomar base.')) return;
+  const msg = $('#banco-msg');
+  if (msg) { msg.hidden = false; msg.textContent = 'Liberando base…'; }
+  const res = await api('/database/liberar', { method: 'POST', body: {} });
+  if (msg) {
+    msg.hidden = false;
+    if (res.ok) {
+      msg.textContent = res.hint || `Base liberada. Anexos encerrados: ${res.disconnected || 0}.`;
+      if (res.warning) msg.textContent += ` ${res.warning}`;
+    } else {
+      msg.textContent = res.error || 'Falha ao liberar';
+    }
+  }
+  await refreshDbMaintenance();
+});
+
+$('#btn-retomar-base')?.addEventListener('click', async () => {
+  const res = await api('/database/retomar', { method: 'POST', body: {} });
+  const msg = $('#banco-msg');
+  if (msg) {
+    msg.hidden = false;
+    msg.textContent = res.ok ? 'Base retomada. Testando conexão…' : (res.error || 'Falha');
+  }
+  await refreshDbMaintenance();
+  if (res.ok) await testOrSave(false);
+});
 
 $('#cfg-browse').addEventListener('click', async () => {
   if (window.desktop?.openFile) {

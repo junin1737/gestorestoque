@@ -21,6 +21,9 @@ const {
   hasTable,
   refreshTables,
   columnExists,
+  getDbMaintenanceInfo,
+  releaseDatabase,
+  resumeDatabase,
 } = require('./db');
 const {
   AUDIT_TABLE,
@@ -1106,6 +1109,28 @@ router.get('/importacao/produtos', (req, res) => {
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }
+});
+
+router.get('/database/status', (_req, res) => {
+  const cfg = loadAppConfig();
+  res.json({
+    ok: true,
+    database: cfg.database,
+    ...getDbMaintenanceInfo(),
+  });
+});
+
+router.post('/database/liberar', async (_req, res) => {
+  try {
+    const out = await releaseDatabase();
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/database/retomar', (_req, res) => {
+  res.json(resumeDatabase());
 });
 
 router.get('/fiscal/config', (_req, res) => {

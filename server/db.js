@@ -1,9 +1,26 @@
 'use strict';
 const Firebird = require('node-firebird');
+const path = require('path');
 const { loadAppConfig } = require('./config');
 
 let tableCache = { checkedAt: 0, names: new Set() };
 let schemaReady = false;
+let dbMaintenance = false;
+let maintenanceReason = '';
+
+function isDbMaintenance() {
+  return dbMaintenance;
+}
+
+function setDbMaintenance(enabled, reason = '') {
+  dbMaintenance = !!enabled;
+  maintenanceReason = enabled ? String(reason || 'Base liberada para manutenção') : '';
+  if (enabled) schemaReady = false;
+}
+
+function getDbMaintenanceInfo() {
+  return { active: dbMaintenance, reason: maintenanceReason };
+}
 
 function buildFbOptions(appCfg, versionHint) {
   const opts = {
@@ -65,6 +82,11 @@ function detach(db) {
 }
 
 async function withDb(fn) {
+  if (dbMaintenance) {
+    const err = new Error(maintenanceReason || 'Base em manutenção. Retome após substituir o arquivo.');
+    err.code = 'DB_MAINTENANCE';
+    throw err;
+  }
   const appCfg = loadAppConfig();
   const { db, fbVersion } = await connectSmart(appCfg);
   try {
@@ -143,7 +165,6 @@ function stockTables(useManage) {
   const identificador = `TB_EST_IDENTIFICADOR${s}`;
   const produto = `TB_EST_PRODUTO${s}`;
   const saldo = `TB_EST_SALDO_ALTERADO${s}`;
-  // Grupo costuma ser compartilhado (sem _2) no espelho ManagePro.
   const grupo = useManage && hasTable('TB_EST_GRUPO_2') ? 'TB_EST_GRUPO_2' : 'TB_EST_GRUPO';
   const lote = useManage && hasTable('TB_LOTE_2') ? 'TB_LOTE_2' : 'TB_LOTE';
   const serial = useManage && hasTable('TB_EST_SERIAL_2') ? 'TB_EST_SERIAL_2' : 'TB_EST_SERIAL';
@@ -222,7 +243,6 @@ function readBlobBuffer(blob) {
     }
     if (typeof blob !== 'function') return resolve(null);
 
-    // node-firebird: LOGO chega como função async de leitura do blob
     blob((err, _name, event) => {
       if (err) return reject(err);
       const chunks = [];
@@ -246,6 +266,94 @@ async function blobToDataUrl(blob) {
   }
 }
 
+function dbPathKey(database) {
+  return String(database || '').replace(/\\/g, '/').toUpperCase();
+}
+
+async function listAttachments(appCfg) {
+  const { db } = await connectSmart(appCfg);
+  try {
+    const rows = await query(
+      db,
+      `SELECT MON$ATTACHMENT_ID AS ID, MON$USER AS USR, MON$REMOTE_PROCESS AS PROC
+       FROM MON$ATTACHMENTS
+       WHERE MON$ATTACHMENT_ID <> CURRENT_CONNECTION`
+    );
+    return rows.map((r) => ({
+      id: Number(r.ID),
+      user: String(r.USR || '').trim(),
+      process: String(r.PROC || '').trim(),
+    }));
+  } catch {
+    return [];
+  } finally {
+    await detach(db);
+  }
+}
+
+async function disconnectAttachment(appCfg, attachmentId) {
+  const { db } = await connectSmart(appCfg);
+  try {
+    await query(db, 'DELETE FROM MON$ATTACHMENTS WHERE MON$ATTACHMENT_ID = ?', [attachmentId]);
+    return true;
+  } finally {
+    await detach(db);
+  }
+}
+
+/** Bloqueia novas conexões do Gestor e tenta derrubar anexos Firebird na base configurada. */
+async function releaseDatabase() {
+  setDbMaintenance(true, 'Base liberada para substituição do arquivo .FDB');
+  schemaReady = false;
+  tableCache = { checkedAt: 0, names: new Set() };
+  generatorCache = new Set();
+
+  const appCfg = loadAppConfig();
+  const dbName = path.basename(appCfg.database || '').toUpperCase();
+  let disconnected = 0;
+  let attachments = [];
+
+  try {
+    attachments = await listAttachments(appCfg);
+    for (const att of attachments) {
+      try {
+        await disconnectAttachment(appCfg, att.id);
+        disconnected += 1;
+      } catch {
+        /* outro processo pode manter lock */
+      }
+    }
+  } catch (err) {
+    return {
+      ok: true,
+      maintenance: true,
+      disconnected,
+      attachmentsBefore: attachments.length,
+      warning: `Modo manutenção ativo. Não foi possível listar anexos: ${err.message}`,
+      database: appCfg.database,
+    };
+  }
+
+  return {
+    ok: true,
+    maintenance: true,
+    disconnected,
+    attachmentsBefore: attachments.length,
+    attachments,
+    database: appCfg.database,
+    hint: disconnected < attachments.length
+      ? 'Feche o Clipp/ERP ou pare o Firebird se o Windows ainda bloquear o arquivo.'
+      : 'Substitua o .FDB e clique em Retomar base.',
+    dbFile: dbName,
+  };
+}
+
+function resumeDatabase() {
+  setDbMaintenance(false);
+  schemaReady = false;
+  return { ok: true, maintenance: false };
+}
+
 module.exports = {
   withDb,
   query,
@@ -261,4 +369,8 @@ module.exports = {
   targetsForSistema,
   blobToDataUrl,
   buildFbOptions,
+  isDbMaintenance,
+  getDbMaintenanceInfo,
+  releaseDatabase,
+  resumeDatabase,
 };
