@@ -76,21 +76,52 @@ async function ensureContaMovtos(db, idCta, {
 
 async function zerarContaPagar(db, idCta, nfNumero) {
   const cur = await query(db, `
-    SELECT FIRST 1 VLR_CTAPAG, HISTORICO FROM TB_CONTA_PAGAR WHERE ID_CTAPAG = ?`, [idCta]);
+    SELECT FIRST 1 VLR_CTAPAG, HISTORICO, TIP_CTAPAG FROM TB_CONTA_PAGAR WHERE ID_CTAPAG = ?`, [idCta]);
   if (!cur[0]) return false;
   const vlr = Number(cur[0].VLR_CTAPAG || 0);
+  const tipAtual = String(cur[0].TIP_CTAPAG || '').trim().toUpperCase();
   const agora = localNow();
+
+  // Já cancelada com baixa C → só garante TIP/histórico
+  const baixaC = await query(db, `
+    SELECT FIRST 1 ID_BAIXA FROM TB_CTAPAG_BAIXA
+    WHERE ID_CTAPAG = ? AND TRIM(TIP_PAGTO) = 'C'`, [idCta]);
+  if (baixaC[0] && tipAtual === 'C') {
+    return true;
+  }
+
   await ensureContaMovtos(db, idCta, {
     vlr: vlr || 0.01,
     historico: `Compra NF ${nfNumero}`,
     dataSql: agora.dataSql,
     horaSql: agora.horaSql,
   });
-  // TB_CONTA_PAGAR não tem coluna STATUS — o indicador de cancelamento no Clipp é TIP_CTAPAG.
+
+  // Padrão Clipp (ex.: ID_CTAPAG 1987): TIP_CTAPAG=C + baixa TIP_PAGTO=C
+  if (!baixaC[0]) {
+    let nextBaixa;
+    try {
+      const gen = await query(db, `SELECT GEN_ID(GEN_TB_CTAPAG_BAIXA_ID, 1) AS ID FROM RDB$DATABASE`);
+      nextBaixa = Number(gen[0].ID);
+    } catch {
+      const max = await query(db, `SELECT COALESCE(MAX(ID_BAIXA),0)+1 AS ID FROM TB_CTAPAG_BAIXA`);
+      nextBaixa = Number(max[0].ID);
+    }
+    await query(db, `
+      INSERT INTO TB_CTAPAG_BAIXA (
+        ID_BAIXA, ID_CTAPAG, DT_BAIXA, HR_BAIXA, VLR_PAGO, VLR_DESC, VLR_ACRESC, TIP_PAGTO
+      ) VALUES (?, ?, ?, ?, ?, 0, 0, 'C')`, [
+      nextBaixa,
+      idCta,
+      agora.dataSql,
+      agora.horaSql,
+      Math.abs(vlr) || 0,
+    ]);
+  }
+
   await query(db, `
     UPDATE TB_CONTA_PAGAR
-    SET VLR_CTAPAG = 0,
-        TIP_CTAPAG = 'C',
+    SET TIP_CTAPAG = 'C',
         HISTORICO = ?
     WHERE ID_CTAPAG = ?`, [
     `CANCELADA c/ NF ${nfNumero} ${agora.dataSql}`.slice(0, 80),
@@ -131,8 +162,10 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
           const cur = await query(db, `
             SELECT VLR_CTAPAG, TIP_CTAPAG FROM TB_CONTA_PAGAR WHERE ID_CTAPAG = ?`, [idCta]);
           const tip = String(cur[0]?.TIP_CTAPAG || '').trim().toUpperCase();
-          const vlr = Number(cur[0]?.VLR_CTAPAG || 0);
-          if (vlr <= 0 && tip === 'C') continue;
+          const baixaOk = await query(db, `
+            SELECT FIRST 1 ID_BAIXA FROM TB_CTAPAG_BAIXA
+            WHERE ID_CTAPAG = ? AND TRIM(TIP_PAGTO) = 'C'`, [idCta]);
+          if (tip === 'C' && baixaOk[0]) continue;
           await zerarContaPagar(db, idCta, nf.NF_NUMERO);
           contasZeradas += 1;
         }
@@ -221,9 +254,10 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
         SELECT COUNT(*) AS QTD
         FROM TB_NFC_CTAPAG L
         JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = L.ID_CTAPAG
-        WHERE L.ID_NFCOMPRA = ? AND C.VLR_CTAPAG > 0`, [id]);
+        WHERE L.ID_NFCOMPRA = ?
+          AND TRIM(C.TIP_CTAPAG) <> 'C'`, [id]);
       if (Number(aindaAbertas[0]?.QTD || 0) > 0) {
-        throw new Error(`Ainda há contas a pagar com valor após o cancelamento.`);
+        throw new Error(`Ainda há contas a pagar sem cancelamento (TIP_CTAPAG) após o processo.`);
       }
 
       return {

@@ -664,6 +664,15 @@ const ImportacaoNfe = (() => {
       const descEst = sys.criar_novo
         ? `(novo) ${sys.descricao || xml.xProd || '—'}`
         : (sys.descricao || (sys.id_identificador ? `ID ${sys.id_identificador}` : '— sem vínculo —'));
+      const conversor = Number(sys.conversor ?? 1) || 1;
+      const qtdXml = Number(sys.qtd_xml ?? xml.qCom ?? 0);
+      const qtdEst = Number(sys.qtd ?? (qtdXml * conversor));
+      const uniXml = sys.uni_medida_xml || xml.uCom || '';
+      const uniEst = sys.uni_medida || '';
+      const custo = Number(sys.prc_custo || 0);
+      const convLine = (it.conferido || it.status === 'conferido')
+        ? `<span class="hint imp-item-conv">Conv. ${esc(String(conversor))} · ${num(qtdXml)} ${esc(uniXml)} → ${num(qtdEst)} ${esc(uniEst)}${custo > 0 ? ` · Custo ${money(custo)}` : ''}</span>`
+        : '';
       return `
         <button type="button" class="imp-item-row ${cls}" data-idx="${idx}">
           <span class="imp-item-num">${esc(it.nItem)}</span>
@@ -677,6 +686,7 @@ const ImportacaoNfe = (() => {
               <strong class="${sys.id_identificador || sys.criar_novo ? '' : 'imp-muted'}">${esc(descEst)}</strong>
             </div>
             <span class="hint">Cód. ${esc(xml.cProd || '—')} · Qtd ${num(xml.qCom)} ${esc(xml.uCom || '')} · CFOP ${esc(cfopOrig)} → ${esc(cfopEnt)}</span>
+            ${convLine}
           </div>
           <span class="imp-status ${cls}">${lbl}</span>
         </button>
@@ -1404,8 +1414,8 @@ const ImportacaoNfe = (() => {
           ${field('ID estoque', 'imp-id-estoque', sys.id_estoque ?? '', { third: true, readonly: true, disabled: true })}
           ${field('Descrição', 'imp-desc', sys.descricao || (vinculado ? xml.xProd : ''), { full: true, readonly: !descEditable })}
           ${field('Descrição complementar', 'imp-desc-cmpl', sys.desc_cmpl, { full: true })}
-          ${field('Referência', 'imp-ref', sys.referencia, { third: true })}
-          <label class="imp-field third">
+          ${field('Referência', 'imp-ref', sys.referencia, { half: true })}
+          <label class="imp-field half imp-ean-field">
             <span>Código de barras</span>
             <div class="search-field imp-ean-scan">
               <input id="imp-ean" type="text" value="${esc(sys.cod_barras || '')}" autocomplete="off" inputmode="numeric" />
@@ -1414,7 +1424,6 @@ const ImportacaoNfe = (() => {
               </button>
             </div>
           </label>
-          ${field('Unidade medida', 'imp-uni-ficha', sys.uni_medida || xml.uCom, { third: true })}
         </div>
         <div class="imp-block-title">Preço</div>
         <div class="imp-fields">
@@ -1422,6 +1431,12 @@ const ImportacaoNfe = (() => {
           ${field('Margem LB %', 'imp-margem', sys.margem_lb ?? 0, { type: 'number', step: '0.01', third: true })}
           ${field('Preço venda', 'imp-venda', sys.prc_venda, { type: 'number', step: '0.0001', third: true })}
           ${field('Status', 'imp-status-prod', sys.status || 'A', { third: true })}
+          <label class="imp-field third imp-uni-compact">
+            <span>Unidade</span>
+            <input id="imp-uni-ficha" type="text" value="${esc(sys.uni_medida || xml.uCom || '')}" maxlength="6" />
+          </label>
+          ${searchableCodeField('CST', 'imp-cst-saida', 'imp-busca-cst-saida', 'imp-cst-saida-list', sys.cst_saida || sys.cst_icms || '', { third: true, placeholder: 'Pesquisar CST…' })}
+          ${searchableCodeField('CST CF-e', 'imp-cst-cfe', 'imp-busca-cst-cfe', 'imp-cst-cfe-list', sys.cst_cfe || '', { third: true, placeholder: 'Pesquisar CST…' })}
         </div>
         <p class="hint" id="imp-margem-hint">Use o custo líquido da nota acima para definir a margem. Com margem &gt; 0: venda = custo × (1 + margem/100)</p>
         <div class="imp-vinc-btns">
@@ -1489,12 +1504,14 @@ const ImportacaoNfe = (() => {
             ${comboField('CEST', 'imp-cest', 'imp-cest-list', sys.cest || '', { third: true, placeholder: 'Pesquisar CEST (filtrado pelo NCM)…' })}
             ${searchableCodeField('CFOP saída NF-e', 'imp-cfop-saida', 'imp-busca-cfop-saida', 'imp-cfop-saida-list', sys.cfop_saida || '', { third: true, placeholder: 'Pesquisar CFOP…' })}
             ${searchableCodeField('CFOP CF-e', 'imp-cfop-nf', 'imp-busca-cfop-nf', 'imp-cfop-nf-list', sys.cfop_nf || '', { third: true, placeholder: 'Pesquisar CFOP…' })}
+            ${searchableCodeField('CST saída NF-e', 'imp-cst-saida', 'imp-busca-cst-saida', 'imp-cst-saida-list', sys.cst_saida || trib.cst_icms || sys.cst_icms || '', { third: true, placeholder: 'Pesquisar CST…' })}
+            ${searchableCodeField('CST CF-e', 'imp-cst-cfe', 'imp-busca-cst-cfe', 'imp-cst-cfe-list', sys.cst_cfe || '', { third: true, placeholder: 'Pesquisar CST…' })}
             ${simples
     ? searchableCodeField('CSOSN saída NF-e', 'imp-csosn-saida', 'imp-busca-csosn-saida', 'imp-csosn-saida-list', sys.csosn_saida || '', { third: true, placeholder: 'Pesquisar CSOSN…' })
-    : searchableCodeField('CST saída NF-e', 'imp-cst-saida', 'imp-busca-cst-saida', 'imp-cst-saida-list', sys.cst_saida || trib.cst_icms || sys.cst_icms || '', { third: true, placeholder: 'Pesquisar CST…' })}
+    : ''}
             ${simples
     ? searchableCodeField('CSOSN CF-e', 'imp-csosn-cfe', 'imp-busca-csosn-cfe', 'imp-csosn-cfe-list', sys.csosn_cfe || '', { third: true, placeholder: 'Pesquisar CSOSN…' })
-    : searchableCodeField('CST CF-e', 'imp-cst-cfe', 'imp-busca-cst-cfe', 'imp-cst-cfe-list', sys.cst_cfe || '', { third: true, placeholder: 'Pesquisar CST…' })}
+    : ''}
             ${searchableCodeField('CST PIS saída', 'imp-cst-pis-saida', 'imp-busca-cst-pis-saida', 'imp-cst-pis-saida-list', tribOut.cst_pis_saida || tribOut.cst_pis || '', { third: true, placeholder: 'Pesquisar CST PIS…' })}
             ${field('% PIS', 'imp-ppis-saida', tribOut.p_pis ?? 0, { type: 'number', step: '0.0001', third: true })}
             ${searchableCodeField('CST COFINS saída', 'imp-cst-cof-saida', 'imp-busca-cst-cof-saida', 'imp-cst-cof-saida-list', tribOut.cst_cofins_saida || tribOut.cst_cofins || '', { third: true, placeholder: 'Pesquisar CST COFINS…' })}

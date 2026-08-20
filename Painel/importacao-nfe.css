@@ -786,12 +786,55 @@
 .imp-ean-scan {
   display: flex;
   gap: 0.35rem;
-  align-items: stretch;
+  align-items: center;
+  width: 100%;
 }
 
 .imp-ean-scan input {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
+  height: 2.1rem;
+  min-height: 2.1rem;
+  max-height: 2.1rem;
+  box-sizing: border-box;
+  padding: 0.28rem 0.45rem;
+  font-size: 0.9rem;
+}
+
+.imp-ean-scan .btn.icon-cam {
+  flex: 0 0 auto;
+  width: 2.1rem;
+  height: 2.1rem;
+  min-width: 2.1rem;
+  min-height: 2.1rem;
+  max-height: 2.1rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.imp-ean-scan .btn.icon-cam svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+
+.imp-ean-field {
+  min-width: 0;
+}
+
+.imp-item-conv {
+  display: block;
+  margin-top: 0.15rem;
+  color: var(--ok, #1b7a3d);
+}
+
+.imp-uni-compact {
+  max-width: 6.5rem;
+}
+
+.imp-uni-compact input {
+  text-transform: uppercase;
 }
 
 .imp-block-title {

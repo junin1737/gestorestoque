@@ -77,10 +77,16 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   const aplicarSaida = String(sistema.aplicar_saida || 'S').toUpperCase() !== 'N';
   const cfopSaida = aplicarSaida ? (String(sistema.cfop_saida || '').trim() || null) : null;
   const cfopNf = aplicarSaida ? (String(sistema.cfop_nf || '').trim() || null) : null;
-  const cst = aplicarSaida ? (String(sistema.tributos?.cst_icms || sistema.cst_icms || '').trim() || null) : null;
+  const idCti = aplicarSaida ? (String(sistema.id_cti || '').trim() || null) : null;
+  const idCtiCfe = aplicarSaida ? (String(sistema.id_cti_cfe || '').trim() || null) : null;
+  const cst = aplicarSaida
+    ? (String(sistema.cst_saida || sistema.tributos?.cst_icms || sistema.cst_icms || '').trim() || null)
+    : null;
   const csosn = aplicarSaida
     ? (String(sistema.csosn_saida || sistema.tributos?.csosn_saida || '').trim() || null)
     : null;
+  const cstCfe = aplicarSaida ? (String(sistema.cst_cfe || '').trim() || null) : null;
+  const csosnCfe = aplicarSaida ? (String(sistema.csosn_cfe || '').trim() || null) : null;
 
   for (const target of targets) {
     const t = target.tables;
@@ -92,10 +98,19 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
     ]);
     try {
       await query(db, `
-        UPDATE ${t.estoque} SET MARGEM_LB = ?, CFOP = ?, CFOP_NF = ?
-        WHERE ID_ESTOQUE = ?`, [margem || null, cfopSaida, cfopNf, idEstoque]);
+        UPDATE ${t.estoque}
+        SET MARGEM_LB = ?, CFOP = ?, CFOP_NF = ?, ID_CTI = ?, ID_CTI_CFE = ?
+        WHERE ID_ESTOQUE = ?`, [
+        margem || null, cfopSaida, cfopNf, idCti, idCtiCfe, idEstoque,
+      ]);
     } catch (e) {
-      console.warn('Atualizar margem/CFOP estoque:', e.message);
+      try {
+        await query(db, `
+          UPDATE ${t.estoque} SET MARGEM_LB = ?, CFOP = ?, CFOP_NF = ?
+          WHERE ID_ESTOQUE = ?`, [margem || null, cfopSaida, cfopNf, idEstoque]);
+      } catch (e2) {
+        console.warn('Atualizar margem/CFOP estoque:', e2.message);
+      }
     }
     await query(db, `INSERT INTO ${t.identificador} (ID_IDENTIFICADOR, ID_ESTOQUE) VALUES (?, ?)`, [
       idIdentificador, idEstoque,
@@ -109,10 +124,19 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
     try {
       await query(db, `
         UPDATE ${t.produto}
-        SET COD_NCM = ?, COD_CEST = ?, ANP = ?, CST = ?, CSOSN = ?
-        WHERE ID_IDENTIFICADOR = ?`, [ncm, cest, anp, cst, csosn, idIdentificador]);
+        SET COD_NCM = ?, COD_CEST = ?, ANP = ?, CST = ?, CSOSN = ?, CST_CFE = ?, CSOSN_CFE = ?
+        WHERE ID_IDENTIFICADOR = ?`, [
+        ncm, cest, anp, cst, csosn, cstCfe, csosnCfe, idIdentificador,
+      ]);
     } catch (e) {
-      console.warn('Atualizar NCM/CEST/ANP produto:', e.message);
+      try {
+        await query(db, `
+          UPDATE ${t.produto}
+          SET COD_NCM = ?, COD_CEST = ?, ANP = ?, CST = ?, CSOSN = ?
+          WHERE ID_IDENTIFICADOR = ?`, [ncm, cest, anp, cst, csosn, idIdentificador]);
+      } catch (e2) {
+        console.warn('Atualizar NCM/CEST/ANP produto:', e2.message);
+      }
     }
   }
   return { id_identificador: idIdentificador, id_estoque: idEstoque };
@@ -134,17 +158,6 @@ async function entradaEstoque(db, appCfg, {
     const prcMedio = Number(prodRows[0].PRC_MEDIO || prcCusto || 0);
     const nova = qtdAtual + Number(qtd || 0);
     await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?`, [nova, idIdentificador]);
-    if (prcCusto != null && Number.isFinite(Number(prcCusto))) {
-      try {
-        await query(db, `
-          UPDATE ${t.estoque} SET PRC_CUSTO = ?
-          WHERE ID_ESTOQUE = (
-            SELECT FIRST 1 ID_ESTOQUE FROM ${t.identificador} WHERE ID_IDENTIFICADOR = ?
-          )`, [Number(prcCusto), idIdentificador]);
-      } catch (e) {
-        console.warn('Atualizar custo:', e.message);
-      }
-    }
     if (hasTable(t.saldo)) {
       const nextSaldo = await nextId(db, t.genSaldo, t.saldo, 'ID');
       try {
@@ -167,6 +180,132 @@ async function entradaEstoque(db, appCfg, {
         } else {
           console.warn('Saldo entrada NF:', e.message);
         }
+      }
+    }
+  }
+}
+
+/**
+ * Atualiza cadastro do produto/estoque com os dados conferidos na importação.
+ * NCM: se estiver em branco no produto, preenche com o da nota.
+ */
+async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) {
+  const idIdent = Number(sistema.id_identificador);
+  if (!idIdent) return;
+
+  const aplicarSaida = String(sistema.aplicar_saida || 'S').toUpperCase() !== 'N';
+  const margem = Number(sistema.margem_lb);
+  const custo = Number(sistema.prc_custo);
+  let venda = Number(sistema.prc_venda);
+  if (Number.isFinite(margem) && margem > 0 && Number.isFinite(custo) && custo > 0) {
+    venda = Number((custo * (1 + margem / 100)).toFixed(4));
+  }
+
+  const ncmForm = String(sistema.ncm || '').trim();
+  const ncmXml = String(xmlItem?.NCM || '').trim();
+  const cest = String(sistema.cest || '').trim() || null;
+  const barras = String(sistema.cod_barras || xmlItem?.cEAN || '').trim() || null;
+  const uni = String(sistema.uni_medida || xmlItem?.uCom || '').trim().slice(0, 6) || null;
+
+  const cfopSaida = aplicarSaida ? (String(sistema.cfop_saida || '').trim().slice(0, 4) || null) : null;
+  const cfopNf = aplicarSaida ? (String(sistema.cfop_nf || '').trim().slice(0, 4) || null) : null;
+  const idCti = aplicarSaida ? (String(sistema.id_cti || '').trim().slice(0, 10) || null) : null;
+  const idCtiCfe = aplicarSaida ? (String(sistema.id_cti_cfe || '').trim().slice(0, 10) || null) : null;
+  const cst = aplicarSaida
+    ? (String(sistema.cst_saida || sistema.tributos?.cst_icms || sistema.cst_icms || '').trim().slice(0, 3) || null)
+    : null;
+  const csosn = aplicarSaida
+    ? (String(sistema.csosn_saida || '').trim().slice(0, 3) || null)
+    : null;
+  const cstCfe = aplicarSaida
+    ? (String(sistema.cst_cfe || '').trim().slice(0, 3) || null)
+    : null;
+  const csosnCfe = aplicarSaida
+    ? (String(sistema.csosn_cfe || '').trim().slice(0, 3) || null)
+    : null;
+
+  const targets = activeTargets(appCfg);
+  for (const target of targets) {
+    const t = target.tables;
+
+    // NCM: tela tem prioridade; se produto em branco, preenche com o da nota
+    try {
+      const curNcm = await query(db, `
+        SELECT FIRST 1 COD_NCM FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdent]);
+      const ncmAtual = String(curNcm[0]?.COD_NCM || '').trim();
+      const ncmFinal = ncmForm || (!ncmAtual ? ncmXml : '') || null;
+      if (ncmFinal && (ncmForm || !ncmAtual)) {
+        await query(db, `
+          UPDATE ${t.produto} SET COD_NCM = ? WHERE ID_IDENTIFICADOR = ?`, [
+          ncmFinal, idIdent,
+        ]);
+      }
+    } catch (e) {
+      console.warn('Atualizar NCM:', e.message);
+    }
+
+    try {
+      await query(db, `
+        UPDATE ${t.produto} SET
+          COD_CEST = COALESCE(?, COD_CEST),
+          COD_BARRA = COALESCE(?, COD_BARRA),
+          CST = COALESCE(?, CST),
+          CSOSN = COALESCE(?, CSOSN),
+          CST_CFE = COALESCE(?, CST_CFE),
+          CSOSN_CFE = COALESCE(?, CSOSN_CFE)
+        WHERE ID_IDENTIFICADOR = ?`, [
+        cest, barras, cst, csosn, cstCfe, csosnCfe, idIdent,
+      ]);
+    } catch (e) {
+      // bases sem CST_CFE / CSOSN_CFE
+      try {
+        await query(db, `
+          UPDATE ${t.produto} SET
+            COD_CEST = COALESCE(?, COD_CEST),
+            COD_BARRA = COALESCE(?, COD_BARRA),
+            CST = COALESCE(?, CST),
+            CSOSN = COALESCE(?, CSOSN)
+          WHERE ID_IDENTIFICADOR = ?`, [
+          cest, barras, cst, csosn, idIdent,
+        ]);
+      } catch (e2) {
+        console.warn('Atualizar tributos produto:', e2.message);
+      }
+    }
+
+    const sets = [];
+    const vals = [];
+    if (Number.isFinite(custo) && custo > 0) {
+      sets.push('PRC_CUSTO = ?');
+      vals.push(custo);
+    }
+    if (Number.isFinite(venda) && venda > 0) {
+      sets.push('PRC_VENDA = ?');
+      vals.push(venda);
+    }
+    if (Number.isFinite(margem)) {
+      sets.push('MARGEM_LB = ?');
+      vals.push(margem);
+    }
+    if (uni) {
+      sets.push('UNI_MEDIDA = ?');
+      vals.push(uni);
+    }
+    if (aplicarSaida) {
+      if (cfopSaida) { sets.push('CFOP = ?'); vals.push(cfopSaida); }
+      if (cfopNf) { sets.push('CFOP_NF = ?'); vals.push(cfopNf); }
+      if (idCti) { sets.push('ID_CTI = ?'); vals.push(idCti); }
+      if (idCtiCfe) { sets.push('ID_CTI_CFE = ?'); vals.push(idCtiCfe); }
+    }
+    if (sets.length) {
+      try {
+        await query(db, `
+          UPDATE ${t.estoque} SET ${sets.join(', ')}
+          WHERE ID_ESTOQUE = (
+            SELECT FIRST 1 ID_ESTOQUE FROM ${t.identificador} WHERE ID_IDENTIFICADOR = ?
+          )`, [...vals, idIdent]);
+      } catch (e) {
+        console.warn('Atualizar estoque fiscal/preço:', e.message);
       }
     }
   }
@@ -570,6 +709,7 @@ async function gravarNfCompra(sessao, {
         it.xml?.imposto || {},
         it.sistema.trib_nfe || {},
       );
+      await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       await entradaEstoque(db, appCfg, {
         idIdentificador: idIdent,
         qtd,
