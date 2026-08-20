@@ -370,20 +370,8 @@ const ImportacaoNfe = (() => {
         <div class="imp-fields">
           ${field('Número NF', 'imp-man-nnf', s.xml?.ide?.nNF || '', { half: true })}
           ${field('Série', 'imp-man-serie', s.xml?.ide?.serie || '1', { half: true })}
-          ${field('Natureza (texto)', 'imp-man-natop', s.xml?.ide?.natOp || '', { full: true })}
-          <label class="imp-field full">
-            <span>Buscar natureza de operação</span>
-            <div class="search-field">
-              <input id="imp-busca-natope" type="search" placeholder="Descrição ou CFOP…" />
-            </div>
-          </label>
-          <div id="imp-natope-resultados" class="imp-prod-list"></div>
-          <div class="imp-vinc-atual">
-            ${s.natureza
-    ? `<span class="chip ok">Natureza: ${esc(s.natureza.descricao)} · CFOP ${esc(s.natureza.cfop || '—')}</span>`
-    : '<span class="chip pending">Nenhuma natureza selecionada</span>'}
-          </div>
         </div>
+        <p class="hint">A natureza principal fica no bloco “Natureza de operação” acima.</p>
         <div class="imp-vinc-btns">
           <button type="button" class="btn small outline" id="imp-man-salvar-cab">Salvar cabeçalho</button>
         </div>
@@ -399,7 +387,6 @@ const ImportacaoNfe = (() => {
         body: {
           nNF: $('#imp-man-nnf')?.value,
           serie: $('#imp-man-serie')?.value,
-          natOp: $('#imp-man-natop')?.value,
         },
       });
       if (res.ok) {
@@ -407,52 +394,6 @@ const ImportacaoNfe = (() => {
         deps.showToast?.('Cabeçalho salvo');
         renderSessao();
       } else deps.showMsg?.(res.error);
-    });
-
-    let t;
-    $('#imp-busca-natope')?.addEventListener('input', (e) => {
-      clearTimeout(t);
-      t = setTimeout(() => loadNaturezasBusca(e.target.value), 280);
-    });
-  }
-
-  async function loadNaturezasBusca(q) {
-    const box = $('#imp-natope-resultados');
-    if (!box) return;
-    if (!String(q || '').trim()) {
-      box.innerHTML = '<p class="hint">Digite para buscar natureza</p>';
-      return;
-    }
-    const res = await api(`/importacao/naturezas?q=${encodeURIComponent(q)}`);
-    const list = res.itens || [];
-    if (!list.length) {
-      box.innerHTML = '<p class="hint">Nenhuma natureza encontrada</p>';
-      return;
-    }
-    box.innerHTML = list.map((n) => `
-      <button type="button" class="imp-prod-opt" data-id="${n.id_natope}">
-        <strong>${esc(n.descricao)}</strong>
-        <span class="hint">CFOP ${esc(n.cfop || '—')} · Cód. ${n.id_natope}</span>
-      </button>
-    `).join('');
-    $$('.imp-prod-opt', box).forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        const id = Number(btn.dataset.id);
-        const nat = list.find((x) => x.id_natope === id);
-        const res = await api(`/importacao/sessoes/${state.sessao.id}/cabecalho`, {
-          method: 'PUT',
-          body: {
-            id_natope: id,
-            natureza: nat,
-            natOp: nat?.descricao || '',
-          },
-        });
-        if (res.ok) {
-          state.sessao = res.sessao;
-          deps.showToast?.('Natureza vinculada');
-          renderSessao();
-        } else deps.showMsg?.(res.error);
-      });
     });
   }
 
@@ -556,9 +497,25 @@ const ImportacaoNfe = (() => {
             ${kv('Número', esc(ide.nNF || '—'))}
             ${kv('Série', esc(ide.serie || '—'))}
             ${kv('Modelo', esc(ide.modelo || '55'))}
-            ${kv('Natureza', esc(ide.natOp || '—'))}
             ${kv('Emissão', esc(fmtDateTimeBr(ide.dhEmi)))}
           </div>
+        </section>
+
+        <section class="imp-section" style="grid-column:1/-1">
+          <header class="imp-section-head">
+            <h4>Natureza de operação</h4>
+            <span class="hint">Natureza principal da nota no Clipp — pode alterar</span>
+          </header>
+          <div class="imp-fields">
+            ${comboField('Natureza (TB_NAT_OPERACAO)', 'imp-natope', 'imp-natope-list', s.id_natope || '', {
+    full: true,
+    displayLabel: s.natureza
+      ? `${s.natureza.descricao}${s.natureza.cfop ? ` · CFOP ${s.natureza.cfop}` : ''}`
+      : (ide.natOp || ''),
+    placeholder: 'Pesquisar natureza por descrição ou CFOP…',
+  })}
+          </div>
+          <p class="hint">Texto na NF-e (XML): <strong>${esc(ide.natOp || '—')}</strong>${s.id_natope ? ` · Cód. sistema ${esc(s.id_natope)}` : ''}</p>
         </section>
 
         <section class="imp-section">
@@ -625,6 +582,38 @@ const ImportacaoNfe = (() => {
       </div>
     `;
     $('#imp-btn-ver-pdf-info')?.addEventListener('click', () => abrirDanfePdf());
+    wireCodeSearch({
+      valueSel: '#imp-natope',
+      listSel: '#imp-natope-list',
+      endpoint: '/importacao/naturezas',
+      codeKey: 'id_natope',
+      labelPreferDesc: true,
+      onSelect: async (code, desc, extra) => {
+        const sess = state.sessao;
+        if (!sess?.id) return;
+        const label = desc || extra?.descricao || '';
+        const res = await api(`/importacao/sessoes/${sess.id}/cabecalho`, {
+          method: 'PUT',
+          body: {
+            id_natope: Number(code) || null,
+            natureza: {
+              id_natope: Number(code) || null,
+              descricao: label,
+              cfop: extra?.cfop || '',
+              csosn_padrao: extra?.csosn_padrao || '',
+            },
+            natOp: label || sess.xml?.ide?.natOp || '',
+          },
+        });
+        if (res.ok) {
+          state.sessao = res.sessao;
+          deps.showToast?.('Natureza atualizada');
+          renderSessao();
+        } else {
+          deps.showMsg?.(res.error || 'Erro ao salvar natureza');
+        }
+      },
+    });
   }
 
   function abrirDanfePdf() {
@@ -2421,6 +2410,9 @@ const ImportacaoNfe = (() => {
     id_class_trib: it.id_class_trib,
     ncm: it.ncm,
     cod_class_trib: it.cod_class_trib,
+    cfop: it.cfop,
+    csosn_padrao: it.csosn_padrao,
+    descricao: it.descricao || it.desc_class_trib || '',
   }))}">
             <strong>${esc(labelPreferDesc ? (desc || code) : code)}</strong>
             <span>${esc(labelPreferDesc ? code : desc)}</span>

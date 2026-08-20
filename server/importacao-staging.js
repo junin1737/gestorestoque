@@ -683,6 +683,23 @@ async function createSessao(opts = {}) {
     });
   }
 
+  let idNatope = null;
+  let natureza = null;
+  try {
+    const { listNaturezas } = require('./importacao-notas');
+    const natOpTxt = String(xml.ide?.natOp || '').trim();
+    if (natOpTxt) {
+      const candidatos = await listNaturezas(natOpTxt);
+      const upper = natOpTxt.toUpperCase();
+      natureza = candidatos.find((n) => String(n.descricao || '').toUpperCase() === upper)
+        || candidatos.find((n) => String(n.descricao || '').toUpperCase().includes(upper)
+          || upper.includes(String(n.descricao || '').toUpperCase()))
+        || candidatos[0]
+        || null;
+      if (natureza) idNatope = natureza.id_natope;
+    }
+  } catch (_) { /* ignore */ }
+
   const sessao = {
     id: newId(),
     chave,
@@ -692,6 +709,8 @@ async function createSessao(opts = {}) {
     manual: false,
     fonte,
     sefazErro: sefazErro || null,
+    id_natope: idNatope,
+    natureza,
     xml: {
       ide: xml.ide,
       emit: xml.emit,
