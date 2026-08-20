@@ -2889,9 +2889,11 @@ const ImportacaoNfe = (() => {
               <th>CFOP saí. NF-e</th>
               <th>CSOSN NF-e</th>
               <th>CST NF-e</th>
+              <th>Taxa ICMS</th>
               <th>CFOP saí. CF-e</th>
               <th>CSOSN CF-e</th>
               <th>CST CF-e</th>
+              <th>Taxa CFE</th>
               <th></th>
             </tr>
           </thead>
@@ -2928,6 +2930,19 @@ const ImportacaoNfe = (() => {
     showView('params');
   }
 
+  function paramsTaxaCell(cls, listCls, value, label, placeholder) {
+    const code = String(value || '').trim();
+    const disp = String(label || code || '').trim();
+    return `
+      <td class="imp-params-combo" data-combo-root>
+        <input type="hidden" class="${cls}" value="${esc(code)}" />
+        <input type="search" class="${cls}-disp" value="${esc(disp)}"
+          placeholder="${esc(placeholder)}" autocomplete="off" enterkeyhint="search" />
+        <div class="imp-combo-list ${listCls}" hidden></div>
+      </td>
+    `;
+  }
+
   function paramsRowHtml(r = {}, i = 0) {
     return `
       <tr data-i="${i}">
@@ -2935,14 +2950,75 @@ const ImportacaoNfe = (() => {
         <td><input type="text" class="imp-cfop-conv" maxlength="4" value="${esc(r.cfop_conv || '')}" inputmode="numeric" title="CFOP entrada" /></td>
         <td><input type="text" class="imp-cfop-csosn" maxlength="3" value="${esc(r.csosn || '102')}" inputmode="numeric" title="CSOSN entrada" /></td>
         <td><input type="text" class="imp-cfop-saida-nfe" maxlength="4" value="${esc(r.cfop_saida_nfe || '')}" inputmode="numeric" title="CFOP saída NF-e" /></td>
-        <td><input type="text" class="imp-csosn-saida-nfe" maxlength="3" value="${esc(r.csosn_saida_nfe || '')}" inputmode="numeric" title="CSOSN/CST saída NF-e" placeholder="CSOSN" /></td>
+        <td><input type="text" class="imp-csosn-saida-nfe" maxlength="3" value="${esc(r.csosn_saida_nfe || '')}" inputmode="numeric" title="CSOSN saída NF-e" placeholder="CSOSN" /></td>
         <td><input type="text" class="imp-cst-saida-nfe" maxlength="3" value="${esc(r.cst_saida_nfe || '')}" inputmode="numeric" title="CST saída NF-e" placeholder="CST" /></td>
+        ${paramsTaxaCell('imp-id-cti', 'imp-params-cti-list', r.id_cti, r.cti_label, 'Taxa ICMS…')}
         <td><input type="text" class="imp-cfop-saida-cfe" maxlength="4" value="${esc(r.cfop_saida_cfe || '')}" inputmode="numeric" title="CFOP saída CF-e" /></td>
-        <td><input type="text" class="imp-csosn-saida-cfe" maxlength="3" value="${esc(r.csosn_saida_cfe || '')}" inputmode="numeric" title="CSOSN/CST saída CF-e" placeholder="CSOSN" /></td>
+        <td><input type="text" class="imp-csosn-saida-cfe" maxlength="3" value="${esc(r.csosn_saida_cfe || '')}" inputmode="numeric" title="CSOSN saída CF-e" placeholder="CSOSN" /></td>
         <td><input type="text" class="imp-cst-saida-cfe" maxlength="3" value="${esc(r.cst_saida_cfe || '')}" inputmode="numeric" title="CST saída CF-e" placeholder="CST" /></td>
+        ${paramsTaxaCell('imp-id-cti-cfe', 'imp-params-cti-cfe-list', r.id_cti_cfe, r.cti_cfe_label, 'Taxa CFE…')}
         <td><button type="button" class="btn small outline imp-params-del">Remover</button></td>
       </tr>
     `;
+  }
+
+  function wireParamsTaxaCombo(tr, hiddenCls, listCls) {
+    const valueEl = tr.querySelector(`.${hiddenCls}`);
+    const displayEl = tr.querySelector(`.${hiddenCls}-disp`);
+    const box = tr.querySelector(`.${listCls}`);
+    if (!valueEl || !displayEl || !box || displayEl.dataset.wired === '1') return;
+    displayEl.dataset.wired = '1';
+
+    const closeList = () => { box.hidden = true; box.innerHTML = ''; };
+    const renderList = async (term) => {
+      box.hidden = false;
+      const qs = new URLSearchParams();
+      if (term) qs.set('q', term);
+      const res = await api(`/importacao/taxa-uf?${qs.toString()}`);
+      const list = res.itens || [];
+      if (!list.length) {
+        box.innerHTML = '<p class="hint">Nenhuma taxa</p>';
+        return;
+      }
+      box.innerHTML = list.map((it) => {
+        const code = String(it.id_cti || '');
+        const desc = String(it.descricao || '');
+        const label = desc ? `${desc}${code ? ` (${code})` : ''}` : code;
+        return `
+          <button type="button" class="imp-prod-opt" data-code="${esc(code)}" data-label="${esc(label)}">
+            <strong>${esc(desc || code)}</strong>
+            <span>${esc(code)}</span>
+          </button>`;
+      }).join('');
+      $$('.imp-prod-opt', box).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          valueEl.value = btn.dataset.code || '';
+          displayEl.value = btn.dataset.label || btn.dataset.code || '';
+          closeList();
+          displayEl.blur();
+        });
+      });
+    };
+
+    displayEl.addEventListener('focus', () => {
+      displayEl.select();
+      renderList(String(displayEl.value || '').trim());
+    });
+    displayEl.addEventListener('input', () => {
+      clearTimeout(buscaCodeTimer);
+      buscaCodeTimer = setTimeout(() => renderList(String(displayEl.value || '').trim()), 220);
+    });
+    displayEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'Search') {
+        e.preventDefault();
+        renderList(String(displayEl.value || '').trim()).then(() => {
+          const opts = $$('.imp-prod-opt', box);
+          if (opts.length === 1) opts[0].click();
+          else displayEl.blur();
+        });
+      }
+      if (e.key === 'Escape') closeList();
+    });
   }
 
   function bindParamsRowEvents() {
@@ -2956,6 +3032,10 @@ const ImportacaoNfe = (() => {
           bindParamsRowEvents();
         }
       };
+    });
+    $$('#imp-params-table tbody tr').forEach((tr) => {
+      wireParamsTaxaCombo(tr, 'imp-id-cti', 'imp-params-cti-list');
+      wireParamsTaxaCombo(tr, 'imp-id-cti-cfe', 'imp-params-cti-cfe-list');
     });
   }
 
@@ -2971,6 +3051,10 @@ const ImportacaoNfe = (() => {
       cfop_saida_cfe: tr.querySelector('.imp-cfop-saida-cfe')?.value || '',
       csosn_saida_cfe: tr.querySelector('.imp-csosn-saida-cfe')?.value || '',
       cst_saida_cfe: tr.querySelector('.imp-cst-saida-cfe')?.value || '',
+      id_cti: tr.querySelector('.imp-id-cti')?.value || '',
+      id_cti_cfe: tr.querySelector('.imp-id-cti-cfe')?.value || '',
+      cti_label: tr.querySelector('.imp-id-cti-disp')?.value || '',
+      cti_cfe_label: tr.querySelector('.imp-id-cti-cfe-disp')?.value || '',
     })).filter((r) => r.cfop_origem || r.cfop_conv);
     const saida = {
       cfop_saida: $('#imp-params-cfop-saida')?.value || '',

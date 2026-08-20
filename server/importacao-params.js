@@ -32,6 +32,10 @@ function normRow(it = {}) {
     cfop_saida_cfe: String(it.cfop_saida_cfe || '').replace(/\D/g, '').slice(0, 4),
     csosn_saida_cfe: String(it.csosn_saida_cfe || '').replace(/\D/g, '').slice(0, 3),
     cst_saida_cfe: String(it.cst_saida_cfe || '').replace(/\D/g, '').slice(0, 3),
+    id_cti: String(it.id_cti || '').trim().slice(0, 10),
+    id_cti_cfe: String(it.id_cti_cfe || '').trim().slice(0, 10),
+    cti_label: String(it.cti_label || '').trim().slice(0, 120),
+    cti_cfe_label: String(it.cti_cfe_label || '').trim().slice(0, 120),
   };
 }
 
@@ -183,6 +187,10 @@ async function mapCfopEntrada(cfopOrigem, ufFornecedor) {
     cfop_cfe: found?.cfop_saida_cfe || found?.cfop_saida_nfe || '',
     csosn_cfe: found?.csosn_saida_cfe || found?.csosn_saida_nfe || '',
     cst_cfe: found?.cst_saida_cfe || '',
+    id_cti: found?.id_cti || '',
+    id_cti_cfe: found?.id_cti_cfe || '',
+    cti_label: found?.cti_label || '',
+    cti_cfe_label: found?.cti_cfe_label || '',
     uf_fornecedor: ufForn,
     uf_emitente: emitUf,
     same_state: useSame,

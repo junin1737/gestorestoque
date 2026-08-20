@@ -189,7 +189,7 @@
   width: 100%;
   border-collapse: collapse;
   font-size: 0.78rem;
-  min-width: 52rem;
+  min-width: 68rem;
 }
 
 .imp-params-scroll {
@@ -218,6 +218,16 @@
   background: var(--bg);
   color: var(--text);
   font-size: 0.78rem;
+}
+
+.imp-params-combo {
+  position: relative;
+  min-width: 9rem;
+  vertical-align: top;
+}
+
+.imp-params-combo .imp-combo-list {
+  min-width: 14rem;
 }
 
 .dev-badge {
