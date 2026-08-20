@@ -1288,11 +1288,15 @@ const ImportacaoNfe = (() => {
 
   function panelEntrada(sys, xml, trib, imp, simples) {
     const csosnEnt = sys.csosn_entrada || sys.csosn || trib.csosn || '';
+    const custoInfo = calcCustoNotaUnitario(sys, xml);
+    const custoNota = sys.prc_custo_nota != null
+      ? sys.prc_custo_nota
+      : (custoInfo.custoXml || xml.vUnCom || 0);
     return `
       <section class="imp-panel" data-panel="entrada">
         <header class="imp-section-head">
           <h4>Tributos e custos de entrada</h4>
-          <span class="hint">Coluna XML = nota · Sistema = o que será gravado</span>
+          <span class="hint">Custo unitário = valor da nota (sem conversão). CST/CSOSN: XML × sistema</span>
         </header>
         <div class="imp-fields">
           ${field('CFOP origem (nota)', 'imp-cfop-origem', sys.cfop_origem || xml.CFOP, { third: true, readonly: true })}
@@ -1300,31 +1304,24 @@ const ImportacaoNfe = (() => {
           ${simples
     ? searchableCodeField('CSOSN entrada', 'imp-csosn-entrada', 'imp-busca-csosn-entrada', 'imp-csosn-entrada-list', csosnEnt, { third: true, placeholder: 'Pesquisar CSOSN…' })
     : field('CST (nota)', 'imp-cst-nota', sys.cst_icms || trib.cst_icms || imp.CST, { third: true, readonly: true })}
-          ${field('Custo unitário', 'imp-custo', sys.prc_custo, { type: 'number', step: '0.0001', third: true })}
+          ${field('Custo unitário', 'imp-custo', custoNota, { type: 'number', step: '0.0001', third: true })}
           ${field('Frete rateado', 'imp-frete', sys.v_frete, { type: 'number', step: '0.01', third: true })}
           ${field('Desconto', 'imp-desc-val', sys.v_desc, { type: 'number', step: '0.01', third: true })}
           ${field('Seguro', 'imp-seguro', sys.v_seguro, { type: 'number', step: '0.01', third: true })}
           ${field('Outras despesas', 'imp-outro', sys.v_outro, { type: 'number', step: '0.01', third: true })}
         </div>
-        <div class="imp-trib-head"><span>Tributo</span><span>XML (nota)</span><span>Sistema</span></div>
-        ${tribRow('CST ICMS', imp.CST, 'imp-cst', trib.cst_icms || imp.CST, { readonly: true })}
-        ${simples
+        <div class="imp-trib-head"><span>Código</span><span>XML (nota)</span><span>Sistema</span></div>
+        <div class="imp-trib-codes">
+          ${tribRow('CST ICMS', imp.CST, 'imp-cst', trib.cst_icms || imp.CST, { readonly: true })}
+          ${simples
     ? tribSearchRow('CSOSN', imp.CSOSN || '—', 'imp-csosn-trib', 'imp-busca-csosn-trib', 'imp-csosn-trib-list', sys.csosn_entrada || trib.csosn || sys.csosn)
-    : ''}
-        ${tribRow('Base ICMS', imp.vBC, 'imp-vbc', trib.v_bc_icms, { type: 'number' })}
-        ${tribRow('% ICMS', imp.pICMS, 'imp-picms', trib.p_icms, { type: 'number' })}
-        ${tribRow('Vlr ICMS', imp.vICMS, 'imp-vicms', trib.v_icms, { type: 'number' })}
-        ${tribRow('Base ST', imp.vBCST, 'imp-vbcst', trib.v_bc_st, { type: 'number' })}
-        ${tribRow('Vlr ST', imp.vICMSST, 'imp-vst', trib.v_icms_st, { type: 'number' })}
-        ${tribSearchRow('CST IPI', imp.CST_IPI, 'imp-cst-ipi', 'imp-busca-cst-ipi', 'imp-cst-ipi-list', trib.cst_ipi)}
-        ${tribRow('% IPI', imp.pIPI, 'imp-pipi', trib.p_ipi, { type: 'number' })}
-        ${tribRow('Vlr IPI', imp.vIPI, 'imp-vipi', trib.v_ipi, { type: 'number' })}
-        ${tribSearchRow('CST PIS', imp.CST_PIS, 'imp-cst-pis', 'imp-busca-cst-pis', 'imp-cst-pis-list', trib.cst_pis)}
-        ${tribRow('% PIS', imp.pPIS, 'imp-ppis', trib.p_pis, { type: 'number' })}
-        ${tribRow('Vlr PIS', imp.vPIS, 'imp-vpis', trib.v_pis, { type: 'number' })}
-        ${tribSearchRow('CST COFINS', imp.CST_COFINS, 'imp-cst-cof', 'imp-busca-cst-cof', 'imp-cst-cof-list', trib.cst_cofins)}
-        ${tribRow('% COFINS', imp.pCOFINS, 'imp-pcof', trib.p_cofins, { type: 'number' })}
-        ${tribRow('Vlr COFINS', imp.vCOFINS, 'imp-vcof', trib.v_cofins, { type: 'number' })}
+    : '<div class="imp-trib-row imp-trib-spacer"></div>'}
+          ${tribSearchRow('CST IPI', imp.CST_IPI, 'imp-cst-ipi', 'imp-busca-cst-ipi', 'imp-cst-ipi-list', trib.cst_ipi)}
+          <div class="imp-trib-row imp-trib-spacer"></div>
+          ${tribSearchRow('CST PIS', imp.CST_PIS, 'imp-cst-pis', 'imp-busca-cst-pis', 'imp-cst-pis-list', trib.cst_pis)}
+          ${tribSearchRow('CST COFINS', imp.CST_COFINS, 'imp-cst-cof', 'imp-busca-cst-cof', 'imp-cst-cof-list', trib.cst_cofins)}
+        </div>
+        <p class="hint">Bases e valores de ICMS/ST/IPI/PIS/COFINS seguem o XML na gravação; aqui só os códigos.</p>
       </section>
     `;
   }
@@ -1335,7 +1332,7 @@ const ImportacaoNfe = (() => {
       <section class="imp-panel" data-panel="conversao">
         <header class="imp-section-head">
           <h4>Conversão e quantidade</h4>
-          <span class="hint">Qtd estoque = qtd XML × conversor · custo unitário já considera a conversão</span>
+          <span class="hint">Entrada estoque = qtd XML × conversor · custo convertido alimenta o preço de custo</span>
         </header>
         <div class="imp-conv-summary">
           <div><span>Na nota</span><strong>${num(qtdXml)} ${esc(sys.uni_medida_xml || xml.uCom || '')}</strong></div>
@@ -1352,10 +1349,10 @@ const ImportacaoNfe = (() => {
             <select id="imp-uni">${unidadeOptions(sys.uni_medida || xml.uCom)}</select>
           </label>
           ${field('Conversor', 'imp-conversor', conversor, { type: 'number', step: '0.0001', third: true })}
-          ${field('Qtd convertida', 'imp-qtd', qtdConv, { type: 'number', step: '0.0001', third: true, readonly: true })}
-          ${field('Custo unit. (c/ conversão)', 'imp-custo-conv', custoInfo.custoEstoque, { type: 'number', step: '0.0001', third: true })}
+          ${field('Entrada Estoque', 'imp-qtd', qtdConv, { type: 'number', step: '0.0001', third: true, readonly: true })}
+          ${field('Custo Convertido', 'imp-custo-conv', custoInfo.custoEstoque, { type: 'number', step: '0.0001', third: true })}
         </div>
-        <p class="hint">Custo = total líquido do item ÷ qtd convertida. Ao salvar, este valor alimenta o preço de custo.</p>
+        <p class="hint">Custo Convertido = total líquido do item ÷ entrada estoque. Ao salvar, este valor alimenta o preço de custo.</p>
         <div class="imp-vinc-btns">
           <button type="button" class="btn small outline" id="imp-cad-unidade">Cadastrar unidade</button>
         </div>
@@ -1419,7 +1416,15 @@ const ImportacaoNfe = (() => {
           ${field('Descrição', 'imp-desc', sys.descricao || (vinculado ? xml.xProd : ''), { full: true, readonly: !descEditable })}
           ${field('Descrição complementar', 'imp-desc-cmpl', sys.desc_cmpl, { full: true })}
           ${field('Referência', 'imp-ref', sys.referencia, { third: true })}
-          ${field('Código de barras', 'imp-ean', sys.cod_barras, { third: true })}
+          <label class="imp-field third">
+            <span>Código de barras</span>
+            <div class="search-field imp-ean-scan">
+              <input id="imp-ean" type="text" value="${esc(sys.cod_barras || '')}" autocomplete="off" inputmode="numeric" />
+              <button type="button" id="imp-btn-scan-ean" class="btn icon-cam" title="Ler código de barras" aria-label="Ler código de barras">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+              </button>
+            </div>
+          </label>
           ${field('Unidade medida', 'imp-uni-ficha', sys.uni_medida || xml.uCom, { third: true })}
         </div>
         <div class="imp-block-title">Preço</div>
@@ -1437,8 +1442,48 @@ const ImportacaoNfe = (() => {
     `;
   }
 
+  function calcCbsIbs(tn = {}, base = 0) {
+    const aliqCbs = Number(tn.aliq_cbs != null ? tn.aliq_cbs : 0.9);
+    const aliqIbsUf = Number(tn.aliq_ibs_uf != null ? tn.aliq_ibs_uf : 0.1);
+    const aliqIbsMun = Number(tn.aliq_ibs_mun != null ? tn.aliq_ibs_mun : 0);
+    const redCbs = Number(tn.percent_red_aliq_cbs || 0);
+    const redIbs = Number(tn.percent_red_aliq_ibs || 0);
+    const efetCbs = aliqCbs * (1 - Math.min(100, Math.max(0, redCbs)) / 100);
+    const efetIbsUf = aliqIbsUf * (1 - Math.min(100, Math.max(0, redIbs)) / 100);
+    const efetIbsMun = aliqIbsMun * (1 - Math.min(100, Math.max(0, redIbs)) / 100);
+    const bc = Number(base || 0);
+    return {
+      vlr_bc_cbs: Number(bc.toFixed(2)),
+      vlr_bc_ibs: Number(bc.toFixed(2)),
+      aliq_cbs: aliqCbs,
+      aliq_ibs_uf: aliqIbsUf,
+      aliq_ibs_mun: aliqIbsMun,
+      percent_red_aliq_cbs: redCbs,
+      percent_red_aliq_ibs: redIbs,
+      aliq_efetiva_cbs: Number(efetCbs.toFixed(4)),
+      aliq_efetiva_ibs_uf: Number(efetIbsUf.toFixed(4)),
+      aliq_efetiva_ibs_mun: Number(efetIbsMun.toFixed(4)),
+      vlr_cbs: Number((bc * efetCbs / 100).toFixed(2)),
+      vlr_ibs_uf: Number((bc * efetIbsUf / 100).toFixed(2)),
+      vlr_ibs_mun: Number((bc * efetIbsMun / 100).toFixed(2)),
+      vlr_ibs_tot: Number((bc * (efetIbsUf + efetIbsMun) / 100).toFixed(2)),
+    };
+  }
+
+  function applySimplesPisCofinsRates(trib = {}, simples) {
+    if (!simples) return trib;
+    const cst = String(trib.cst_pis_saida || trib.cst_pis || '').replace(/\D/g, '').padStart(2, '0').slice(-2);
+    if (cst === '01' || cst === '05') {
+      return { ...trib, p_pis: 0.65, p_cofins: 3 };
+    }
+    return trib;
+  }
+
   function panelTribSaida(sys, trib, tn, tc, simples, xml = {}) {
     const aplicar = ynChecked(sys.aplicar_saida !== undefined ? sys.aplicar_saida : 'S');
+    const tribOut = applySimplesPisCofinsRates(trib, simples);
+    const custoInfo = calcCustoNotaUnitario(sys, xml);
+    const cbs = calcCbsIbs(tn, tn.vlr_bc_cbs != null && tn.vlr_bc_cbs !== '' ? tn.vlr_bc_cbs : custoInfo.totalItem);
     return `
       <section class="imp-panel" data-panel="trib_saida">
         <header class="imp-section-head">
@@ -1461,13 +1506,14 @@ const ImportacaoNfe = (() => {
             ${simples
     ? searchableCodeField('CSOSN CF-e', 'imp-csosn-cfe', 'imp-busca-csosn-cfe', 'imp-csosn-cfe-list', sys.csosn_cfe || '', { third: true, placeholder: 'Pesquisar CSOSN…' })
     : searchableCodeField('CST CF-e', 'imp-cst-cfe', 'imp-busca-cst-cfe', 'imp-cst-cfe-list', sys.cst_cfe || '', { third: true, placeholder: 'Pesquisar CST…' })}
-            ${searchableCodeField('CST PIS saída', 'imp-cst-pis-saida', 'imp-busca-cst-pis-saida', 'imp-cst-pis-saida-list', trib.cst_pis_saida || trib.cst_pis || '', { third: true, placeholder: 'Pesquisar CST PIS…' })}
-            ${field('% PIS', 'imp-ppis-saida', trib.p_pis ?? 0, { type: 'number', step: '0.0001', third: true })}
-            ${searchableCodeField('CST COFINS saída', 'imp-cst-cof-saida', 'imp-busca-cst-cof-saida', 'imp-cst-cof-saida-list', trib.cst_cofins_saida || trib.cst_cofins || '', { third: true, placeholder: 'Pesquisar CST COFINS…' })}
-            ${field('% COFINS', 'imp-pcof-saida', trib.p_cofins ?? 0, { type: 'number', step: '0.0001', third: true })}
+            ${searchableCodeField('CST PIS saída', 'imp-cst-pis-saida', 'imp-busca-cst-pis-saida', 'imp-cst-pis-saida-list', tribOut.cst_pis_saida || tribOut.cst_pis || '', { third: true, placeholder: 'Pesquisar CST PIS…' })}
+            ${field('% PIS', 'imp-ppis-saida', tribOut.p_pis ?? 0, { type: 'number', step: '0.0001', third: true })}
+            ${searchableCodeField('CST COFINS saída', 'imp-cst-cof-saida', 'imp-busca-cst-cof-saida', 'imp-cst-cof-saida-list', tribOut.cst_cofins_saida || tribOut.cst_cofins || '', { third: true, placeholder: 'Pesquisar CST COFINS…' })}
+            ${field('% COFINS', 'imp-pcof-saida', tribOut.p_cofins ?? 0, { type: 'number', step: '0.0001', third: true })}
             ${comboField('Taxa ICMS', 'imp-cti', 'imp-cti-list', sys.id_cti || '', { half: true, displayLabel: sys._cti_label || sys.id_cti || '', placeholder: 'Pesquisar pela descrição da taxa…' })}
             ${comboField('Taxa CFE', 'imp-cti-cfe', 'imp-cti-cfe-list', sys.id_cti_cfe || '', { half: true, displayLabel: sys._cti_cfe_label || sys.id_cti_cfe || '', placeholder: 'Pesquisar pela descrição…' })}
           </div>
+          <div class="imp-block-title">Reforma Tributária — CBS / IBS</div>
           <div class="imp-fields">
             ${comboField('Classificação tributária CBS/IBS — NF-e', 'imp-nfe-class', 'imp-class-nfe-list', tn.id_class_trib ?? '', {
     full: true,
@@ -1475,9 +1521,17 @@ const ImportacaoNfe = (() => {
     displayLabel: tn._class_label || (tn.id_class_trib != null ? String(tn.id_class_trib) : ''),
     placeholder: 'Pesquisar classificação…',
   })}
-            ${field('% red. alíq. CBS', 'imp-nfe-red-cbs', tn.percent_red_aliq_cbs ?? '', { type: 'number', step: '0.0001', third: true, readonly: true })}
-            ${field('% red. alíq. IBS', 'imp-nfe-red-ibs', tn.percent_red_aliq_ibs ?? '', { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('Base CBS/IBS', 'imp-nfe-bc-cbs', cbs.vlr_bc_cbs, { type: 'number', step: '0.01', third: true })}
+            ${field('Alíq. CBS %', 'imp-nfe-aliq-cbs-pad', cbs.aliq_cbs, { type: 'number', step: '0.0001', third: true })}
+            ${field('Alíq. IBS UF %', 'imp-nfe-aliq-ibs-uf', cbs.aliq_ibs_uf, { type: 'number', step: '0.0001', third: true })}
+            ${field('% red. alíq. CBS', 'imp-nfe-red-cbs', cbs.percent_red_aliq_cbs, { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('% red. alíq. IBS', 'imp-nfe-red-ibs', cbs.percent_red_aliq_ibs, { type: 'number', step: '0.0001', third: true, readonly: true })}
             ${field('CST class. trib.', 'imp-nfe-cst-class', tn.cst_class_trib || '', { third: true, readonly: true })}
+            ${field('Alíq. efetiva CBS', 'imp-nfe-efet-cbs', cbs.aliq_efetiva_cbs, { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('Alíq. efetiva IBS UF', 'imp-nfe-efet-ibs-uf', cbs.aliq_efetiva_ibs_uf, { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('Vlr CBS', 'imp-nfe-vlr-cbs', cbs.vlr_cbs, { type: 'number', step: '0.01', third: true, readonly: true })}
+            ${field('Vlr IBS UF', 'imp-nfe-vlr-ibs-uf', cbs.vlr_ibs_uf, { type: 'number', step: '0.01', third: true, readonly: true })}
+            ${field('Vlr IBS total', 'imp-nfe-vlr-ibs-tot', cbs.vlr_ibs_tot, { type: 'number', step: '0.01', third: true, readonly: true })}
             ${field('Diferimento CBS', 'imp-nfe-dif-cbs', tn.diferimento_cbs ?? 0, { type: 'number', step: '0.0001', third: true })}
             ${field('Cód. créd. pres. CBS', 'imp-nfe-cod-cbs', tn.cod_cred_presu_cbs || '', { third: true })}
             ${field('Alíq. créd. pres. CBS', 'imp-nfe-aliq-cbs', tn.aliq_cred_presu_cbs ?? 0, { type: 'number', step: '0.0001', third: true })}
@@ -1556,11 +1610,19 @@ const ImportacaoNfe = (() => {
         sys[key] = {
           ...t,
           _class_label: `${c.cod_class_trib} — ${c.desc_class_trib}`,
+          _class_cod: c.cod_class_trib,
           percent_red_aliq_cbs: c.percent_red_aliq_cbs,
           percent_red_aliq_ibs: c.percent_red_aliq_ibs,
           cst_class_trib: c.cst_class_trib || t.cst_class_trib || '',
           _class_hydrated: true,
         };
+        if (key === 'trib_nfe') {
+          const it = itemAt(state.itemIndex);
+          const base = Number(sys[key].vlr_bc_cbs)
+            || calcCustoNotaUnitario(sys, it?.xml || {}).totalItem
+            || 0;
+          Object.assign(sys[key], calcCbsIbs(sys[key], base));
+        }
       } catch (_) { /* ignore */ }
     }
   }
@@ -1849,9 +1911,10 @@ const ImportacaoNfe = (() => {
       }, it.xml || {});
       const custoEl = $('#imp-custo-conv');
       if (custoEl) custoEl.value = String(custoInfo.custoEstoque);
+      // Aba Entrada mantém o unitário da nota (sem conversão)
       const custoEntrada = $('#imp-custo');
       if (custoEntrada && !(Number(custoEntrada.value) > 0)) {
-        custoEntrada.value = String(custoInfo.custoEstoque);
+        custoEntrada.value = String(custoInfo.custoXml);
       }
       const custoFicha = $('#imp-custo-ficha');
       if (custoFicha) custoFicha.value = String(custoInfo.custoEstoque);
@@ -2060,7 +2123,7 @@ const ImportacaoNfe = (() => {
     const qtdXml = gnDef('#imp-qtd-xml', sys.qtd_xml ?? it?.xml?.qCom ?? 0);
     const qtd = Number((qtdXml * conversor).toFixed(6));
 
-    let custo = gn('#imp-custo-ficha') ?? gn('#imp-custo-conv') ?? gn('#imp-custo');
+    let custo = gn('#imp-custo-ficha') ?? gn('#imp-custo-conv');
     if (custo === undefined) custo = sys.prc_custo;
     if (!(Number(custo) > 0) && it) {
       const merged = {
@@ -2074,12 +2137,15 @@ const ImportacaoNfe = (() => {
         v_outro: vOutro,
         tributos: {
           ...trib,
-          v_ipi: gnDef('#imp-vipi', trib.v_ipi ?? 0),
-          v_icms_st: gnDef('#imp-vst', trib.v_icms_st ?? 0),
+          v_ipi: trib.v_ipi ?? 0,
+          v_icms_st: trib.v_icms_st ?? 0,
         },
       };
       custo = calcCustoNotaUnitario(merged, it.xml || {}).custoEstoque;
     }
+    const custoNota = gn('#imp-custo') ?? sys.prc_custo_nota ?? calcCustoNotaUnitario({
+      ...sys, conversor, qtd_xml: qtdXml, qtd, v_desc: vDesc, v_frete: vFrete, v_seguro: vSeguro, v_outro: vOutro,
+    }, it?.xml || {}).custoXml;
 
     const margem = gn('#imp-margem') ?? sys.margem_lb ?? 0;
     let venda = gn('#imp-venda') ?? sys.prc_venda;
@@ -2121,6 +2187,7 @@ const ImportacaoNfe = (() => {
         qtd_xml: qtdXml,
         qtd,
         prc_custo: custo ?? 0,
+        prc_custo_nota: custoNota ?? 0,
         prc_venda: venda ?? 0,
         v_desc: vDesc,
         v_frete: vFrete,
@@ -2130,31 +2197,41 @@ const ImportacaoNfe = (() => {
         id_estoque: sys.id_estoque ?? null,
         criar_novo: !!sys.criar_novo,
         tributos: {
-          origem: g('#imp-orig') != null ? g('#imp-orig') : (trib.origem || ''),
+          origem: trib.origem || '',
           cst_icms: g('#imp-cst') || g('#imp-cst-nota') || g('#imp-cst-saida') || trib.cst_icms || '',
           csosn: csosnEntrada || trib.csosn || '',
-          v_bc_icms: gnDef('#imp-vbc', trib.v_bc_icms ?? 0),
-          p_icms: gnDef('#imp-picms', trib.p_icms ?? 0),
-          v_icms: gnDef('#imp-vicms', trib.v_icms ?? 0),
-          v_bc_st: gnDef('#imp-vbcst', trib.v_bc_st ?? 0),
-          v_icms_st: gnDef('#imp-vst', trib.v_icms_st ?? 0),
+          v_bc_icms: gn('#imp-vbc') ?? trib.v_bc_icms ?? 0,
+          p_icms: gn('#imp-picms') ?? trib.p_icms ?? 0,
+          v_icms: gn('#imp-vicms') ?? trib.v_icms ?? 0,
+          v_bc_st: gn('#imp-vbcst') ?? trib.v_bc_st ?? 0,
+          v_icms_st: gn('#imp-vst') ?? trib.v_icms_st ?? 0,
           cst_ipi: g('#imp-cst-ipi') != null ? g('#imp-cst-ipi') : (trib.cst_ipi || ''),
-          p_ipi: gnDef('#imp-pipi', trib.p_ipi ?? 0),
-          v_ipi: gnDef('#imp-vipi', trib.v_ipi ?? 0),
+          p_ipi: gn('#imp-pipi') ?? trib.p_ipi ?? 0,
+          v_ipi: gn('#imp-vipi') ?? trib.v_ipi ?? 0,
           cst_pis: g('#imp-cst-pis') != null ? g('#imp-cst-pis') : (trib.cst_pis || ''),
           cst_pis_saida: g('#imp-cst-pis-saida') != null ? g('#imp-cst-pis-saida') : (trib.cst_pis_saida || ''),
-          p_pis: gn('#imp-ppis-saida') ?? gnDef('#imp-ppis', trib.p_pis ?? 0),
-          v_pis: gnDef('#imp-vpis', trib.v_pis ?? 0),
+          p_pis: gn('#imp-ppis-saida') ?? gn('#imp-ppis') ?? trib.p_pis ?? 0,
+          v_pis: gn('#imp-vpis') ?? trib.v_pis ?? 0,
           cst_cofins: g('#imp-cst-cof') != null ? g('#imp-cst-cof') : (trib.cst_cofins || ''),
           cst_cofins_saida: g('#imp-cst-cof-saida') != null ? g('#imp-cst-cof-saida') : (trib.cst_cofins_saida || ''),
-          p_cofins: gn('#imp-pcof-saida') ?? gnDef('#imp-pcof', trib.p_cofins ?? 0),
-          v_cofins: gnDef('#imp-vcof', trib.v_cofins ?? 0),
+          p_cofins: gn('#imp-pcof-saida') ?? gn('#imp-pcof') ?? trib.p_cofins ?? 0,
+          v_cofins: gn('#imp-vcof') ?? trib.v_cofins ?? 0,
         },
         trib_nfe: {
           id_class_trib: gnNull('#imp-nfe-class') ?? tn.id_class_trib ?? null,
           percent_red_aliq_cbs: gnDef('#imp-nfe-red-cbs', tn.percent_red_aliq_cbs ?? 0),
           percent_red_aliq_ibs: gnDef('#imp-nfe-red-ibs', tn.percent_red_aliq_ibs ?? 0),
           cst_class_trib: g('#imp-nfe-cst-class') || tn.cst_class_trib || '',
+          aliq_cbs: gnDef('#imp-nfe-aliq-cbs-pad', tn.aliq_cbs ?? 0.9),
+          aliq_ibs_uf: gnDef('#imp-nfe-aliq-ibs-uf', tn.aliq_ibs_uf ?? 0.1),
+          aliq_ibs_mun: tn.aliq_ibs_mun ?? 0,
+          vlr_bc_cbs: gnDef('#imp-nfe-bc-cbs', tn.vlr_bc_cbs ?? 0),
+          vlr_bc_ibs: gnDef('#imp-nfe-bc-cbs', tn.vlr_bc_ibs ?? 0),
+          aliq_efetiva_cbs: gnDef('#imp-nfe-efet-cbs', tn.aliq_efetiva_cbs ?? 0),
+          aliq_efetiva_ibs_uf: gnDef('#imp-nfe-efet-ibs-uf', tn.aliq_efetiva_ibs_uf ?? 0),
+          vlr_cbs: gnDef('#imp-nfe-vlr-cbs', tn.vlr_cbs ?? 0),
+          vlr_ibs_uf: gnDef('#imp-nfe-vlr-ibs-uf', tn.vlr_ibs_uf ?? 0),
+          vlr_ibs_tot: gnDef('#imp-nfe-vlr-ibs-tot', tn.vlr_ibs_tot ?? 0),
           diferimento_cbs: gnDef('#imp-nfe-dif-cbs', tn.diferimento_cbs ?? 0),
           cod_cred_presu_cbs: g('#imp-nfe-cod-cbs') != null ? g('#imp-nfe-cod-cbs') : (tn.cod_cred_presu_cbs || ''),
           aliq_cred_presu_cbs: gnDef('#imp-nfe-aliq-cbs', tn.aliq_cred_presu_cbs ?? 0),
@@ -2167,6 +2244,7 @@ const ImportacaoNfe = (() => {
           deduz_cred_presu_ibs: $('#imp-nfe-deduz-ibs') ? yn('#imp-nfe-deduz-ibs') : (tn.deduz_cred_presu_ibs || 'N'),
           ind_bem_movel_usado: $('#imp-nfe-bem-usado') ? yn('#imp-nfe-bem-usado') : (tn.ind_bem_movel_usado || 'N'),
           _class_label: g('#imp-busca-class-nfe') || tn._class_label || '',
+          _class_cod: tn._class_cod || '',
         },
         trib_nfce: {
           id_class_trib: gnNull('#imp-nfce-class') ?? tc.id_class_trib ?? null,
@@ -2400,6 +2478,46 @@ const ImportacaoNfe = (() => {
     }
   }
 
+  function syncCbsIbsFields(cbs) {
+    if (!cbs) return;
+    const set = (id, v) => { if ($(id)) $(id).value = v == null ? '' : String(v); };
+    set('#imp-nfe-bc-cbs', cbs.vlr_bc_cbs);
+    set('#imp-nfe-aliq-cbs-pad', cbs.aliq_cbs);
+    set('#imp-nfe-aliq-ibs-uf', cbs.aliq_ibs_uf);
+    set('#imp-nfe-red-cbs', cbs.percent_red_aliq_cbs);
+    set('#imp-nfe-red-ibs', cbs.percent_red_aliq_ibs);
+    set('#imp-nfe-efet-cbs', cbs.aliq_efetiva_cbs);
+    set('#imp-nfe-efet-ibs-uf', cbs.aliq_efetiva_ibs_uf);
+    set('#imp-nfe-vlr-cbs', cbs.vlr_cbs);
+    set('#imp-nfe-vlr-ibs-uf', cbs.vlr_ibs_uf);
+    set('#imp-nfe-vlr-ibs-tot', cbs.vlr_ibs_tot);
+  }
+
+  function recalcCbsIbsFromInputs() {
+    const it = itemAt(state.itemIndex);
+    if (!it?.sistema) return;
+    const tn = {
+      ...(it.sistema.trib_nfe || {}),
+      percent_red_aliq_cbs: Number($('#imp-nfe-red-cbs')?.value || 0),
+      percent_red_aliq_ibs: Number($('#imp-nfe-red-ibs')?.value || 0),
+      aliq_cbs: Number($('#imp-nfe-aliq-cbs-pad')?.value || 0.9),
+      aliq_ibs_uf: Number($('#imp-nfe-aliq-ibs-uf')?.value || 0.1),
+    };
+    const base = Number($('#imp-nfe-bc-cbs')?.value || 0);
+    const cbs = calcCbsIbs(tn, base);
+    it.sistema.trib_nfe = { ...tn, ...cbs };
+    syncCbsIbsFields(cbs);
+  }
+
+  function applySimplesPisCofinsFromCst() {
+    if (!state.emitenteSimples) return;
+    const cst = String($('#imp-cst-pis-saida')?.value || '').replace(/\D/g, '').padStart(2, '0').slice(-2);
+    if (cst === '01' || cst === '05') {
+      if ($('#imp-ppis-saida')) $('#imp-ppis-saida').value = '0.65';
+      if ($('#imp-pcof-saida')) $('#imp-pcof-saida').value = '3';
+    }
+  }
+
   function bindItemEvents(it) {
     $('#imp-item-voltar')?.addEventListener('click', () => {
       renderSessao();
@@ -2475,6 +2593,15 @@ const ImportacaoNfe = (() => {
     $('#imp-btn-scan-prod')?.addEventListener('click', () => {
       deps.startScanner?.('importacao-prod');
     });
+    $('#imp-btn-scan-ean')?.addEventListener('click', () => {
+      deps.startScanner?.('importacao-ean');
+    });
+    $('#imp-nfe-bc-cbs')?.addEventListener('input', recalcCbsIbsFromInputs);
+    $('#imp-nfe-aliq-cbs-pad')?.addEventListener('input', recalcCbsIbsFromInputs);
+    $('#imp-nfe-aliq-ibs-uf')?.addEventListener('input', recalcCbsIbsFromInputs);
+    $('#imp-cst-pis-saida-disp')?.addEventListener('change', applySimplesPisCofinsFromCst);
+    $('#imp-cst-pis-saida')?.addEventListener('change', applySimplesPisCofinsFromCst);
+    applySimplesPisCofinsFromCst();
     $('#imp-busca-prod')?.addEventListener('input', (e) => {
       state.buscaProduto = e.target.value;
       syncClearBuscaProd();
@@ -2578,7 +2705,9 @@ const ImportacaoNfe = (() => {
     wireFiscal('#imp-cst-pis', '#imp-cst-pis-list', '/importacao/cst-pis', 'codigo');
     wireFiscal('#imp-cst-cof', '#imp-cst-cof-list', '/importacao/cst-cofins', 'codigo');
     wireFiscal('#imp-cst-ipi', '#imp-cst-ipi-list', '/importacao/cst-ipi', 'codigo');
-    wireFiscal('#imp-cst-pis-saida', '#imp-cst-pis-saida-list', '/importacao/cst-pis', 'codigo');
+    wireFiscal('#imp-cst-pis-saida', '#imp-cst-pis-saida-list', '/importacao/cst-pis', 'codigo', {
+      onSelect: () => applySimplesPisCofinsFromCst(),
+    });
     wireFiscal('#imp-cst-cof-saida', '#imp-cst-cof-saida-list', '/importacao/cst-cofins', 'codigo');
     wireFiscal('#imp-cst-saida', '#imp-cst-saida-list', '/importacao/cst-icms', 'codigo');
     wireFiscal('#imp-cst-cfe', '#imp-cst-cfe-list', '/importacao/cst-icms', 'codigo');
@@ -2610,17 +2739,26 @@ const ImportacaoNfe = (() => {
         if ($('#imp-nfe-cst-class')) $('#imp-nfe-cst-class').value = extra.cst_class_trib || '';
       }
       if (it?.sistema) {
-        it.sistema[key] = {
+        const baseTn = {
           ...(it.sistema[key] || {}),
           id_class_trib: Number(code),
           _class_label: desc
             ? `${extra.cod_class_trib || code} — ${desc}`
             : String(extra.cod_class_trib || code),
+          _class_cod: extra.cod_class_trib || '',
           percent_red_aliq_cbs: Number(extra.percent_red_aliq_cbs || 0),
           percent_red_aliq_ibs: Number(extra.percent_red_aliq_ibs || 0),
           cst_class_trib: extra.cst_class_trib || '',
           _class_hydrated: true,
         };
+        if (target === 'nfe') {
+          const bc = Number($('#imp-nfe-bc-cbs')?.value)
+            || calcCustoNotaUnitario(it.sistema, it.xml || {}).totalItem
+            || 0;
+          Object.assign(baseTn, calcCbsIbs(baseTn, bc));
+          syncCbsIbsFields(baseTn);
+        }
+        it.sistema[key] = baseTn;
       }
     };
 
@@ -2985,6 +3123,19 @@ const ImportacaoNfe = (() => {
     return true;
   }
 
+  function applyScannedEan(code) {
+    if (state.view !== 'item') return false;
+    const raw = String(code || '').trim();
+    if (!raw) return false;
+    const inp = $('#imp-ean');
+    if (!inp) return false;
+    inp.value = raw;
+    const it = itemAt(state.itemIndex);
+    if (it?.sistema) it.sistema.cod_barras = raw;
+    deps.showToast?.('Código de barras atualizado');
+    return true;
+  }
+
   /** Volta uma tela no fluxo de importação. Retorna true se tratou o back. */
   function handleBack() {
     if (state.view === 'item') {
@@ -3027,6 +3178,7 @@ const ImportacaoNfe = (() => {
     onPageEnter,
     applyScannedChave,
     applyScannedProduto,
+    applyScannedEan,
     handleBack,
     getView: () => state.view,
   };

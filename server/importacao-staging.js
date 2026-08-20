@@ -336,6 +336,7 @@ async function buildSistemaFromXmlItem(xmlItem, ufFornecedor) {
     qtd_xml: xmlItem.qCom,
     qtd: xmlItem.qCom,
     prc_custo: xmlItem.vUnCom,
+    prc_custo_nota: xmlItem.vUnCom,
     prc_venda: Number(xmlItem.vUnCom || 0),
     v_desc: xmlItem.vDesc || 0,
     v_frete: xmlItem.vFrete || 0,

@@ -86,14 +86,16 @@ async function zerarContaPagar(db, idCta, nfNumero) {
     dataSql: agora.dataSql,
     horaSql: agora.horaSql,
   });
-  await query(db, `UPDATE TB_CONTA_PAGAR SET VLR_CTAPAG = 0 WHERE ID_CTAPAG = ?`, [idCta]);
-  try {
-    await query(db, `
-      UPDATE TB_CONTA_PAGAR SET HISTORICO = ? WHERE ID_CTAPAG = ?`, [
-      `CANCELADA c/ NF ${nfNumero} ${agora.dataSql}`.slice(0, 80),
-      idCta,
-    ]);
-  } catch (_) { /* ignore */ }
+  // TB_CONTA_PAGAR não tem coluna STATUS — o indicador de cancelamento no Clipp é TIP_CTAPAG.
+  await query(db, `
+    UPDATE TB_CONTA_PAGAR
+    SET VLR_CTAPAG = 0,
+        TIP_CTAPAG = 'C',
+        HISTORICO = ?
+    WHERE ID_CTAPAG = ?`, [
+    `CANCELADA c/ NF ${nfNumero} ${agora.dataSql}`.slice(0, 80),
+    idCta,
+  ]);
   return true;
 }
 
@@ -126,8 +128,11 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
         for (const link of links) {
           const idCta = Number(link.ID_CTAPAG);
           if (!idCta) continue;
-          const cur = await query(db, `SELECT VLR_CTAPAG FROM TB_CONTA_PAGAR WHERE ID_CTAPAG = ?`, [idCta]);
-          if (Number(cur[0]?.VLR_CTAPAG || 0) <= 0) continue;
+          const cur = await query(db, `
+            SELECT VLR_CTAPAG, TIP_CTAPAG FROM TB_CONTA_PAGAR WHERE ID_CTAPAG = ?`, [idCta]);
+          const tip = String(cur[0]?.TIP_CTAPAG || '').trim().toUpperCase();
+          const vlr = Number(cur[0]?.VLR_CTAPAG || 0);
+          if (vlr <= 0 && tip === 'C') continue;
           await zerarContaPagar(db, idCta, nf.NF_NUMERO);
           contasZeradas += 1;
         }

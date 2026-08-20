@@ -172,7 +172,7 @@ async function entradaEstoque(db, appCfg, {
   }
 }
 
-async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}) {
+async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe = {}) {
   const cstIcms = String(trib.cst_icms || xmlImp.CST || '').trim().padStart(3, '0').slice(-3);
   const aliq = Number(trib.p_icms || xmlImp.pICMS || 0);
   const vBc = Number(trib.v_bc_icms || xmlImp.vBC || 0);
@@ -239,6 +239,74 @@ async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}) {
       Number(trib.v_ipi || xmlImp.vIPI || 0),
     ]);
   } catch (e) { console.warn('IPI:', e.message); }
+
+  const tn = tribNfe || {};
+  if (tn.id_class_trib || tn.vlr_cbs != null || tn.aliq_cbs != null) {
+    try {
+      const classRow = tn.id_class_trib
+        ? (await query(db, `
+            SELECT FIRST 1 COD_CLASS_TRIB, CST_CLASS_TRIB, PERCENT_RED_ALIQ_CBS, PERCENT_RED_ALIQ_IBS
+            FROM TB_CLASS_TRIB WHERE ID_CLASS_TRIB = ?`, [Number(tn.id_class_trib)]))[0]
+        : null;
+      const codClass = String(tn._class_cod || classRow?.COD_CLASS_TRIB || '').trim().slice(0, 10);
+      const cstClass = String(tn.cst_class_trib || classRow?.CST_CLASS_TRIB || '').trim().slice(0, 3);
+      const redCbs = Number(tn.percent_red_aliq_cbs ?? classRow?.PERCENT_RED_ALIQ_CBS ?? 0);
+      const redIbs = Number(tn.percent_red_aliq_ibs ?? classRow?.PERCENT_RED_ALIQ_IBS ?? 0);
+      const aliqCbs = Number(tn.aliq_cbs ?? 0.9);
+      const aliqIbsUf = Number(tn.aliq_ibs_uf ?? 0.1);
+      const aliqIbsMun = Number(tn.aliq_ibs_mun ?? 0);
+      const bc = Number(tn.vlr_bc_cbs ?? 0);
+      const efetCbs = Number(tn.aliq_efetiva_cbs ?? (aliqCbs * (1 - redCbs / 100)));
+      const efetIbsUf = Number(tn.aliq_efetiva_ibs_uf ?? (aliqIbsUf * (1 - redIbs / 100)));
+      const efetIbsMun = Number(tn.aliq_efetiva_ibs_mun ?? (aliqIbsMun * (1 - redIbs / 100)));
+      const vlrCbs = Number(tn.vlr_cbs ?? (bc * efetCbs / 100));
+      const vlrIbsUf = Number(tn.vlr_ibs_uf ?? (bc * efetIbsUf / 100));
+      const vlrIbsMun = Number(tn.vlr_ibs_mun ?? (bc * efetIbsMun / 100));
+      const gen = await query(db, `SELECT GEN_ID(GEN_TB_NFC_ITEM_CBS_IBS_ID, 1) AS ID FROM RDB$DATABASE`);
+      const idCbs = Number(gen[0].ID);
+      await query(db, `
+        INSERT INTO TB_NFC_ITEM_CBS_IBS (
+          ID_CBS_IBS, ID_NFCITEM, VLR_BC_CBS, VLR_BC_IBS,
+          ALIQ_CBS, ALIQ_IBS_UF, ALIQ_IBS_MUN,
+          VLR_CBS, VLR_IBS_UF, VLR_IBS_MUN,
+          CLASS_TRIB, CST_CLASS_TRIB,
+          PERCENT_RED_ALIQ_CBS, PERCENT_RED_ALI_IBS,
+          ALIQ_EFETIVA_CBS, ALIQ_EFETIVA_IBS_UF, ALIQ_EFETIVA_IBS_MUN,
+          ENVIAR_IBSCBS, ENVIAR_DIFERIMENTO, DIFERIMENTO_CBS, VLR_DIFERIMENTO_CBS,
+          DIFERIMENTO_IBS_UF, VLR_DIFERIMENTO_IBS_UF, DIFERIMENTO_IBS_MUN, VLR_DIFERIMENTO_IBS_MUN,
+          ENVIAR_CREDITO_PRESUMIDO, ALIQ_CRED_PRESU_CBS, VLR_CRED_PRESU_CBS,
+          ALIQ_CRED_PRESU_IBS, VLR_CRED_PRESU_IBS,
+          DEDUZ_CRED_PRESU_CBS, DEDUZ_CRED_PRESU_IBS, VLR_IBS_TOT, VLR_BC_CRED_PRESU
+        ) VALUES (
+          ?, ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?,
+          ?, ?,
+          ?, ?, ?,
+          'S', 'N', ?, 0,
+          ?, 0, ?, 0,
+          'N', ?, 0,
+          ?, 0,
+          ?, ?, ?, 0
+        )`, [
+        idCbs, idNfcItem, bc, bc,
+        aliqCbs, aliqIbsUf, aliqIbsMun,
+        round2(vlrCbs), round2(vlrIbsUf), round2(vlrIbsMun),
+        codClass || null, cstClass || null,
+        redCbs, redIbs,
+        efetCbs, efetIbsUf, efetIbsMun,
+        Number(tn.diferimento_cbs || 0),
+        Number(tn.diferimento_ibs_uf || 0),
+        Number(tn.diferimento_ibs_mun || 0),
+        Number(tn.aliq_cred_presu_cbs || 0),
+        Number(tn.aliq_cred_presu_ibs || 0),
+        String(tn.deduz_cred_presu_cbs || 'N').slice(0, 1),
+        String(tn.deduz_cred_presu_ibs || 'N').slice(0, 1),
+        round2(vlrIbsUf + vlrIbsMun),
+      ]);
+    } catch (e) { console.warn('CBS/IBS:', e.message); }
+  }
 }
 
 /**
@@ -495,7 +563,13 @@ async function gravarNfCompra(sessao, {
         cfop || null, csosn || null, vUnit, vUnit,
       ]);
 
-      await insertTributosItem(db, idItem, it.sistema.tributos || {}, it.xml?.imposto || {});
+      await insertTributosItem(
+        db,
+        idItem,
+        it.sistema.tributos || {},
+        it.xml?.imposto || {},
+        it.sistema.trib_nfe || {},
+      );
       await entradaEstoque(db, appCfg, {
         idIdentificador: idIdent,
         qtd,

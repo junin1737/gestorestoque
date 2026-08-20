@@ -750,6 +750,53 @@
   font-size: 0.78rem;
 }
 
+.imp-field > span {
+  white-space: nowrap;
+}
+
+.imp-trib-codes {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem 0.65rem;
+  margin-top: 0.35rem;
+}
+
+.imp-trib-codes .imp-trib-row {
+  margin: 0;
+  padding: 0.35rem 0.25rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.imp-trib-codes .imp-trib-spacer {
+  border: 0;
+  min-height: 0;
+  padding: 0;
+}
+
+.imp-ean-scan {
+  display: flex;
+  gap: 0.35rem;
+  align-items: stretch;
+}
+
+.imp-ean-scan input {
+  flex: 1;
+  min-width: 0;
+}
+
+.imp-block-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--muted);
+  margin: 0.85rem 0 0.4rem;
+}
+
+@media (max-width: 640px) {
+  .imp-trib-codes {
+    grid-template-columns: 1fr;
+  }
+}
+
 .imp-trib-search {
   display: flex;
   flex-direction: column;

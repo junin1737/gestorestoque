@@ -31,7 +31,7 @@ const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const CAMERA_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
 
 window.setGestorScanTarget = (target) => {
-  state.scanTarget = ['ficha', 'importacao', 'importacao-prod'].includes(target) ? target : 'search';
+  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
 };
 
 function showToast(message) {
@@ -1247,6 +1247,14 @@ async function applyScannedCode(value) {
     state.scanTarget = 'search';
     return true;
   }
+  if (state.scanTarget === 'importacao-ean') {
+    if (window.ImportacaoNfe?.applyScannedEan?.(code)) {
+      state.scanTarget = 'search';
+      return true;
+    }
+    state.scanTarget = 'search';
+    return true;
+  }
   scrollAppTop();
   buscarEstoque(code, { barras: String(code).length > 5 });
   return true;
@@ -1396,7 +1404,7 @@ async function decodeBarcodeFromImageUrl(url) {
 }
 
 async function startScanner(target = 'search') {
-  state.scanTarget = ['ficha', 'importacao', 'importacao-prod'].includes(target) ? target : 'search';
+  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
   // No APK Android: câmera nativa (WebView em HTTP local não abre getUserMedia).
   try {
     if (window.GestorApp && typeof window.GestorApp.scanBarcode === 'function') {
