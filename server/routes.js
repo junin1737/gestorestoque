@@ -1047,6 +1047,9 @@ router.get('/niveis', async (_req, res) => {
 });
 
 const importacaoStaging = require('./importacao-staging');
+const importacaoFornecedor = require('./importacao-fornecedor');
+const importacaoParams = require('./importacao-params');
+const importacaoNotas = require('./importacao-notas');
 
 function importacaoSupervisorOk(req) {
   const q = req.query?.supervisor;
@@ -1069,23 +1072,494 @@ router.get('/importacao/sessoes', (req, res) => {
   }
 });
 
-router.post('/importacao/sessoes', (req, res) => {
+router.get('/importacao/notas', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
-    const chave = String(req.body?.chave || '').replace(/\D/g, '');
-    const out = importacaoStaging.createSessao(chave);
+    const notas = await importacaoNotas.listNotasCadastradas({
+      de: req.query.de,
+      ate: req.query.ate,
+      nfNumero: req.query.nf || req.query.nnf || req.query.numero,
+      fornecedor: req.query.fornecedor || req.query.forn || '',
+      dataCampo: req.query.data_campo || req.query.dataCampo || 'entrada',
+    });
+    let sessoes = importacaoStaging.listSessoes();
+    const nnf = String(req.query.nf || req.query.nnf || req.query.numero || '').replace(/\D/g, '');
+    const fornQ = String(req.query.fornecedor || req.query.forn || '').trim().toLowerCase();
+    if (nnf) {
+      sessoes = sessoes.filter((s) => String(s.xml?.ide?.nNF || '').includes(nnf));
+    }
+    if (fornQ) {
+      sessoes = sessoes.filter((s) => {
+        const nome = `${s.xml?.emit?.xFant || ''} ${s.xml?.emit?.xNome || ''} ${s.fornecedor?.cadastro?.nome_fanta || ''} ${s.fornecedor?.cadastro?.nome || ''}`.toLowerCase();
+        return nome.includes(fornQ);
+      });
+    }
+    const confirmadas = importacaoStaging.listSessoesConfirmadas();
+    res.json({ ok: true, notas, sessoes, confirmadas });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, notas: [], sessoes: [] });
+  }
+});
+
+router.get('/importacao/formas-pagto', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listFormasPagto() });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/parcelamentos', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({
+      ok: true,
+      itens: await importacaoNotas.listParcelamentos(req.query.id_fmapgto || req.query.idFmapgto),
+    });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/nf-duplicada', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const dup = await importacaoNotas.findNfDuplicada({
+      chave: req.query.chave,
+      nfNumero: req.query.nf || req.query.nnf,
+      serie: req.query.serie,
+      idFornec: req.query.id_fornec,
+      cnpj: req.query.cnpj,
+    });
+    res.json({ ok: true, duplicada: !!dup, nota: dup || null });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, duplicada: false, nota: null });
+  }
+});
+
+router.get('/importacao/params/cfop', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const itens = await importacaoParams.listCfopConv();
+    res.json({
+      ok: true,
+      itens,
+      csosn_padrao: importacaoParams.getCsosnPadrao(),
+      saida: importacaoParams.getSaidaPadrao(),
+    });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [], csosn_padrao: '102', saida: null });
+  }
+});
+
+router.put('/importacao/params/cfop', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const itens = await importacaoParams.saveCfopConv(req.body?.itens || []);
+    const csosn = importacaoParams.setCsosnPadrao(req.body?.csosn_padrao);
+    const saida = req.body?.saida != null
+      ? importacaoParams.setSaidaPadrao(req.body.saida)
+      : importacaoParams.getSaidaPadrao();
+    res.json({ ok: true, itens, csosn_padrao: csosn, saida });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/unidades', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listUnidades(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.post('/importacao/unidades', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const item = await importacaoNotas.cadastrarUnidade(req.body || {});
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/naturezas', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listNaturezas(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/class-trib', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listClassTrib(req.query.q, req.query.id) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/cst-icms', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listCstIcms(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/csosn', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listCsosn(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/anp', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listAnp(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/cest', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({
+      ok: true,
+      itens: await importacaoNotas.listCest(req.query.q, req.query.ncm),
+    });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/taxa-uf', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listTaxaUf(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/cfop', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listCfopSis(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/cst-pis', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listCstPis(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/cst-cofins', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listCstCofins(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/cst-ipi', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await importacaoNotas.listCstIpi(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/importacao/emitente-fiscal', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json({ ok: true, ...(await importacaoNotas.getEmitenteFiscal()) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, simples: false });
+  }
+});
+
+router.get('/importacao/produto-fiscal/:id', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const item = await importacaoNotas.getProdutoFiscal(req.params.id);
+    if (!item) return res.json({ ok: false, error: 'Produto não encontrado' });
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+const importacaoEstoqueFornec = require('./importacao-estoque-fornec');
+const importacaoRegra = require('./importacao-regra');
+
+router.get('/importacao/estoque-fornecedor', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const item = await importacaoEstoqueFornec.buscarEstoqueFornecedor({
+      idFornec: req.query.id_fornec,
+      idIdentificador: req.query.id_identificador,
+      codFornecedor: req.query.cod_fornecedor,
+    });
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, item: null });
+  }
+});
+
+router.post('/importacao/estoque-fornecedor', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const item = await importacaoEstoqueFornec.upsertEstoqueFornecedor(req.body || {});
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/regra-tributo', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const item = await importacaoRegra.buscarRegra({
+      idFornec: req.query.id_fornec,
+      idIdentificador: req.query.id_identificador,
+      codFornecedor: req.query.cod_fornecedor,
+      cfopEntrada: req.query.cfop_entrada,
+    });
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, item: null });
+  }
+});
+
+router.post('/importacao/regra-tributo', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const item = await importacaoRegra.salvarRegra(req.body || {});
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+const importacaoCancel = require('./importacao-cancel');
+
+router.post('/importacao/sessoes', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const body = req.body || {};
+    const chave = String(body.chave || '').replace(/\D/g, '');
+    const out = await importacaoStaging.createSessao({
+      chave,
+      xmlText: body.xmlText || body.xml || null,
+      xmlPath: body.xmlPath || null,
+      allowDemo: !!body.allowDemo || !!body.demo,
+    });
+    if (!out.ok) return res.json(out);
+    const forn = await importacaoFornecedor.resolverNaImportacao(out.sessao.xml);
+    const sessao = importacaoStaging.setFornecedor(out.sessao.id, forn);
+    const ide = sessao?.xml?.ide || {};
+    const emit = sessao?.xml?.emit || {};
+    let avisoDuplicada = null;
+    try {
+      const dup = await importacaoNotas.findNfDuplicada({
+        chave: sessao?.chave || chave,
+        nfNumero: ide.nNF,
+        serie: ide.serie,
+        idFornec: forn?.id_fornec,
+        cnpj: emit.CNPJ || forn?.cadastro?.cnpj,
+      });
+      if (dup) avisoDuplicada = dup.aviso;
+    } catch (_) { /* base sem NFCOMPRA / falha pontual */ }
+    res.json({ ok: true, sessao, fonte: out.fonte, avisoDuplicada, sefazErro: out.sefazErro || null });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.delete('/importacao/sessoes/:id', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json(importacaoStaging.deleteSessao(req.params.id));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/sessoes/:id/cancelar', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json(importacaoStaging.cancelarSessaoConfirmada(req.params.id));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/notas/:idNfcompra/cancelar', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const result = await importacaoCancel.cancelarNfCompra(req.params.idNfcompra, {
+      usuario: req.body?.usuarioNome || 'Supervisor',
+      idFuncionario: Number(req.body?.idFuncionario || 0),
+    });
+    importacaoStaging.marcarSessoesCanceladasPorNf({
+      idNfcompra: result.id_nfcompra,
+      chave: result.chave,
+    });
+    const contas = Number(result.contas_pagar_zeradas || 0);
+    const msg = result.ja_cancelada
+      ? (contas
+        ? `NF ${result.nf_numero} já estava cancelada. ${contas} conta(s) a pagar residual(is) zerada(s). Pode reimportar.`
+        : `NF ${result.nf_numero} já estava cancelada. Pode reimportar esta chave.`)
+      : `NF ${result.nf_numero} cancelada. Estoque estornado e ${contas} conta(s) a pagar zerada(s). Pode reimportar esta chave.`;
+    res.json({
+      ok: true,
+      ...result,
+      message: msg,
+    });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/sessoes/manual', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const out = await importacaoStaging.createSessaoManual(req.body || {});
     res.json(out);
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
 });
 
-router.get('/importacao/sessoes/:id', (req, res) => {
+router.post('/importacao/sessoes/:id/itens', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const out = await importacaoStaging.addItemManual(req.params.id, req.body || {});
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.put('/importacao/sessoes/:id/cabecalho', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json(importacaoStaging.updateCabecalho(req.params.id, req.body || {}));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/sessoes/:id', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    let sessao = importacaoStaging.getSessao(req.params.id);
+    if (!sessao) return res.json({ ok: false, error: 'Sessão não encontrada' });
+    if (!sessao.fornecedor && sessao.xml) {
+      const forn = await importacaoFornecedor.resolverNaImportacao(sessao.xml);
+      sessao = importacaoStaging.setFornecedor(sessao.id, forn);
+    }
+    res.json({ ok: true, sessao });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/sessoes/:id/danfe', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const sessao = importacaoStaging.getSessao(req.params.id);
+    if (!sessao) {
+      res.status(404).type('html').send('<p>Sessão não encontrada</p>');
+      return;
+    }
+    const { renderDanfeHtml } = require('./importacao-danfe');
+    res.type('html').send(renderDanfeHtml(sessao));
+  } catch (err) {
+    res.status(500).type('html').send(`<p>Erro: ${String(err.message || err)}</p>`);
+  }
+});
+
+router.get('/importacao/fornecedores', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const itens = await importacaoFornecedor.buscarFornecedores(req.query.q);
+    res.json({ ok: true, itens });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.put('/importacao/sessoes/:id/fornecedor', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const body = req.body || {};
+    const patch = {};
+    if (body.cadastro) patch.cadastro = body.cadastro;
+    if (body.id_fornec !== undefined) {
+      const id = body.id_fornec ? Number(body.id_fornec) : null;
+      patch.id_fornec = id;
+      patch.criar_novo = !id;
+      patch.origem = id ? 'manual' : 'xml';
+      if (id) {
+        const cad = await importacaoFornecedor.getFornecedorById(id);
+        if (cad) patch.cadastro = cad;
+      } else {
+        const sessaoAtual = importacaoStaging.getSessao(req.params.id);
+        const forn = await importacaoFornecedor.resolverNaImportacao(sessaoAtual?.xml || {});
+        patch.cadastro = forn.cadastro;
+      }
+    }
+    if (body.criar_novo !== undefined) patch.criar_novo = !!body.criar_novo;
+    const out = importacaoStaging.updateFornecedor(req.params.id, patch);
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/sessoes/:id/fornecedor/cadastrar', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const sessao = importacaoStaging.getSessao(req.params.id);
     if (!sessao) return res.json({ ok: false, error: 'Sessão não encontrada' });
-    res.json({ ok: true, sessao });
+    const cadastro = req.body?.cadastro || sessao.fornecedor?.cadastro;
+    const ide = sessao.xml?.ide || {};
+    const result = await importacaoFornecedor.cadastrarFornecedor(cadastro, {
+      nNF: ide.nNF,
+      serie: ide.serie,
+    });
+    const out = importacaoStaging.updateFornecedor(req.params.id, {
+      id_fornec: result.id_fornec,
+      criar_novo: false,
+      origem: result.ja_existia ? 'cadastro' : 'novo',
+      cadastro: result.cadastro,
+    });
+    res.json({
+      ...out,
+      message: result.ja_existia
+        ? 'Fornecedor já existia no cadastro e foi vinculado.'
+        : `Fornecedor cadastrado (cód. ${result.id_fornec}).`,
+    });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -1111,10 +1585,23 @@ router.put('/importacao/sessoes/:id/financeiro', (req, res) => {
   }
 });
 
-router.post('/importacao/sessoes/:id/confirmar', (req, res) => {
+router.post('/importacao/sessoes/:id/financeiro/sugerir', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
-    const out = importacaoStaging.confirmarSessao(req.params.id);
+    const out = await importacaoStaging.sugerirFinanceiroSessao(req.params.id);
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/sessoes/:id/confirmar', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const out = await importacaoStaging.confirmarSessao(req.params.id, {
+      usuario: req.body?.usuarioNome || 'Supervisor',
+      idFuncionario: Number(req.body?.idFuncionario || 0),
+    });
     res.json(out);
   } catch (err) {
     res.json({ ok: false, error: err.message });

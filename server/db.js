@@ -148,6 +148,13 @@ async function ensureSchema(db) {
     console.warn('Auditoria GESTOR_EST_ALTERACAO:', err.message);
   }
 
+  try {
+    const { ensureMtRegraTributo } = require('./importacao-mt-schema');
+    await ensureMtRegraTributo(db);
+  } catch (err) {
+    console.warn('TB_MT_REGRA_TRIBUTO:', err.message);
+  }
+
   schemaReady = true;
   await refreshTables(db);
 }

@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#1e3a5f" />
   <title>Gestor Estoque</title>
-  <link rel="stylesheet" href="styles.css?v=125" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=125" />
+  <link rel="stylesheet" href="styles.css?v=140" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=140" />
 </head>
 <body>
   <div id="app">
@@ -183,16 +183,57 @@
           </div>
         </div>
 
-        <!-- IMPORTAÇÃO NF-e (protótipo) -->
+        <!-- IMPORTAÇÃO NF-e -->
         <div id="page-importacao" class="page" hidden>
           <div class="imp-dev-banner" role="status">
             <strong>Em Desenvolvimento</strong>
             <span>Módulo em testes — disponível apenas para o supervisor até a integração com a SEFAZ ficar pronta.</span>
           </div>
+
+          <!-- Lista do dia -->
           <div id="imp-view-inicio">
+            <div class="imp-home-toolbar">
+              <div class="imp-filtro-datas">
+                <label>De <input type="date" id="imp-filtro-de" /></label>
+                <label>Até <input type="date" id="imp-filtro-ate" /></label>
+                <label>Data
+                  <select id="imp-filtro-data-campo">
+                    <option value="entrada">Entrada</option>
+                    <option value="emissao">Emissão</option>
+                  </select>
+                </label>
+                <label class="imp-filtro-grow">Nº NF <input type="search" id="imp-filtro-nnf" placeholder="Número" inputmode="numeric" autocomplete="off" /></label>
+                <label class="imp-filtro-grow">Fornecedor <input type="search" id="imp-filtro-forn" placeholder="Nome ou CNPJ" autocomplete="off" /></label>
+                <button type="button" class="btn small" id="imp-btn-filtrar">Filtrar</button>
+                <button type="button" class="btn small outline" id="imp-btn-hoje">Hoje</button>
+              </div>
+              <div class="imp-home-acoes">
+                <button type="button" class="btn primary" id="imp-btn-nova">Nova nota</button>
+                <button type="button" class="btn outline" id="imp-btn-manual">Lançamento manual</button>
+              </div>
+            </div>
+            <button type="button" class="imp-params-card" id="imp-btn-params">
+              <strong>Parâmetros CFOP / tributos</strong>
+              <span>Conversão de CFOP de entrada, CSOSN e padrões de saída (venda) para a regra tributária.</span>
+            </button>
+            <div class="imp-sessoes-panel">
+              <h3>Em conferência</h3>
+              <div id="imp-sessoes-lista"></div>
+            </div>
+            <div class="imp-sessoes-panel">
+              <h3>Notas cadastradas no período</h3>
+              <div id="imp-notas-lista"></div>
+            </div>
+          </div>
+
+          <!-- Consultar chave -->
+          <div id="imp-view-consultar" hidden>
+            <div class="imp-sessao-toolbar">
+              <button type="button" class="btn" id="imp-voltar-lista">← Voltar</button>
+            </div>
             <div class="imp-capture-card">
-              <h3>Localizar NF-e</h3>
-              <p class="hint">Digite a chave de acesso, leia o código de barras ou use a demonstração.</p>
+              <h3>Consultar NF-e</h3>
+              <p class="hint">Informe a chave (44 dígitos). Com certificado configurado, a consulta busca a nota na SEFAZ; senão use o XML anexado ou em Downloads.</p>
               <div class="imp-capture-row">
                 <div class="search-field">
                   <input id="imp-chave" type="text" inputmode="numeric" maxlength="54"
@@ -204,35 +245,56 @@
                 <button type="button" id="imp-btn-consultar" class="btn primary">Consultar</button>
               </div>
               <div class="imp-actions-inline">
+                <label class="btn outline small" style="cursor:pointer">
+                  Anexar XML
+                  <input type="file" id="imp-xml-file" accept=".xml,text/xml" hidden />
+                </label>
                 <button type="button" id="imp-btn-demo" class="btn outline small">Carregar demonstração</button>
-                <span class="hint">Protótipo: consulta simulada no servidor (sem SEFAZ ainda)</span>
+                <span class="hint">Prefira anexar o XML ou colocar o arquivo em Downloads com o nome da chave</span>
               </div>
-            </div>
-            <div class="imp-sessoes-panel">
-              <h3>Importações em andamento</h3>
-              <div id="imp-sessoes-lista"></div>
             </div>
           </div>
 
+          <!-- Parâmetros CFOP -->
+          <div id="imp-view-params" hidden>
+            <div class="imp-sessao-toolbar">
+              <button type="button" class="btn" id="imp-params-voltar">← Voltar</button>
+              <button type="button" class="btn primary" id="imp-params-salvar">Salvar parâmetros</button>
+            </div>
+            <div id="imp-params-host"></div>
+          </div>
+
+          <!-- Sessão da nota -->
           <div id="imp-view-sessao" hidden>
             <div class="imp-sessao-toolbar">
-              <button type="button" class="btn" id="imp-voltar-inicio">← Nova consulta</button>
-              <button type="button" class="btn outline" id="imp-btn-financeiro">Financeiro</button>
-              <button type="button" class="btn primary" id="imp-btn-confirmar" disabled>Confirmar gravação</button>
+              <button type="button" class="btn" id="imp-voltar-inicio">← Lista</button>
+              <button type="button" class="btn outline" id="imp-btn-ver-pdf" title="Visualizar nota">Ver PDF</button>
+              <button type="button" class="btn outline" id="imp-btn-params-sessao" title="Parâmetros CFOP">CFOP</button>
+              <button type="button" class="btn primary is-disabled" id="imp-btn-confirmar" aria-disabled="true">Confirmar gravação</button>
             </div>
-            <div id="imp-sessao-resumo"></div>
-            <div class="panel list-panel list-panel-full">
-              <div class="list-panel-head"><span>Toque no item para conferir (vinculação, preços e tributos)</span></div>
+            <div class="imp-tabs" id="imp-tabs">
+              <button type="button" class="imp-tab active" data-tab="dados">Dados da NF</button>
+              <button type="button" class="imp-tab" data-tab="itens">Itens</button>
+              <button type="button" class="imp-tab" data-tab="financeiro">Financeiro</button>
+            </div>
+            <div id="imp-tab-dados" class="imp-tab-panel">
+              <div id="imp-sessao-resumo"></div>
+              <div id="imp-fornecedor-host"></div>
+            </div>
+            <div id="imp-tab-itens" class="imp-tab-panel" hidden>
+              <div class="list-panel-head imp-itens-head">
+                <span>Toque no item para vincular, converter e parametrizar</span>
+                <button type="button" class="btn small outline" id="imp-btn-add-item" hidden>+ Item</button>
+              </div>
               <div id="imp-itens-lista"></div>
+            </div>
+            <div id="imp-tab-financeiro" class="imp-tab-panel" hidden>
+              <div id="imp-fin-host"></div>
             </div>
           </div>
 
           <div id="imp-view-item" hidden>
             <div id="imp-item-host"></div>
-          </div>
-
-          <div id="imp-view-financeiro" hidden>
-            <div id="imp-fin-host"></div>
           </div>
         </div>
 
@@ -324,10 +386,34 @@
         </div>
       </div>
     </dialog>
+
+    <dialog id="dlg-confirm" class="dlg">
+      <div class="dlg-card msg-card">
+        <p id="dlg-confirm-text"></p>
+        <div class="dlg-actions">
+          <button type="button" id="dlg-confirm-nao" class="btn">Cancelar</button>
+          <button type="button" id="dlg-confirm-sim" class="btn primary">Confirmar</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="dlg-danfe" class="dlg dlg-danfe">
+      <div class="dlg-card dlg-danfe-card">
+        <div class="dlg-danfe-bar">
+          <strong>Visualizar nota</strong>
+          <div class="dlg-danfe-actions">
+            <button type="button" id="dlg-danfe-print" class="btn small outline">Imprimir</button>
+            <button type="button" id="dlg-danfe-fechar" class="btn small">Fechar</button>
+          </div>
+        </div>
+        <iframe id="dlg-danfe-frame" title="DANFE"></iframe>
+      </div>
+    </dialog>
+
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=125"></script>
-  <script src="importacao-nfe.js?v=125"></script>
-  <script src="app.js?v=125"></script>
+  <script src="vendor/zxing-browser.min.js?v=140"></script>
+  <script src="importacao-nfe.js?v=140"></script>
+  <script src="app.js?v=140"></script>
 </body>
 </html>

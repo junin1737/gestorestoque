@@ -1103,7 +1103,8 @@ html[data-theme="escuro"] .toolbar-select select {
     overscroll-behavior: contain;
   }
   #page-dashboard,
-  #page-usuarios {
+  #page-usuarios,
+  #page-importacao {
     overflow: auto;
     -webkit-overflow-scrolling: touch;
   }

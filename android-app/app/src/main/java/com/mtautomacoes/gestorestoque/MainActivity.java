@@ -135,14 +135,28 @@ public class MainActivity extends AppCompatActivity {
         getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
             @Override
             public void handleOnBackPressed() {
-                if (browserPanel.getVisibility() == View.VISIBLE && webView.canGoBack()) {
-                    webView.goBack();
-                } else if (browserPanel.getVisibility() == View.VISIBLE) {
-                    showConnectPanel();
-                } else {
+                if (browserPanel.getVisibility() != View.VISIBLE) {
                     setEnabled(false);
                     getOnBackPressedDispatcher().onBackPressed();
+                    return;
                 }
+                webView.evaluateJavascript(
+                        "(function(){try{"
+                                + "if(typeof window.gestorHardwareBack==='function'&&window.gestorHardwareBack())return true;"
+                                + "return false;"
+                                + "}catch(e){return false;}})();",
+                        value -> {
+                            boolean handled = "true".equals(value);
+                            if (handled) return;
+                            runOnUiThread(() -> {
+                                if (webView.canGoBack()) {
+                                    webView.goBack();
+                                } else {
+                                    showConnectPanel();
+                                }
+                            });
+                        }
+                );
             }
         });
 
@@ -235,13 +249,18 @@ public class MainActivity extends AppCompatActivity {
                 + "  document.addEventListener('click',function(e){"
                 + "    var n=e.target,t=null;"
                 + "    while(n&&n!==document){"
-                + "      if(n.id==='btn-scan-barras'||n.id==='btn-scan-ficha-barras'){t=n;break;}"
+                + "      if(n.id==='btn-scan-barras'||n.id==='btn-scan-ficha-barras'"
+                + "||n.id==='imp-btn-scan-chave'||n.id==='imp-btn-scan-prod'){t=n;break;}"
                 + "      n=n.parentElement||n.parentNode;"
                 + "    }"
                 + "    if(!t||t.disabled)return;"
                 + "    e.preventDefault();e.stopImmediatePropagation();"
                 + "    if(typeof window.setGestorScanTarget==='function'){"
-                + "      window.setGestorScanTarget(t.id==='btn-scan-ficha-barras'?'ficha':'search');"
+                + "      var tgt='search';"
+                + "      if(t.id==='btn-scan-ficha-barras')tgt='ficha';"
+                + "      else if(t.id==='imp-btn-scan-chave')tgt='importacao';"
+                + "      else if(t.id==='imp-btn-scan-prod')tgt='importacao-prod';"
+                + "      window.setGestorScanTarget(tgt);"
                 + "    }"
                 + "    try{if(window.GestorApp){window.GestorApp.scanBarcode();}}catch(err){}"
                 + "  },true);"
