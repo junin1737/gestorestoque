@@ -539,6 +539,108 @@ async function getNotaById(id) {
   });
 }
 
+function numOrNull(v) {
+  if (v == null || v === '') return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Última entrada do identificador + sugestão pelos parâmetros (CFOP / regra tributo). */
+async function getSugestaoTributoEstoque(idIdentificador) {
+  const id = Number(idIdentificador);
+  if (!id) return { atual: null, ultima_entrada: null, sugestao: null };
+  const atual = await getProdutoFiscal(id);
+  let ultima = null;
+  try {
+    ultima = await withDb(async (db) => {
+    const rows = await query(db, `
+      SELECT FIRST 1
+        I.ID_NFCITEM, I.ID_NFCOMPRA, I.CFOP, I.CSOSN, I.QTD_ITEM, I.VLR_UNIT,
+        N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.ID_FORNEC, N.STATUS,
+        F.UF AS FORNEC_UF, F.NOME_FANTA AS FORNEC_FANTA,
+        C.CST_ICMS, C.ALIQ_ICMS, C.VLR_BC_ICMS, C.VLR_ICMS,
+        S.VLR_BC_ICMS_ST, S.VLR_ST, S.VLR_BC_ICMS_ST_RET, S.VLR_ICMS_ST_RET, S.ALIQ_ST_DEST,
+        P.CST_PIS, P.ALIQ_PIS, O.CST_COFINS, O.ALIQ_COFINS
+      FROM TB_NFC_ITEM I
+      JOIN TB_NFCOMPRA N ON N.ID_NFCOMPRA = I.ID_NFCOMPRA
+      LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
+      LEFT JOIN TB_NFC_ITEM_ICMS C ON C.ID_NFCITEM = I.ID_NFCITEM
+      LEFT JOIN TB_NFC_ITEM_ST S ON S.ID_NFCITEM = I.ID_NFCITEM
+      LEFT JOIN TB_NFC_ITEM_PIS P ON P.ID_NFCITEM = I.ID_NFCITEM
+      LEFT JOIN TB_NFC_ITEM_COFINS O ON O.ID_NFCITEM = I.ID_NFCITEM
+      WHERE I.ID_IDENTIFICADOR = ?
+        AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+      ORDER BY N.DT_ENTRADA DESC, I.ID_NFCITEM DESC`, [id]);
+    if (!rows[0]) return null;
+    const r = rows[0];
+    return {
+      id_nfcitem: Number(r.ID_NFCITEM),
+      id_nfcompra: Number(r.ID_NFCOMPRA),
+      nf_numero: r.NF_NUMERO,
+      nf_serie: String(r.NF_SERIE || '').trim(),
+      dt_entrada: r.DT_ENTRADA,
+      dt_emissao: r.DT_EMISSAO,
+      id_fornec: r.ID_FORNEC != null ? Number(r.ID_FORNEC) : null,
+      fornecedor_uf: String(r.FORNEC_UF || '').trim(),
+      fornecedor_nome: String(r.FORNEC_FANTA || '').trim(),
+      cfop: String(r.CFOP || '').trim(),
+      csosn: String(r.CSOSN || '').trim(),
+      qtd: numOrNull(r.QTD_ITEM),
+      vlr_unit: numOrNull(r.VLR_UNIT),
+      cst_icms: String(r.CST_ICMS || '').trim(),
+      aliq_icms: numOrNull(r.ALIQ_ICMS),
+      vlr_bc_icms: numOrNull(r.VLR_BC_ICMS),
+      vlr_icms: numOrNull(r.VLR_ICMS),
+      vlr_bc_st: numOrNull(r.VLR_BC_ICMS_ST),
+      vlr_st: numOrNull(r.VLR_ST),
+      vlr_bc_st_ret: numOrNull(r.VLR_BC_ICMS_ST_RET),
+      vlr_st_ret: numOrNull(r.VLR_ICMS_ST_RET),
+      aliq_st: numOrNull(r.ALIQ_ST_DEST),
+      cst_pis: String(r.CST_PIS || '').trim(),
+      aliq_pis: numOrNull(r.ALIQ_PIS),
+      cst_cofins: String(r.CST_COFINS || '').trim(),
+      aliq_cofins: numOrNull(r.ALIQ_COFINS),
+    };
+    });
+  } catch (err) {
+    console.warn('ultima entrada NFC:', err.message);
+    ultima = null;
+  }
+
+  let sugestao = null;
+  let regra = null;
+  if (ultima?.cfop) {
+    try {
+      const importacaoParams = require('./importacao-params');
+      const conv = await importacaoParams.mapCfopEntrada(ultima.cfop, ultima.fornecedor_uf);
+      const importacaoRegra = require('./importacao-regra');
+      regra = await importacaoRegra.buscarRegra({
+        idFornec: ultima.id_fornec,
+        idIdentificador: id,
+        cfopEntrada: conv.cfop_entrada || ultima.cfop,
+      });
+      sugestao = {
+        cfop: conv.cfop_saida || atual?.cfop || '',
+        cfop_nf: conv.cfop_cfe || atual?.cfop_nf || '',
+        csosn: (regra && regra.aplicar_saida ? regra.csosn_saida : null) || conv.csosn_saida || conv.csosn || atual?.csosn || '',
+        cst: (regra && regra.aplicar_saida ? regra.cst_saida : null) || conv.cst_saida || atual?.cst || '',
+        csosn_cfe: (regra && regra.csosn_cfe) || conv.csosn_cfe || atual?.csosn_cfe || '',
+        cst_cfe: (regra && regra.cst_cfe) || conv.cst_cfe || atual?.cst_cfe || '',
+        cst_pis: (regra && regra.cst_pis_saida) || atual?.cst_pis || '',
+        cst_cofins: (regra && regra.cst_cofins_saida) || atual?.cst_cofins || '',
+        pis: regra && regra.pis != null ? regra.pis : atual?.pis,
+        cofins: regra && regra.cofins != null ? regra.cofins : atual?.cofins,
+        id_cti: (regra && regra.id_cti) || conv.id_cti || atual?.id_cti || '',
+        id_cti_cfe: (regra && regra.id_cti_cfe) || conv.id_cti_cfe || atual?.id_cti_cfe || '',
+        origem: regra ? 'regra+parametro' : 'parametro_cfop',
+      };
+    } catch (err) {
+      sugestao = { error: err.message };
+    }
+  }
+  return { atual, ultima_entrada: ultima, sugestao, regra };
+}
+
 module.exports = {
   listNotasCadastradas,
   getNotaById,
@@ -560,5 +662,6 @@ module.exports = {
   listCsosn,
   getEmitenteFiscal,
   getProdutoFiscal,
+  getSugestaoTributoEstoque,
   toDateOnly,
 };

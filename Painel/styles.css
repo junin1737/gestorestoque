@@ -643,6 +643,14 @@ html[data-theme="escuro"] .toolbar-select select {
 }
 .tab.active { background: var(--primary-2); border-color: var(--primary-2); color: #fff; }
 .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; }
+.form-grid.side-by-side { grid-template-columns: 1fr 1fr; }
+.trib-ultima {
+  background: color-mix(in srgb, var(--primary-2) 8%, var(--card));
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.75rem;
+}
+.trib-ultima p { margin: 0.25rem 0 0; }
 .form-grid .full { grid-column: 1 / -1; }
 .qty-box {
   display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; margin-top: 0.5rem;
@@ -886,6 +894,7 @@ html[data-theme="escuro"] .toolbar-select select {
   }
   .login-brand h1 { font-size: 1.45rem; }
   .login-split, .split-panels, .form-grid, .qty-box { grid-template-columns: 1fr; }
+  .form-grid.side-by-side { grid-template-columns: 1fr 1fr; }
   .barcode-row {
     gap: 0;
   }

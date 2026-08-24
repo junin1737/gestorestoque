@@ -68,8 +68,13 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
     prcVenda = Number((prcCusto * (1 + margem / 100)).toFixed(4));
   }
   if (!(prcVenda > 0)) prcVenda = prcCusto > 0 ? prcCusto : 0.01;
-  const barras = String(sistema.cod_barras || xmlItem?.cEAN || '').trim() || null;
-  const ref = String(sistema.referencia || xmlItem?.cProd || '').trim() || null;
+  const eanXml = String(xmlItem?.cEAN || '').trim();
+  const barras = sistema.ean_em_referencia
+    ? (String(sistema.cod_barras || '').trim() || null)
+    : (String(sistema.cod_barras || eanXml).trim() || null);
+  const ref = sistema.ean_em_referencia
+    ? (String(sistema.referencia || eanXml || xmlItem?.cProd || '').trim() || null)
+    : (String(sistema.referencia || xmlItem?.cProd || '').trim() || null);
   const descCmpl = String(sistema.desc_cmpl || '').trim() || null;
   const ncm = String(sistema.ncm || xmlItem?.NCM || '').trim() || null;
   const cest = String(sistema.cest || '').trim() || null;
@@ -204,7 +209,10 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
   const ncmForm = String(sistema.ncm || '').trim();
   const ncmXml = String(xmlItem?.NCM || '').trim();
   const cest = String(sistema.cest || '').trim() || null;
-  const barras = String(sistema.cod_barras || xmlItem?.cEAN || '').trim() || null;
+  const eanXml = String(xmlItem?.cEAN || '').trim();
+  const barras = sistema.ean_em_referencia
+    ? (String(sistema.cod_barras || '').trim() || null)
+    : (String(sistema.cod_barras || eanXml).trim() || null);
   const uni = String(sistema.uni_medida_saida || sistema.uni_medida || xmlItem?.uCom || '').trim().slice(0, 6) || null;
 
   const cfopSaida = aplicarSaida ? (String(sistema.cfop_saida || '').trim().slice(0, 4) || null) : null;

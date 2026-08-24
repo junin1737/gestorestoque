@@ -800,6 +800,20 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   if ((editarVenda || state.isNovo) && $('#p-venda')) body.prc_venda = Number($('#p-venda').value);
   if ((editarCusto || state.isNovo) && $('#p-custo') && (verCusto || state.isNovo)) body.prc_custo = Number($('#p-custo').value);
   if (editarQtd && $('#q-atual')) body.qtd_atual = Number($('#q-atual').value);
+  if ($('#t-cfop')) {
+    body.cfop = $('#t-cfop').value;
+    body.cfop_nf = $('#t-cfop-nf')?.value || '';
+    body.csosn = $('#t-csosn')?.value || '';
+    body.cst = $('#t-cst')?.value || '';
+    body.csosn_cfe = $('#t-csosn-cfe')?.value || '';
+    body.cst_cfe = $('#t-cst-cfe')?.value || '';
+    body.cst_pis = $('#t-cst-pis')?.value || '';
+    body.cst_cofins = $('#t-cst-cofins')?.value || '';
+    if ($('#t-pis')) body.pis = Number($('#t-pis').value || 0);
+    if ($('#t-cofins')) body.cofins = Number($('#t-cofins').value || 0);
+    body.id_cti = $('#t-id-cti')?.value || '';
+    body.id_cti_cfe = $('#t-id-cti-cfe')?.value || '';
+  }
 
   if (!String(body.descricao || it.descricao || '').trim() && state.isNovo) {
     return showMsg('Informe a descrição do produto.');
@@ -817,6 +831,69 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   await loadEstoque();
 });
 
+function inp(id, val, dis) {
+  return `<input id="${id}" value="${escapeAttr(val == null ? '' : val)}" ${dis ? 'disabled' : ''} />`;
+}
+
+async function loadTributosProduto(it, editar) {
+  const host = $('#trib-host');
+  if (!host || !it?.id_identificador) return;
+  const res = await api(`/estoque/${it.id_identificador}/tributacao`);
+  if (!res.ok) {
+    host.innerHTML = `<p class="hint">${escapeHtml(res.error || 'Não foi possível carregar os tributos.')}</p>`;
+    return;
+  }
+  const u = res.ultima_entrada;
+  const s = res.sugestao && !res.sugestao.error ? res.sugestao : null;
+  const a = res.atual || {};
+  const val = (k) => (s && s[k] != null && s[k] !== '' ? s[k] : (a[k] != null ? a[k] : ''));
+  const dis = !editar;
+  const ultimaHtml = u
+    ? `<div class="trib-ultima">
+        <strong>Última entrada</strong>
+        <p>NF ${escapeHtml(u.nf_numero)} · ${escapeHtml(u.fornecedor_nome || '—')} · ${escapeHtml(fmtDate(u.dt_entrada))}</p>
+        <p class="hint">CFOP nota ${escapeHtml(u.cfop || '—')} · CSOSN ${escapeHtml(u.csosn || '—')} · CST ICMS ${escapeHtml(u.cst_icms || '—')}
+          ${u.vlr_st_ret ? ` · ST retido ${fmtMoney(u.vlr_st_ret)}` : ''}</p>
+        ${s ? `<p class="hint">Sugestão com base nos parâmetros (${escapeHtml(s.origem || 'parâmetro')}). Confira e grave na ficha.</p>` : '<p class="hint">Sem parâmetro de CFOP para sugerir. Preencha manualmente.</p>'}
+      </div>`
+    : '<p class="hint">Este item ainda não tem entrada em TB_NFC_ITEM. Os campos abaixo são o cadastro atual.</p>';
+  host.innerHTML = `
+    ${ultimaHtml}
+    ${s ? `<button type="button" class="btn small outline" id="btn-aplicar-sugestao-trib">Aplicar sugestão nos campos</button>` : ''}
+    <div class="form-grid side-by-side">
+      <label>CFOP saída (NFe)${inp('t-cfop', val('cfop'), dis)}</label>
+      <label>CFOP NFCe/SAT${inp('t-cfop-nf', val('cfop_nf'), dis)}</label>
+      <label>CSOSN${inp('t-csosn', val('csosn'), dis)}</label>
+      <label>CST ICMS${inp('t-cst', val('cst'), dis)}</label>
+      <label>CSOSN CFe${inp('t-csosn-cfe', val('csosn_cfe'), dis)}</label>
+      <label>CST CFe${inp('t-cst-cfe', val('cst_cfe'), dis)}</label>
+      <label>CST PIS${inp('t-cst-pis', val('cst_pis'), dis)}</label>
+      <label>CST COFINS${inp('t-cst-cofins', val('cst_cofins'), dis)}</label>
+      <label>Alíq. PIS${inp('t-pis', val('pis'), dis)}</label>
+      <label>Alíq. COFINS${inp('t-cofins', val('cofins'), dis)}</label>
+      <label>CTI (NFe)${inp('t-id-cti', val('id_cti'), dis)}</label>
+      <label>CTI CFe${inp('t-id-cti-cfe', val('id_cti_cfe'), dis)}</label>
+    </div>
+  `;
+  $('#btn-aplicar-sugestao-trib')?.addEventListener('click', () => {
+    if (!s) return;
+    const set = (id, v) => { const el = $(id); if (el && v != null) el.value = v; };
+    set('#t-cfop', s.cfop);
+    set('#t-cfop-nf', s.cfop_nf);
+    set('#t-csosn', s.csosn);
+    set('#t-cst', s.cst);
+    set('#t-csosn-cfe', s.csosn_cfe);
+    set('#t-cst-cfe', s.cst_cfe);
+    set('#t-cst-pis', s.cst_pis);
+    set('#t-cst-cofins', s.cst_cofins);
+    set('#t-pis', s.pis);
+    set('#t-cofins', s.cofins);
+    set('#t-id-cti', s.id_cti);
+    set('#t-id-cti-cfe', s.id_cti_cfe);
+    showToast('Sugestão aplicada. Grave o produto para atualizar o cadastro.');
+  });
+}
+
 function renderDetalhe() {
   const it = state.selecionado;
   if (!it) return;
@@ -832,16 +909,16 @@ function renderDetalhe() {
   $('#estoque-detalhe').innerHTML = `
     <div class="tabs">
       <button class="tab active" data-tab="ficha">Ficha</button>
-      <button class="tab" data-tab="precos">Preços</button>
-      <button class="tab" data-tab="quantidades">Quantidades</button>
+      <button class="tab" data-tab="estoque-precos">Estoque e preços</button>
+      ${!state.isNovo ? '<button class="tab" data-tab="tributos">Tributos</button>' : ''}
       ${showGrade || showSerial || showLote ? '<button class="tab" data-tab="controle">Grade / Lote / Serial</button>' : ''}
     </div>
     <div class="tab-pane" data-pane="ficha">
-      <div class="form-grid">
+      <div class="form-grid side-by-side">
         <label>ID Estoque<input value="${it.id_estoque ?? 'Novo'}" disabled /></label>
         <label>ID Identificador<input value="${it.id_identificador ?? 'Novo'}" disabled /></label>
         <label class="full">Descrição<input id="f-descricao" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
-        <label class="full">Grupo
+        <label>Grupo
           <div class="input-row">
             <select id="f-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>
               <option value="">—</option>
@@ -855,8 +932,7 @@ function renderDetalhe() {
             ${optionsUnidades(it.uni_medida)}
           </select>
         </label>
-        <label>Qtd atual<input value="${fmtNum(it.qtd_atual)}" disabled /></label>
-        <div class="full field">
+        <div class="field">
           <span>Cód. barras</span>
           <div class="input-row barcode-row">
             <input id="f-barras" value="${escapeAttr(it.cod_barras)}" ${editarFicha ? '' : 'disabled'} />
@@ -865,7 +941,7 @@ function renderDetalhe() {
         </div>
         <label>Referência<input id="f-ref" value="${escapeAttr(it.referencia)}" ${editarFicha ? '' : 'disabled'} /></label>
         <label>Status
-          <select id="f-status" ${editarFicha && !state.isNovo ? '' : (state.isNovo ? '' : 'disabled')}>
+          <select id="f-status" ${editarFicha || state.isNovo ? '' : 'disabled'}>
             <option value="A" ${String(it.status || 'A').toUpperCase() !== 'I' ? 'selected' : ''}>Ativo</option>
             <option value="I" ${String(it.status || 'A').toUpperCase() === 'I' ? 'selected' : ''}>Inativo</option>
           </select>
@@ -878,24 +954,20 @@ function renderDetalhe() {
           </button>
           <span class="hint">Altera o campo STATUS na base (Clipp e ManagePro).</span>
         </div>` : ''}
-        <label>Preço venda<input value="${fmtMoney(it.prc_venda)}" disabled /></label>
-        <label>Preço custo<input class="${verCusto ? '' : 'masked'}" value="${verCusto ? fmtMoney(it.prc_custo) : '****'}" disabled /></label>
       </div>
     </div>
-    <div class="tab-pane" data-pane="precos" hidden>
-      <div class="form-grid">
+    <div class="tab-pane" data-pane="estoque-precos" hidden>
+      <div class="form-grid side-by-side">
         <label>Preço de venda<input id="p-venda" type="number" step="0.01" value="${it.prc_venda}" ${editarVenda ? '' : 'disabled'} /></label>
         <label>Preço de custo
           <input id="p-custo" type="${editarCusto || verCusto ? 'number' : 'text'}" step="0.01"
             value="${verCusto ? it.prc_custo : '****'}" ${editarCusto ? '' : 'disabled'} class="${verCusto ? '' : 'masked'}" />
         </label>
         <p class="hint full">${verCusto ? `Margem: ${fmtMargem(it.prc_venda, it.prc_custo)}` : 'Custo oculto pela permissão do usuário.'}</p>
+        <label class="full">Quantidade atual (banco)
+          <input id="q-atual" type="number" step="0.0001" value="${it.qtd_atual}" ${editarQtd ? '' : 'disabled'} />
+        </label>
       </div>
-    </div>
-    <div class="tab-pane" data-pane="quantidades" hidden>
-      <label>Quantidade atual (banco)
-        <input id="q-atual" type="number" step="0.0001" value="${it.qtd_atual}" ${editarQtd ? '' : 'disabled'} />
-      </label>
       <div class="qty-box">
         <div class="qty-card add">
           <div>Adicionar</div>
@@ -908,6 +980,10 @@ function renderDetalhe() {
       </div>
       <div id="q-diff" class="diff-box">Diferença: 0</div>
     </div>
+    ${!state.isNovo ? `
+    <div class="tab-pane" data-pane="tributos" hidden>
+      <div id="trib-host" class="trib-host"><p class="hint">Carregando última entrada e parâmetros…</p></div>
+    </div>` : ''}
     <div class="tab-pane" data-pane="controle" hidden>
       ${showGrade ? `
         <h3 class="section-title">Grade (cor / tamanho)</h3>
@@ -954,6 +1030,7 @@ function renderDetalhe() {
       $$('.tab-pane', $('#estoque-detalhe')).forEach((p) => {
         p.hidden = p.dataset.pane !== tab.dataset.tab;
       });
+      if (tab.dataset.tab === 'tributos') loadTributosProduto(it, editarFicha);
     });
   });
 

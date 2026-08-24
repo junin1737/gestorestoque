@@ -338,11 +338,17 @@ const ImportacaoNfe = (() => {
           </div>
         </div>
         ${!cancelada ? `<div class="imp-nota-acoes">
+            <button type="button" class="btn small outline imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}">Visualizar</button>
             <button type="button" class="btn small outline imp-btn-editar-nf" data-id="${esc(n.id_nfcompra)}">Editar</button>
             <button type="button" class="btn small outline imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}">Cancelar</button>
-          </div>` : ''}
+          </div>` : `<div class="imp-nota-acoes">
+            <button type="button" class="btn small outline imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}">Visualizar</button>
+          </div>`}
       </div>`;
     }).join('');
+    $$('.imp-btn-ver-nf', box).forEach((btn) => {
+      btn.addEventListener('click', () => abrirDanfeNota(btn.dataset.id));
+    });
     $$('.imp-btn-editar-nf', box).forEach((btn) => {
       btn.addEventListener('click', async () => {
         const res = await api(`/importacao/notas/${btn.dataset.id}/editar`, { method: 'POST', body: {} });
@@ -691,6 +697,24 @@ const ImportacaoNfe = (() => {
       $('#dlg-danfe-print')?.addEventListener('click', () => {
         try { frame.contentWindow?.print(); } catch { /* ignore */ }
       }, { once: true });
+      if (!dlg.open) dlg.showModal();
+      return;
+    }
+    const win = window.open(url, '_blank');
+    if (!win) deps.showMsg?.('Permita pop-ups para visualizar o PDF da nota.');
+  }
+
+  function abrirDanfeNota(idNf) {
+    if (!idNf) {
+      deps.showMsg?.('Nota inválida.');
+      return;
+    }
+    const supervisor = deps.isSupervisor?.() ? '1' : '0';
+    const url = `/api/importacao/notas/${encodeURIComponent(idNf)}/danfe?supervisor=${supervisor}`;
+    const dlg = $('#dlg-danfe');
+    const frame = $('#dlg-danfe-frame');
+    if (dlg && frame) {
+      frame.src = url;
       if (!dlg.open) dlg.showModal();
       return;
     }
@@ -2106,6 +2130,54 @@ const ImportacaoNfe = (() => {
     }
   }
 
+  async function startCriarNovoProduto(it) {
+    const ean = String(it?.xml?.cEAN || it?.xml?.cEANTrib || '').replace(/\D/g, '');
+    const baseNovo = {
+      id_identificador: null,
+      id_estoque: null,
+      criar_novo: true,
+      descricao: it?.xml?.xProd || '',
+      cod_fornecedor: it?.xml?.cProd || '',
+      ncm: it?.xml?.NCM || '',
+    };
+    if (ean && ean !== 'SEMGTIN' && ean.length >= 8) {
+      try {
+        const res = await api(`/estoque/codigo-barras?code=${encodeURIComponent(ean)}`);
+        const found = res.item;
+        if (found?.id_identificador) {
+          const vincular = await askConfirm(
+            `O código de barras ${ean} já existe no estoque: ${found.descricao} (ID ${found.id_identificador}). Deseja vincular a este produto da nota?`,
+            { okLabel: 'Vincular', cancelLabel: 'Cadastrar novo' }
+          );
+          if (vincular) {
+            await applyVinculo({
+              id_identificador: found.id_identificador,
+              id_estoque: found.id_estoque,
+              descricao: found.descricao,
+              cod_barras: found.cod_barras,
+              criar_novo: false,
+            });
+            return;
+          }
+          await applyVinculo({
+            ...baseNovo,
+            cod_barras: '',
+            referencia: ean,
+            ean_em_referencia: true,
+          });
+          deps.showMsg?.(
+            `Você optou por não vincular. O código de barras da nota (${ean}) será gravado em Referência, não no código de barras, para evitar duplicidade.`
+          );
+          return;
+        }
+      } catch (_) { /* segue cadastro novo */ }
+    }
+    await applyVinculo({
+      ...baseNovo,
+      cod_barras: it?.xml?.cEAN || '',
+    });
+  }
+
   async function applyVinculo(patch) {
     const it = itemAt(state.itemIndex);
     if (!it) return;
@@ -2729,17 +2801,7 @@ const ImportacaoNfe = (() => {
         if (sel === '#imp-venda') recalcCbsIbsFromInputs();
       });
     });
-    $('#imp-criar-novo')?.addEventListener('click', () => {
-      applyVinculo({
-        id_identificador: null,
-        id_estoque: null,
-        criar_novo: true,
-        descricao: it.xml?.xProd || '',
-        cod_barras: it.xml?.cEAN || '',
-        cod_fornecedor: it.xml?.cProd || '',
-        ncm: it.xml?.NCM || '',
-      });
-    });
+    $('#imp-criar-novo')?.addEventListener('click', () => startCriarNovoProduto(it));
     $('#imp-limpar-vinc')?.addEventListener('click', async () => {
       const item = itemAt(state.itemIndex);
       if (!item) return;
@@ -3396,8 +3458,7 @@ const ImportacaoNfe = (() => {
     });
 
     $('#imp-voltar-inicio')?.addEventListener('click', () => {
-      showView('inicio');
-      loadHome();
+      leaveSessaoToHome();
     });
   }
 
@@ -3442,6 +3503,24 @@ const ImportacaoNfe = (() => {
     return true;
   }
 
+  async function leaveSessaoToHome() {
+    const s = state.sessao;
+    if (s?.editar_id_nfcompra && s.id) {
+      const ok = await askConfirm(
+        'Descartar as alterações e voltar? A nota cadastrada permanece como estava (nada será gravado).',
+        { okLabel: 'Sim, descartar', cancelLabel: 'Continuar' }
+      );
+      if (!ok) return false;
+      try {
+        await api(`/importacao/sessoes/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+      } catch (_) { /* ignore */ }
+    }
+    state.sessao = null;
+    showView('inicio');
+    loadHome();
+    return true;
+  }
+
   /** Volta uma tela no fluxo de importação. Retorna true se tratou o back. */
   function handleBack() {
     if (state.view === 'item') {
@@ -3451,9 +3530,7 @@ const ImportacaoNfe = (() => {
       return true;
     }
     if (state.view === 'sessao') {
-      state.sessao = null;
-      showView('inicio');
-      loadHome();
+      leaveSessaoToHome();
       return true;
     }
     if (state.view === 'consultar' || state.view === 'params') {

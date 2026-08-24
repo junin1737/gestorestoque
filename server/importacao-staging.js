@@ -1086,4 +1086,5 @@ module.exports = {
   cancelarSessaoConfirmada,
   marcarSessoesCanceladasPorNf,
   findXmlFileByChave,
+  resolveXmlPayload,
 };

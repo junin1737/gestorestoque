@@ -463,6 +463,16 @@ router.get('/estoque/codigo-barras', async (req, res) => {
   }
 });
 
+router.get('/estoque/:idIdentificador/tributacao', async (req, res) => {
+  try {
+    const notasMod = require('./importacao-notas');
+    const data = await notasMod.getSugestaoTributoEstoque(req.params.idIdentificador);
+    res.json({ ok: true, ...data });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/estoque/:idIdentificador', async (req, res) => {
   try {
     const id = Number(req.params.idIdentificador);
@@ -742,6 +752,14 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
           estParams.push(body.id_grupo === null || body.id_grupo === '' ? null : Number(body.id_grupo));
         }
         if (body.uni_medida !== undefined) { estSets.push('UNI_MEDIDA = ?'); estParams.push(String(body.uni_medida)); }
+        if (body.cfop !== undefined) { estSets.push('CFOP = ?'); estParams.push(String(body.cfop || '').trim() || null); }
+        if (body.cfop_nf !== undefined) { estSets.push('CFOP_NF = ?'); estParams.push(String(body.cfop_nf || '').trim() || null); }
+        if (body.cst_pis !== undefined) { estSets.push('CST_PIS = ?'); estParams.push(String(body.cst_pis || '').trim() || null); }
+        if (body.cst_cofins !== undefined) { estSets.push('CST_COFINS = ?'); estParams.push(String(body.cst_cofins || '').trim() || null); }
+        if (body.pis !== undefined) { estSets.push('PIS = ?'); estParams.push(Number(body.pis || 0)); }
+        if (body.cofins !== undefined) { estSets.push('COFINS = ?'); estParams.push(Number(body.cofins || 0)); }
+        if (body.id_cti !== undefined) { estSets.push('ID_CTI = ?'); estParams.push(String(body.id_cti || '').trim() || null); }
+        if (body.id_cti_cfe !== undefined) { estSets.push('ID_CTI_CFE = ?'); estParams.push(String(body.id_cti_cfe || '').trim() || null); }
         if (body.prc_venda !== undefined) { estSets.push('PRC_VENDA = ?'); estParams.push(Number(body.prc_venda)); }
         if (body.prc_custo !== undefined) { estSets.push('PRC_CUSTO = ?'); estParams.push(Number(body.prc_custo)); }
         if (body.grade_serie !== undefined) { estSets.push('GRADE_SERIE = ?'); estParams.push(String(body.grade_serie)); }
@@ -761,6 +779,10 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
         if (body.cod_barras !== undefined) { prodSets.push('COD_BARRA = ?'); prodParams.push(String(body.cod_barras)); }
         if (body.referencia !== undefined) { prodSets.push('REFERENCIA = ?'); prodParams.push(String(body.referencia)); }
         if (body.desc_cmpl !== undefined) { prodSets.push('DESC_CMPL = ?'); prodParams.push(String(body.desc_cmpl)); }
+        if (body.cst !== undefined) { prodSets.push('CST = ?'); prodParams.push(String(body.cst || '').trim() || null); }
+        if (body.csosn !== undefined) { prodSets.push('CSOSN = ?'); prodParams.push(String(body.csosn || '').trim() || null); }
+        if (body.cst_cfe !== undefined) { prodSets.push('CST_CFE = ?'); prodParams.push(String(body.cst_cfe || '').trim() || null); }
+        if (body.csosn_cfe !== undefined) { prodSets.push('CSOSN_CFE = ?'); prodParams.push(String(body.csosn_cfe || '').trim() || null); }
         if (body.id_nivel1 !== undefined) {
           prodSets.push('ID_NIVEL1 = ?');
           prodParams.push(body.id_nivel1 === '' || body.id_nivel1 == null ? null : Number(body.id_nivel1));
@@ -1102,6 +1124,14 @@ router.get('/importacao/notas', async (req, res) => {
         return nome.includes(fornQ);
       });
     }
+    const de = String(req.query.de || '').slice(0, 10);
+    const ate = String(req.query.ate || '').slice(0, 10);
+    if (!nnf && de && ate) {
+      sessoes = sessoes.filter((s) => {
+        const d = String(s.xml?.ide?.dhEmi || s.createdAt || '').slice(0, 10);
+        return d >= de && d <= ate;
+      });
+    }
     const confirmadas = importacaoStaging.listSessoesConfirmadas();
     res.json({ ok: true, notas, sessoes, confirmadas });
   } catch (err) {
@@ -1419,6 +1449,33 @@ router.post('/importacao/sessoes/:id/cancelar', (req, res) => {
     res.json(importacaoStaging.cancelarSessaoConfirmada(req.params.id));
   } catch (err) {
     res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/notas/:idNfcompra/danfe', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const nota = await importacaoNotas.getNotaById(req.params.idNfcompra);
+    if (!nota) {
+      res.status(404).type('html').send('<p>Nota não encontrada</p>');
+      return;
+    }
+    const chave = String(nota.nfe_origem || '').replace(/\D/g, '');
+    if (chave.length !== 44) {
+      res.status(400).type('html').send('<p>Esta nota não possui chave de acesso para o DANFE.</p>');
+      return;
+    }
+    const { xml } = await importacaoStaging.resolveXmlPayload({ chave, allowDemo: false });
+    const sessao = {
+      chave,
+      xml,
+      itens: (xml.itens || []).map((xi) => ({ xml: xi, sistema: {} })),
+      financeiro: { parcelas: xml.cobr?.dup || [] },
+    };
+    const { renderDanfeHtml } = require('./importacao-danfe');
+    res.type('html').send(renderDanfeHtml(sessao));
+  } catch (err) {
+    res.status(500).type('html').send(`<p>Erro: ${String(err.message || err)}</p>`);
   }
 });
 
