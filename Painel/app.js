@@ -195,38 +195,116 @@ function initUiScale() {
 }
 
 function applyTheme(tema, logoUrl) {
+  const logo = logoUrl || state.emitente?.logo;
   document.documentElement.setAttribute('data-theme', tema || 'claro');
-  if (tema === 'empresa' && logoUrl) {
-    extractAccent(logoUrl).then((color) => {
-      document.documentElement.style.setProperty('--empresa-accent', color || '#1e3a5f');
+  if (tema === 'empresa' && logo) {
+    extractAccent(logo).then((color) => {
+      if (!color) return;
+      document.documentElement.style.setProperty('--empresa-accent', color);
     });
+  } else {
+    document.documentElement.style.removeProperty('--empresa-accent');
   }
 }
 
+function rgbToHex(r, g, b) {
+  const h = (n) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
+  return `#${h(r)}${h(g)}${h(b)}`;
+}
+
+function chromaOf(r, g, b) {
+  return Math.max(r, g, b) - Math.min(r, g, b);
+}
+
+function boostAccent(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  if (max <= 0) return [r, g, b];
+  const sat = (max - min) / max;
+  const target = Math.min(1, sat * 1.35 + 0.12);
+  const scale = max === min ? 1 : (target * max) / (max - min);
+  return [
+    max - (max - r) * scale,
+    max - (max - g) * scale,
+    max - (max - b) * scale,
+  ];
+}
+
+/** Cor mais forte da logo (ignora branco/preto/cinza). */
 function extractAccent(url) {
   return new Promise((resolve) => {
     const img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = () => {
       try {
+        const size = 64;
         const c = document.createElement('canvas');
-        c.width = 16; c.height = 16;
-        const ctx = c.getContext('2d');
-        ctx.drawImage(img, 0, 0, 16, 16);
-        const data = ctx.getImageData(0, 0, 16, 16).data;
-        let r = 0, g = 0, b = 0, n = 0;
+        c.width = size;
+        c.height = size;
+        const ctx = c.getContext('2d', { willReadFrequently: true });
+        ctx.drawImage(img, 0, 0, size, size);
+        const data = ctx.getImageData(0, 0, size, size).data;
+        const buckets = new Map();
+        let fallbackR = 0;
+        let fallbackG = 0;
+        let fallbackB = 0;
+        let fallbackN = 0;
         for (let i = 0; i < data.length; i += 4) {
-          if (data[i + 3] < 128) continue;
-          r += data[i]; g += data[i + 1]; b += data[i + 2]; n++;
+          const a = data[i + 3];
+          if (a < 140) continue;
+          const r = data[i];
+          const g = data[i + 1];
+          const b = data[i + 2];
+          const mx = Math.max(r, g, b);
+          const mn = Math.min(r, g, b);
+          if (mx < 28) continue;
+          if (mn > 232) continue;
+          fallbackR += r;
+          fallbackG += g;
+          fallbackB += b;
+          fallbackN++;
+          const ch = mx - mn;
+          if (ch < 36) continue;
+          const key = `${r >> 4},${g >> 4},${b >> 4}`;
+          let bucket = buckets.get(key);
+          if (!bucket) {
+            bucket = {
+              n: 0, r: 0, g: 0, b: 0, chroma: 0,
+            };
+            buckets.set(key, bucket);
+          }
+          bucket.n += 1;
+          bucket.r += r;
+          bucket.g += g;
+          bucket.b += b;
+          bucket.chroma += ch;
         }
-        if (!n) return resolve('#1e3a5f');
-        r = Math.round(r / n); g = Math.round(g / n); b = Math.round(b / n);
-        resolve(`rgb(${r}, ${g}, ${b})`);
+        let best = null;
+        for (const bucket of buckets.values()) {
+          const score = bucket.n * (bucket.chroma / bucket.n);
+          if (!best || score > best.score) best = { score, bucket };
+        }
+        let r;
+        let g;
+        let b;
+        if (best) {
+          r = best.bucket.r / best.bucket.n;
+          g = best.bucket.g / best.bucket.n;
+          b = best.bucket.b / best.bucket.n;
+        } else if (fallbackN) {
+          r = fallbackR / fallbackN;
+          g = fallbackG / fallbackN;
+          b = fallbackB / fallbackN;
+        } else {
+          return resolve('#b71c1c');
+        }
+        [r, g, b] = boostAccent(r, g, b);
+        resolve(rgbToHex(r, g, b));
       } catch {
-        resolve('#1e3a5f');
+        resolve('#b71c1c');
       }
     };
-    img.onerror = () => resolve('#1e3a5f');
+    img.onerror = () => resolve('#b71c1c');
     img.src = url;
   });
 }
@@ -282,6 +360,7 @@ function setEmitenteUI(emitente) {
   } catch {
     /* APK antigo ou logo grande demais para a ponte */
   }
+  if (state.config?.tema === 'empresa') applyTheme('empresa', state.emitente.logo);
 }
 
 async function bootstrap() {

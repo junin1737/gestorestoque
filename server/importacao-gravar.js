@@ -412,12 +412,34 @@ async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe
 
   const vBcSt = Number(trib.v_bc_st || xmlImp.vBCST || 0);
   const vSt = Number(trib.v_icms_st || xmlImp.vICMSST || 0);
-  if (vBcSt > 0 || vSt > 0) {
+  const vBcStRet = Number(trib.v_bc_st_ret || xmlImp.vBCSTRet || 0);
+  const vStRet = Number(trib.v_icms_st_ret || xmlImp.vICMSSTRet || 0);
+  const mva = Number(trib.p_mva_st || xmlImp.pMVAST || 0);
+  const aliqDest = Number(trib.p_st || xmlImp.pST || 0);
+  const aliqOrig = Number(trib.p_icms_st || xmlImp.pICMSST || aliqDest);
+  const cstSt = String(cstIcms || '').replace(/\D/g, '').padStart(3, '0');
+  const csosnSt = String(trib.csosn || xmlImp.CSOSN || '').replace(/\D/g, '');
+  const stCst = /^(010|030|060|070|090)$/.test(cstSt) || /^(201|202|203|500)$/.test(csosnSt);
+  if (vBcSt > 0 || vSt > 0 || vBcStRet > 0 || vStRet > 0 || stCst) {
+    const informa = (vBcSt > 0 || vSt > 0) ? 'S' : 'N';
     try {
       await query(db, `
-        INSERT INTO TB_NFC_ITEM_ST
-          (ID_NFCITEM, POR_BC_ICMS_ST, VLR_BC_ICMS_ST, MVA, VLR_ST, INFORMA_ST)
-        VALUES (?, 100, ?, 0, ?, 'S')`, [idNfcItem, vBcSt, vSt]);
+        INSERT INTO TB_NFC_ITEM_ST (
+          ID_NFCITEM, POR_BC_ICMS_ST, VLR_BC_ICMS_ST, MVA, VLR_ST,
+          ALIQ_ST_DEST, ALIQ_ST_ORIG, INFORMA_ST, ICMS_EFETIVO,
+          VLR_BC_ICMS_ST_RET, VLR_ICMS_ST_RET
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?)`, [
+        idNfcItem,
+        vBcSt > 0 ? 100 : 0,
+        vBcSt,
+        mva,
+        vSt,
+        aliqDest,
+        aliqOrig || aliqDest,
+        informa,
+        vBcStRet,
+        vStRet,
+      ]);
     } catch (e) {
       console.warn('ST item:', e.message);
     }

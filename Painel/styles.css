@@ -42,8 +42,9 @@ html[data-theme="escuro"] {
 
 html[data-theme="empresa"] {
   --primary: var(--empresa-accent);
-  --primary-2: var(--empresa-accent);
-  --sidebar: color-mix(in srgb, var(--empresa-accent) 85%, #000);
+  --primary-2: color-mix(in srgb, var(--empresa-accent) 70%, #fff);
+  --sidebar: color-mix(in srgb, var(--empresa-accent) 82%, #000);
+  --ok: color-mix(in srgb, var(--empresa-accent) 55%, #1b7f4a);
 }
 
 * { box-sizing: border-box; }
