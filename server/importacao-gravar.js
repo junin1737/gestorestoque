@@ -629,10 +629,11 @@ async function gravarNfCompra(sessao, {
   if (Number(sessao.editar_id_nfcompra)) {
     const idNf = Number(sessao.editar_id_nfcompra);
     return withDb(async (db, appCfg) => {
+      const lock = await nfFinanceiroBloqueado(db, idNf);
       const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
         ? fin.parcelas
         : [];
-      if (parcelasXml.length) {
+      if (parcelasXml.length && !lock.bloqueado) {
         try {
           const contas = await query(db, `
             SELECT C.ID_CTAPAG
@@ -923,4 +924,34 @@ async function gravarNfCompra(sessao, {
   });
 }
 
-module.exports = { gravarNfCompra };
+async function nfFinanceiroBloqueado(db, idNf) {
+  const id = Number(idNf);
+  if (!id) return { bloqueado: false, motivo: '' };
+  try {
+    const contas = await query(db, `
+      SELECT C.ID_CTAPAG, C.TIP_CTAPAG, C.VLR_CTAPAG
+      FROM TB_NFC_CTAPAG L
+      JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = L.ID_CTAPAG
+      WHERE L.ID_NFCOMPRA = ?`, [id]);
+    for (const c of contas) {
+      const tip = String(c.TIP_CTAPAG || '').trim().toUpperCase();
+      if (tip === 'P' || tip === 'Q' || tip === 'B') {
+        return { bloqueado: true, motivo: 'Há parcela recebida. Estorne no financeiro do Clipp antes de alterar o financeiro desta nota.' };
+      }
+      const baixas = await query(db, `
+        SELECT FIRST 1 ID_BAIXA, VLR_PAGO, TIP_PAGTO
+        FROM TB_CTAPAG_BAIXA
+        WHERE ID_CTAPAG = ?
+          AND UPPER(TRIM(COALESCE(TIP_PAGTO, ''))) NOT IN ('C', '')
+          AND COALESCE(VLR_PAGO, 0) > 0.009`, [Number(c.ID_CTAPAG)]);
+      if (baixas[0]) {
+        return { bloqueado: true, motivo: 'Há parcela recebida. Estorne no financeiro do Clipp antes de alterar o financeiro desta nota.' };
+      }
+    }
+  } catch (e) {
+    console.warn('Checagem financeiro NF:', e.message);
+  }
+  return { bloqueado: false, motivo: '' };
+}
+
+module.exports = { gravarNfCompra, upsertEstTributosReforma, nfFinanceiroBloqueado };

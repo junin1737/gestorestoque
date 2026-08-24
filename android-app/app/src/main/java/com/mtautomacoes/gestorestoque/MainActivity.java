@@ -2,8 +2,11 @@ package com.mtautomacoes.gestorestoque;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.print.PrintAttributes;
+import android.print.PrintManager;
 import android.graphics.Bitmap;
 import android.os.Bundle;
 import android.view.KeyEvent;
@@ -484,6 +487,34 @@ public class MainActivity extends AppCompatActivity {
         public void setEmitente(String nome, String logoDataUrl) {
             runOnUiThread(() -> EmitenteIcon.applyFromJs(
                     MainActivity.this, imgEmitente, txtEmpresa, nome, logoDataUrl));
+        }
+
+        @JavascriptInterface
+        public void printHtml(String title, String html) {
+            final String t = (title == null || title.isEmpty()) ? "relatorio" : title;
+            final String h = html == null ? "" : html;
+            runOnUiThread(() -> {
+                WebView printer = new WebView(MainActivity.this);
+                printer.setWebViewClient(new WebViewClient() {
+                    @Override
+                    public void onPageFinished(WebView view, String url) {
+                        PrintManager pm = (PrintManager) getSystemService(PRINT_SERVICE);
+                        if (pm == null) return;
+                        pm.print(t, view.createPrintDocumentAdapter(t),
+                                new PrintAttributes.Builder().build());
+                    }
+                });
+                printer.loadDataWithBaseURL("https://local/", h, "text/html", "UTF-8", null);
+            });
+        }
+
+        @JavascriptInterface
+        public void shareText(String title, String text) {
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_SUBJECT, title);
+            send.putExtra(Intent.EXTRA_TEXT, text);
+            startActivity(Intent.createChooser(send, title));
         }
     }
 }

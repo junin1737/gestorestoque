@@ -423,6 +423,10 @@ function mapSessaoForClient(s) {
   if (s.id_nfcompra != null) out.id_nfcompra = s.id_nfcompra;
   if (s.editar_id_nfcompra != null) out.editar_id_nfcompra = s.editar_id_nfcompra;
   if (s.financeiro_ok) out.financeiro_ok = true;
+  if (s.financeiro_bloqueado) {
+    out.financeiro_bloqueado = true;
+    out.financeiro_bloqueado_motivo = s.financeiro_bloqueado_motivo || '';
+  }
   if (s.sefazErro) out.sefazErro = s.sefazErro;
   out.dt_entrada = s.dt_entrada || null;
   return out;
@@ -445,9 +449,30 @@ async function aplicarVinculosSessao(sessaoId) {
   if (!s) return null;
   const { aplicarSugestoesVinculo } = require('./importacao-vinculo');
   await aplicarSugestoesVinculo(s);
+  if (s.editar_id_nfcompra) {
+    await reaplicarParamsTributoSessao(s);
+  }
   s.updatedAt = new Date().toISOString();
   saveStore(store);
   return mapSessaoForClient(s);
+}
+
+async function reaplicarParamsTributoSessao(s) {
+  const uf = s.xml?.emit?.enderEmit?.UF || '';
+  const saidaPad = importacaoParams.getSaidaPadrao();
+  for (const it of s.itens || []) {
+    const conv = await importacaoParams.mapCfopEntrada(it.xml?.CFOP, uf);
+    if (!it.sistema) continue;
+    if (conv.cfop_entrada) it.sistema.cfop = conv.cfop_entrada;
+    if (conv.csosn) it.sistema.csosn = conv.csosn;
+    it.sistema.cfop_saida = conv.cfop_saida || saidaPad.cfop_saida || it.sistema.cfop_saida;
+    it.sistema.csosn_saida = conv.csosn_saida || saidaPad.csosn_saida || it.sistema.csosn_saida;
+    it.sistema.cst_saida = conv.cst_saida || it.sistema.cst_saida;
+    it.sistema.cfop_nf = conv.cfop_cfe || it.sistema.cfop_nf;
+    it.sistema.csosn_cfe = conv.csosn_cfe || it.sistema.csosn_cfe;
+    it.sistema.cst_cfe = conv.cst_cfe || it.sistema.cst_cfe;
+    if (saidaPad.aplicar_saida) it.sistema.aplicar_saida = saidaPad.aplicar_saida;
+  }
 }
 
 function updateFornecedor(sessaoId, patch) {
@@ -763,6 +788,20 @@ async function createSessao(opts = {}) {
   };
 
   store.sessoes.unshift(sessao);
+  if (editarId) {
+    try {
+      const { nfFinanceiroBloqueado } = require('./importacao-gravar');
+      const { withDb } = require('./db');
+      const lock = await withDb((db) => nfFinanceiroBloqueado(db, editarId));
+      if (lock.bloqueado) {
+        sessao.financeiro_bloqueado = true;
+        sessao.financeiro_bloqueado_motivo = lock.motivo;
+        saveStore(store);
+      }
+    } catch (e) {
+      console.warn('Financeiro bloqueado (edição):', e.message);
+    }
+  }
   saveStore(store);
   return { ok: true, sessao: mapSessaoForClient(sessao), fonte, sefazErro: sefazErro || null };
 }

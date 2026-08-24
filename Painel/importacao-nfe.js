@@ -714,6 +714,32 @@ const ImportacaoNfe = (() => {
     });
   }
 
+  let danfeDlgBound = false;
+
+  function bindDanfeDialog() {
+    if (danfeDlgBound) return;
+    const dlg = $('#dlg-danfe');
+    const frame = $('#dlg-danfe-frame');
+    if (!dlg || !frame) return;
+    danfeDlgBound = true;
+    const fechar = () => {
+      try {
+        frame.src = 'about:blank';
+        if (dlg.open) dlg.close();
+      } catch { /* ignore */ }
+    };
+    $('#dlg-danfe-fechar')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      fechar();
+    });
+    $('#dlg-danfe-print')?.addEventListener('click', () => {
+      try { frame.contentWindow?.print(); } catch { /* ignore */ }
+    });
+    dlg.addEventListener('close', () => {
+      try { frame.src = 'about:blank'; } catch { /* ignore */ }
+    });
+  }
+
   function abrirDanfePdf() {
     const id = state.sessao?.id;
     if (!id) {
@@ -722,20 +748,11 @@ const ImportacaoNfe = (() => {
     }
     const supervisor = deps.isSupervisor?.() ? '1' : '0';
     const url = `/api/importacao/sessoes/${encodeURIComponent(id)}/danfe?supervisor=${supervisor}`;
+    bindDanfeDialog();
     const dlg = $('#dlg-danfe');
     const frame = $('#dlg-danfe-frame');
     if (dlg && frame) {
       frame.src = url;
-      const fechar = () => {
-        try {
-          frame.src = 'about:blank';
-          dlg.close();
-        } catch { /* ignore */ }
-      };
-      $('#dlg-danfe-fechar')?.addEventListener('click', fechar, { once: true });
-      $('#dlg-danfe-print')?.addEventListener('click', () => {
-        try { frame.contentWindow?.print(); } catch { /* ignore */ }
-      }, { once: true });
       if (!dlg.open) dlg.showModal();
       return;
     }
@@ -750,6 +767,7 @@ const ImportacaoNfe = (() => {
     }
     const supervisor = deps.isSupervisor?.() ? '1' : '0';
     const url = `/api/importacao/notas/${encodeURIComponent(idNf)}/danfe?supervisor=${supervisor}`;
+    bindDanfeDialog();
     const dlg = $('#dlg-danfe');
     const frame = $('#dlg-danfe-frame');
     if (dlg && frame) {
@@ -1188,6 +1206,16 @@ const ImportacaoNfe = (() => {
         </div>
       </div>
     `;
+    if (s.financeiro_bloqueado) {
+      const warn = document.createElement('p');
+      warn.className = 'hint erro';
+      warn.textContent = s.financeiro_bloqueado_motivo
+        || 'Há parcela recebida. Estorne no financeiro do Clipp antes de alterar o financeiro desta nota.';
+      host.prepend(warn);
+      host.querySelectorAll('input, select, button').forEach((el) => {
+        el.disabled = true;
+      });
+    }
     $('#imp-fmpag')?.addEventListener('change', async (e) => {
       const id = e.target.value;
       await loadParcelamentos(id);
@@ -2979,6 +3007,12 @@ const ImportacaoNfe = (() => {
         loadProdutosBusca(e.target.value);
         e.target.blur();
       }
+    });
+    $('#imp-busca-prod')?.addEventListener('search', (e) => {
+      e.preventDefault();
+      clearTimeout(buscaProdTimer);
+      loadProdutosBusca(e.target.value);
+      e.target.blur();
     });
     $('#imp-ncm')?.addEventListener('change', () => {
       const disp = $('#imp-cest-disp');

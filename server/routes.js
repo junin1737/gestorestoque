@@ -497,6 +497,18 @@ router.get('/estoque/:idIdentificador', async (req, res) => {
       );
       if (!rows.length) return null;
       const item = mapProdutoRow(rows[0]);
+      try {
+        const fiscal = await importacaoNotas.getProdutoFiscal(id);
+        if (fiscal) {
+          item.ncm = fiscal.ncm;
+          item.cest = fiscal.cest;
+          item.anp = fiscal.anp;
+          item.trib_nfe = fiscal.trib_nfe;
+          item.trib_nfce = fiscal.trib_nfce;
+          item.cfop = fiscal.cfop;
+          item.csosn = fiscal.csosn;
+        }
+      } catch { /* ignore */ }
       item.lotes = [];
       item.seriais = [];
       if (item.controla_lote) {
@@ -783,6 +795,8 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
         if (body.csosn !== undefined) { prodSets.push('CSOSN = ?'); prodParams.push(String(body.csosn || '').trim() || null); }
         if (body.cst_cfe !== undefined) { prodSets.push('CST_CFE = ?'); prodParams.push(String(body.cst_cfe || '').trim() || null); }
         if (body.csosn_cfe !== undefined) { prodSets.push('CSOSN_CFE = ?'); prodParams.push(String(body.csosn_cfe || '').trim() || null); }
+        if (body.ncm !== undefined) { prodSets.push('COD_NCM = ?'); prodParams.push(String(body.ncm || '').replace(/\D/g, '').slice(0, 8) || null); }
+        if (body.cest !== undefined) { prodSets.push('COD_CEST = ?'); prodParams.push(String(body.cest || '').replace(/\D/g, '').slice(0, 7) || null); }
         if (body.id_nivel1 !== undefined) {
           prodSets.push('ID_NIVEL1 = ?');
           prodParams.push(body.id_nivel1 === '' || body.id_nivel1 == null ? null : Number(body.id_nivel1));
@@ -855,6 +869,18 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
         }
 
         updated = { id_identificador: id, id_estoque: idEstoque };
+      }
+
+      if (updated && (body.trib_nfe || body.trib_nfce)) {
+        try {
+          const { upsertEstTributosReforma } = require('./importacao-gravar');
+          await upsertEstTributosReforma(db, id, {
+            trib_nfe: body.trib_nfe || {},
+            trib_nfce: body.trib_nfce || {},
+          });
+        } catch (e) {
+          console.warn('Reforma tributária (cadastro):', e.message);
+        }
       }
 
       if (updated && snapshotAntes && snapshotDepois) {
@@ -947,6 +973,7 @@ router.get('/alteracoes', async (req, res) => {
 
       const wantQty = tipo === 'todos' || tipo === 'quantidade';
       const wantGestor = tipo === 'todos' || ['ficha', 'precos', 'cadastro'].includes(tipo);
+      const wantNotas = tipo === 'todos' || tipo === 'notas';
 
       if (wantQty && hasTable(t.saldo)) {
         const hasObs = await columnExists(db, t.saldo, 'OBSERVACAO');
@@ -1034,6 +1061,43 @@ router.get('/alteracoes', async (req, res) => {
             params
           );
           itens.push(...rows.map(mapGestorAlteracao));
+        }
+      }
+
+      if (wantNotas) {
+        try {
+          const nfRows = await query(db, `
+            SELECT FIRST 200
+              N.ID_NFCOMPRA, N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.STATUS,
+              F.NOME_FANTA AS FORNEC_FANTA, F.NOME AS FORNEC_NOME
+            FROM TB_NFCOMPRA N
+            LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
+            WHERE N.DT_ENTRADA >= DATEADD(-${dias} DAY TO CURRENT_DATE)
+              AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+            ORDER BY N.DT_ENTRADA DESC, N.ID_NFCOMPRA DESC`);
+          itens.push(...nfRows.map((r) => ({
+            id: `nf-${Number(r.ID_NFCOMPRA)}`,
+            origem: 'nota',
+            tipo: 'notas',
+            data: r.DT_ENTRADA,
+            hora: null,
+            data_hora: null,
+            id_identificador: null,
+            id_estoque: Number(r.ID_NFCOMPRA),
+            descricao: `NF ${r.NF_NUMERO}/${String(r.NF_SERIE || '').trim()}`,
+            uni_medida: '',
+            cod_barras: '',
+            saldo_antigo: null,
+            saldo_novo: null,
+            diferenca: null,
+            resumo: String(r.FORNEC_FANTA || r.FORNEC_NOME || '').trim() || 'Nota lançada',
+            detalhe: `Emissão ${r.DT_EMISSAO || '—'} · status ${String(r.STATUS || '').trim() || '—'}`,
+            id_funcionario: 0,
+            funcionario: '—',
+            observacao: '',
+          })));
+        } catch (e) {
+          console.warn('Alterações notas lançadas:', e.message);
         }
       }
 

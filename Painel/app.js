@@ -201,8 +201,10 @@ function applyTheme(tema, logoUrl) {
     extractAccent(logo).then((color) => {
       if (!color) return;
       document.documentElement.style.setProperty('--empresa-accent', color);
+      document.documentElement.style.setProperty('--empresa-accent', color);
     });
   } else {
+    document.documentElement.style.removeProperty('--empresa-accent');
     document.documentElement.style.removeProperty('--empresa-accent');
   }
 }
@@ -281,7 +283,11 @@ function extractAccent(url) {
         }
         let best = null;
         for (const bucket of buckets.values()) {
-          const score = bucket.n * (bucket.chroma / bucket.n);
+          const avgG = bucket.g / bucket.n;
+          const avgR = bucket.r / bucket.n;
+          const avgB = bucket.b / bucket.n;
+          const greenBias = avgG >= avgR && avgG >= avgB ? 1.55 : 1;
+          const score = bucket.n * (bucket.chroma / bucket.n) * greenBias;
           if (!best || score > best.score) best = { score, bucket };
         }
         let r;
@@ -615,7 +621,16 @@ $('#estoque-status-filtro')?.addEventListener('change', (e) => {
   loadEstoque();
 });
 $('#estoque-busca').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') buscarEstoque($('#estoque-busca').value);
+  if (e.key === 'Enter' || e.key === 'Search') {
+    e.preventDefault();
+    buscarEstoque($('#estoque-busca').value);
+    $('#estoque-busca').blur();
+  }
+});
+$('#estoque-busca').addEventListener('search', (e) => {
+  e.preventDefault();
+  buscarEstoque($('#estoque-busca').value);
+  $('#estoque-busca').blur();
 });
 $('#estoque-busca').addEventListener('input', syncLimparBuscaBtn);
 $('#btn-limpar-busca')?.addEventListener('click', () => {
@@ -797,9 +812,9 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
     if ($('#g-cor')) body.id_nivel1 = $('#g-cor').value === '' ? null : Number($('#g-cor').value);
     if ($('#g-tam')) body.id_nivel2 = $('#g-tam').value === '' ? null : Number($('#g-tam').value);
   }
-  if ((editarVenda || state.isNovo) && $('#p-venda')) body.prc_venda = Number($('#p-venda').value);
-  if ((editarCusto || state.isNovo) && $('#p-custo') && (verCusto || state.isNovo)) body.prc_custo = Number($('#p-custo').value);
-  if (editarQtd && $('#q-atual')) body.qtd_atual = Number($('#q-atual').value);
+  if ((editarVenda || state.isNovo) && $('#p-venda')) body.prc_venda = parseBrMoney($('#p-venda').value);
+  if ((editarCusto || state.isNovo) && $('#p-custo') && (verCusto || state.isNovo)) body.prc_custo = parseBrMoney($('#p-custo').value);
+  if (editarQtd && $('#q-atual')) body.qtd_atual = parseBrMoney($('#q-atual').value);
   if ($('#t-cfop')) {
     body.cfop = $('#t-cfop').value;
     body.cfop_nf = $('#t-cfop-nf')?.value || '';
@@ -813,6 +828,16 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
     if ($('#t-cofins')) body.cofins = Number($('#t-cofins').value || 0);
     body.id_cti = $('#t-id-cti')?.value || '';
     body.id_cti_cfe = $('#t-id-cti-cfe')?.value || '';
+    body.ncm = $('#t-ncm')?.value || '';
+    body.cest = $('#t-cest')?.value || '';
+  }
+  if ($('#r-id-class-trib')) {
+    body.trib_nfe = {
+      id_class_trib: $('#r-id-class-trib').value || null,
+      diferimento_cbs: Number($('#r-dif-cbs')?.value || 0),
+      diferimento_ibs_uf: Number($('#r-dif-ibs-uf')?.value || 0),
+      diferimento_ibs_mun: Number($('#r-dif-ibs-mun')?.value || 0),
+    };
   }
 
   if (!String(body.descricao || it.descricao || '').trim() && state.isNovo) {
@@ -873,6 +898,8 @@ async function loadTributosProduto(it, editar) {
       <label>Alíq. COFINS${inp('t-cofins', val('cofins'), dis)}</label>
       <label>CTI (NFe)${inp('t-id-cti', val('id_cti'), dis)}</label>
       <label>CTI CFe${inp('t-id-cti-cfe', val('id_cti_cfe'), dis)}</label>
+      <label>NCM${inp('t-ncm', a.ncm || it.ncm || '', dis)}</label>
+      <label>CEST${inp('t-cest', a.cest || it.cest || '', dis)}</label>
     </div>
   `;
   $('#btn-aplicar-sugestao-trib')?.addEventListener('click', () => {
@@ -892,6 +919,29 @@ async function loadTributosProduto(it, editar) {
     set('#t-id-cti-cfe', s.id_cti_cfe);
     showToast('Sugestão aplicada. Grave o produto para atualizar o cadastro.');
   });
+  const tn = a.trib_nfe || {};
+  const refHost = $('#ref-host');
+  if (refHost) {
+    refHost.innerHTML = `
+      <p class="hint">Dados da reforma tributária (classificação) já gravados no cadastro, quando existirem.</p>
+      <div class="form-grid side-by-side">
+        <label>ID classificação NFe${inp('r-id-class-trib', tn.id_class_trib || '', dis)}</label>
+        <label>Diferimento CBS %${inp('r-dif-cbs', tn.diferimento_cbs ?? 0, dis)}</label>
+        <label>Diferimento IBS UF %${inp('r-dif-ibs-uf', tn.diferimento_ibs_uf ?? 0, dis)}</label>
+        <label>Diferimento IBS mun. %${inp('r-dif-ibs-mun', tn.diferimento_ibs_mun ?? 0, dis)}</label>
+      </div>
+      <p class="hint" id="r-class-label"></p>
+    `;
+    const idClass = Number(tn.id_class_trib);
+    if (idClass) {
+      api(`/importacao/class-trib?id=${idClass}`).then((r) => {
+        const item = r.itens && r.itens[0];
+        if (item && $('#r-class-label')) {
+          $('#r-class-label').textContent = `${item.codigo || ''} — ${item.descricao || ''}`.trim();
+        }
+      }).catch(() => {});
+    }
+  }
 }
 
 function renderDetalhe() {
@@ -911,6 +961,7 @@ function renderDetalhe() {
       <button class="tab active" data-tab="ficha">Ficha</button>
       <button class="tab" data-tab="estoque-precos">Estoque e preços</button>
       ${!state.isNovo ? '<button class="tab" data-tab="tributos">Tributos</button>' : ''}
+      ${!state.isNovo ? '<button class="tab" data-tab="reforma">Reforma tributária</button>' : ''}
       ${showGrade || showSerial || showLote ? '<button class="tab" data-tab="controle">Grade / Lote / Serial</button>' : ''}
     </div>
     <div class="tab-pane" data-pane="ficha">
@@ -932,6 +983,7 @@ function renderDetalhe() {
             ${optionsUnidades(it.uni_medida)}
           </select>
         </label>
+        <div class="ficha-cod-ref">
         <div class="field">
           <span>Cód. barras</span>
           <div class="input-row barcode-row">
@@ -940,6 +992,7 @@ function renderDetalhe() {
           </div>
         </div>
         <label>Referência<input id="f-ref" value="${escapeAttr(it.referencia)}" ${editarFicha ? '' : 'disabled'} /></label>
+        </div>
         <label>Status
           <select id="f-status" ${editarFicha || state.isNovo ? '' : 'disabled'}>
             <option value="A" ${String(it.status || 'A').toUpperCase() !== 'I' ? 'selected' : ''}>Ativo</option>
@@ -958,24 +1011,24 @@ function renderDetalhe() {
     </div>
     <div class="tab-pane" data-pane="estoque-precos" hidden>
       <div class="form-grid side-by-side">
-        <label>Preço de venda<input id="p-venda" type="number" step="0.01" value="${it.prc_venda}" ${editarVenda ? '' : 'disabled'} /></label>
+        <label>Preço de venda<input id="p-venda" inputmode="decimal" value="${escapeAttr(fmtMoney2(it.prc_venda))}" ${editarVenda ? '' : 'disabled'} /></label>
         <label>Preço de custo
-          <input id="p-custo" type="${editarCusto || verCusto ? 'number' : 'text'}" step="0.01"
-            value="${verCusto ? it.prc_custo : '****'}" ${editarCusto ? '' : 'disabled'} class="${verCusto ? '' : 'masked'}" />
+          <input id="p-custo" inputmode="decimal"
+            value="${verCusto ? escapeAttr(fmtMoney2(it.prc_custo)) : '****'}" ${editarCusto ? '' : 'disabled'} class="${verCusto ? '' : 'masked'}" />
         </label>
         <p class="hint full">${verCusto ? `Margem: ${fmtMargem(it.prc_venda, it.prc_custo)}` : 'Custo oculto pela permissão do usuário.'}</p>
         <label class="full">Quantidade atual (banco)
-          <input id="q-atual" type="number" step="0.0001" value="${it.qtd_atual}" ${editarQtd ? '' : 'disabled'} />
+          <input id="q-atual" inputmode="decimal" value="${escapeAttr(fmtMoney2(it.qtd_atual))}" ${editarQtd ? '' : 'disabled'} />
         </label>
       </div>
       <div class="qty-box">
         <div class="qty-card add">
           <div>Adicionar</div>
-          <input id="q-add" type="number" step="0.0001" value="0" ${editarQtd ? '' : 'disabled'} />
+          <input id="q-add" inputmode="decimal" value="${escapeAttr(fmtMoney2(0))}" ${editarQtd ? '' : 'disabled'} />
         </div>
         <div class="qty-card rem">
           <div>Remover</div>
-          <input id="q-rem" type="number" step="0.0001" value="0" ${editarQtd ? '' : 'disabled'} />
+          <input id="q-rem" inputmode="decimal" value="${escapeAttr(fmtMoney2(0))}" ${editarQtd ? '' : 'disabled'} />
         </div>
       </div>
       <div id="q-diff" class="diff-box">Diferença: 0</div>
@@ -983,6 +1036,9 @@ function renderDetalhe() {
     ${!state.isNovo ? `
     <div class="tab-pane" data-pane="tributos" hidden>
       <div id="trib-host" class="trib-host"><p class="hint">Carregando última entrada e parâmetros…</p></div>
+    </div>
+    <div class="tab-pane" data-pane="reforma" hidden>
+      <div id="ref-host" class="trib-host"><p class="hint">Carregando classificação da reforma tributária…</p></div>
     </div>` : ''}
     <div class="tab-pane" data-pane="controle" hidden>
       ${showGrade ? `
@@ -1030,7 +1086,7 @@ function renderDetalhe() {
       $$('.tab-pane', $('#estoque-detalhe')).forEach((p) => {
         p.hidden = p.dataset.pane !== tab.dataset.tab;
       });
-      if (tab.dataset.tab === 'tributos') loadTributosProduto(it, editarFicha);
+      if (tab.dataset.tab === 'tributos' || tab.dataset.tab === 'reforma') loadTributosProduto(it, editarFicha);
     });
   });
 
@@ -1041,8 +1097,8 @@ function renderDetalhe() {
   let syncing = false;
 
   function updateDiffFromAddRem() {
-    const add = Number(qAdd?.value || 0);
-    const rem = Number(qRem?.value || 0);
+    const add = parseBrMoney(qAdd?.value || 0);
+    const rem = parseBrMoney(qRem?.value || 0);
     const delta = add - rem;
     const box = $('#q-diff');
     box.textContent = delta === 0
@@ -1053,7 +1109,7 @@ function renderDetalhe() {
     box.className = `diff-box ${delta > 0 ? 'pos' : delta < 0 ? 'neg' : ''}`;
     if (!syncing && qAtual) {
       syncing = true;
-      qAtual.value = String(base + delta);
+      qAtual.value = fmtMoney2(base + delta);
       syncing = false;
     }
   }
@@ -1319,6 +1375,7 @@ function tipoAlteracaoLabel(tipo) {
     precos: 'Preços',
     ficha: 'Ficha',
     cadastro: 'Cadastro',
+    notas: 'Nota lançada',
   };
   return map[tipo] || tipo || 'Alteração';
 }
@@ -1397,6 +1454,38 @@ $$('#alt-tabs [data-alt-tipo]').forEach((btn) => {
     loadAlteracoes();
   });
 });
+$('#btn-exportar-alt')?.addEventListener('click', () => exportarAlteracoesPdf());
+
+function exportarAlteracoesPdf() {
+  const list = state.alteracoesLista || [];
+  const titulo = `Alterações — ${tipoAlteracaoLabel(state.alteracoesTipo === 'todos' ? '' : state.alteracoesTipo) || 'Todas'}`;
+  const rows = list.map((it) => `<tr>
+      <td>${escapeHtml(fmtDataHora(it.data, it.hora, it.data_hora))}</td>
+      <td>${escapeHtml(tipoAlteracaoLabel(it.tipo))}</td>
+      <td>${escapeHtml(it.descricao || '')}</td>
+      <td>${escapeHtml(it.detalhe || it.resumo || '')}</td>
+      <td>${escapeHtml(it.funcionario || '')}</td>
+    </tr>`).join('') || '<tr><td colspan="5">Nenhum registro</td></tr>';
+  const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${escapeHtml(titulo)}</title>
+    <style>body{font-family:sans-serif;padding:16px;color:#222}h1{font-size:18px}table{width:100%;border-collapse:collapse;font-size:12px}
+    th,td{border:1px solid #ccc;padding:6px;text-align:left}th{background:#eee}</style></head>
+    <body><h1>${escapeHtml(titulo)}</h1><p>${list.length} registro(s)</p>
+    <table><thead><tr><th>Data</th><th>Tipo</th><th>Produto / NF</th><th>Detalhe</th><th>Usuário</th></tr></thead>
+    <tbody>${rows}</tbody></table></body></html>`;
+  if (window.GestorApp && typeof window.GestorApp.printHtml === 'function') {
+    window.GestorApp.printHtml(titulo, html);
+    return;
+  }
+  const w = window.open('', '_blank');
+  if (!w) {
+    showMsg('Permita pop-ups para exportar o PDF.');
+    return;
+  }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  w.print();
+}
 
 function stopScanner() {
   if (scanControls?.timer) clearInterval(scanControls.timer);
@@ -1855,8 +1944,20 @@ function escapeHtml(s) {
   })[c]);
 }
 function escapeAttr(s) { return escapeHtml(s).replace(/\n/g, ' '); }
+function parseBrMoney(v) {
+  if (v == null) return 0;
+  let s = String(v).trim();
+  if (!s || s === '****') return 0;
+  s = s.replace(/[R$\s]/g, '');
+  if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+  const n = Number(s);
+  return Number.isFinite(n) ? n : 0;
+}
+function fmtMoney2(n) {
+  return Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
 function fmtNum(n) {
-  return Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+  return Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 function fmtMoney(n) {
   return Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });

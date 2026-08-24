@@ -545,6 +545,140 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+async function tryQueryFirst(db, sql, params) {
+  try {
+    const rows = await query(db, sql, params);
+    return rows[0] || null;
+  } catch (err) {
+    console.warn('NFC última entrada:', err.message);
+    return null;
+  }
+}
+
+function mapUltimaNfcRow(r, extra = {}) {
+  if (!r) return null;
+  return {
+    id_nfcitem: Number(r.ID_NFCITEM),
+    id_nfcompra: Number(r.ID_NFCOMPRA),
+    nf_numero: r.NF_NUMERO,
+    nf_serie: String(r.NF_SERIE || '').trim(),
+    dt_entrada: r.DT_ENTRADA,
+    dt_emissao: r.DT_EMISSAO,
+    id_fornec: r.ID_FORNEC != null ? Number(r.ID_FORNEC) : null,
+    fornecedor_uf: String(extra.uf || r.FORNEC_UF || '').trim(),
+    fornecedor_nome: String(extra.nome || r.FORNEC_FANTA || r.NOME_FANTA || r.FORNEC_NOME || '').trim(),
+    cfop: String(r.CFOP || '').trim(),
+    csosn: String(r.CSOSN || '').trim(),
+    qtd: numOrNull(r.QTD_ITEM != null ? r.QTD_ITEM : r.QTD_ITEM),
+    vlr_unit: numOrNull(r.VLR_UNIT != null ? r.VLR_UNIT : r.VLR_UNIT),
+    cst_icms: String(extra.CST_ICMS || r.CST_ICMS || '').trim(),
+    aliq_icms: numOrNull(extra.ALIQ_ICMS != null ? extra.ALIQ_ICMS : r.ALIQ_ICMS),
+    vlr_bc_icms: numOrNull(extra.VLR_BC_ICMS != null ? extra.VLR_BC_ICMS : r.VLR_BC_ICMS),
+    vlr_icms: numOrNull(extra.VLR_ICMS != null ? extra.VLR_ICMS : r.VLR_ICMS),
+    vlr_bc_st: numOrNull(extra.VLR_BC_ICMS_ST != null ? extra.VLR_BC_ICMS_ST : r.VLR_BC_ICMS_ST),
+    vlr_st: numOrNull(extra.VLR_ST != null ? extra.VLR_ST : r.VLR_ST),
+    vlr_bc_st_ret: numOrNull(extra.VLR_BC_ICMS_ST_RET != null ? extra.VLR_BC_ICMS_ST_RET : r.VLR_BC_ICMS_ST_RET),
+    vlr_st_ret: numOrNull(extra.VLR_ICMS_ST_RET != null ? extra.VLR_ICMS_ST_RET : r.VLR_ICMS_ST_RET),
+    aliq_st: numOrNull(extra.ALIQ_ST_DEST != null ? extra.ALIQ_ST_DEST : r.ALIQ_ST_DEST),
+    cst_pis: String(extra.CST_PIS || r.CST_PIS || '').trim(),
+    aliq_pis: numOrNull(extra.ALIQ_PIS != null ? extra.ALIQ_PIS : r.ALIQ_PIS),
+    cst_cofins: String(extra.CST_COFINS || r.CST_COFINS || '').trim(),
+    aliq_cofins: numOrNull(extra.ALIQ_COFINS != null ? extra.ALIQ_COFINS : r.ALIQ_COFINS),
+  };
+}
+
+async function fetchUltimaEntradaNfc(db, idIdent) {
+  let row = await tryQueryFirst(db, `
+    SELECT FIRST 1
+      I.ID_NFCITEM, I.ID_NFCOMPRA, I.CFOP, I.CSOSN,
+      N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.ID_FORNEC, N.STATUS
+    FROM TB_NFC_ITEM I
+    JOIN TB_NFCOMPRA N ON N.ID_NFCOMPRA = I.ID_NFCOMPRA
+    WHERE I.ID_IDENTIFICADOR = ?
+      AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+    ORDER BY N.DT_ENTRADA DESC, I.ID_NFCITEM DESC`, [idIdent]);
+
+  if (!row) {
+    row = await tryQueryFirst(db, `
+      SELECT FIRST 1
+        I.ID_NFCITEM, I.ID_NFCOMPRA, I.CFOP, I.CSOSN, I.QTD_ITEM, I.VLR_UNIT,
+        N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.ID_FORNEC, N.STATUS
+      FROM TB_NFC_ITEM I
+      JOIN TB_NFCOMPRA N ON N.ID_NFCOMPRA = I.ID_NFCOMPRA
+      WHERE I.ID_IDENTIFICADOR = ?
+        AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+      ORDER BY N.DT_ENTRADA DESC, I.ID_NFCITEM DESC`, [idIdent]);
+  }
+
+  if (!row) {
+    row = await tryQueryFirst(db, `
+      SELECT FIRST 1
+        I.ID_NFCITEM, I.ID_NFCOMPRA, I.CFOP, I.CSOSN, I.QTD_ITEM, I.VLR_UNIT,
+        N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.ID_FORNEC, N.STATUS
+      FROM TB_NFC_ITEM I
+      JOIN TB_NFCOMPRA N ON N.ID_NFCOMPRA = I.ID_NFCOMPRA
+      WHERE I.ID_IDENTIFICADOR = ?
+        AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+      ORDER BY N.DT_ENTRADA DESC, I.ID_NFCITEM DESC`, [idIdent]);
+  }
+
+  if (!row) {
+    row = await tryQueryFirst(db, `
+      SELECT FIRST 1
+        I.ID_NFCITEM, I.ID_NFCOMPRA, I.CFOP, I.CSOSN, I.QTD_ITEM, I.VLR_UNIT,
+        N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.ID_FORNEC, N.STATUS
+      FROM TB_NFC_ITEM I
+      JOIN TB_NFCOMPRA N ON N.ID_NFCOMPRA = I.ID_NFCOMPRA
+      JOIN TB_EST_IDENTIFICADOR X ON X.ID_ESTOQUE = I.ID_ESTOQUE
+      WHERE X.ID_IDENTIFICADOR = ?
+        AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+      ORDER BY N.DT_ENTRADA DESC, I.ID_NFCITEM DESC`, [idIdent]);
+  }
+
+  if (!row) return null;
+
+  const extra = {};
+  const idItem = Number(row.ID_NFCITEM);
+  const taxTries = [
+    ['SELECT FIRST 1 CST_ICMS, ALIQ_ICMS, VLR_BC_ICMS, VLR_ICMS FROM TB_NFC_ITEM_ICMS WHERE ID_NFCITEM = ?', idItem],
+    ['SELECT FIRST 1 CST_ICMS, ALIQ_ICMS, VLR_BC_ICMS, VLR_ICMS FROM TB_NFC_ITEM_ICMS WHERE ID_NFCITEM = ?', idItem],
+  ];
+  for (const [sql, param] of taxTries) {
+    const tax = await tryQueryFirst(db, sql, [param]);
+    if (tax) {
+      Object.assign(extra, tax);
+      break;
+    }
+  }
+  const st = await tryQueryFirst(db, `
+    SELECT FIRST 1 VLR_BC_ICMS_ST, VLR_ST, VLR_BC_ICMS_ST_RET, VLR_ICMS_ST_RET, ALIQ_ST_DEST
+    FROM TB_NFC_ITEM_ST WHERE ID_NFCITEM = ?`, [idItem])
+    || await tryQueryFirst(db, `
+    SELECT FIRST 1 VLR_BC_ICMS_ST, VLR_ST, VLR_BC_ICMS_ST_RET, VLR_ICMS_ST_RET, ALIQ_ST_DEST
+    FROM TB_NFC_ITEM_ST WHERE ID_NFCITEM = ?`, [idItem]);
+  if (st) Object.assign(extra, st);
+
+  const pis = await tryQueryFirst(db, `SELECT FIRST 1 CST_PIS, ALIQ_PIS FROM TB_NFC_ITEM_PIS WHERE ID_NFCITEM = ?`, [idItem])
+    || await tryQueryFirst(db, `SELECT FIRST 1 CST_PIS, ALIQ_PIS FROM TB_NFC_ITEM_PIS WHERE ID_NFCITEM = ?`, [idItem]);
+  if (pis) Object.assign(extra, pis);
+  const cof = await tryQueryFirst(db, `SELECT FIRST 1 CST_COFINS, ALIQ_COFINS FROM TB_NFC_ITEM_COFINS WHERE ID_NFCITEM = ?`, [idItem])
+    || await tryQueryFirst(db, `SELECT FIRST 1 CST_COFINS, ALIQ_COFINS FROM TB_NFC_ITEM_COFINS WHERE ID_NFCITEM = ?`, [idItem]);
+  if (cof) Object.assign(extra, cof);
+
+  if (row.ID_FORNEC != null) {
+    const forn = await tryQueryFirst(db, `
+      SELECT FIRST 1 UF, NOME_FANTA, NOME FROM TB_FORNECEDOR WHERE ID_FORNEC = ?`, [row.ID_FORNEC])
+      || await tryQueryFirst(db, `
+      SELECT FIRST 1 UF, NOME_FANTA, NOME FROM TB_FORNECEDOR WHERE ID_FORNEC = ?`, [row.ID_FORNEC]);
+    if (forn) {
+      extra.uf = forn.UF;
+      extra.nome = String(forn.NOME_FANTA || forn.NOME_FANTA || forn.NOME || '').trim();
+    }
+  }
+
+  return mapUltimaNfcRow(row, extra);
+}
+
 /** Última entrada do identificador + sugestão pelos parâmetros (CFOP / regra tributo). */
 async function getSugestaoTributoEstoque(idIdentificador) {
   const id = Number(idIdentificador);
@@ -552,56 +686,7 @@ async function getSugestaoTributoEstoque(idIdentificador) {
   const atual = await getProdutoFiscal(id);
   let ultima = null;
   try {
-    ultima = await withDb(async (db) => {
-    const rows = await query(db, `
-      SELECT FIRST 1
-        I.ID_NFCITEM, I.ID_NFCOMPRA, I.CFOP, I.CSOSN, I.QTD_ITEM, I.VLR_UNIT,
-        N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.ID_FORNEC, N.STATUS,
-        F.UF AS FORNEC_UF, F.NOME_FANTA AS FORNEC_FANTA,
-        C.CST_ICMS, C.ALIQ_ICMS, C.VLR_BC_ICMS, C.VLR_ICMS,
-        S.VLR_BC_ICMS_ST, S.VLR_ST, S.VLR_BC_ICMS_ST_RET, S.VLR_ICMS_ST_RET, S.ALIQ_ST_DEST,
-        P.CST_PIS, P.ALIQ_PIS, O.CST_COFINS, O.ALIQ_COFINS
-      FROM TB_NFC_ITEM I
-      JOIN TB_NFCOMPRA N ON N.ID_NFCOMPRA = I.ID_NFCOMPRA
-      LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
-      LEFT JOIN TB_NFC_ITEM_ICMS C ON C.ID_NFCITEM = I.ID_NFCITEM
-      LEFT JOIN TB_NFC_ITEM_ST S ON S.ID_NFCITEM = I.ID_NFCITEM
-      LEFT JOIN TB_NFC_ITEM_PIS P ON P.ID_NFCITEM = I.ID_NFCITEM
-      LEFT JOIN TB_NFC_ITEM_COFINS O ON O.ID_NFCITEM = I.ID_NFCITEM
-      WHERE I.ID_IDENTIFICADOR = ?
-        AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
-      ORDER BY N.DT_ENTRADA DESC, I.ID_NFCITEM DESC`, [id]);
-    if (!rows[0]) return null;
-    const r = rows[0];
-    return {
-      id_nfcitem: Number(r.ID_NFCITEM),
-      id_nfcompra: Number(r.ID_NFCOMPRA),
-      nf_numero: r.NF_NUMERO,
-      nf_serie: String(r.NF_SERIE || '').trim(),
-      dt_entrada: r.DT_ENTRADA,
-      dt_emissao: r.DT_EMISSAO,
-      id_fornec: r.ID_FORNEC != null ? Number(r.ID_FORNEC) : null,
-      fornecedor_uf: String(r.FORNEC_UF || '').trim(),
-      fornecedor_nome: String(r.FORNEC_FANTA || '').trim(),
-      cfop: String(r.CFOP || '').trim(),
-      csosn: String(r.CSOSN || '').trim(),
-      qtd: numOrNull(r.QTD_ITEM),
-      vlr_unit: numOrNull(r.VLR_UNIT),
-      cst_icms: String(r.CST_ICMS || '').trim(),
-      aliq_icms: numOrNull(r.ALIQ_ICMS),
-      vlr_bc_icms: numOrNull(r.VLR_BC_ICMS),
-      vlr_icms: numOrNull(r.VLR_ICMS),
-      vlr_bc_st: numOrNull(r.VLR_BC_ICMS_ST),
-      vlr_st: numOrNull(r.VLR_ST),
-      vlr_bc_st_ret: numOrNull(r.VLR_BC_ICMS_ST_RET),
-      vlr_st_ret: numOrNull(r.VLR_ICMS_ST_RET),
-      aliq_st: numOrNull(r.ALIQ_ST_DEST),
-      cst_pis: String(r.CST_PIS || '').trim(),
-      aliq_pis: numOrNull(r.ALIQ_PIS),
-      cst_cofins: String(r.CST_COFINS || '').trim(),
-      aliq_cofins: numOrNull(r.ALIQ_COFINS),
-    };
-    });
+    ultima = await withDb((db) => fetchUltimaEntradaNfc(db, id));
   } catch (err) {
     console.warn('ultima entrada NFC:', err.message);
     ultima = null;

@@ -309,6 +309,29 @@ input, select, textarea {
   padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border); background: var(--bg-elev);
   gap: 0.65rem;
 }
+html[data-theme="empresa"] .topbar {
+  background: var(--empresa-accent, #1b7f4a);
+  color: #fff;
+  border-bottom-color: transparent;
+}
+html[data-theme="empresa"] .topbar h1,
+html[data-theme="empresa"] .topbar p { color: #fff; }
+html[data-theme="empresa"] .user-chip {
+  background: rgba(255,255,255,0.16);
+  color: #fff;
+  border-color: rgba(255,255,255,0.28);
+}
+html[data-theme="empresa"] .btn-icon-menu { color: #fff; }
+.ficha-cod-ref,
+.ficha-cod-ref {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 0.85rem;
+  grid-column: 1 / -1;
+  align-items: start;
+}
+.ficha-cod-ref .field,
+.ficha-cod-ref label { min-width: 0; }
 .topbar h1 {
   margin: 0;
   font-size: clamp(1.05rem, 2.8vw, 1.25rem);
