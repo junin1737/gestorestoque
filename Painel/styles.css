@@ -16,7 +16,7 @@
   --radius: 14px;
   --empresa-accent: #1e3a5f;
   --font: "Segoe UI", "Helvetica Neue", -apple-system, BlinkMacSystemFont, sans-serif;
-  --fs: 16px;
+  --fs: 1rem;
   --fs-xs: 0.75rem;
   --fs-sm: 0.875rem;
   --fs-md: 1rem;
@@ -49,9 +49,16 @@ html[data-theme="empresa"] {
 * { box-sizing: border-box; }
 html {
   height: 100%;
+  font-size: 16px;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
+html[data-ui-scale="compacto"] { font-size: 13.5px; }
+html[data-ui-scale="padrao"],
+html[data-ui-scale="padrao"] { font-size: 16px; }
+html[data-ui-scale="confortavel"],
+html[data-ui-scale="confortavel"] { font-size: 17.5px; }
+html[data-ui-scale="grande"] { font-size: 19.5px; }
 html, body { margin: 0; }
 body {
   min-height: 100%;
@@ -290,6 +297,11 @@ input, select, textarea {
 .nav-btn.active, .nav-btn:hover { background: rgba(255,255,255,0.12); }
 .side-bottom { margin-top: auto; display: grid; gap: 0.6rem; }
 .tema-inline { margin: 0; color: inherit; }
+.tema-inline select {
+  width: 100%;
+  margin-top: 0.25rem;
+  min-height: 2.2rem;
+}
 .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .topbar {
   display: flex; justify-content: space-between; align-items: center;
@@ -362,7 +374,7 @@ input, select, textarea {
   flex: 1;
 }
 .toolbar.estoque-toolbar {
-  --ctrl-h: 44px;
+  --ctrl-h: 2.75rem;
   display: flex;
   flex-direction: column;
   flex-wrap: nowrap;
@@ -959,7 +971,7 @@ html[data-theme="escuro"] .toolbar-select select {
     gap: 0.45rem;
   }
   .toolbar.estoque-toolbar {
-    --ctrl-h: 48px;
+    --ctrl-h: 3rem;
     --cam-w: 3.2rem;
     flex-direction: column;
     flex-wrap: nowrap;

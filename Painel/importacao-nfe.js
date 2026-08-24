@@ -3363,6 +3363,7 @@ const ImportacaoNfe = (() => {
     init,
     onPageEnter,
     applyScannedChave,
+    applyScannedChave: applyScannedChave,
     applyScannedProduto,
     applyScannedEan,
     handleBack,

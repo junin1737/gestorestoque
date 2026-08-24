@@ -311,7 +311,11 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
   }
 }
 
-async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe = {}) {
+function tribReformaNfe(sistema = {}) {
+  return sistema.trib_nfe || {};
+}
+
+async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe = {}, extra = {}) {
   const cstIcms = String(trib.cst_icms || xmlImp.CST || '').trim().padStart(3, '0').slice(-3);
   const aliq = Number(trib.p_icms || xmlImp.pICMS || 0);
   const vBc = Number(trib.v_bc_icms || xmlImp.vBC || 0);
@@ -380,7 +384,8 @@ async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe
   } catch (e) { console.warn('IPI:', e.message); }
 
   const tn = tribNfe || {};
-  if (tn.id_class_trib || tn.vlr_cbs != null || tn.aliq_cbs != null) {
+  const aplicarReforma = String(extra.aplicarSaida || extra.aplicar_saida || 'S').toUpperCase() !== 'N';
+  if (aplicarReforma || tn.id_class_trib || tn.vlr_cbs != null || tn.vlr_cbs != null || tn.aliq_cbs != null || tn.aliq_cbs != null) {
     try {
       const classRow = tn.id_class_trib
         ? (await query(db, `
@@ -388,19 +393,19 @@ async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe
             FROM TB_CLASS_TRIB WHERE ID_CLASS_TRIB = ?`, [Number(tn.id_class_trib)]))[0]
         : null;
       const codClass = String(tn._class_cod || classRow?.COD_CLASS_TRIB || '').trim().slice(0, 10);
-      const cstClass = String(tn.cst_class_trib || classRow?.CST_CLASS_TRIB || '').trim().slice(0, 3);
+      const cstClass = String(tn.cst_class_trib || tn.cst_class_trib || classRow?.CST_CLASS_TRIB || '').trim().slice(0, 3);
       const redCbs = Number(tn.percent_red_aliq_cbs ?? classRow?.PERCENT_RED_ALIQ_CBS ?? 0);
       const redIbs = Number(tn.percent_red_aliq_ibs ?? classRow?.PERCENT_RED_ALIQ_IBS ?? 0);
-      const aliqCbs = Number(tn.aliq_cbs ?? 0.9);
-      const aliqIbsUf = Number(tn.aliq_ibs_uf ?? 0.1);
-      const aliqIbsMun = Number(tn.aliq_ibs_mun ?? 0);
-      const bc = Number(tn.vlr_bc_cbs ?? 0);
-      const efetCbs = Number(tn.aliq_efetiva_cbs ?? (aliqCbs * (1 - redCbs / 100)));
-      const efetIbsUf = Number(tn.aliq_efetiva_ibs_uf ?? (aliqIbsUf * (1 - redIbs / 100)));
-      const efetIbsMun = Number(tn.aliq_efetiva_ibs_mun ?? (aliqIbsMun * (1 - redIbs / 100)));
-      const vlrCbs = Number(tn.vlr_cbs ?? (bc * efetCbs / 100));
-      const vlrIbsUf = Number(tn.vlr_ibs_uf ?? (bc * efetIbsUf / 100));
-      const vlrIbsMun = Number(tn.vlr_ibs_mun ?? (bc * efetIbsMun / 100));
+      const aliqCbs = Number(tn.aliq_cbs ?? tn.aliq_cbs ?? 0.9);
+      const aliqIbsUf = Number(tn.aliq_ibs_uf ?? tn.aliq_ibs_uf ?? 0.1);
+      const aliqIbsMun = Number(tn.aliq_ibs_mun ?? tn.aliq_ibs_mun ?? 0);
+      const bc = Number(tn.vlr_bc_cbs ?? tn.vlr_bc_cbs ?? extra.prcVenda ?? extra.prc_venda ?? 0);
+      const efetCbs = Number(tn.aliq_efetiva_cbs ?? tn.aliq_efetiva_cbs ?? (aliqCbs * (1 - redCbs / 100)));
+      const efetIbsUf = Number(tn.aliq_efetiva_ibs_uf ?? tn.aliq_efetiva_ibs_uf ?? (aliqIbsUf * (1 - redIbs / 100)));
+      const efetIbsMun = Number(tn.aliq_efetiva_ibs_mun ?? tn.aliq_efetiva_ibs_mun ?? (aliqIbsMun * (1 - redIbs / 100)));
+      const vlrCbs = Number(tn.vlr_cbs ?? tn.vlr_cbs ?? (bc * efetCbs / 100));
+      const vlrIbsUf = Number(tn.vlr_ibs_uf ?? tn.vlr_ibs_uf ?? (bc * efetIbsUf / 100));
+      const vlrIbsMun = Number(tn.vlr_ibs_mun ?? tn.vlr_ibs_mun ?? (bc * efetIbsMun / 100));
       const gen = await query(db, `SELECT GEN_ID(GEN_TB_NFC_ITEM_CBS_IBS_ID, 1) AS ID FROM RDB$DATABASE`);
       const idCbs = Number(gen[0].ID);
       await query(db, `
@@ -444,7 +449,9 @@ async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe
         String(tn.deduz_cred_presu_ibs || 'N').slice(0, 1),
         round2(vlrIbsUf + vlrIbsMun),
       ]);
-    } catch (e) { console.warn('CBS/IBS:', e.message); }
+    } catch (e) {
+      console.warn('CBS/IBS:', e.message);
+    }
   }
 }
 
@@ -654,7 +661,7 @@ async function gravarNfCompra(sessao, {
           cofins: trib.p_cofins || 0,
           id_cti: it.sistema.id_cti || '',
           id_cti_cfe: it.sistema.id_cti_cfe || '',
-          id_class_trib: it.sistema.trib_nfe?.id_class_trib ?? null,
+          id_class_trib: tribReformaNfe(it.sistema).id_class_trib ?? null,
           id_class_trib_nfce: it.sistema.trib_nfce?.id_class_trib ?? null,
           aplicar_saida: it.sistema.aplicar_saida || 'S',
         });
@@ -707,7 +714,11 @@ async function gravarNfCompra(sessao, {
         idItem,
         it.sistema.tributos || {},
         it.xml?.imposto || {},
-        it.sistema.trib_nfe || {},
+        tribReformaNfe(it.sistema),
+        {
+          aplicarSaida: it.sistema.aplicar_saida,
+          prcVenda: Number(it.sistema.prc_venda || it.sistema.prc_venda || 0),
+        },
       );
       await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       await entradaEstoque(db, appCfg, {

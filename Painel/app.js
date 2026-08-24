@@ -31,7 +31,7 @@ const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const CAMERA_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
 
 window.setGestorScanTarget = (target) => {
-  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
+  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
 };
 
 function showToast(message) {
@@ -146,6 +146,23 @@ function podeEditarPrecoVenda() {
 
 function podeEditarCusto() {
   return precoNivel() === 'total';
+}
+
+const UI_SCALE_KEY = 'gestor.uiScale';
+
+function applyUiScale(scale) {
+  const allowed = ['compacto', 'padrao', 'padrao', 'confortavel', 'confortavel', 'grande'];
+  const value = allowed.includes(scale) ? scale : 'padrao';
+  document.documentElement.setAttribute('data-ui-scale', value);
+  try { localStorage.setItem(UI_SCALE_KEY, value); } catch { /* ignore */ }
+  const sel = $('#ui-scale');
+  if (sel && sel.value !== value) sel.value = value;
+}
+
+function initUiScale() {
+  let saved = 'padrao';
+  try { saved = localStorage.getItem(UI_SCALE_KEY) || 'padrao'; } catch { /* ignore */ }
+  applyUiScale(saved);
 }
 
 function applyTheme(tema, logoUrl) {
@@ -366,6 +383,11 @@ $('#tema-rapido').addEventListener('change', async (e) => {
   state.config.tema = tema;
   applyTheme(tema, state.emitente.logo);
 });
+
+$('#ui-scale')?.addEventListener('change', (e) => {
+  applyUiScale(e.target.value);
+});
+initUiScale();
 
 function setNavActive(page) {
   $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
@@ -1171,26 +1193,40 @@ function stopScanner() {
   }
 }
 
+function extractChaveNfe44(raw) {
+  const digits = String(raw || '').replace(/\D/g, '');
+  if (digits.length === 44) return digits;
+  const compact = String(raw || '').replace(/[\s\-._]/g, '');
+  const run = compact.match(/\d{44}/) || digits.match(/\d{44}/);
+  return run ? run[0].slice(0, 44) : '';
+}
+
 function normalizeBarcodeNumber(raw) {
+  const chave = extractChaveNfe44(raw);
+  if (chave) return chave;
+
   const text = String(raw || '').trim();
   if (!text) return '';
 
-  // Remove espaços e caracteres comuns de formatação
   const compact = text.replace(/[\s\-._]/g, '');
 
-  // Se já for só dígitos, usa direto
-  if (/^\d{4,18}$/.test(compact)) return compact;
+  if (/^\d{4,44}$/.test(compact)) return compact;
 
-  // Extrai a maior sequência numérica (código de barras impresso)
-  const matches = compact.match(/\d{4,18}/g) || text.match(/\d{4,18}/g) || [];
+  const matches = compact.match(/\d{4,44}/g) || text.match(/\d{4,44}/g) || [];
   if (!matches.length) return '';
   matches.sort((a, b) => b.length - a.length);
   return matches[0];
 }
 
-function pickBestBarcode(candidates) {
-  const uniq = [...new Set(candidates.filter(Boolean))];
+function pickBestBarcode(candidates, target = state.scanTarget) {
+  const uniq = [...new Set(candidates.filter(Boolean).map((c) => String(c)))];
   if (!uniq.length) return '';
+  if (target === 'importacao') {
+    const chaves = uniq.map(extractChaveNfe44).filter((c) => c.length === 44);
+    if (chaves.length) return chaves[0];
+    uniq.sort((a, b) => String(b).replace(/\D/g, '').length - String(a).replace(/\D/g, '').length);
+    return extractChaveNfe44(uniq[0]) || uniq[0];
+  }
   uniq.sort((a, b) => {
     if (a.length === 13 && b.length !== 13) return -1;
     if (b.length === 13 && a.length !== 13) return 1;
@@ -1204,6 +1240,30 @@ function pickBestBarcode(candidates) {
 }
 
 async function applyScannedCode(value) {
+  if (state.scanTarget === 'importacao') {
+    const chave = extractChaveNfe44(value) || String(value || '').replace(/\D/g, '').slice(0, 44);
+    if (chave.length === 44 && (window.ImportacaoNfe?.applyScannedChave?.(chave) || window.ImportacaoNfe?.applyScannedChave?.(chave))) {
+      stopScanner();
+      $('#dlg-scan')?.close();
+      state.scanTarget = 'search';
+      return true;
+    }
+    const codeTry = normalizeBarcodeNumber(value);
+    if (codeTry.length === 44 && (window.ImportacaoNfe?.applyScannedChave?.(codeTry) || window.ImportacaoNfe?.applyScannedChave?.(codeTry))) {
+      stopScanner();
+      $('#dlg-scan')?.close();
+      state.scanTarget = 'search';
+      return true;
+    }
+    if (value) {
+      stopScanner();
+      $('#dlg-scan')?.close();
+      showMsg('Não li os 44 dígitos da chave. Fotografe a faixa do código de barras da chave de acesso (DANFE), na horizontal e bem nítida.');
+      state.scanTarget = 'search';
+      return true;
+    }
+    return false;
+  }
   const code = normalizeBarcodeNumber(value);
   if (!code) return false;
   stopScanner();
@@ -1229,26 +1289,16 @@ async function applyScannedCode(value) {
     state.scanTarget = 'search';
     return true;
   }
-  if (state.scanTarget === 'importacao') {
-    const chave = String(value || code || '').replace(/\D/g, '').slice(0, 44);
-    if (chave.length === 44 && window.ImportacaoNfe?.applyScannedChave(chave)) {
-      state.scanTarget = 'search';
-      return true;
-    }
-    showMsg('Chave inválida. A NF-e deve ter 44 dígitos numéricos.');
-    state.scanTarget = 'search';
-    return true;
-  }
-  if (state.scanTarget === 'importacao-prod') {
-    if (window.ImportacaoNfe?.applyScannedProduto?.(code)) {
+  if (state.scanTarget === 'importacao-prod' || state.scanTarget === 'importacao-prod') {
+    if (window.ImportacaoNfe?.applyScannedProduto?.(code) || window.ImportacaoNfe?.applyScannedProduto?.(code)) {
       state.scanTarget = 'search';
       return true;
     }
     state.scanTarget = 'search';
     return true;
   }
-  if (state.scanTarget === 'importacao-ean') {
-    if (window.ImportacaoNfe?.applyScannedEan?.(code)) {
+  if (state.scanTarget === 'importacao-ean' || state.scanTarget === 'importacao-ean') {
+    if (window.ImportacaoNfe?.applyScannedEan?.(code) || window.ImportacaoNfe?.applyScannedEan?.(code)) {
       state.scanTarget = 'search';
       return true;
     }
@@ -1342,6 +1392,24 @@ function canvasVariantsFromImage(img) {
   pushVariant(bx, by, bw, bh, 2, 'contrast');
   pushVariant(bx, by, bw, bh, 2.2, 'threshold');
 
+  // DANFE: código da chave (Code 128) costuma ficar na faixa superior
+  const th = Math.max(48, Math.round(h * 0.3));
+  pushVariant(0, 0, w, th, 2.2, 'contrast');
+  pushVariant(0, 0, w, th, 2.6, 'threshold');
+  pushVariant(Math.round(w * 0.02), Math.round(h * 0.01), Math.round(w * 0.96), Math.round(h * 0.22), 2.4, 'raw');
+
+  // Foto deitada (iPhone na vertical fotografando o DANFE na horizontal)
+  const rot = document.createElement('canvas');
+  rot.width = h;
+  rot.height = w;
+  const rctx = rot.getContext('2d', { willReadFrequently: true });
+  if (rctx) {
+    rctx.translate(h, 0);
+    rctx.rotate(Math.PI / 2);
+    rctx.drawImage(img, 0, 0);
+    variants.push(rot);
+  }
+
   return variants;
 }
 
@@ -1350,7 +1418,7 @@ async function detectWithBarcodeDetector(source) {
   try {
     const detector = new BarcodeDetector({ formats: BARCODE_FORMATS });
     const codes = await detector.detect(source);
-    return codes.map((c) => normalizeBarcodeNumber(c.rawValue)).filter(Boolean);
+    return codes.map((c) => c.rawValue).filter(Boolean);
   } catch {
     return [];
   }
@@ -1361,8 +1429,8 @@ async function detectWithZxingCanvas(canvas) {
   if (!reader) return [];
   try {
     const result = await reader.decodeFromCanvas(canvas);
-    const n = normalizeBarcodeNumber(result?.getText?.() || result?.text || '');
-    return n ? [n] : [];
+    const text = result?.getText?.() || result?.text || '';
+    return text ? [text] : [];
   } catch {
     return [];
   }
@@ -1384,12 +1452,20 @@ async function decodeBarcodeFromImageUrl(url) {
     const reader = getZxingReader();
     if (reader) {
       const result = await reader.decodeFromImageUrl(url);
-      const n = normalizeBarcodeNumber(result?.getText?.() || result?.text || '');
-      if (n) candidates.push(n);
+      const text = result?.getText?.() || result?.text || '';
+      if (text) candidates.push(text);
     }
   } catch { /* ignore */ }
 
-  if (pickBestBarcode(candidates)) return pickBestBarcode(candidates);
+  if (pickBestBarcode(candidates)) {
+    const early = pickBestBarcode(candidates);
+    if (state.scanTarget === 'importacao') {
+      const chave = extractChaveNfe44(early);
+      if (chave.length === 44) return chave;
+    } else {
+      return early;
+    }
+  }
 
   // 2) Variantes processadas (contraste / recorte / threshold)
   const variants = canvasVariantsFromImage(img);
@@ -1397,14 +1473,19 @@ async function decodeBarcodeFromImageUrl(url) {
     candidates.push(...await detectWithBarcodeDetector(canvas));
     candidates.push(...await detectWithZxingCanvas(canvas));
     const best = pickBestBarcode(candidates);
-    if (best) return best;
+    if (state.scanTarget === 'importacao') {
+      const chave = extractChaveNfe44(best);
+      if (chave.length === 44) return chave;
+    } else if (best) {
+      return best;
+    }
   }
 
   return pickBestBarcode(candidates);
 }
 
 async function startScanner(target = 'search') {
-  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
+  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
   // No APK Android: câmera nativa (WebView em HTTP local não abre getUserMedia).
   try {
     if (window.GestorApp && typeof window.GestorApp.scanBarcode === 'function') {
@@ -1427,7 +1508,9 @@ async function startScanner(target = 'search') {
     preview.removeAttribute('src');
   }
   dlg.showModal();
-  msg.textContent = 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
+  msg.textContent = state.scanTarget === 'importacao'
+    ? 'No iPhone, fotografe a faixa preta da chave de acesso (44 dígitos), na horizontal, ocupando a largura da tela.'
+    : 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
 
   const canLive = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
     && (window.isSecureContext || window.__GESTOR_APP__));
