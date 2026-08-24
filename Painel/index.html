@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes, viewport-fit=cover" />
   <meta name="theme-color" content="#1e3a5f" />
   <title>Gestor Estoque</title>
-  <link rel="stylesheet" href="styles.css?v=146" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=146" />
+  <link rel="stylesheet" href="styles.css?v=147" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=147" />
 </head>
 <body>
   <div id="app">
@@ -87,6 +87,7 @@
           <button id="btn-logout" class="btn small block">Sair</button>
         </div>
       </aside>
+      <button type="button" id="sidebar-backdrop" class="sidebar-backdrop" hidden aria-label="Fechar menu"></button>
 
       <main class="main">
         <header class="topbar">
@@ -348,6 +349,10 @@
             <p class="hint">Permissões por módulo. Supervisor sempre tem acesso total (senha 1020).</p>
             <button id="btn-salvar-usuarios" class="btn primary">Salvar usuários</button>
           </div>
+          <div class="toolbar users-filters">
+            <label>Buscar usuário<input type="search" id="busca-usuarios" placeholder="Nome…" autocomplete="off" /></label>
+            <label>Buscar permissão<input type="search" id="busca-permissoes" placeholder="Estoque, NF-e…" autocomplete="off" /></label>
+          </div>
           <div id="usuarios-lista" class="users-grid"></div>
         </div>
 
@@ -405,6 +410,17 @@
       </div>
     </dialog>
 
+    <dialog id="dlg-prompt" class="dlg">
+      <div class="dlg-card msg-card">
+        <p id="dlg-prompt-text"></p>
+        <input id="dlg-prompt-input" class="dlg-prompt-input" />
+        <div class="dlg-actions">
+          <button type="button" id="dlg-prompt-cancel" class="btn">Cancelar</button>
+          <button type="button" id="dlg-prompt-ok" class="btn primary">OK</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="dlg-danfe" class="dlg dlg-danfe">
       <div class="dlg-card dlg-danfe-card">
         <div class="dlg-danfe-bar">
@@ -420,8 +436,8 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=146"></script>
-  <script src="importacao-nfe.js?v=146"></script>
-  <script src="app.js?v=146"></script>
+  <script src="vendor/zxing-browser.min.js?v=147"></script>
+  <script src="importacao-nfe.js?v=147"></script>
+  <script src="app.js?v=147"></script>
 </body>
 </html>

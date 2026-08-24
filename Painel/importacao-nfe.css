@@ -128,7 +128,19 @@
 
 .imp-tab-panel {
   min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
 }
+.imp-parc-box {
+  max-height: min(50dvh, 28rem);
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.65rem;
+  margin: 0.5rem 0;
+}
+.imp-nota-acoes { display: flex; gap: 0.4rem; flex-wrap: wrap; }
 
 .imp-nf-grid {
   display: grid;

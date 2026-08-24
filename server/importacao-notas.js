@@ -452,6 +452,42 @@ async function getProdutoFiscal(idIdentificador) {
       WHERE I.ID_IDENTIFICADOR = ?`, [id]);
     if (!rows[0]) return null;
     const r = rows[0];
+    let tribNfe = null;
+    let tribNfce = null;
+    try {
+      const t1 = await query(db, `
+        SELECT FIRST 1 ID_CLASS_TRIB, DIFERIMENTO_CBS, COD_CRED_PRESU_CBS, ALIQ_CRED_PRESU_CBS,
+               DIFERIMENTO_IBS_UF, DIFERIMENTO_IBS_MUN, COD_CRED_PRESU_IBS, ALIQ_CRED_PRESU_IBS,
+               ID_CLASS_TRIB_REGULAR, DEDUZ_CRED_PRESU_CBS, DEDUZ_CRED_PRESU_IBS, IND_BEM_MOVEL_USADO
+        FROM TB_EST_TRIBUTOS WHERE ID_ESTOQUE = ?`, [r.ID_ESTOQUE]);
+      if (t1[0]) {
+        tribNfe = {
+          id_class_trib: t1[0].ID_CLASS_TRIB != null ? Number(t1[0].ID_CLASS_TRIB) : null,
+          diferimento_cbs: Number(t1[0].DIFERIMENTO_CBS || 0),
+          cod_cred_presu_cbs: String(t1[0].COD_CRED_PRESU_CBS || '').trim(),
+          aliq_cred_presu_cbs: Number(t1[0].ALIQ_CRED_PRESU_CBS || 0),
+          diferimento_ibs_uf: Number(t1[0].DIFERIMENTO_IBS_UF || 0),
+          diferimento_ibs_mun: Number(t1[0].DIFERIMENTO_IBS_MUN || 0),
+          cod_cred_presu_ibs: String(t1[0].COD_CRED_PRESU_IBS || '').trim(),
+          aliq_cred_presu_ibs: Number(t1[0].ALIQ_CRED_PRESU_IBS || 0),
+          id_class_trib_regular: t1[0].ID_CLASS_TRIB_REGULAR != null ? Number(t1[0].ID_CLASS_TRIB_REGULAR) : null,
+          deduz_cred_presu_cbs: String(t1[0].DEDUZ_CRED_PRESU_CBS || 'N').slice(0, 1),
+          deduz_cred_presu_ibs: String(t1[0].DEDUZ_CRED_PRESU_IBS || 'N').slice(0, 1),
+          ind_bem_movel_usado: String(t1[0].IND_BEM_MOVEL_USADO || 'N').slice(0, 1),
+        };
+      }
+      const t2 = await query(db, `
+        SELECT FIRST 1 ID_CLASS_TRIB, DIFERIMENTO_CBS, DIFERIMENTO_IBS_UF, DIFERIMENTO_IBS_MUN
+        FROM TB_EST_TRIBUTOS_NFCE WHERE ID_ESTOQUE = ?`, [r.ID_ESTOQUE]);
+      if (t2[0]) {
+        tribNfce = {
+          id_class_trib: t2[0].ID_CLASS_TRIB != null ? Number(t2[0].ID_CLASS_TRIB) : null,
+          diferimento_cbs: Number(t2[0].DIFERIMENTO_CBS || 0),
+          diferimento_ibs_uf: Number(t2[0].DIFERIMENTO_IBS_UF || 0),
+          diferimento_ibs_mun: Number(t2[0].DIFERIMENTO_IBS_MUN || 0),
+        };
+      }
+    } catch { /* bases sem reforma */ }
     return {
       id_estoque: Number(r.ID_ESTOQUE),
       id_identificador: Number(r.ID_IDENTIFICADOR),
@@ -483,12 +519,29 @@ async function getProdutoFiscal(idIdentificador) {
       cst_cfe: String(r.CST_CFE || '').trim(),
       csosn_cfe: String(r.CSOSN_CFE || '').trim(),
       qtd_atual: Number(r.QTD_ATUAL || 0),
+      trib_nfe: tribNfe,
+      trib_nfce: tribNfce,
     };
+  });
+}
+
+async function getNotaById(id) {
+  const idNf = Number(id);
+  if (!idNf) return null;
+  return withDb(async (db) => {
+    const rows = await query(db, `
+      SELECT FIRST 1 N.ID_NFCOMPRA, N.NF_NUMERO, N.NF_SERIE, N.NFE_ORIGEM, N.STATUS,
+             F.NOME_FANTA AS FORNEC_FANTA, F.CNPJ AS FORNEC_CNPJ
+      FROM TB_NFCOMPRA N
+      LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
+      WHERE N.ID_NFCOMPRA = ?`, [idNf]);
+    return rows[0] ? mapNotaRow(rows[0]) : null;
   });
 }
 
 module.exports = {
   listNotasCadastradas,
+  getNotaById,
   findNfDuplicada,
   listFormasPagto,
   listParcelamentos,

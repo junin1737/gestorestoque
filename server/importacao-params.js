@@ -109,6 +109,7 @@ function getSaidaPadrao() {
     cfop_saida: String(s.cfop_saida || '').trim(),
     csosn_saida: String(s.csosn_saida || '').trim(),
     aplicar_saida: (s.aplicar_saida === false || s.aplicar_saida === 'N') ? 'N' : 'S',
+    obrigar_financeiro: (s.obrigar_financeiro === false || s.obrigar_financeiro === 'N') ? 'N' : 'S',
   };
 }
 
@@ -118,6 +119,7 @@ function setSaidaPadrao(saida) {
     cfop_saida: String(saida?.cfop_saida || '').replace(/\D/g, '').slice(0, 4),
     csosn_saida: String(saida?.csosn_saida || '').replace(/\D/g, '').slice(0, 3),
     aplicar_saida: (saida?.aplicar_saida === false || saida?.aplicar_saida === 'N') ? 'N' : 'S',
+    obrigar_financeiro: (saida?.obrigar_financeiro === false || saida?.obrigar_financeiro === 'N') ? 'N' : 'S',
   };
   saveLocalParams(local);
   return local.saida;

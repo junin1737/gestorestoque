@@ -22,6 +22,7 @@ const ImportacaoNfe = (() => {
     parcelamentos: [],
     emitenteSimples: null,
     xmlTextPendente: null,
+    financeiroVisitado: false,
   };
 
   let deps = {};
@@ -63,14 +64,16 @@ const ImportacaoNfe = (() => {
 
   async function api(path, options = {}) {
     const supervisor = deps.isSupervisor?.() ? '1' : '0';
+    const usuarioId = deps.getUsuario?.()?.id;
     const method = (options.method || 'GET').toUpperCase();
     let url = path;
+    const extra = `supervisor=${supervisor}${usuarioId != null ? `&usuarioId=${encodeURIComponent(usuarioId)}` : ''}`;
     if (method === 'GET' || method === 'DELETE') {
-      url += (path.includes('?') ? '&' : '?') + `supervisor=${supervisor}`;
+      url += (path.includes('?') ? '&' : '?') + extra;
     } else if (options.body && typeof options.body === 'object') {
-      options = { ...options, body: { ...options.body, supervisor: supervisor === '1' } };
+      options = { ...options, body: { ...options.body, supervisor: supervisor === '1', usuarioId } };
     } else if (method === 'POST' || method === 'PUT') {
-      options = { ...options, body: { ...(options.body || {}), supervisor: supervisor === '1' } };
+      options = { ...options, body: { ...(options.body || {}), supervisor: supervisor === '1', usuarioId } };
     }
     return deps.api(url, options);
   }
@@ -210,6 +213,12 @@ const ImportacaoNfe = (() => {
     state.filtroDataCampo = $('#imp-filtro-data-campo')?.value || state.filtroDataCampo || 'entrada';
   }
 
+  async function askPrompt(message, opts = {}) {
+    if (deps.showPrompt) return deps.showPrompt({ message, ...opts });
+    if (opts.password) return window.prompt(message);
+    return window.prompt(message, opts.defaultValue || '');
+  }
+
   async function askConfirm(message, opts) {
     if (deps.showConfirm) return deps.showConfirm(message, opts);
     return window.confirm(message);
@@ -226,7 +235,10 @@ const ImportacaoNfe = (() => {
     if (dados) dados.hidden = state.tab !== 'dados';
     if (itens) itens.hidden = state.tab !== 'itens';
     if (fin) fin.hidden = state.tab !== 'financeiro';
-    if (state.tab === 'financeiro') renderFinanceiro();
+    if (state.tab === 'financeiro') {
+      state.financeiroVisitado = true;
+      renderFinanceiro();
+    }
   }
 
   /* ── HOME ───────────────────────────────────────────────────────────────── */
@@ -325,9 +337,31 @@ const ImportacaoNfe = (() => {
             <span class="chip ${cancelada ? 'pending' : 'ok'}">${cancelada ? 'Cancelada' : 'Cadastrada'}</span>
           </div>
         </div>
-        ${!cancelada ? `<button type="button" class="btn small outline imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}">Cancelar</button>` : ''}
+        ${!cancelada ? `<div class="imp-nota-acoes">
+            <button type="button" class="btn small outline imp-btn-editar-nf" data-id="${esc(n.id_nfcompra)}">Editar</button>
+            <button type="button" class="btn small outline imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}">Cancelar</button>
+          </div>` : ''}
       </div>`;
     }).join('');
+    $$('.imp-btn-editar-nf', box).forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const res = await api(`/importacao/notas/${btn.dataset.id}/editar`, { method: 'POST', body: {} });
+        if (!res.ok) {
+          deps.showMsg?.(res.error || 'Não foi possível reabrir a nota');
+          return;
+        }
+        const id = res.sessao?.id;
+        if (id) openSessao(id);
+        else if (res.sessao) {
+          state.sessao = res.sessao;
+          state.itemIndex = 0;
+          state.tab = 'dados';
+          renderSessao();
+          setTab('dados');
+          showView('sessao');
+        }
+      });
+    });
     $$('.imp-btn-cancelar-nf', box).forEach((btn) => {
       btn.addEventListener('click', async () => {
         if (btn.disabled) return;
@@ -371,7 +405,10 @@ const ImportacaoNfe = (() => {
     renderItensLista();
     updateAddItemBtn();
     updateConfirmBtn();
-    if (state.tab === 'financeiro') renderFinanceiro();
+    if (state.tab === 'financeiro') {
+      state.financeiroVisitado = true;
+      renderFinanceiro();
+    }
   }
 
   function renderManualCabecalho() {
@@ -1076,8 +1113,8 @@ const ImportacaoNfe = (() => {
           ${field('Fatura (nFat)', 'imp-nfat', fin.nFat || '', { half: true })}
           ${field('tPag XML', 'imp-tpag', fin.tPag || '', { half: true, readonly: true })}
         </div>
-        <h4 class="imp-sub">Parcelas da nota (XML)</h4>
-        <div id="imp-parcelas">${parc.length ? parc.map((p, i) => `
+        <h4 class="imp-sub">Parcelas (valor e vencimento editáveis)</h4>
+        <div id="imp-parcelas" class="imp-parc-box">${parc.length ? parc.map((p, i) => `
           <div class="imp-parc-row" data-i="${i}">
             ${field(`Parcela ${p.nDup || i + 1}`, `imp-parc-v-${i}`, p.vDup, { type: 'number', step: '0.01', half: true })}
             ${field('Vencimento', `imp-parc-d-${i}`, String(p.dVenc || '').slice(0, 10), { type: 'date', half: true })}
@@ -1102,11 +1139,50 @@ const ImportacaoNfe = (() => {
           ),
       ].join('');
     });
+    function addDaysIso(iso, days) {
+      const d = new Date(`${String(iso).slice(0, 10)}T12:00:00`);
+      if (Number.isNaN(d.getTime())) return String(iso || '').slice(0, 10);
+      d.setDate(d.getDate() + Number(days || 0));
+      return d.toISOString().slice(0, 10);
+    }
+    function writeParcelasDom(list) {
+      const boxParc = $('#imp-parcelas');
+      if (!boxParc) return;
+      if (!list.length) {
+        boxParc.innerHTML = '<p class="hint">Nenhuma parcela. Escolha um parcelamento para gerar.</p>';
+        return;
+      }
+      boxParc.innerHTML = list.map((p, i) => `
+          <div class="imp-parc-row" data-i="${i}">
+            ${field(`Parcela ${p.nDup || i + 1}`, `imp-parc-v-${i}`, p.vDup, { type: 'number', step: '0.01', half: true })}
+            ${field('Vencimento', `imp-parc-d-${i}`, String(p.dVenc || '').slice(0, 10), { type: 'date', half: true })}
+          </div>`).join('');
+    }
+    function rebuildParcelasFromParcelamento() {
+      const p = state.parcelamentos.find((x) => String(x.id_parcela) === String($('#imp-parcelamento')?.value));
+      const n = Number(p?.n_parcelas || 0);
+      if (n < 1) return;
+      const total = Number(s.xml?.total?.vNF || 0);
+      const first = String($('#imp-parc-d-0')?.value || parc[0]?.dVenc || todayLocal()).slice(0, 10);
+      const interval = Number(p.intervalo || 30) || 30;
+      const each = Number((total / n).toFixed(2));
+      const rows = [];
+      let acc = 0;
+      for (let i = 0; i < n; i++) {
+        const v = i === n - 1 ? Number((total - acc).toFixed(2)) : each;
+        acc += v;
+        rows.push({ nDup: String(i + 1).padStart(3, '0'), vDup: v, dVenc: addDaysIso(first, i * interval) });
+      }
+      writeParcelasDom(rows);
+    }
+    $('#imp-parcelamento')?.addEventListener('change', rebuildParcelasFromParcelamento);
+    const pSel = state.parcelamentos.find((x) => String(x.id_parcela) === String(idParcela));
+    if (Number(pSel?.n_parcelas) > 1 && parc.length <= 1) rebuildParcelasFromParcelamento();
     $('#imp-fin-salvar')?.addEventListener('click', async () => {
-      const parcelas = parc.map((p, i) => ({
-        ...p,
+      const parcelas = $$('#imp-parcelas .imp-parc-row').map((row, i) => ({
+        nDup: String(i + 1).padStart(3, '0'),
         vDup: Number($(`#imp-parc-v-${i}`)?.value || 0),
-        dVenc: $(`#imp-parc-d-${i}`)?.value || p.dVenc,
+        dVenc: $(`#imp-parc-d-${i}`)?.value || '',
       }));
       const idFmapgto = $('#imp-fmpag')?.value || null;
       const idParcelaSel = $('#imp-parcelamento')?.value || null;
@@ -2105,6 +2181,9 @@ const ImportacaoNfe = (() => {
             p_pis: f.pis ?? it.sistema.tributos?.p_pis,
             p_cofins: f.cofins ?? it.sistema.tributos?.p_cofins,
           };
+          it.sistema.uni_medida_cadastro = f.uni_medida || it.sistema.uni_medida_cadastro;
+          if (f.trib_nfe) it.sistema.trib_nfe = { ...(it.sistema.trib_nfe || {}), ...f.trib_nfe };
+          if (f.trib_nfce) it.sistema.trib_nfce = { ...(it.sistema.trib_nfce || {}), ...f.trib_nfce };
         }
       } catch (_) { /* ignore */ }
 
@@ -2243,6 +2322,7 @@ const ImportacaoNfe = (() => {
         aplicar_saida: aplicarSaida,
         id_regra: sys.id_regra ?? null,
         uni_medida: uniEstoque || '',
+        uni_medida_cadastro: sys.uni_medida_cadastro || '',
         uni_medida_saida: uniSaida || '',
         uni_medida_xml: g('#imp-uni-xml') || sys.uni_medida_xml || '',
         conversor,
@@ -2570,7 +2650,9 @@ const ImportacaoNfe = (() => {
       aliq_cbs: Number($('#imp-nfe-aliq-cbs-pad')?.value || 0.9),
       aliq_ibs_uf: Number($('#imp-nfe-aliq-ibs-uf')?.value || 0.1),
     };
-    const base = Number($('#imp-nfe-bc-cbs')?.value || 0);
+    const venda = parseMoney($('#imp-venda')?.value);
+    const base = (venda != null && venda > 0) ? venda : Number($('#imp-nfe-bc-cbs')?.value || 0);
+    if (venda != null && venda > 0 && $('#imp-nfe-bc-cbs')) $('#imp-nfe-bc-cbs').value = String(venda);
     const cbs = calcCbsIbs(tn, base);
     it.sistema.trib_nfe = { ...tn, ...cbs };
     syncCbsIbsFields(cbs);
@@ -2639,6 +2721,7 @@ const ImportacaoNfe = (() => {
         const n = parseMoney(e.target.value);
         if (n != null) e.target.value = moneyInput(n);
         if (sel === '#imp-custo-ficha') syncVendaPorMargem();
+        if (sel === '#imp-venda') recalcCbsIbsFromInputs();
       });
     });
     $('#imp-criar-novo')?.addEventListener('click', () => {
@@ -2725,7 +2808,25 @@ const ImportacaoNfe = (() => {
         disp.dispatchEvent(new Event('focus'));
       }
     });
-    $('#imp-conversor')?.addEventListener('input', syncQtdConvertida);
+    $('#imp-conversor')?.addEventListener('input', () => {
+      const xmlUni = String($('#imp-uni-xml')?.value || '').trim().toUpperCase();
+      const sel = $('#imp-uni');
+      const cur = String(sel?.value || '').trim().toUpperCase();
+      const it = itemAt(state.itemIndex);
+      const cad = String(it?.sistema?.uni_medida_cadastro || it?.sistema?.uni_medida_saida || 'UN').trim().toUpperCase();
+      if (sel && xmlUni && cur === xmlUni && cad && cad !== xmlUni) {
+        const has = [...sel.options].some((o) => String(o.value).toUpperCase() === cad);
+        if (!has) {
+          const opt = document.createElement('option');
+          opt.value = cad;
+          opt.textContent = cad;
+          sel.appendChild(opt);
+        }
+        const match = [...sel.options].find((o) => String(o.value).toUpperCase() === cad);
+        if (match) sel.value = match.value;
+      }
+      syncQtdConvertida();
+    });
     $('#imp-uni')?.addEventListener('change', (e) => {
       const opt = e.target.selectedOptions?.[0];
       const conv = opt?.dataset?.conversor;
@@ -2741,10 +2842,10 @@ const ImportacaoNfe = (() => {
       if (block) block.classList.toggle('is-off', !e.target.checked);
     });
     $('#imp-cad-unidade')?.addEventListener('click', async () => {
-      const unidade = prompt('Unidade (ex.: CX):');
+      const unidade = await askPrompt('Unidade (ex.: CX):');
       if (!unidade) return;
-      const descricao = prompt('Descrição da unidade:', unidade) || unidade;
-      const conversorStr = prompt('Conversor (padrão 1):', '1');
+      const descricao = (await askPrompt('Descrição da unidade:', { defaultValue: unidade })) || unidade;
+      const conversorStr = await askPrompt('Conversor (padrão 1):', { defaultValue: '1' });
       const conversor = Number(conversorStr || 1) || 1;
       const res = await api('/importacao/unidades', {
         method: 'POST',
@@ -3018,6 +3119,10 @@ const ImportacaoNfe = (() => {
             <input type="checkbox" id="imp-params-aplicar-saida" ${ynChecked(saida.aplicar_saida !== undefined ? saida.aplicar_saida : 'S') ? 'checked' : ''} />
             Aplicar saída padrão
           </label>
+          <label class="imp-check imp-field third">
+            <input type="checkbox" id="imp-params-obrigar-fin" ${ynChecked(saida.obrigar_financeiro !== 'N') ? 'checked' : ''} />
+            Obrigar conferência da aba Financeiro antes de gravar
+          </label>
         </div>
       </section>
     `;
@@ -3162,6 +3267,7 @@ const ImportacaoNfe = (() => {
       cfop_saida: $('#imp-params-cfop-saida')?.value || '',
       csosn_saida: $('#imp-params-csosn-saida')?.value || '',
       aplicar_saida: $('#imp-params-aplicar-saida')?.checked ? 'S' : 'N',
+      obrigar_financeiro: $('#imp-params-obrigar-fin')?.checked ? 'S' : 'N',
     };
     const res = await api('/importacao/params/cfop', {
       method: 'PUT',
@@ -3241,6 +3347,15 @@ const ImportacaoNfe = (() => {
         deps.showMsg?.(btn?.title || 'Confira todos os itens e vincule o fornecedor antes de gravar.');
         return;
       }
+      try {
+        const params = await api('/importacao/params/cfop');
+        const obrigar = (params.saida?.obrigar_financeiro || 'S') !== 'N';
+        if (obrigar && !state.sessao?.financeiro_ok && !state.financeiroVisitado) {
+          deps.showMsg?.('Abra a aba Financeiro, confira as parcelas (valor e vencimento) e toque em Salvar financeiro antes de gravar.');
+          setTab('financeiro');
+          return;
+        }
+      } catch { /* segue se params falhar */ }
       const nItens = state.sessao.itens?.length || 0;
       const nNf = state.sessao.xml?.ide?.nNF || state.sessao.cabecalho?.nNF || '—';
       const okConfirm = await askConfirm(

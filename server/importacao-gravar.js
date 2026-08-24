@@ -309,6 +309,84 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
       }
     }
   }
+
+  await upsertEstTributosReforma(db, idIdent, sistema);
+}
+
+/** Reforma tributária do cadastro: TB_EST_TRIBUTOS / TB_EST_TRIBUTOS_NFCE (por ID_ESTOQUE). */
+async function upsertEstTributosReforma(db, idIdent, sistema = {}) {
+  const nfe = sistema.trib_nfe || sistema.trib_nfe || {};
+  const nfce = sistema.trib_nfce || {};
+  const idClassNfe = nfe.id_class_trib != null && nfe.id_class_trib !== '' ? Number(nfe.id_class_trib) : null;
+  const idClassNfce = nfce.id_class_trib != null && nfce.id_class_trib !== ''
+    ? Number(nfce.id_class_trib)
+    : idClassNfe;
+  if (!idClassNfe && !idClassNfce) return;
+
+  try {
+    const row = (await query(db, `
+      SELECT FIRST 1 ID_ESTOQUE FROM TB_EST_IDENTIFICADOR WHERE ID_IDENTIFICADOR = ?`, [idIdent]))[0];
+    const idEst = Number(row?.ID_ESTOQUE);
+    if (!idEst) return;
+
+    if (idClassNfe) {
+      const exists = await query(db, `SELECT FIRST 1 ID_ESTOQUE FROM TB_EST_TRIBUTOS WHERE ID_ESTOQUE = ?`, [idEst]);
+      const payload = [
+        idClassNfe,
+        Number(nfe.diferimento_cbs || 0),
+        String(nfe.cod_cred_presu_cbs || '').trim() || null,
+        Number(nfe.aliq_cred_presu_cbs || 0),
+        Number(nfe.diferimento_ibs_uf || 0),
+        Number(nfe.diferimento_ibs_mun || 0),
+        String(nfe.cod_cred_presu_ibs || '').trim() || null,
+        Number(nfe.aliq_cred_presu_ibs || 0),
+        nfe.id_class_trib_regular != null && nfe.id_class_trib_regular !== ''
+          ? Number(nfe.id_class_trib_regular)
+          : null,
+        String(nfe.deduz_cred_presu_cbs || 'N').slice(0, 1) || 'N',
+        String(nfe.deduz_cred_presu_ibs || 'N').slice(0, 1) || 'N',
+        String(nfe.ind_bem_movel_usado || 'N').slice(0, 1) || 'N',
+      ];
+      if (exists.length) {
+        await query(db, `
+          UPDATE TB_EST_TRIBUTOS SET
+            ID_CLASS_TRIB=?, DIFERIMENTO_CBS=?, COD_CRED_PRESU_CBS=?, ALIQ_CRED_PRESU_CBS=?,
+            DIFERIMENTO_IBS_UF=?, DIFERIMENTO_IBS_MUN=?, COD_CRED_PRESU_IBS=?, ALIQ_CRED_PRESU_IBS=?,
+            ID_CLASS_TRIB_REGULAR=?, DEDUZ_CRED_PRESU_CBS=?, DEDUZ_CRED_PRESU_IBS=?, IND_BEM_MOVEL_USADO=?
+          WHERE ID_ESTOQUE=?`, [...payload, idEst]);
+      } else {
+        await query(db, `
+          INSERT INTO TB_EST_TRIBUTOS (
+            ID_ESTOQUE, ID_CLASS_TRIB, DIFERIMENTO_CBS, COD_CRED_PRESU_CBS, ALIQ_CRED_PRESU_CBS,
+            DIFERIMENTO_IBS_UF, DIFERIMENTO_IBS_MUN, COD_CRED_PRESU_IBS, ALIQ_CRED_PRESU_IBS,
+            ID_CLASS_TRIB_REGULAR, DEDUZ_CRED_PRESU_CBS, DEDUZ_CRED_PRESU_IBS, IND_BEM_MOVEL_USADO
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [idEst, ...payload]);
+      }
+    }
+
+    if (idClassNfce) {
+      const existsN = await query(db, `SELECT FIRST 1 ID_ESTOQUE FROM TB_EST_TRIBUTOS_NFCE WHERE ID_ESTOQUE = ?`, [idEst]);
+      const nfceVals = [
+        idClassNfce,
+        Number(nfce.diferimento_cbs || nfe.diferimento_cbs || 0),
+        Number(nfce.diferimento_ibs_uf || nfe.diferimento_ibs_uf || 0),
+        Number(nfce.diferimento_ibs_mun || nfe.diferimento_ibs_mun || 0),
+      ];
+      if (existsN.length) {
+        await query(db, `
+          UPDATE TB_EST_TRIBUTOS_NFCE SET
+            ID_CLASS_TRIB=?, DIFERIMENTO_CBS=?, DIFERIMENTO_IBS_UF=?, DIFERIMENTO_IBS_MUN=?
+          WHERE ID_ESTOQUE=?`, [...nfceVals, idEst]);
+      } else {
+        await query(db, `
+          INSERT INTO TB_EST_TRIBUTOS_NFCE (
+            ID_ESTOQUE, ID_CLASS_TRIB, DIFERIMENTO_CBS, DIFERIMENTO_IBS_UF, DIFERIMENTO_IBS_MUN
+          ) VALUES (?, ?, ?, ?, ?)`, [idEst, ...nfceVals]);
+      }
+    }
+  } catch (e) {
+    console.warn('TB_EST_TRIBUTOS:', e.message);
+  }
 }
 
 function tribReformaNfe(sistema = {}) {
@@ -488,7 +566,9 @@ async function gravarNfCompra(sessao, {
   const serie = String(ide.serie || '1').trim().slice(0, 3);
   const modelo = String(ide.modelo || '55').trim().slice(0, 2);
 
-  const dup = await findNfDuplicada({
+  const dup = Number(sessao.editar_id_nfcompra)
+    ? null
+    : await findNfDuplicada({
     chave,
     nfNumero,
     serie,
@@ -497,6 +577,49 @@ async function gravarNfCompra(sessao, {
   });
   if (dup) {
     throw new Error(dup.aviso || `NF ${nfNumero} já cadastrada (cód. ${dup.id_nfcompra}).`);
+  }
+
+  if (Number(sessao.editar_id_nfcompra)) {
+    const idNf = Number(sessao.editar_id_nfcompra);
+    return withDb(async (db, appCfg) => {
+      const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
+        ? fin.parcelas
+        : [];
+      if (parcelasXml.length) {
+        try {
+          const contas = await query(db, `
+            SELECT C.ID_CTAPAG
+            FROM TB_NFC_CTAPAG L
+            JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = L.ID_CTAPAG
+            WHERE L.ID_NFCOMPRA = ?
+            ORDER BY C.DT_VENCTO, C.ID_CTAPAG`, [idNf]);
+          const n = Math.min(contas.length, parcelasXml.length);
+          for (let i = 0; i < n; i++) {
+            const p = parcelasXml[i];
+            await query(db, `
+              UPDATE TB_CONTA_PAGAR SET VLR_CTAPAG = ?, DT_VENCTO = ?
+              WHERE ID_CTAPAG = ?`, [
+              round2(p.vDup || 0),
+              toDateSql(p.dVenc),
+              Number(contas[i].ID_CTAPAG),
+            ]);
+          }
+        } catch (e) {
+          console.warn('Atualizar parcelas (edição):', e.message);
+        }
+      }
+      for (const it of itens) {
+        await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
+      }
+      return {
+        id_nfcompra: idNf,
+        nf_numero: nfNumero,
+        nf_serie: serie,
+        itens_gravados: itens.length,
+        parcelas: parcelasXml.length,
+        editado: true,
+      };
+    });
   }
 
   return withDb(async (db, appCfg) => {

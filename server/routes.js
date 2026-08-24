@@ -1059,7 +1059,15 @@ function importacaoSupervisorOk(req) {
 
 function guardImportacaoSupervisor(req, res) {
   if (importacaoSupervisorOk(req)) return true;
-  res.json({ ok: false, error: 'Importação NF-e em desenvolvimento — disponível apenas para supervisor.' });
+  const uid = Number(req.query?.usuarioId ?? req.body?.usuarioId);
+  if (Number.isFinite(uid)) {
+    try {
+      const users = loadUsersConfig(loadAppConfig());
+      const u = (users.usuarios || []).find((x) => Number(x.id) === uid);
+      if (u?.supervisor || u?.permissoes?.importacao?.acesso) return true;
+    } catch { /* ignore */ }
+  }
+  res.json({ ok: false, error: 'Sem permissão para notas de entrada.' });
   return false;
 }
 
@@ -1409,6 +1417,30 @@ router.post('/importacao/sessoes/:id/cancelar', (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
     res.json(importacaoStaging.cancelarSessaoConfirmada(req.params.id));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/notas/:idNfcompra/editar', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const nota = await importacaoNotas.getNotaById(req.params.idNfcompra);
+    if (!nota) {
+      res.json({ ok: false, error: 'Nota não encontrada.' });
+      return;
+    }
+    const chave = String(nota.nfe_origem || '').replace(/\D/g, '');
+    if (chave.length !== 44) {
+      res.json({ ok: false, error: 'Esta nota não tem chave de acesso para reabrir a conferência.' });
+      return;
+    }
+    const out = await importacaoStaging.createSessao({
+      chave,
+      editarIdNfcompra: Number(nota.id_nfcompra),
+      allowDemo: false,
+    });
+    res.json(out);
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

@@ -408,6 +408,8 @@ function mapSessaoForClient(s) {
   if (s.natureza) out.natureza = s.natureza;
   if (s.fonte) out.fonte = s.fonte;
   if (s.id_nfcompra != null) out.id_nfcompra = s.id_nfcompra;
+  if (s.editar_id_nfcompra != null) out.editar_id_nfcompra = s.editar_id_nfcompra;
+  if (s.financeiro_ok) out.financeiro_ok = true;
   if (s.sefazErro) out.sefazErro = s.sefazErro;
   return out;
 }
@@ -644,11 +646,13 @@ async function createSessao(opts = {}) {
     preferSefaz: typeof opts === 'object' ? opts.preferSefaz !== false : true,
   });
 
+  const editarId = typeof opts === 'object' ? Number(opts.editarIdNfcompra || 0) : 0;
+
   const store = loadStore();
   const chave = xml.chave || String(chaveIn || '').replace(/\D/g, '');
 
   // Sessão JSON "confirmada" não pode bloquear se a NF já foi cancelada no Clipp
-  const dupConfirmada = store.sessoes.find((s) => s.chave === chave && s.status === 'confirmada');
+  const dupConfirmada = !editarId && store.sessoes.find((s) => s.chave === chave && s.status === 'confirmada');
   if (dupConfirmada) {
     const { findNfDuplicada } = require('./importacao-notas');
     const dupDb = await findNfDuplicada({
@@ -721,6 +725,7 @@ async function createSessao(opts = {}) {
     manual: false,
     fonte,
     sefazErro: sefazErro || null,
+    editar_id_nfcompra: editarId || undefined,
     id_natope: idNatope,
     natureza,
     xml: {
@@ -931,6 +936,7 @@ function updateFinanceiro(sessaoId, financeiro) {
   // Evita persistir "Nenhum" se o cliente mandar id 1 por engano
   if (Number(s.financeiro.id_fmapgto) === 1) s.financeiro.id_fmapgto = 3;
   if (Number(s.financeiro.id_parcela) === 1) s.financeiro.id_parcela = 24;
+  s.financeiro_ok = true;
   s.updatedAt = new Date().toISOString();
   s._sync = { ...(s._sync || {}), version: (s._sync?.version || 0) + 1, pendingCloud: true };
   saveStore(store);

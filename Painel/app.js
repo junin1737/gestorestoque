@@ -88,6 +88,35 @@ function showConfirm(message, { okLabel = 'Confirmar', cancelLabel = 'Cancelar' 
   });
 }
 
+function showPrompt({ message, password = false, defaultValue = '' } = {}) {
+  return new Promise((resolve) => {
+    const dlg = $('#dlg-prompt');
+    const text = $('#dlg-prompt-text');
+    const input = $('#dlg-prompt-input');
+    const btnOk = $('#dlg-prompt-ok');
+    const btnCancel = $('#dlg-prompt-cancel');
+    if (!dlg || !text || !input || !btnOk || !btnCancel) {
+      resolve(password ? window.prompt(message) : window.prompt(message, defaultValue));
+      return;
+    }
+    text.textContent = String(message || '');
+    input.type = password ? 'password' : 'text';
+    input.value = password ? '' : String(defaultValue || '');
+    const finish = (value) => {
+      btnOk.onclick = null;
+      btnCancel.onclick = null;
+      dlg.onclose = null;
+      try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
+      resolve(value);
+    };
+    btnOk.onclick = () => finish(input.value);
+    btnCancel.onclick = () => finish(null);
+    dlg.onclose = () => resolve(null);
+    if (!dlg.open) dlg.showModal();
+    setTimeout(() => input.focus(), 30);
+  });
+}
+
 window.alert = (message) => showMsg(message);
 
 async function api(path, options = {}) {
@@ -351,7 +380,7 @@ function enterApp() {
   $('#nav-estoque').hidden = !canEst;
   if ($('#nav-estoque-mobile')) $('#nav-estoque-mobile').hidden = !canEst;
   if ($('#dash-estoque')) $('#dash-estoque').hidden = !canEst;
-  const showImp = !!state.usuario?.supervisor;
+  const showImp = !!state.usuario?.supervisor || can('importacao', 'acesso');
   if ($('#nav-importacao')) $('#nav-importacao').hidden = !showImp;
   if ($('#nav-importacao-mobile')) $('#nav-importacao-mobile').hidden = !showImp;
   if ($('#dash-importacao')) $('#dash-importacao').hidden = !showImp;
@@ -368,6 +397,8 @@ function trocarUsuario() {
   $('#view-app').hidden = true;
   $('#view-login').hidden = false;
   document.body.classList.remove('sidebar-open');
+  const bd = $('#sidebar-backdrop');
+  if (bd) bd.hidden = true;
   loadFuncionarios();
 }
 
@@ -375,7 +406,16 @@ $('#btn-logout').addEventListener('click', trocarUsuario);
 $('#btn-trocar-usuario').addEventListener('click', trocarUsuario);
 $('#btn-trocar-usuario-top').addEventListener('click', trocarUsuario);
 $('#btn-trocar-mobile')?.addEventListener('click', trocarUsuario);
-$('#btn-menu-mobile')?.addEventListener('click', () => document.body.classList.toggle('sidebar-open'));
+function setSidebarOpen(open) {
+  document.body.classList.toggle('sidebar-open', open);
+  const bd = $('#sidebar-backdrop');
+  if (bd) bd.hidden = !open;
+}
+
+$('#btn-menu-mobile')?.addEventListener('click', () => {
+  setSidebarOpen(!document.body.classList.contains('sidebar-open'));
+});
+$('#sidebar-backdrop')?.addEventListener('click', () => setSidebarOpen(false));
 
 $('#tema-rapido').addEventListener('change', async (e) => {
   const tema = e.target.value;
@@ -431,7 +471,7 @@ function showPage(page) {
     showMsg('Sem permissão de estoque.');
     page = 'dashboard';
   }
-  if (page === 'importacao' && !state.usuario?.supervisor) {
+  if (page === 'importacao' && !(state.usuario?.supervisor || can('importacao', 'acesso'))) {
     showMsg('Importação NF-e em desenvolvimento — disponível apenas para supervisor.');
     page = 'dashboard';
   }
@@ -911,7 +951,7 @@ function renderDetalhe() {
   });
 
   $('#btn-novo-grupo')?.addEventListener('click', async () => {
-    const nome = prompt('Nome do novo grupo:');
+    const nome = await showPrompt({ message: 'Nome do novo grupo:' });
     if (!nome) return;
     const res = await api('/grupos', { method: 'POST', body: { descricao: nome } });
     if (!res.ok) return showMsg(res.error || 'Erro ao criar grupo');
@@ -974,11 +1014,33 @@ function renderUsuarios() {
             <option value="false" ${!u.permissoes?.usuarios?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        <label>Notas de entrada
+          <select data-perm="importacao.acesso" ${u.supervisor ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.importacao?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.importacao?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
       </div>
-      <p class="hint">${u.supervisor ? 'Supervisor: todas as permissões ativas automaticamente.' : 'Preços: Visualizar = só venda; Editar = altera venda; Total = venda + custo.'}</p>
     </div>
   `).join('');
+  applyUsuariosFiltros();
 }
+
+function applyUsuariosFiltros() {
+  const qUser = String($('#busca-usuarios')?.value || '').trim().toLowerCase();
+  const qPerm = String($('#busca-permissoes')?.value || '').trim().toLowerCase();
+  $$('.user-card').forEach((card) => {
+    const nome = card.querySelector('input')?.value || '';
+    card.hidden = !!(qUser && !nome.toLowerCase().includes(qUser));
+    $$('.perm-grid label', card).forEach((lab) => {
+      const txt = String(lab.textContent || '').toLowerCase();
+      lab.hidden = !!(qPerm && !txt.includes(qPerm));
+    });
+  });
+}
+
+$('#busca-usuarios')?.addEventListener('input', applyUsuariosFiltros);
+$('#busca-permissoes')?.addEventListener('input', applyUsuariosFiltros);
 
 const PERM_LABELS = {
   nenhum: 'Nenhum',
@@ -995,7 +1057,7 @@ function permOptions(list, current) {
 }
 
 $('#btn-salvar-usuarios').addEventListener('click', async () => {
-  const senhaSup = prompt('Confirme a senha do supervisor para salvar:');
+  const senhaSup = await showPrompt({ message: 'Confirme a senha do supervisor para salvar:', password: true });
   if (senhaSup == null) return;
   const cards = $$('.user-card');
   const usuarios = state.usuarios.map((u, idx) => {
@@ -1016,6 +1078,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         },
         usuarios: {
           acesso: $('[data-perm="usuarios.acesso"]', card).value === 'true',
+        },
+        importacao: {
+          acesso: $('[data-perm="importacao.acesso"]', card)?.value === 'true',
         },
       },
     };
@@ -1337,6 +1402,23 @@ function canvasVariantsFromImage(img) {
   const h = img.naturalHeight || img.height;
   if (!w || !h) return [];
 
+  const max = 1600;
+  const srcW = w;
+  const srcH = h;
+  let work = img;
+  if (Math.max(w, h) > max) {
+    const s = max / Math.max(w, h);
+    const c = document.createElement('canvas');
+    c.width = Math.round(w * s);
+    c.height = Math.round(h * s);
+    const ctx0 = c.getContext('2d');
+    if (ctx0) ctx0.drawImage(img, 0, 0, c.width, c.height);
+    work = c;
+    w = c.width;
+    h = c.height;
+  }
+  const src = work;
+
   const variants = [];
   const pushVariant = (sx, sy, sw, sh, scale, mode) => {
     const cw = Math.max(1, Math.round(sw * scale));
@@ -1347,7 +1429,7 @@ function canvasVariantsFromImage(img) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
     ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(img, sx, sy, sw, sh, 0, 0, cw, ch);
+    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, cw, ch);
 
     if (mode !== 'raw') {
       const data = ctx.getImageData(0, 0, cw, ch);
@@ -1370,7 +1452,7 @@ function canvasVariantsFromImage(img) {
   };
 
   // Original e com contraste em escalas úteis
-  for (const scale of [1, 1.6, 0.75]) {
+  for (const scale of [1]) {
     pushVariant(0, 0, w, h, scale, 'raw');
     pushVariant(0, 0, w, h, scale, 'contrast');
   }
@@ -1382,7 +1464,6 @@ function canvasVariantsFromImage(img) {
   const ch = Math.round(h * 0.56);
   pushVariant(cx, cy, cw, ch, 1.4, 'contrast');
   pushVariant(cx, cy, cw, ch, 1.8, 'threshold');
-  pushVariant(cx, cy, cw, ch, 1.4, 'invert');
 
   // Faixa horizontal (barras de produto)
   const bx = Math.round(w * 0.05);
@@ -1641,6 +1722,7 @@ window.ImportacaoNfe?.init({
   api,
   showMsg,
   showConfirm,
+  showPrompt,
   showToast,
   escapeHtml,
   fmtMoney,
@@ -1658,6 +1740,11 @@ window.gestorHardwareBack = () => {
     const frame = $('#dlg-danfe-frame');
     if (frame) frame.src = 'about:blank';
     try { dlgDanfe.close(); } catch { /* ignore */ }
+    return true;
+  }
+  const dlgPrompt = $('#dlg-prompt');
+  if (dlgPrompt?.open) {
+    try { dlgPrompt.close(); } catch { /* ignore */ }
     return true;
   }
   const dlgConfirm = $('#dlg-confirm');
