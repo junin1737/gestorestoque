@@ -214,6 +214,11 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
     ? (String(sistema.cod_barras || '').trim() || null)
     : (String(sistema.cod_barras || eanXml).trim() || null);
   const uni = String(sistema.uni_medida_saida || sistema.uni_medida || xmlItem?.uCom || '').trim().slice(0, 6) || null;
+  const descricao = String(sistema.descricao || '').trim();
+  const referencia = sistema.referencia != null ? String(sistema.referencia).trim() : null;
+  const descCmpl = sistema.desc_cmpl != null ? String(sistema.desc_cmpl).trim() : null;
+  const statusProd = String(sistema.status || '').trim().slice(0, 1) || null;
+  const anp = String(sistema.anp || '').trim() || null;
 
   const cfopSaida = aplicarSaida ? (String(sistema.cfop_saida || '').trim().slice(0, 4) || null) : null;
   const cfopNf = aplicarSaida ? (String(sistema.cfop_nf || '').trim().slice(0, 4) || null) : null;
@@ -257,24 +262,28 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
         UPDATE ${t.produto} SET
           COD_CEST = COALESCE(?, COD_CEST),
           COD_BARRA = COALESCE(?, COD_BARRA),
+          REFERENCIA = COALESCE(?, REFERENCIA),
+          DESC_CMPL = COALESCE(?, DESC_CMPL),
+          ANP = COALESCE(?, ANP),
           CST = COALESCE(?, CST),
           CSOSN = COALESCE(?, CSOSN),
           CST_CFE = COALESCE(?, CST_CFE),
           CSOSN_CFE = COALESCE(?, CSOSN_CFE)
         WHERE ID_IDENTIFICADOR = ?`, [
-        cest, barras, cst, csosn, cstCfe, csosnCfe, idIdent,
+        cest, barras, referencia, descCmpl, anp, cst, csosn, cstCfe, csosnCfe, idIdent,
       ]);
     } catch (e) {
-      // bases sem CST_CFE / CSOSN_CFE
       try {
         await query(db, `
           UPDATE ${t.produto} SET
             COD_CEST = COALESCE(?, COD_CEST),
             COD_BARRA = COALESCE(?, COD_BARRA),
+            REFERENCIA = COALESCE(?, REFERENCIA),
+            DESC_CMPL = COALESCE(?, DESC_CMPL),
             CST = COALESCE(?, CST),
             CSOSN = COALESCE(?, CSOSN)
           WHERE ID_IDENTIFICADOR = ?`, [
-          cest, barras, cst, csosn, idIdent,
+          cest, barras, referencia, descCmpl, cst, csosn, idIdent,
         ]);
       } catch (e2) {
         console.warn('Atualizar tributos produto:', e2.message);
@@ -283,6 +292,14 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
 
     const sets = [];
     const vals = [];
+    if (descricao) {
+      sets.push('DESCRICAO = ?');
+      vals.push(descricao.slice(0, 120));
+    }
+    if (statusProd) {
+      sets.push('STATUS = ?');
+      vals.push(statusProd);
+    }
     if (Number.isFinite(custo) && custo > 0) {
       sets.push('PRC_CUSTO = ?');
       vals.push(custo);
@@ -641,6 +658,16 @@ async function gravarNfCompra(sessao, {
       for (const it of itens) {
         await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       }
+      try {
+        const dtEntrada = toDateSql(sessao.dt_entrada);
+        if (dtEntrada) {
+          await query(db, `UPDATE TB_NFCOMPRA SET DT_ENTRADA = ? WHERE ID_NFCOMPRA = ?`, [
+            dtEntrada, idNf,
+          ]);
+        }
+      } catch (e) {
+        console.warn('Atualizar data de entrada (edição):', e.message);
+      }
       return {
         id_nfcompra: idNf,
         nf_numero: nfNumero,
@@ -655,6 +682,7 @@ async function gravarNfCompra(sessao, {
   return withDb(async (db, appCfg) => {
     const agora = localNow();
     const dtEmissao = toDateSql(ide.dhEmi);
+    const dtEntrada = toDateSql(sessao.dt_entrada) || agora.dataSql;
     const idNf = await nextId(db, 'GEN_TB_NFCOMPRA_ID', 'TB_NFCOMPRA', 'ID_NFCOMPRA');
     const idFmapgtoRaw = fin.id_fmapgto != null ? Number(fin.id_fmapgto) : 3;
     const idFmapgto = idFmapgtoRaw === 1 ? 3 : (idFmapgtoRaw || 3);
@@ -687,7 +715,7 @@ async function gravarNfCompra(sessao, {
       serie,
       modelo.padEnd(2).slice(0, 2),
       dtEmissao,
-      agora.dataSql,
+      dtEntrada,
       agora.horaSql,
       Number(tot.vFrete || 0),
       Number(tot.vSeg || 0),

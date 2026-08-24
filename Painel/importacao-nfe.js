@@ -112,6 +112,26 @@ const ImportacaoNfe = (() => {
     return `${y}-${m}-${day}`;
   }
 
+  function todayYmd() {
+    const d = new Date();
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function toInputDate(v) {
+    if (!v) return todayYmd();
+    const s = String(v);
+    if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+    const dt = new Date(v);
+    if (Number.isNaN(dt.getTime())) return todayYmd();
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const day = String(dt.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
   function fmtDateBr(v) {
     if (!v) return '—';
     const s = String(v);
@@ -556,7 +576,11 @@ const ImportacaoNfe = (() => {
             ${kv('Número', esc(ide.nNF || '—'))}
             ${kv('Série', esc(ide.serie || '—'))}
             ${kv('Modelo', esc(ide.modelo || '55'))}
-            ${kv('Emissão', esc(fmtDateTimeBr(ide.dhEmi)))}
+            ${kv('Emissão (XML)', esc(fmtDateTimeBr(ide.dhEmi)))}
+            <label class="imp-field">
+              <span>Data de entrada</span>
+              <input type="date" id="imp-dt-entrada" value="${esc(toInputDate(s.dt_entrada || todayYmd()))}" />
+            </label>
           </div>
         </section>
 
@@ -672,6 +696,21 @@ const ImportacaoNfe = (() => {
           deps.showMsg?.(res.error || 'Erro ao salvar natureza');
         }
       },
+    });
+    $('#imp-dt-entrada')?.addEventListener('change', async (e) => {
+      const sess = state.sessao;
+      if (!sess?.id) return;
+      const dt = String(e.target.value || '').slice(0, 10);
+      const res = await api(`/importacao/sessoes/${sess.id}/cabecalho`, {
+        method: 'PUT',
+        body: { dt_entrada: dt || todayYmd() },
+      });
+      if (res.ok) {
+        state.sessao = res.sessao;
+        deps.showToast?.('Data de entrada atualizada');
+      } else {
+        deps.showMsg?.(res.error || 'Erro ao salvar data de entrada');
+      }
     });
   }
 
@@ -1584,8 +1623,8 @@ const ImportacaoNfe = (() => {
   }
 
   function calcCbsIbs(tn = {}, base = 0) {
-    const aliqCbs = Number(tn.aliq_cbs != null ? tn.aliq_cbs : 0.9);
-    const aliqIbsUf = Number(tn.aliq_ibs_uf != null ? tn.aliq_ibs_uf : 0.1);
+    const aliqCbs = Number(tn.aliq_cbs) > 0 ? Number(tn.aliq_cbs) : 0.9;
+    const aliqIbsUf = Number(tn.aliq_ibs_uf) > 0 ? Number(tn.aliq_ibs_uf) : 0.1;
     const aliqIbsMun = Number(tn.aliq_ibs_mun != null ? tn.aliq_ibs_mun : 0);
     const redCbs = Number(tn.percent_red_aliq_cbs || 0);
     const redIbs = Number(tn.percent_red_aliq_ibs || 0);
@@ -1744,7 +1783,7 @@ const ImportacaoNfe = (() => {
     for (const key of ['trib_nfe', 'trib_nfce']) {
       const t = sys[key];
       if (!t?.id_class_trib) continue;
-      if (t._class_hydrated) continue;
+      if (t._class_hydrated && Number(t.aliq_cbs) > 0 && (key === 'trib_nfce' || Number(t.vlr_bc_cbs) > 0)) continue;
       try {
         const res = await api(`/importacao/class-trib?id=${encodeURIComponent(t.id_class_trib)}`);
         const c = (res.itens || [])[0];
@@ -1759,14 +1798,12 @@ const ImportacaoNfe = (() => {
           percent_red_aliq_cbs: c.percent_red_aliq_cbs,
           percent_red_aliq_ibs: c.percent_red_aliq_ibs,
           cst_class_trib: c.cst_class_trib || t.cst_class_trib || '',
+          aliq_cbs: Number(t.aliq_cbs) > 0 ? Number(t.aliq_cbs) : 0.9,
+          aliq_ibs_uf: Number(t.aliq_ibs_uf) > 0 ? Number(t.aliq_ibs_uf) : 0.1,
           _class_hydrated: true,
         };
         if (key === 'trib_nfe') {
-          const it = itemAt(state.itemIndex);
-          const base = Number(sys[key].vlr_bc_cbs)
-            || calcCustoNotaUnitario(sys, it?.xml || {}).totalItem
-            || 0;
-          Object.assign(sys[key], calcCbsIbs(sys[key], base));
+          Object.assign(sys[key], calcCbsIbs(sys[key], cbsBaseFromScreen(sys)));
         }
       } catch (_) { /* ignore */ }
     }
@@ -1938,26 +1975,13 @@ const ImportacaoNfe = (() => {
         const redCbs = btn.dataset.redCbs;
         const redIbs = btn.dataset.redIbs;
         const cst = btn.dataset.cst || '';
-        if (target === 'nfce') {
-          if ($('#imp-nfce-red-cbs')) $('#imp-nfce-red-cbs').value = redCbs;
-          if ($('#imp-nfce-red-ibs')) $('#imp-nfce-red-ibs').value = redIbs;
-        } else {
-          if ($('#imp-nfe-red-cbs')) $('#imp-nfe-red-cbs').value = redCbs;
-          if ($('#imp-nfe-red-ibs')) $('#imp-nfe-red-ibs').value = redIbs;
-          if ($('#imp-nfe-cst-class')) $('#imp-nfe-cst-class').value = cst;
-        }
-        const it = itemAt(state.itemIndex);
-        if (it?.sistema) {
-          const key = target === 'nfce' ? 'trib_nfce' : 'trib_nfe';
-          it.sistema[key] = {
-            ...(it.sistema[key] || {}),
-            id_class_trib: Number(btn.dataset.id),
-            _class_label: btn.dataset.label,
-            percent_red_aliq_cbs: Number(redCbs || 0),
-            percent_red_aliq_ibs: Number(redIbs || 0),
-            cst_class_trib: cst,
-          };
-        }
+        const extra = {
+          percent_red_aliq_cbs: Number(redCbs || 0),
+          percent_red_aliq_ibs: Number(redIbs || 0),
+          cst_class_trib: cst,
+          _class_label: btn.dataset.label,
+        };
+        applyClassTribSelection(target, btn.dataset.id, extra);
         box.innerHTML = `<p class="hint">Selecionado: ${esc(btn.dataset.label)} (CBS/IBS de TB_CLASS_TRIB)</p>`;
       });
     });
@@ -2066,67 +2090,83 @@ const ImportacaoNfe = (() => {
     }
   }
 
+  function filled(v) {
+    return v != null && String(v).trim() !== '';
+  }
+
   function applySugestoesRegra(sys, regra, estFornec) {
     if (!sys) return;
     if (regra) {
       if (regra.id_regra) sys.id_regra = regra.id_regra;
-      if (regra.cfop_entrada && !sys.cfop) sys.cfop = regra.cfop_entrada;
-      if (regra.cfop_saida) sys.cfop_saida = regra.cfop_saida;
-      if (regra.cfop_nf) sys.cfop_nf = regra.cfop_nf;
+      if (regra.cfop_entrada && !filled(sys.cfop)) sys.cfop = regra.cfop_entrada;
+      if (regra.cfop_saida && !filled(sys.cfop_saida)) sys.cfop_saida = regra.cfop_saida;
+      if (regra.cfop_nf && !filled(sys.cfop_nf)) sys.cfop_nf = regra.cfop_nf;
       if (regra.cst_entrada || regra.cst) {
         const cstE = regra.cst_entrada || regra.cst;
-        sys.cst_icms = cstE;
-        sys.tributos = { ...(sys.tributos || {}), cst_icms: cstE };
+        if (!filled(sys.cst_icms)) {
+          sys.cst_icms = cstE;
+          sys.tributos = { ...(sys.tributos || {}), cst_icms: cstE };
+        }
       }
-      if (regra.cst_saida) sys.cst_saida = regra.cst_saida;
-      if (regra.cst_cfe) sys.cst_cfe = regra.cst_cfe;
-      if (regra.csosn_entrada) sys.csosn_entrada = regra.csosn_entrada;
-      if (regra.csosn_saida || regra.csosn) {
+      if (regra.cst_saida && !filled(sys.cst_saida)) sys.cst_saida = regra.cst_saida;
+      if (regra.cst_cfe && !filled(sys.cst_cfe)) sys.cst_cfe = regra.cst_cfe;
+      if (regra.csosn_entrada && !filled(sys.csosn_entrada)) sys.csosn_entrada = regra.csosn_entrada;
+      if ((regra.csosn_saida || regra.csosn) && !filled(sys.csosn_saida)) {
         sys.csosn_saida = regra.csosn_saida || regra.csosn;
       }
-      if (regra.csosn_cfe) sys.csosn_cfe = regra.csosn_cfe;
-      if (regra.cst_pis_entrada || regra.cst_pis) {
+      if (regra.csosn_cfe && !filled(sys.csosn_cfe)) sys.csosn_cfe = regra.csosn_cfe;
+      if ((regra.cst_pis_entrada || regra.cst_pis) && !filled(sys.tributos?.cst_pis)) {
         sys.tributos = { ...(sys.tributos || {}), cst_pis: regra.cst_pis_entrada || regra.cst_pis };
       }
-      if (regra.cst_pis_saida) {
+      if (regra.cst_pis_saida && !filled(sys.tributos?.cst_pis_saida)) {
         sys.tributos = { ...(sys.tributos || {}), cst_pis_saida: regra.cst_pis_saida };
       }
-      if (regra.cst_cofins_entrada || regra.cst_cofins) {
+      if ((regra.cst_cofins_entrada || regra.cst_cofins) && !filled(sys.tributos?.cst_cofins)) {
         sys.tributos = { ...(sys.tributos || {}), cst_cofins: regra.cst_cofins_entrada || regra.cst_cofins };
       }
-      if (regra.cst_cofins_saida) {
+      if (regra.cst_cofins_saida && !filled(sys.tributos?.cst_cofins_saida)) {
         sys.tributos = { ...(sys.tributos || {}), cst_cofins_saida: regra.cst_cofins_saida };
       }
-      if (regra.pis != null) sys.tributos = { ...(sys.tributos || {}), p_pis: regra.pis };
-      if (regra.cofins != null) sys.tributos = { ...(sys.tributos || {}), p_cofins: regra.cofins };
-      if (regra.id_cti) sys.id_cti = regra.id_cti;
-      if (regra.id_cti_cfe) sys.id_cti_cfe = regra.id_cti_cfe;
-      if (regra.aplicar_saida !== undefined && regra.aplicar_saida !== null) {
+      if (regra.pis != null && sys.tributos?.p_pis == null) {
+        sys.tributos = { ...(sys.tributos || {}), p_pis: regra.pis };
+      }
+      if (regra.cofins != null && sys.tributos?.p_cofins == null) {
+        sys.tributos = { ...(sys.tributos || {}), p_cofins: regra.cofins };
+      }
+      if (regra.id_cti && !filled(sys.id_cti)) sys.id_cti = regra.id_cti;
+      if (regra.id_cti_cfe && !filled(sys.id_cti_cfe)) sys.id_cti_cfe = regra.id_cti_cfe;
+      if (regra.aplicar_saida !== undefined && regra.aplicar_saida !== null && sys.aplicar_saida == null) {
         sys.aplicar_saida = (regra.aplicar_saida === true || regra.aplicar_saida === 'S') ? 'S' : 'N';
       }
-      if (regra.id_class_trib) {
+      if (regra.id_class_trib && !sys.trib_nfe?.id_class_trib) {
         sys.trib_nfe = { ...(sys.trib_nfe || {}), id_class_trib: regra.id_class_trib };
       }
-      if (regra.id_class_trib_nfce) {
+      if (regra.id_class_trib_nfce && !sys.trib_nfce?.id_class_trib) {
         sys.trib_nfce = { ...(sys.trib_nfce || {}), id_class_trib: regra.id_class_trib_nfce };
       }
     }
     if (estFornec) {
       if (estFornec.cod_no_fornecedor) sys.cod_fornecedor = estFornec.cod_no_fornecedor;
-      if (estFornec.cfop && !sys.cfop) sys.cfop = estFornec.cfop;
-      if (estFornec.cst) {
+      if (estFornec.cfop && !filled(sys.cfop)) sys.cfop = estFornec.cfop;
+      if (estFornec.cst && !filled(sys.cst_icms)) {
         sys.cst_icms = estFornec.cst;
         sys.tributos = { ...(sys.tributos || {}), cst_icms: estFornec.cst };
       }
-      if (estFornec.csosn) {
-        sys.csosn_saida = estFornec.csosn;
+      if (estFornec.csosn && !filled(sys.csosn_saida)) sys.csosn_saida = estFornec.csosn;
+      if (estFornec.cst_pis && !filled(sys.tributos?.cst_pis)) {
+        sys.tributos = { ...(sys.tributos || {}), cst_pis: estFornec.cst_pis };
       }
-      if (estFornec.cst_pis) sys.tributos = { ...(sys.tributos || {}), cst_pis: estFornec.cst_pis };
-      if (estFornec.cst_cofins) sys.tributos = { ...(sys.tributos || {}), cst_cofins: estFornec.cst_cofins };
-      if (estFornec.pis != null) sys.tributos = { ...(sys.tributos || {}), p_pis: estFornec.pis };
-      if (estFornec.cofins != null) sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
-      if (estFornec.uni_medida) sys.uni_medida_saida = estFornec.uni_medida;
-      if (estFornec.cod_barras && !sys.cod_barras) sys.cod_barras = estFornec.cod_barras;
+      if (estFornec.cst_cofins && !filled(sys.tributos?.cst_cofins)) {
+        sys.tributos = { ...(sys.tributos || {}), cst_cofins: estFornec.cst_cofins };
+      }
+      if (estFornec.pis != null && sys.tributos?.p_pis == null) {
+        sys.tributos = { ...(sys.tributos || {}), p_pis: estFornec.pis };
+      }
+      if (estFornec.cofins != null && sys.tributos?.p_cofins == null) {
+        sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
+      }
+      if (estFornec.uni_medida && !filled(sys.uni_medida_saida)) sys.uni_medida_saida = estFornec.uni_medida;
+      if (estFornec.cod_barras && !filled(sys.cod_barras)) sys.cod_barras = estFornec.cod_barras;
     }
   }
 
@@ -2228,14 +2268,14 @@ const ImportacaoNfe = (() => {
             ncm: f.ncm || it.sistema.ncm,
             cest: f.cest || it.sistema.cest || '',
             anp: f.anp || it.sistema.anp || '',
-            cfop_saida: keepSaida.cfop_saida || f.cfop || '',
-            cfop_nf: keepSaida.cfop_nf || f.cfop_nf || '',
-            csosn_saida: keepSaida.csosn_saida || f.csosn || '',
-            csosn_cfe: keepSaida.csosn_cfe || f.csosn_cfe || '',
-            cst_saida: keepSaida.cst_saida || f.cst || '',
-            cst_cfe: keepSaida.cst_cfe || f.cst_cfe || '',
-            id_cti: keepSaida.id_cti || f.id_cti || '',
-            id_cti_cfe: keepSaida.id_cti_cfe || f.id_cti_cfe || '',
+            cfop_saida: f.cfop || keepSaida.cfop_saida || '',
+            cfop_nf: f.cfop_nf || keepSaida.cfop_nf || '',
+            csosn_saida: f.csosn || keepSaida.csosn_saida || '',
+            csosn_cfe: f.csosn_cfe || keepSaida.csosn_cfe || '',
+            cst_saida: f.cst || keepSaida.cst_saida || '',
+            cst_cfe: f.cst_cfe || keepSaida.cst_cfe || '',
+            id_cti: f.id_cti || keepSaida.id_cti || '',
+            id_cti_cfe: f.id_cti_cfe || keepSaida.id_cti_cfe || '',
             _cti_label: '',
             _cti_cfe_label: '',
             status: f.status || 'A',
@@ -2254,8 +2294,14 @@ const ImportacaoNfe = (() => {
             p_cofins: f.cofins ?? it.sistema.tributos?.p_cofins,
           };
           it.sistema.uni_medida_cadastro = f.uni_medida || it.sistema.uni_medida_cadastro;
-          if (f.trib_nfe) it.sistema.trib_nfe = { ...(it.sistema.trib_nfe || {}), ...f.trib_nfe };
-          if (f.trib_nfce) it.sistema.trib_nfce = { ...(it.sistema.trib_nfce || {}), ...f.trib_nfce };
+          if (f.trib_nfe) {
+            it.sistema.trib_nfe = { ...(keepSaida.trib_nfe || {}), ...(it.sistema.trib_nfe || {}), ...f.trib_nfe };
+            delete it.sistema.trib_nfe._class_hydrated;
+          }
+          if (f.trib_nfce) {
+            it.sistema.trib_nfce = { ...(keepSaida.trib_nfce || {}), ...(it.sistema.trib_nfce || {}), ...f.trib_nfce };
+            delete it.sistema.trib_nfce._class_hydrated;
+          }
         }
       } catch (_) { /* ignore */ }
 
@@ -2702,6 +2748,71 @@ const ImportacaoNfe = (() => {
     }
   }
 
+  function cbsBaseFromScreen(sys = {}) {
+    const venda = parseMoney($('#imp-venda')?.value);
+    if (venda != null && venda > 0) return venda;
+    if (Number(sys.prc_venda) > 0) return Number(sys.prc_venda);
+    const typed = Number($('#imp-nfe-bc-cbs')?.value || 0);
+    if (typed > 0) return typed;
+    try {
+      return Number(calcCustoNotaUnitario(sys, itemAt(state.itemIndex)?.xml || {}).totalItem || 0);
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  async function applyClassTribSelection(target, code, extra = {}) {
+    const it = itemAt(state.itemIndex);
+    const key = target === 'nfce' ? 'trib_nfce' : 'trib_nfe';
+    let info = { ...extra };
+    try {
+      const res = await api(`/importacao/class-trib?id=${encodeURIComponent(code)}`);
+      const c = (res.itens || [])[0];
+      if (c) {
+        info = {
+          ...info,
+          percent_red_aliq_cbs: c.percent_red_aliq_cbs ?? info.percent_red_aliq_cbs,
+          percent_red_aliq_ibs: c.percent_red_aliq_ibs ?? info.percent_red_aliq_ibs,
+          cst_class_trib: c.cst_class_trib || info.cst_class_trib,
+          cod_class_trib: c.cod_class_trib || info.cod_class_trib,
+          desc: c.desc_class_trib || info.desc || info.descricao,
+        };
+      }
+    } catch (_) { /* usa extra da lista */ }
+    extra = info;
+    if (target === 'nfce') {
+      if ($('#imp-nfce-red-cbs')) $('#imp-nfce-red-cbs').value = extra.percent_red_aliq_cbs ?? '';
+      if ($('#imp-nfce-red-ibs')) $('#imp-nfce-red-ibs').value = extra.percent_red_aliq_ibs ?? '';
+    } else {
+      if ($('#imp-nfe-red-cbs')) $('#imp-nfe-red-cbs').value = extra.percent_red_aliq_cbs ?? '';
+      if ($('#imp-nfe-red-ibs')) $('#imp-nfe-red-ibs').value = extra.percent_red_aliq_ibs ?? '';
+      if ($('#imp-nfe-cst-class')) $('#imp-nfe-cst-class').value = extra.cst_class_trib || '';
+    }
+    if (!it?.sistema) return;
+    const prev = it.sistema[key] || {};
+    const next = {
+      ...prev,
+      id_class_trib: Number(code),
+      _class_label: extra._class_label
+        || (extra.cod_class_trib || extra.desc
+          ? `${extra.cod_class_trib || code} — ${extra.desc || extra.descricao || ''}`.trim()
+          : prev._class_label),
+      _class_cod: extra.cod_class_trib || prev._class_cod || '',
+      percent_red_aliq_cbs: Number(extra.percent_red_aliq_cbs || 0),
+      percent_red_aliq_ibs: Number(extra.percent_red_aliq_ibs || 0),
+      cst_class_trib: extra.cst_class_trib || prev.cst_class_trib || '',
+      aliq_cbs: Number(prev.aliq_cbs) > 0 ? Number(prev.aliq_cbs) : 0.9,
+      aliq_ibs_uf: Number(prev.aliq_ibs_uf) > 0 ? Number(prev.aliq_ibs_uf) : 0.1,
+      aliq_ibs_mun: Number(prev.aliq_ibs_mun || 0),
+      _class_hydrated: true,
+    };
+    if (target === 'nfe') {
+      Object.assign(next, calcCbsIbs(next, cbsBaseFromScreen(it.sistema)));
+      syncCbsIbsFields(next);
+    }
+    it.sistema[key] = next;
+  }
+
   function syncCbsIbsFields(cbs) {
     if (!cbs) return;
     const set = (id, v) => { if ($(id)) $(id).value = v == null ? '' : String(v); };
@@ -2997,39 +3108,14 @@ const ImportacaoNfe = (() => {
       }),
     });
 
-    const onClassPick = (target) => (code, desc, extra) => {
-      const it = itemAt(state.itemIndex);
-      const key = target === 'nfce' ? 'trib_nfce' : 'trib_nfe';
-      if (target === 'nfce') {
-        if ($('#imp-nfce-red-cbs')) $('#imp-nfce-red-cbs').value = extra.percent_red_aliq_cbs ?? '';
-        if ($('#imp-nfce-red-ibs')) $('#imp-nfce-red-ibs').value = extra.percent_red_aliq_ibs ?? '';
-      } else {
-        if ($('#imp-nfe-red-cbs')) $('#imp-nfe-red-cbs').value = extra.percent_red_aliq_cbs ?? '';
-        if ($('#imp-nfe-red-ibs')) $('#imp-nfe-red-ibs').value = extra.percent_red_aliq_ibs ?? '';
-        if ($('#imp-nfe-cst-class')) $('#imp-nfe-cst-class').value = extra.cst_class_trib || '';
-      }
-      if (it?.sistema) {
-        const baseTn = {
-          ...(it.sistema[key] || {}),
-          id_class_trib: Number(code),
-          _class_label: desc
-            ? `${extra.cod_class_trib || code} — ${desc}`
-            : String(extra.cod_class_trib || code),
-          _class_cod: extra.cod_class_trib || '',
-          percent_red_aliq_cbs: Number(extra.percent_red_aliq_cbs || 0),
-          percent_red_aliq_ibs: Number(extra.percent_red_aliq_ibs || 0),
-          cst_class_trib: extra.cst_class_trib || '',
-          _class_hydrated: true,
-        };
-        if (target === 'nfe') {
-          const bc = Number($('#imp-nfe-bc-cbs')?.value)
-            || calcCustoNotaUnitario(it.sistema, it.xml || {}).totalItem
-            || 0;
-          Object.assign(baseTn, calcCbsIbs(baseTn, bc));
-          syncCbsIbsFields(baseTn);
-        }
-        it.sistema[key] = baseTn;
-      }
+    const onClassPick = (target) => (code, desc, extra = {}) => {
+      applyClassTribSelection(target, code, {
+        ...extra,
+        desc,
+        _class_label: desc
+          ? `${extra.cod_class_trib || code} — ${desc}`
+          : (extra.cod_class_trib || String(code)),
+      });
     };
 
     wireCodeSearch({

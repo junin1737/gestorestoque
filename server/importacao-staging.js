@@ -13,6 +13,14 @@ const { parseNfeXml } = require('./importacao-xml');
 const { aplicarRateiosDoXml, syncSistemaComXmlItem } = require('./importacao-rateio');
 const { consultarChaveSefaz, fiscalReady } = require('./importacao-sefaz');
 const { getFiscalConfig } = require('./certificado');
+
+function todayYmd() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
 const { gravarNfCompra } = require('./importacao-gravar');
 const { sugerirFinanceiroFromXml } = require('./importacao-financeiro');
 
@@ -416,6 +424,7 @@ function mapSessaoForClient(s) {
   if (s.editar_id_nfcompra != null) out.editar_id_nfcompra = s.editar_id_nfcompra;
   if (s.financeiro_ok) out.financeiro_ok = true;
   if (s.sefazErro) out.sefazErro = s.sefazErro;
+  out.dt_entrada = s.dt_entrada || null;
   return out;
 }
 
@@ -470,6 +479,10 @@ function updateCabecalho(sessaoId, patch = {}) {
   if (patch.dhEmi != null) s.xml.ide.dhEmi = String(patch.dhEmi);
   if (patch.id_natope !== undefined) s.id_natope = patch.id_natope != null ? Number(patch.id_natope) : null;
   if (patch.natureza !== undefined) s.natureza = patch.natureza;
+  if (patch.dt_entrada != null) {
+    const dt = String(patch.dt_entrada).slice(0, 10);
+    s.dt_entrada = /^\d{4}-\d{2}-\d{2}$/.test(dt) ? dt : s.dt_entrada;
+  }
   s.updatedAt = new Date().toISOString();
   saveStore(store);
   return { ok: true, sessao: mapSessaoForClient(s) };
@@ -733,6 +746,7 @@ async function createSessao(opts = {}) {
     editar_id_nfcompra: editarId || undefined,
     id_natope: idNatope,
     natureza,
+    dt_entrada: todayYmd(),
     xml: {
       ide: xml.ide,
       emit: xml.emit,
@@ -819,6 +833,7 @@ async function createSessaoManual(body = {}) {
     manual: true,
     id_natope: body.id_natope != null ? Number(body.id_natope) : null,
     natureza: body.natureza || null,
+    dt_entrada: String(body.dt_entrada || todayYmd()).slice(0, 10),
     xml: {
       ide: {
         nNF,
