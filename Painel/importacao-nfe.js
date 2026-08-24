@@ -81,6 +81,22 @@ const ImportacaoNfe = (() => {
   function money(n) {
     return deps.fmtMoney ? deps.fmtMoney(n) : String(n ?? '');
   }
+  function parseMoney(v) {
+    if (v == null || v === '') return undefined;
+    if (typeof v === 'number') return v;
+    const s = String(v).trim();
+    if (!s) return undefined;
+    const normalized = s.includes(',')
+      ? s.replace(/\./g, '').replace(',', '.')
+      : s.replace(/[^\d.-]/g, '');
+    const n = Number(normalized);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  function moneyInput(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '';
+    return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+  }
   function num(n) {
     return deps.fmtNum ? deps.fmtNum(n) : String(n ?? '');
   }
@@ -1216,6 +1232,29 @@ const ImportacaoNfe = (() => {
     `;
   }
 
+  function renderSugestoesVinculo(it, sys) {
+    const list = it?.sugestoes_vinculo || [];
+    if (!list.length || sys.id_identificador) return '';
+    return `
+      <div class="imp-sugestoes">
+        <span class="hint">Sugestões (mesmo EAN ou descrição ≥ 70%)</span>
+        ${list.map((p) => `
+          <button type="button" class="imp-prod-opt imp-sugestao-opt"
+            data-id="${p.id_identificador}"
+            data-estoque="${p.id_estoque ?? ''}"
+            data-desc="${esc(p.descricao)}"
+            data-ean="${esc(p.cod_barras || '')}"
+            data-uni="${esc(p.uni_medida || '')}"
+            data-custo="${p.prc_custo ?? ''}"
+            data-venda="${p.prc_venda ?? ''}">
+            <strong>${esc(p.motivo === 'ean' ? 'EAN igual' : `${p.score}% descrição`)} · ID ${p.id_identificador}</strong>
+            <span>${esc(p.descricao)}</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
+
   function panelVinculo(it, sys, xml) {
     const chips = [
       cmpHint(xml.cEAN, sys.cod_barras, 'EAN'),
@@ -1256,6 +1295,7 @@ const ImportacaoNfe = (() => {
           </article>
         </div>
         ${chips ? `<div class="imp-cmp-chips">${chips}</div>` : ''}
+        ${renderSugestoesVinculo(it, sys)}
         <div class="imp-field">
           <span>Buscar no estoque</span>
           <div class="imp-busca-row">
@@ -1279,7 +1319,9 @@ const ImportacaoNfe = (() => {
         ${sys.criar_novo ? field('Descrição do novo produto', 'imp-desc-novo', sys.descricao || xml.xProd, { full: true }) : ''}
         <div class="imp-vinc-btns">
           <button type="button" class="btn small outline" id="imp-criar-novo">Criar como novo produto</button>
-          <button type="button" class="btn small outline" id="imp-limpar-vinc">Limpar vínculo</button>
+          ${sys.id_identificador
+    ? '<button type="button" class="btn small danger outline" id="imp-limpar-vinc">Desvincular produto</button>'
+    : '<button type="button" class="btn small outline" id="imp-limpar-vinc">Limpar vínculo</button>'}
         </div>
       </section>
     `;
@@ -1315,7 +1357,7 @@ const ImportacaoNfe = (() => {
           ${simples
     ? tribSearchRow('CSOSN', imp.CSOSN || '—', 'imp-csosn-trib', 'imp-busca-csosn-trib', 'imp-csosn-trib-list', sys.csosn_entrada || trib.csosn || sys.csosn)
     : '<div class="imp-trib-row imp-trib-spacer"></div>'}
-          ${tribSearchRow('CST IPI', imp.CST_IPI, 'imp-cst-ipi', 'imp-busca-cst-ipi', 'imp-cst-ipi-list', trib.cst_ipi)}
+          ${tribSearchRow('CST IPI', imp.CST_IPI, 'imp-cst-ipi', 'imp-busca-cst-ipi', 'imp-cst-ipi-list', trib.cst_ipi || '49')}
           <div class="imp-trib-row imp-trib-spacer"></div>
           ${tribSearchRow('CST PIS', imp.CST_PIS, 'imp-cst-pis', 'imp-busca-cst-pis', 'imp-cst-pis-list', trib.cst_pis)}
           ${tribSearchRow('CST COFINS', imp.CST_COFINS, 'imp-cst-cof', 'imp-busca-cst-cof', 'imp-cst-cof-list', trib.cst_cofins)}
@@ -1427,16 +1469,11 @@ const ImportacaoNfe = (() => {
         </div>
         <div class="imp-block-title">Preço</div>
         <div class="imp-fields">
-          ${field('Preço custo', 'imp-custo-ficha', sys.prc_custo ?? custoInfo.custoEstoque, { type: 'number', step: '0.0001', third: true })}
+          ${field('Preço custo', 'imp-custo-ficha', moneyInput(sys.prc_custo ?? custoInfo.custoEstoque), { third: true })}
           ${field('Margem LB %', 'imp-margem', sys.margem_lb ?? 0, { type: 'number', step: '0.01', third: true })}
-          ${field('Preço venda', 'imp-venda', sys.prc_venda, { type: 'number', step: '0.0001', third: true })}
+          ${field('Preço venda', 'imp-venda', moneyInput(sys.prc_venda), { third: true })}
           ${field('Status', 'imp-status-prod', sys.status || 'A', { third: true })}
-          <label class="imp-field third imp-uni-compact">
-            <span>Unidade</span>
-            <input id="imp-uni-ficha" type="text" value="${esc(sys.uni_medida || xml.uCom || '')}" maxlength="6" />
-          </label>
-          ${searchableCodeField('CST', 'imp-cst-saida', 'imp-busca-cst-saida', 'imp-cst-saida-list', sys.cst_saida || sys.cst_icms || '', { third: true, placeholder: 'Pesquisar CST…' })}
-          ${searchableCodeField('CST CF-e', 'imp-cst-cfe', 'imp-busca-cst-cfe', 'imp-cst-cfe-list', sys.cst_cfe || '', { third: true, placeholder: 'Pesquisar CST…' })}
+          ${comboField('Unidade', 'imp-uni-ficha', 'imp-uni-ficha-list', sys.uni_medida_saida || sys.uni_medida || '', { third: true, placeholder: 'Pesquisar unidade (TB_UNI_MEDIDA)…' })}
         </div>
         <p class="hint" id="imp-margem-hint">Use o custo líquido da nota acima para definir a margem. Com margem &gt; 0: venda = custo × (1 + margem/100)</p>
         <div class="imp-vinc-btns">
@@ -1487,7 +1524,9 @@ const ImportacaoNfe = (() => {
     const aplicar = ynChecked(sys.aplicar_saida !== undefined ? sys.aplicar_saida : 'S');
     const tribOut = applySimplesPisCofinsRates(trib, simples);
     const custoInfo = calcCustoNotaUnitario(sys, xml);
-    const cbs = calcCbsIbs(tn, tn.vlr_bc_cbs != null && tn.vlr_bc_cbs !== '' ? tn.vlr_bc_cbs : custoInfo.totalItem);
+    const cbs = calcCbsIbs(tn, tn.vlr_bc_cbs != null && tn.vlr_bc_cbs !== ''
+      ? tn.vlr_bc_cbs
+      : (Number(sys.prc_venda) > 0 ? Number(sys.prc_venda) : custoInfo.totalItem));
     return `
       <section class="imp-panel" data-panel="trib_saida">
         <header class="imp-section-head">
@@ -1753,7 +1792,7 @@ const ImportacaoNfe = (() => {
           descricao: btn.dataset.desc,
           cod_barras: btn.dataset.ean,
           referencia: btn.dataset.ref || undefined,
-          uni_medida: btn.dataset.uni || undefined,
+          uni_medida_saida: btn.dataset.uni || undefined,
           prc_custo: btn.dataset.custo !== '' ? Number(btn.dataset.custo) : undefined,
           prc_venda: btn.dataset.venda !== '' ? Number(btn.dataset.venda) : undefined,
           criar_novo: false,
@@ -1986,7 +2025,7 @@ const ImportacaoNfe = (() => {
       if (estFornec.cst_cofins) sys.tributos = { ...(sys.tributos || {}), cst_cofins: estFornec.cst_cofins };
       if (estFornec.pis != null) sys.tributos = { ...(sys.tributos || {}), p_pis: estFornec.pis };
       if (estFornec.cofins != null) sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
-      if (estFornec.uni_medida) sys.uni_medida = estFornec.uni_medida;
+      if (estFornec.uni_medida) sys.uni_medida_saida = estFornec.uni_medida;
       if (estFornec.cod_barras && !sys.cod_barras) sys.cod_barras = estFornec.cod_barras;
     }
   }
@@ -1994,6 +2033,17 @@ const ImportacaoNfe = (() => {
   async function applyVinculo(patch) {
     const it = itemAt(state.itemIndex);
     if (!it) return;
+    const keepSaida = {
+      cfop_saida: it.sistema.cfop_saida,
+      cfop_nf: it.sistema.cfop_nf,
+      csosn_saida: it.sistema.csosn_saida,
+      csosn_cfe: it.sistema.csosn_cfe,
+      cst_saida: it.sistema.cst_saida,
+      cst_cfe: it.sistema.cst_cfe,
+      id_cti: it.sistema.id_cti,
+      id_cti_cfe: it.sistema.id_cti_cfe,
+      uni_medida: it.sistema.uni_medida,
+    };
     const merged = { ...patch };
     if (merged.prc_custo === undefined) delete merged.prc_custo;
     if (merged.prc_venda === undefined) delete merged.prc_venda;
@@ -2010,6 +2060,7 @@ const ImportacaoNfe = (() => {
         confianca: 100,
       };
       it.sistema.criar_novo = false;
+      it.sistema.desvinculado = false;
 
       try {
         const fiscal = await api(`/importacao/produto-fiscal/${patch.id_identificador}`);
@@ -2021,21 +2072,22 @@ const ImportacaoNfe = (() => {
             desc_cmpl: f.desc_cmpl || it.sistema.desc_cmpl || '',
             referencia: f.referencia || it.sistema.referencia || '',
             cod_barras: f.cod_barras || it.sistema.cod_barras || '',
-            uni_medida: f.uni_medida || it.sistema.uni_medida,
+            uni_medida_saida: f.uni_medida || it.sistema.uni_medida_saida || '',
+            uni_medida: keepSaida.uni_medida || f.uni_medida || it.sistema.uni_medida,
             prc_custo: it.sistema.prc_custo ?? f.prc_custo,
             prc_venda: f.prc_venda ?? it.sistema.prc_venda,
             margem_lb: f.margem_lb || 0,
             ncm: f.ncm || it.sistema.ncm,
             cest: f.cest || it.sistema.cest || '',
             anp: f.anp || it.sistema.anp || '',
-            cfop_saida: f.cfop || it.sistema.cfop_saida || '',
-            cfop_nf: f.cfop_nf || it.sistema.cfop_nf || '',
-            csosn_saida: f.csosn || it.sistema.csosn_saida || '',
-            csosn_cfe: f.csosn_cfe || it.sistema.csosn_cfe || '',
-            cst_saida: f.cst || it.sistema.cst_saida || '',
-            cst_cfe: f.cst_cfe || it.sistema.cst_cfe || '',
-            id_cti: f.id_cti || '',
-            id_cti_cfe: f.id_cti_cfe || '',
+            cfop_saida: keepSaida.cfop_saida || f.cfop || '',
+            cfop_nf: keepSaida.cfop_nf || f.cfop_nf || '',
+            csosn_saida: keepSaida.csosn_saida || f.csosn || '',
+            csosn_cfe: keepSaida.csosn_cfe || f.csosn_cfe || '',
+            cst_saida: keepSaida.cst_saida || f.cst || '',
+            cst_cfe: keepSaida.cst_cfe || f.cst_cfe || '',
+            id_cti: keepSaida.id_cti || f.id_cti || '',
+            id_cti_cfe: keepSaida.id_cti_cfe || f.id_cti_cfe || '',
             _cti_label: '',
             _cti_cfe_label: '',
             status: f.status || 'A',
@@ -2079,10 +2131,10 @@ const ImportacaoNfe = (() => {
   }
 
   function syncVendaPorMargem() {
-    const custo = Number($('#imp-custo-ficha')?.value || $('#imp-custo')?.value || 0);
+    const custo = parseMoney($('#imp-custo-ficha')?.value) ?? Number($('#imp-custo')?.value || 0);
     const margem = Number($('#imp-margem')?.value || 0);
     const calc = calcVendaPorMargem(custo, margem);
-    if (calc != null && $('#imp-venda')) $('#imp-venda').value = String(calc);
+    if (calc != null && $('#imp-venda')) $('#imp-venda').value = moneyInput(calc);
   }
 
   function collectItemPatch() {
@@ -2114,7 +2166,8 @@ const ImportacaoNfe = (() => {
     const descricao = descNovo != null && descNovo !== ''
       ? descNovo
       : (g('#imp-desc') != null ? g('#imp-desc') : sys.descricao);
-    const uniSelect = $('#imp-uni')?.value || g('#imp-uni-ficha') || sys.uni_medida;
+    const uniEstoque = $('#imp-uni') ? ($('#imp-uni').value || sys.uni_medida) : sys.uni_medida;
+    const uniSaida = g('#imp-uni-ficha') != null ? (g('#imp-uni-ficha') || '') : (sys.uni_medida_saida || '');
     const csosnEntrada = g('#imp-csosn-entrada') || g('#imp-csosn-trib') || sys.csosn_entrada || sys.csosn || '';
     const csosnSaida = g('#imp-csosn-saida') != null ? (g('#imp-csosn-saida') || '') : (sys.csosn_saida || '');
 
@@ -2129,7 +2182,8 @@ const ImportacaoNfe = (() => {
     const qtdXml = gnDef('#imp-qtd-xml', sys.qtd_xml ?? it?.xml?.qCom ?? 0);
     const qtd = Number((qtdXml * conversor).toFixed(6));
 
-    let custo = gn('#imp-custo-ficha') ?? gn('#imp-custo-conv');
+    let custo = parseMoney($('#imp-custo-ficha')?.value);
+    if (custo === undefined) custo = gn('#imp-custo-conv');
     if (custo === undefined) custo = sys.prc_custo;
     if (!(Number(custo) > 0) && it) {
       const merged = {
@@ -2154,7 +2208,8 @@ const ImportacaoNfe = (() => {
     }, it?.xml || {}).custoXml;
 
     const margem = gn('#imp-margem') ?? sys.margem_lb ?? 0;
-    let venda = gn('#imp-venda') ?? sys.prc_venda;
+    let venda = parseMoney($('#imp-venda')?.value);
+    if (venda === undefined) venda = sys.prc_venda;
     const calc = calcVendaPorMargem(custo, margem);
     if (calc != null && ($('#imp-margem') || margem > 0)) venda = calc;
 
@@ -2187,7 +2242,8 @@ const ImportacaoNfe = (() => {
         margem_lb: margem,
         aplicar_saida: aplicarSaida,
         id_regra: sys.id_regra ?? null,
-        uni_medida: uniSelect || '',
+        uni_medida: uniEstoque || '',
+        uni_medida_saida: uniSaida || '',
         uni_medida_xml: g('#imp-uni-xml') || sys.uni_medida_xml || '',
         conversor,
         qtd_xml: qtdXml,
@@ -2202,6 +2258,7 @@ const ImportacaoNfe = (() => {
         id_identificador: sys.id_identificador ?? null,
         id_estoque: sys.id_estoque ?? null,
         criar_novo: !!sys.criar_novo,
+        desvinculado: !!sys.desvinculado,
         tributos: {
           origem: trib.origem || '',
           cst_icms: g('#imp-cst') || g('#imp-cst-nota') || g('#imp-cst-saida') || trib.cst_icms || '',
@@ -2211,7 +2268,7 @@ const ImportacaoNfe = (() => {
           v_icms: gn('#imp-vicms') ?? trib.v_icms ?? 0,
           v_bc_st: gn('#imp-vbcst') ?? trib.v_bc_st ?? 0,
           v_icms_st: gn('#imp-vst') ?? trib.v_icms_st ?? 0,
-          cst_ipi: g('#imp-cst-ipi') != null ? g('#imp-cst-ipi') : (trib.cst_ipi || ''),
+          cst_ipi: g('#imp-cst-ipi') != null ? (g('#imp-cst-ipi') || '49') : (trib.cst_ipi || '49'),
           p_ipi: gn('#imp-pipi') ?? trib.p_ipi ?? 0,
           v_ipi: gn('#imp-vipi') ?? trib.v_ipi ?? 0,
           cst_pis: g('#imp-cst-pis') != null ? g('#imp-cst-pis') : (trib.cst_pis || ''),
@@ -2264,6 +2321,7 @@ const ImportacaoNfe = (() => {
       },
       conferido: $('#imp-conferido') ? !!$('#imp-conferido').checked : !!it?.conferido,
       observacao: g('#imp-obs') != null ? (g('#imp-obs') || '') : (it?.observacao || ''),
+      match: (sys.id_identificador || sys.criar_novo) ? (it?.match || null) : null,
     };
   }
 
@@ -2325,7 +2383,7 @@ const ImportacaoNfe = (() => {
           uni_medida: sys.uni_medida || '',
           cfop: sys.cfop || '',
           ipi: trib.p_ipi || null,
-          cst_ipi: trib.cst_ipi || '',
+          cst_ipi: trib.cst_ipi || '49',
           cod_barras: sys.cod_barras || '',
         },
       });
@@ -2562,6 +2620,27 @@ const ImportacaoNfe = (() => {
       const next = state.itemIndex < (state.sessao?.itens?.length || 0) - 1;
       await saveItem({ next, back: !next });
     });
+    $$('.imp-sugestao-opt').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        applyVinculo({
+          id_identificador: Number(btn.dataset.id),
+          id_estoque: btn.dataset.estoque !== '' ? Number(btn.dataset.estoque) : null,
+          descricao: btn.dataset.desc,
+          cod_barras: btn.dataset.ean,
+          uni_medida_saida: btn.dataset.uni || undefined,
+          prc_custo: btn.dataset.custo !== '' ? Number(btn.dataset.custo) : undefined,
+          prc_venda: btn.dataset.venda !== '' ? Number(btn.dataset.venda) : undefined,
+          criar_novo: false,
+        });
+      });
+    });
+    ['#imp-custo-ficha', '#imp-venda'].forEach((sel) => {
+      $(sel)?.addEventListener('blur', (e) => {
+        const n = parseMoney(e.target.value);
+        if (n != null) e.target.value = moneyInput(n);
+        if (sel === '#imp-custo-ficha') syncVendaPorMargem();
+      });
+    });
     $('#imp-criar-novo')?.addEventListener('click', () => {
       applyVinculo({
         id_identificador: null,
@@ -2573,18 +2652,33 @@ const ImportacaoNfe = (() => {
         ncm: it.xml?.NCM || '',
       });
     });
-    $('#imp-limpar-vinc')?.addEventListener('click', () => {
+    $('#imp-limpar-vinc')?.addEventListener('click', async () => {
       const item = itemAt(state.itemIndex);
       if (!item) return;
+      const idIdent = item.sistema?.id_identificador;
+      const idFornec = state.sessao?.fornecedor?.id_fornec;
+      if (idIdent && idFornec) {
+        try {
+          await api('/importacao/estoque-fornecedor', {
+            method: 'POST',
+            body: {
+              id_identificador: idIdent,
+              id_fornec: idFornec,
+              inativar: true,
+            },
+          });
+        } catch (_) { /* ignore */ }
+      }
       item.match = null;
       item.sistema.id_identificador = null;
       item.sistema.id_estoque = null;
       item.sistema.descricao = '';
       item.sistema.cod_barras = '';
       item.sistema.criar_novo = false;
+      item.sistema.desvinculado = true;
       item.sistema.id_regra = null;
       state.buscaProduto = item.xml?.xProd || '';
-      renderItemScreen();
+      await saveItem();
     });
     const syncClearBuscaProd = () => {
       const clearBtn = $('#imp-limpar-busca-prod');
@@ -2638,8 +2732,6 @@ const ImportacaoNfe = (() => {
       if (conv != null && $('#imp-conversor')) {
         $('#imp-conversor').value = conv;
       }
-      const ficha = $('#imp-uni-ficha');
-      if (ficha) ficha.value = e.target.value;
       syncQtdConvertida();
     });
     $('#imp-margem')?.addEventListener('input', syncVendaPorMargem);
@@ -2720,6 +2812,7 @@ const ImportacaoNfe = (() => {
     wireFiscal('#imp-cst-cof-saida', '#imp-cst-cof-saida-list', '/importacao/cst-cofins', 'codigo');
     wireFiscal('#imp-cst-saida', '#imp-cst-saida-list', '/importacao/cst-icms', 'codigo');
     wireFiscal('#imp-cst-cfe', '#imp-cst-cfe-list', '/importacao/cst-icms', 'codigo');
+    wireFiscal('#imp-uni-ficha', '#imp-uni-ficha-list', '/importacao/unidades', 'unidade');
     wireFiscal('#imp-csosn-saida', '#imp-csosn-saida-list', '/importacao/csosn', 'codigo');
     wireFiscal('#imp-csosn-cfe', '#imp-csosn-cfe-list', '/importacao/csosn', 'codigo');
     wireFiscal('#imp-csosn-trib', '#imp-csosn-trib-list', '/importacao/csosn', 'codigo');

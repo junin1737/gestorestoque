@@ -53,7 +53,7 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   const idEstoque = await nextId(db, tPrimary.genEstoque, tPrimary.estoque, 'ID_ESTOQUE');
   const idIdentificador = await nextId(db, tPrimary.genIdentificador, tPrimary.identificador, 'ID_IDENTIFICADOR');
   const descricao = String(sistema.descricao || xmlItem?.xProd || 'PRODUTO NF-e').trim().slice(0, 120);
-  const uni = String(sistema.uni_medida || xmlItem?.uCom || 'UN').trim().slice(0, 6) || 'UN';
+  const uni = String(sistema.uni_medida_saida || sistema.uni_medida || xmlItem?.uCom || 'UN').trim().slice(0, 6) || 'UN';
   const margem = Number(sistema.margem_lb || 0) || 0;
   const custoCalc = calcCustoUnitarioItem(sistema, xmlItem);
   let prcCusto = Number(sistema.prc_custo);
@@ -205,7 +205,7 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
   const ncmXml = String(xmlItem?.NCM || '').trim();
   const cest = String(sistema.cest || '').trim() || null;
   const barras = String(sistema.cod_barras || xmlItem?.cEAN || '').trim() || null;
-  const uni = String(sistema.uni_medida || xmlItem?.uCom || '').trim().slice(0, 6) || null;
+  const uni = String(sistema.uni_medida_saida || sistema.uni_medida || xmlItem?.uCom || '').trim().slice(0, 6) || null;
 
   const cfopSaida = aplicarSaida ? (String(sistema.cfop_saida || '').trim().slice(0, 4) || null) : null;
   const cfopNf = aplicarSaida ? (String(sistema.cfop_nf || '').trim().slice(0, 4) || null) : null;

@@ -1375,7 +1375,8 @@ router.post('/importacao/sessoes', async (req, res) => {
     });
     if (!out.ok) return res.json(out);
     const forn = await importacaoFornecedor.resolverNaImportacao(out.sessao.xml);
-    const sessao = importacaoStaging.setFornecedor(out.sessao.id, forn);
+    importacaoStaging.setFornecedor(out.sessao.id, forn);
+    const sessao = await importacaoStaging.aplicarVinculosSessao(out.sessao.id);
     const ide = sessao?.xml?.ide || {};
     const emit = sessao?.xml?.emit || {};
     let avisoDuplicada = null;
@@ -1476,7 +1477,8 @@ router.get('/importacao/sessoes/:id', async (req, res) => {
     if (!sessao) return res.json({ ok: false, error: 'Sessão não encontrada' });
     if (!sessao.fornecedor && sessao.xml) {
       const forn = await importacaoFornecedor.resolverNaImportacao(sessao.xml);
-      sessao = importacaoStaging.setFornecedor(sessao.id, forn);
+      importacaoStaging.setFornecedor(sessao.id, forn);
+      sessao = await importacaoStaging.aplicarVinculosSessao(sessao.id);
     }
     res.json({ ok: true, sessao });
   } catch (err) {
@@ -1531,6 +1533,10 @@ router.put('/importacao/sessoes/:id/fornecedor', async (req, res) => {
     }
     if (body.criar_novo !== undefined) patch.criar_novo = !!body.criar_novo;
     const out = importacaoStaging.updateFornecedor(req.params.id, patch);
+    if (out?.ok && patch.id_fornec) {
+      const sessao = await importacaoStaging.aplicarVinculosSessao(req.params.id);
+      return res.json({ ok: true, sessao });
+    }
     res.json(out);
   } catch (err) {
     res.json({ ok: false, error: err.message });
@@ -1548,14 +1554,16 @@ router.post('/importacao/sessoes/:id/fornecedor/cadastrar', async (req, res) => 
       nNF: ide.nNF,
       serie: ide.serie,
     });
-    const out = importacaoStaging.updateFornecedor(req.params.id, {
+    importacaoStaging.updateFornecedor(req.params.id, {
       id_fornec: result.id_fornec,
       criar_novo: false,
       origem: result.ja_existia ? 'cadastro' : 'novo',
       cadastro: result.cadastro,
     });
+    const sessaoAtual = await importacaoStaging.aplicarVinculosSessao(req.params.id);
     res.json({
-      ...out,
+      ok: true,
+      sessao: sessaoAtual,
       message: result.ja_existia
         ? 'Fornecedor já existia no cadastro e foi vinculado.'
         : `Fornecedor cadastrado (cód. ${result.id_fornec}).`,

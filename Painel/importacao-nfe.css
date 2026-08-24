@@ -1473,4 +1473,14 @@
   background: #fff;
 }
 
+.imp-sugestoes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 0.4rem 0 0.7rem;
+}
+.imp-sugestao-opt {
+  text-align: left;
+}
+
 /* filtro nnf/forn handled above in .imp-filtro-datas */

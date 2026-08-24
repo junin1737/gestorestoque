@@ -63,7 +63,7 @@ function syncSistemaComXmlItem(sistema, xmlItem) {
     v_icms: Number(imp.vICMS || 0),
     v_bc_st: Number(imp.vBCST || 0),
     v_icms_st: Number(imp.vICMSST || 0),
-    cst_ipi: imp.CST_IPI || sistema.tributos?.cst_ipi || '',
+    cst_ipi: '49',
     v_ipi: Number(imp.vIPI || 0),
     p_ipi: Number(imp.pIPI || 0),
     cst_pis: imp.CST_PIS || sistema.tributos?.cst_pis || '',

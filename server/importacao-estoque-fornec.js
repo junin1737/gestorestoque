@@ -75,6 +75,11 @@ async function upsertEstoqueFornecedor(body = {}) {
 
     if (existing[0]) {
       const id = Number(existing[0].ID_EST_FORNEC);
+      if (body.inativar || body.status === 'I') {
+        await query(db, `UPDATE TB_ESTOQUE_FORNECEDOR SET STATUS='I' WHERE ID_EST_FORNEC=?`, [id]);
+        const rows = await query(db, `SELECT * FROM TB_ESTOQUE_FORNECEDOR WHERE ID_EST_FORNEC=?`, [id]);
+        return mapEstFornec(rows[0]);
+      }
       await query(db, `
         UPDATE TB_ESTOQUE_FORNECEDOR SET
           COD_NO_FORNECEDOR=?, CST=?, CSOSN=?, COFINS=?, CST_COFINS=?,

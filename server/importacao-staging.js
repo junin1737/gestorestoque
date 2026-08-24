@@ -334,6 +334,7 @@ async function buildSistemaFromXmlItem(xmlItem, ufFornecedor) {
     id_regra: null,
     uni_medida_xml: xmlItem.uCom,
     uni_medida: xmlItem.uCom,
+    uni_medida_saida: '',
     conversor: 1,
     qtd_xml: xmlItem.qCom,
     qtd: xmlItem.qCom,
@@ -353,7 +354,7 @@ async function buildSistemaFromXmlItem(xmlItem, ufFornecedor) {
       v_icms: imp.vICMS || 0,
       v_bc_st: imp.vBCST || 0,
       v_icms_st: imp.vICMSST || 0,
-      cst_ipi: imp.CST_IPI || '',
+      cst_ipi: '49',
       v_ipi: imp.vIPI || 0,
       p_ipi: imp.pIPI || 0,
       cst_pis: imp.CST_PIS || '',
@@ -418,6 +419,17 @@ function setFornecedor(sessaoId, fornecedor) {
   s.fornecedor = fornecedor;
   s.updatedAt = new Date().toISOString();
   s._sync = { ...(s._sync || {}), version: (s._sync?.version || 0) + 1, pendingCloud: true };
+  saveStore(store);
+  return mapSessaoForClient(s);
+}
+
+async function aplicarVinculosSessao(sessaoId) {
+  const store = loadStore();
+  const s = store.sessoes.find((x) => x.id === sessaoId);
+  if (!s) return null;
+  const { aplicarSugestoesVinculo } = require('./importacao-vinculo');
+  await aplicarSugestoesVinculo(s);
+  s.updatedAt = new Date().toISOString();
   saveStore(store);
   return mapSessaoForClient(s);
 }
@@ -1057,6 +1069,7 @@ module.exports = {
   buscarProdutos,
   setFornecedor,
   updateFornecedor,
+  aplicarVinculosSessao,
   updateCabecalho,
   deleteSessao,
   cancelarSessaoConfirmada,
