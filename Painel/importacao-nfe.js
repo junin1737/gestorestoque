@@ -1390,6 +1390,14 @@ const ImportacaoNfe = (() => {
         vDup: Number($(`#imp-parc-v-${i}`)?.value || 0),
         dVenc: $(`#imp-parc-d-${i}`)?.value || '',
       }));
+      const vNf = Number(s.xml?.total?.vNF || 0);
+      const somaParc = parcelas.reduce((acc, p) => acc + Number(p.vDup || 0), 0);
+      if (vNf > 0.009 && parcelas.length && Math.abs(vNf - somaParc) > 0.03) {
+        deps.showMsg?.(
+          `Soma das parcelas (${somaParc.toFixed(2)}) difere do total da NF (${vNf.toFixed(2)}). Ajuste os valores antes de salvar.`
+        );
+        return;
+      }
       const idFmapgto = $('#imp-fmpag')?.value || null;
       const idParcelaSel = $('#imp-parcelamento')?.value || null;
       const formaDesc = state.formasPagto.find((f) => String(f.id_fmapgto) === String(idFmapgto))?.descricao || '';
@@ -4110,6 +4118,16 @@ const ImportacaoNfe = (() => {
           return;
         }
       } catch { /* segue se params falhar */ }
+      const vNfConf = Number(state.sessao?.xml?.total?.vNF || 0);
+      const parcConf = state.sessao?.financeiro?.parcelas || [];
+      const somaParcConf = parcConf.reduce((acc, p) => acc + Number(p.vDup || 0), 0);
+      if (vNfConf > 0.009 && parcConf.length && Math.abs(vNfConf - somaParcConf) > 0.03) {
+        deps.showMsg?.(
+          `Soma das parcelas (${somaParcConf.toFixed(2)}) difere do total da NF (${vNfConf.toFixed(2)}). Ajuste na aba Financeiro.`
+        );
+        setTab('financeiro');
+        return;
+      }
       const nItens = state.sessao.itens?.length || 0;
       const nNf = state.sessao.xml?.ide?.nNF || state.sessao.cabecalho?.nNF || '—';
       const okConfirm = await askConfirm(
@@ -4150,16 +4168,15 @@ const ImportacaoNfe = (() => {
   }
 
   function applyScannedChave(code) {
-    if (state.view !== 'consultar' && state.view !== 'inicio') return false;
-    const chave = String(code || '').replace(/\D/g, '');
-    if (chave.length >= 44) {
-      if (state.view !== 'consultar') showView('consultar');
-      const inp = $('#imp-chave');
-      if (inp) inp.value = chave.slice(0, 44);
-      consultarChave();
-      return true;
-    }
-    return false;
+    const chave = String(code || '').replace(/\D/g, '').slice(0, 44);
+    if (chave.length !== 44) return false;
+    const inp = $('#imp-chave');
+    const onConsultar = state.view === 'consultar' || state.view === 'inicio' || !!inp;
+    if (!onConsultar) return false;
+    if (state.view !== 'consultar') showView('consultar');
+    if (inp) inp.value = chave;
+    consultarChave();
+    return true;
   }
 
   function applyScannedProduto(code) {

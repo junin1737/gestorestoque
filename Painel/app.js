@@ -214,16 +214,37 @@ function initUiScale() {
 function applyTheme(tema, logoUrl) {
   const logo = logoUrl || state.emitente?.logo;
   document.documentElement.setAttribute('data-theme', tema || 'claro');
+  let statusColor = '#1e3a5f';
   if (tema === 'empresa' && logo) {
     extractAccent(logo).then((color) => {
       if (!color) return;
       document.documentElement.style.setProperty('--empresa-accent', color);
-      document.documentElement.style.setProperty('--empresa-accent', color);
+      syncThemeColor(color);
     });
+    statusColor = getComputedStyle(document.documentElement).getPropertyValue('--empresa-accent').trim() || statusColor;
   } else {
     document.documentElement.style.removeProperty('--empresa-accent');
-    document.documentElement.style.removeProperty('--empresa-accent');
+    if (tema === 'escuro') statusColor = '#0f1724';
+    else statusColor = '#1e3a5f';
   }
+  syncThemeColor(statusColor);
+}
+
+function syncThemeColor(color) {
+  const hex = String(color || '#1e3a5f').trim();
+  if (!hex.startsWith('#')) return;
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute('content', hex);
+  try {
+    if (window.GestorApp && typeof window.GestorApp.setStatusBarColor === 'function') {
+      window.GestorApp.setStatusBarColor(hex);
+    }
+  } catch { /* ignore */ }
 }
 
 function rgbToHex(r, g, b) {
@@ -1627,15 +1648,9 @@ function pickBestBarcode(candidates, target = state.scanTarget) {
 
 async function applyScannedCode(value) {
   if (state.scanTarget === 'importacao') {
-    const chave = extractChaveNfe44(value) || String(value || '').replace(/\D/g, '').slice(0, 44);
-    if (chave.length === 44 && (window.ImportacaoNfe?.applyScannedChave?.(chave) || window.ImportacaoNfe?.applyScannedChave?.(chave))) {
-      stopScanner();
-      $('#dlg-scan')?.close();
-      state.scanTarget = 'search';
-      return true;
-    }
-    const codeTry = normalizeBarcodeNumber(value);
-    if (codeTry.length === 44 && (window.ImportacaoNfe?.applyScannedChave?.(codeTry) || window.ImportacaoNfe?.applyScannedChave?.(codeTry))) {
+    const digits = String(value || '').replace(/\D/g, '');
+    const chave = extractChaveNfe44(value) || (digits.length >= 44 ? digits.slice(0, 44) : '');
+    if (chave.length === 44 && window.ImportacaoNfe?.applyScannedChave?.(chave)) {
       stopScanner();
       $('#dlg-scan')?.close();
       state.scanTarget = 'search';
@@ -2025,7 +2040,7 @@ async function startLiveScanner() {
     video.srcObject = stream;
     await video.play();
 
-    const reader = getZxingReader();
+    const reader = getZxingReader(isChaveScanTarget());
     scanControls = { stream, reader, timer: null };
 
     if (reader?.decodeFromVideoDevice) {

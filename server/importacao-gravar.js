@@ -3,7 +3,7 @@
 const { withDb, query, activeTargets, hasTable, columnExists } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
-const { round2, calcCustoUnitarioItem, totalMercadoriaItem, validarTotaisNf } = require('./importacao-rateio');
+const { round2, calcCustoUnitarioItem, totalMercadoriaItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
 const { buscarPorCnpj, cadastrarFornecedor, onlyDigits } = require('./importacao-fornecedor');
 
@@ -1061,13 +1061,10 @@ async function gravarNfCompra(sessao, {
       const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
         ? fin.parcelas
         : [{ nDup: '001', dVenc: agora.dataSql, vDup: tot.vNF || 0 }];
-      const somaParc = round2(parcelasXml.reduce((a, p) => a + Number(p.vDup || 0), 0));
-      const vNf = round2(tot.vNF || 0);
-      if (vNf > 0.009 && Math.abs(somaParc - vNf) > 0.03) {
-        throw new Error(
-          `Diferença de valor acima de 3 centavos no financeiro (NF ${vNf.toFixed(2)} × parcelas ${somaParc.toFixed(2)}). A nota não será gravada.`
-        );
-      }
+      const checagemFin = validarFinanceiroNf(sessao.xml, { parcelas: parcelasXml });
+      if (!checagemFin.ok) throw new Error(checagemFin.erro);
+      const vNf = checagemFin.vNf;
+      const somaParc = checagemFin.soma;
       const idNumPag = await nextId(db, 'GEN_TB_NFCOMPRA_FMAPAGTO_ID', 'TB_NFCOMPRA_FMAPAGTO', 'ID_NUMPAG');
       await query(db, `
         INSERT INTO TB_NFCOMPRA_FMAPAGTO (ID_NUMPAG, VLR_PAGTO, ID_NFCOMPRA, ID_FMANFCE, ID_PARCELA)

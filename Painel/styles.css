@@ -912,6 +912,15 @@ html[data-theme="escuro"] .toolbar-select select {
 }
 
 @media (max-width: 980px) {
+  html[data-theme="empresa"] #view-app {
+    background: linear-gradient(
+      to bottom,
+      var(--empresa-accent, var(--primary)) 0,
+      var(--empresa-accent, var(--primary)) max(var(--safe-t), env(safe-area-inset-top, 0px)),
+      var(--bg) max(var(--safe-t), env(safe-area-inset-top, 0px)),
+      var(--bg) 100%
+    );
+  }
   body {
     overflow: hidden;
     height: 100%;

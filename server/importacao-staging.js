@@ -10,7 +10,7 @@ const os = require('os');
 const { getAppDataDir } = require('./config');
 const importacaoParams = require('./importacao-params');
 const { parseNfeXml } = require('./importacao-xml');
-const { aplicarRateiosDoXml, syncSistemaComXmlItem } = require('./importacao-rateio');
+const { aplicarRateiosDoXml, syncSistemaComXmlItem, validarFinanceiroNf } = require('./importacao-rateio');
 const { consultarChaveSefaz, fiscalReady } = require('./importacao-sefaz');
 const { getFiscalConfig } = require('./certificado');
 
@@ -1060,8 +1060,12 @@ function updateFinanceiro(sessaoId, financeiro) {
   const store = loadStore();
   const s = store.sessoes.find((x) => x.id === sessaoId);
   if (!s) return { ok: false, error: 'Sessão não encontrada' };
-  s.financeiro = { ...s.financeiro, ...financeiro };
-  if (financeiro.parcelas) s.financeiro.parcelas = financeiro.parcelas;
+  const finPatch = { ...financeiro };
+  if (financeiro.parcelas) finPatch.parcelas = financeiro.parcelas;
+  const finMerged = { ...s.financeiro, ...finPatch };
+  const checagemFin = validarFinanceiroNf(s.xml, finMerged);
+  if (!checagemFin.ok) return { ok: false, error: checagemFin.erro };
+  s.financeiro = finMerged;
   // Evita persistir "Nenhum" se o cliente mandar id 1 por engano
   if (Number(s.financeiro.id_fmapgto) === 1) s.financeiro.id_fmapgto = 3;
   if (Number(s.financeiro.id_parcela) === 1) s.financeiro.id_parcela = 24;
@@ -1147,6 +1151,11 @@ async function confirmarSessao(sessaoId, opts = {}) {
     } catch (e) {
       console.warn('Reaplicar financeiro:', e.message);
     }
+  }
+
+  const checagemFin = validarFinanceiroNf(s.xml, s.financeiro);
+  if (!checagemFin.ok) {
+    return { ok: false, error: checagemFin.erro };
   }
 
   let gravacao;

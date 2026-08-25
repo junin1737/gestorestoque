@@ -8,6 +8,7 @@ import android.content.pm.PackageManager;
 import android.print.PrintAttributes;
 import android.print.PrintManager;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.os.Bundle;
 import android.view.KeyEvent;
 import android.view.View;
@@ -36,6 +37,8 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.google.zxing.client.android.Intents;
 import com.journeyapps.barcodescanner.ScanContract;
@@ -92,7 +95,11 @@ public class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        getWindow().setStatusBarColor(Color.TRANSPARENT);
+        getWindow().setNavigationBarColor(Color.TRANSPARENT);
         setContentView(R.layout.activity_main);
+        applySystemBarAppearance(getResources().getColor(R.color.brand, getTheme()), false);
 
         webView = findViewById(R.id.webview);
         connectPanel = findViewById(R.id.connect_panel);
@@ -212,13 +219,14 @@ public class MainActivity extends AppCompatActivity {
             options.setDesiredBarcodeFormats(Arrays.asList(
                     ScanOptions.CODE_128,
                     ScanOptions.ITF,
-                    ScanOptions.CODE_39
+                    ScanOptions.CODE_39,
+                    ScanOptions.CODABAR
             ));
             options.setPrompt("Chave NF-e — enquadre a barra na horizontal");
             options.setOrientationLocked(false);
             options.setBeepEnabled(true);
             options.setBarcodeImageEnabled(false);
-            options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.NORMAL_SCAN);
+            options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.MIXED_SCAN);
         } else {
             options.setDesiredBarcodeFormats(Arrays.asList(
                     ScanOptions.EAN_13,
@@ -244,21 +252,54 @@ public class MainActivity extends AppCompatActivity {
             JSONObject payload = new JSONObject();
             payload.put("code", raw);
             final String js = "(function(p){"
-                    + "var c=p&&p.code;"
-                    + "if(!c)return;"
+                    + "var raw=p&&p.code;if(!raw)return;"
+                    + "var digits=String(raw).replace(/\\D/g,'');"
+                    + "var chave=digits.length>=44?digits.slice(0,44):'';"
                     + "if(typeof window.applyScannedCodeFromApp==='function'){"
-                    + "  window.applyScannedCodeFromApp(c);return;"
+                    + "  if(window.applyScannedCodeFromApp(chave||raw))return;"
+                    + "}"
+                    + "if(chave.length===44){"
+                    + "  var inp=document.getElementById('imp-chave');"
+                    + "  if(inp){inp.value=chave;"
+                    + "    if(window.ImportacaoNfe&&typeof ImportacaoNfe.applyScannedChave==='function'"
+                    + "        &&ImportacaoNfe.applyScannedChave(chave))return;"
+                    + "    var btn=document.getElementById('imp-btn-consultar');"
+                    + "    if(btn)btn.click();return;}"
                     + "}"
                     + "var inp=document.getElementById('estoque-busca');"
-                    + "if(inp){inp.value=c;inp.dispatchEvent(new Event('input',{bubbles:true}));"
+                    + "if(inp){inp.value=raw;inp.dispatchEvent(new Event('input',{bubbles:true}));"
                     + "  var btn=document.getElementById('btn-buscar-estoque');"
                     + "  if(btn)btn.click();}"
                     + "})(" + payload + ");";
             webView.post(() -> webView.evaluateJavascript(js, null));
-            Toast.makeText(this, "Código: " + raw, Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, chaveLabel(raw), Toast.LENGTH_SHORT).show();
         } catch (Exception e) {
             Toast.makeText(this, "Lido, mas falhou ao enviar ao painel: " + e.getMessage(), Toast.LENGTH_LONG).show();
         }
+    }
+
+    private static String chaveLabel(String raw) {
+        String digits = raw == null ? "" : raw.replaceAll("\\D", "");
+        if (digits.length() >= 44) return "Chave NF-e lida";
+        return "Código: " + raw;
+    }
+
+    private void applySystemBarAppearance(int color, boolean lightIcons) {
+        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(
+                getWindow(), getWindow().getDecorView());
+        if (controller != null) {
+            controller.setAppearanceLightStatusBars(lightIcons);
+            controller.setAppearanceLightNavigationBars(lightIcons);
+        }
+        getWindow().setStatusBarColor(color);
+    }
+
+    private static boolean isColorLight(int color) {
+        double r = Color.red(color) / 255.0;
+        double g = Color.green(color) / 255.0;
+        double b = Color.blue(color) / 255.0;
+        double luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        return luminance > 0.62;
     }
 
     private void injectNativeHooks(WebView view) {
@@ -513,6 +554,18 @@ public class MainActivity extends AppCompatActivity {
                         Toast.LENGTH_SHORT
                 ).show();
                 startBarcodeScan(mode);
+            });
+        }
+
+        @JavascriptInterface
+        public void setStatusBarColor(String hex) {
+            runOnUiThread(() -> {
+                try {
+                    int color = Color.parseColor(hex);
+                    applySystemBarAppearance(color, isColorLight(color));
+                } catch (Exception ignored) {
+                    /* ignore */
+                }
             });
         }
 

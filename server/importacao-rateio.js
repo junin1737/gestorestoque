@@ -191,6 +191,25 @@ function validarTotaisNf(xml, itensSessao) {
   return { ok: true, vNf, recon, delta };
 }
 
+function validarFinanceiroNf(xml, financeiro) {
+  const vNf = round2(xml?.total?.vNF || 0);
+  if (vNf <= 0.009) return { ok: true, vNf: 0, soma: 0, delta: 0 };
+  const parcelas = Array.isArray(financeiro?.parcelas) ? financeiro.parcelas : [];
+  if (!parcelas.length) return { ok: true, vNf, soma: vNf, delta: 0 };
+  const soma = round2(parcelas.reduce((a, p) => a + Number(p.vDup || 0), 0));
+  const delta = round2(Math.abs(vNf - soma));
+  if (delta > DIFERENCA_MAX_NF) {
+    return {
+      ok: false,
+      vNf,
+      soma,
+      delta,
+      erro: `Diferença de valor acima de 3 centavos no financeiro (NF ${vNf.toFixed(2)} × parcelas ${soma.toFixed(2)}, delta ${delta.toFixed(2)}). Ajuste as parcelas antes de salvar ou gravar.`,
+    };
+  }
+  return { ok: true, vNf, soma, delta };
+}
+
 module.exports = {
   round2,
   aplicarRateiosDoXml,
@@ -198,5 +217,6 @@ module.exports = {
   calcCustoUnitarioItem,
   totalMercadoriaItem,
   validarTotaisNf,
+  validarFinanceiroNf,
   DIFERENCA_MAX_NF,
 };
