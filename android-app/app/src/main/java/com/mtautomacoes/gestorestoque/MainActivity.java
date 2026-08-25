@@ -37,7 +37,6 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.google.zxing.client.android.Intents;
 import com.journeyapps.barcodescanner.ScanContract;
 import com.journeyapps.barcodescanner.ScanOptions;
@@ -105,9 +104,6 @@ public class MainActivity extends AppCompatActivity {
         txtEmpresa = findViewById(R.id.txt_empresa);
         Button btnConnect = findViewById(R.id.btn_connect);
         Button btnScanQr = findViewById(R.id.btn_scan_qr);
-        Button btnChange = findViewById(R.id.btn_change_server);
-        Button btnScanProduct = findViewById(R.id.btn_scan_product);
-        FloatingActionButton fabScan = findViewById(R.id.fab_scan_barcode);
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean firstConnection = !prefs.contains(KEY_URL);
@@ -119,12 +115,8 @@ public class MainActivity extends AppCompatActivity {
         setupWebView();
         EmitenteIcon.restore(this, imgEmitente, txtEmpresa);
 
-        View.OnClickListener openBarcode = v -> startBarcodeScan("product");
         btnScanQr.setOnClickListener(v -> startQrScan());
         btnConnect.setOnClickListener(v -> connect());
-        btnChange.setOnClickListener(v -> showConnectPanel());
-        btnScanProduct.setOnClickListener(openBarcode);
-        fabScan.setOnClickListener(openBarcode);
 
         urlInput.setOnEditorActionListener((v, actionId, event) -> {
             if (actionId == EditorInfo.IME_ACTION_GO
@@ -298,6 +290,8 @@ public class MainActivity extends AppCompatActivity {
                 + "    }catch(err){}"
                 + "  },true);"
                 + "}"
+                + "var cfg=document.getElementById('btn-config-servidor');"
+                + "if(cfg)cfg.hidden=false;"
                 + "var m=document.querySelector('meta[name=viewport]');"
                 + "if(m)m.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');"
                 + "})();";
@@ -525,6 +519,11 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public boolean isNativeApp() {
             return true;
+        }
+
+        @JavascriptInterface
+        public void changeServer() {
+            runOnUiThread(MainActivity.this::showConnectPanel);
         }
 
         @JavascriptInterface

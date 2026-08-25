@@ -486,6 +486,8 @@ function enterApp() {
   if ($('#nav-importacao')) $('#nav-importacao').hidden = !showImp;
   if ($('#nav-importacao-mobile')) $('#nav-importacao-mobile').hidden = !showImp;
   if ($('#dash-importacao')) $('#dash-importacao').hidden = !showImp;
+  const cfgSrv = $('#btn-config-servidor');
+  if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   showPage('dashboard');
   loadUnidades();
 }
@@ -508,6 +510,22 @@ $('#btn-logout').addEventListener('click', trocarUsuario);
 $('#btn-trocar-usuario').addEventListener('click', trocarUsuario);
 $('#btn-trocar-usuario-top').addEventListener('click', trocarUsuario);
 $('#btn-trocar-mobile')?.addEventListener('click', trocarUsuario);
+
+(function wireServerConfig() {
+  const btn = $('#btn-config-servidor');
+  if (!btn) return;
+  btn.hidden = !isNativeApk();
+  btn.addEventListener('click', () => {
+    setSidebarOpen(false);
+    try {
+      if (window.GestorApp && typeof window.GestorApp.changeServer === 'function') {
+        window.GestorApp.changeServer();
+      }
+    } catch (err) {
+      console.warn('changeServer', err);
+    }
+  });
+})();
 function setSidebarOpen(open) {
   document.body.classList.toggle('sidebar-open', open);
   const bd = $('#sidebar-backdrop');
