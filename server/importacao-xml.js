@@ -17,6 +17,31 @@ function extractBlock(xml, name) {
   return m ? m[0] : '';
 }
 
+function parseIbsCbs(det) {
+  const imposto = extractBlock(det, 'imposto') || det;
+  const blk = extractBlock(imposto, 'IBSCBS')
+    || extractBlock(imposto, 'IBSCBSTot')
+    || extractBlock(det, 'IBSCBS')
+    || '';
+  if (!blk) return { has_ibscbs: false };
+  const gIbs = extractBlock(blk, 'gIBSCBS') || blk;
+  const gCbs = extractBlock(gIbs, 'gCBS') || extractBlock(blk, 'gCBS') || gIbs;
+  const gIbsUf = extractBlock(gIbs, 'gIBSUF') || extractBlock(blk, 'gIBSUF') || gIbs;
+  const gIbsMun = extractBlock(gIbs, 'gIBSMun') || extractBlock(blk, 'gIBSMun') || '';
+  return {
+    has_ibscbs: true,
+    CST: tag(blk, 'CST') || tag(gIbs, 'CST') || '',
+    cClassTrib: tag(blk, 'cClassTrib') || tag(gIbs, 'cClassTrib') || '',
+    vBC: tagNum(gIbs, 'vBC') || tagNum(blk, 'vBC'),
+    pCBS: tagNum(gCbs, 'pCBS') || tagNum(blk, 'pCBS'),
+    vCBS: tagNum(gCbs, 'vCBS') || tagNum(blk, 'vCBS'),
+    pIBSUF: tagNum(gIbsUf, 'pIBSUF') || tagNum(blk, 'pIBSUF'),
+    vIBSUF: tagNum(gIbsUf, 'vIBSUF') || tagNum(blk, 'vIBSUF'),
+    pIBSMun: tagNum(gIbsMun, 'pIBSMun') || tagNum(blk, 'pIBSMun'),
+    vIBSMun: tagNum(gIbsMun, 'vIBSMun') || tagNum(blk, 'vIBSMun'),
+  };
+}
+
 function parseImposto(det) {
   const imposto = extractBlock(det, 'imposto') || det;
   const icmsBlock = imposto.match(/<ICMS\b[\s\S]*?<\/ICMS>/i)?.[0] || '';
@@ -27,6 +52,7 @@ function parseImposto(det) {
   const pisInner = pis.match(/<PIS\w*\b[\s\S]*?<\/PIS\w*>/i)?.[0] || pis;
   const cofins = extractBlock(imposto, 'COFINS') || '';
   const cofinsInner = cofins.match(/<COFINS\w*\b[\s\S]*?<\/COFINS\w*>/i)?.[0] || cofins;
+  const ibscbs = parseIbsCbs(det);
 
   return {
     orig: tag(icmsInner, 'orig') || '0',
@@ -42,18 +68,40 @@ function parseImposto(det) {
     pST: tagNum(icmsInner, 'pST'),
     vBCSTRet: tagNum(icmsInner, 'vBCSTRet'),
     vICMSSTRet: tagNum(icmsInner, 'vICMSSTRet'),
+    vICMSDeson: tagNum(icmsInner, 'vICMSDeson'),
+    motDesICMS: tag(icmsInner, 'motDesICMS') || '',
+    vBCFCP: tagNum(icmsInner, 'vBCFCP'),
+    pFCP: tagNum(icmsInner, 'pFCP'),
+    vFCP: tagNum(icmsInner, 'vFCP'),
+    vBCFCPST: tagNum(icmsInner, 'vBCFCPST'),
+    pFCPST: tagNum(icmsInner, 'pFCPST'),
+    vFCPST: tagNum(icmsInner, 'vFCPST'),
+    has_ipi: !!ipi,
     CST_IPI: tag(ipiTrib, 'CST') || tag(ipi, 'CST') || '',
     vIPI: tagNum(ipiTrib, 'vIPI'),
     pIPI: tagNum(ipiTrib, 'pIPI'),
+    has_pis: !!pis,
     CST_PIS: tag(pisInner, 'CST') || '',
     vPIS: tagNum(pisInner, 'vPIS'),
     pPIS: tagNum(pisInner, 'pPIS'),
     vBCPIS: tagNum(pisInner, 'vBC'),
+    has_cofins: !!cofins,
     CST_COFINS: tag(cofinsInner, 'CST') || '',
     vCOFINS: tagNum(cofinsInner, 'vCOFINS'),
     pCOFINS: tagNum(cofinsInner, 'pCOFINS'),
     vBCCOFINS: tagNum(cofinsInner, 'vBC'),
+    ibscbs,
   };
+}
+
+function parseRastros(prod) {
+  const blocks = [...(String(prod || '').match(/<rastro\b[^>]*>[\s\S]*?<\/rastro>/gi) || [])];
+  return blocks.map((b) => ({
+    nLote: tag(b, 'nLote'),
+    qLote: tagNum(b, 'qLote'),
+    dFab: tag(b, 'dFab'),
+    dVal: tag(b, 'dVal'),
+  })).filter((r) => r.nLote || r.qLote);
 }
 
 function parseDet(det) {
@@ -74,6 +122,7 @@ function parseDet(det) {
     vFrete: tagNum(prod, 'vFrete'),
     vSeg: tagNum(prod, 'vSeg'),
     vOutro: tagNum(prod, 'vOutro'),
+    rastros: parseRastros(prod),
     imposto: parseImposto(det),
   };
 }
@@ -92,6 +141,7 @@ function parseNfeXml(xmlRaw) {
   const icmsTot = extractBlock(total, 'ICMSTot') || total;
   const transp = extractBlock(inf, 'transp');
   const transporta = extractBlock(transp, 'transporta');
+  const veicTransp = extractBlock(transp, 'veicTransp');
   const cobr = extractBlock(inf, 'cobr');
   const fat = extractBlock(cobr, 'fat');
   const pag = extractBlock(inf, 'pag');
@@ -202,6 +252,11 @@ function parseNfeXml(xmlRaw) {
         xMun: tag(transporta, 'xMun'),
         UF: tag(transporta, 'UF'),
       },
+      veicTransp: {
+        placa: tag(veicTransp, 'placa'),
+        UF: tag(veicTransp, 'UF'),
+        RNTC: tag(veicTransp, 'RNTC'),
+      },
       vol: vols,
     },
     total: {
@@ -217,6 +272,9 @@ function parseNfeXml(xmlRaw) {
       vIPI: tagNum(icmsTot, 'vIPI'),
       vPIS: tagNum(icmsTot, 'vPIS'),
       vCOFINS: tagNum(icmsTot, 'vCOFINS'),
+      vFCP: tagNum(icmsTot, 'vFCP'),
+      vFCPST: tagNum(icmsTot, 'vFCPST'),
+      vICMSDeson: tagNum(icmsTot, 'vICMSDeson'),
     },
     cobr: {
       nFat: tag(fat, 'nFat'),

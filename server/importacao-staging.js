@@ -989,6 +989,7 @@ function updateItem(sessaoId, nItem, patch) {
   if (patch.etapas_ok !== undefined && patch.etapas_ok && typeof patch.etapas_ok === 'object') {
     item.etapas_ok = { ...(item.etapas_ok || {}), ...patch.etapas_ok };
   }
+  if (patch.lote_aba_visitada) item.lote_aba_visitada = true;
 
   try {
     const sys = item.sistema || {};

@@ -68,7 +68,18 @@ function syncSistemaComXmlItem(sistema, xmlItem) {
     p_st: Number(imp.pST || sistema.tributos?.p_st || 0),
     v_bc_st_ret: Number(imp.vBCSTRet || 0),
     v_icms_st_ret: Number(imp.vICMSSTRet || 0),
-    cst_ipi: '49',
+    v_icms_deson: Number(imp.vICMSDeson || 0),
+    mot_des_icms: String(imp.motDesICMS || '').replace(/\D/g, '').slice(0, 2),
+    v_bc_fcp: Number(imp.vBCFCP || 0),
+    p_fcp: Number(imp.pFCP || 0),
+    v_fcp: Number(imp.vFCP || 0),
+    v_bc_fcp_st: Number(imp.vBCFCPST || 0),
+    p_fcp_st: Number(imp.pFCPST || 0),
+    v_fcp_st: Number(imp.vFCPST || 0),
+    has_pis: !!imp.has_pis,
+    has_cofins: !!imp.has_cofins,
+    has_ipi: !!imp.has_ipi,
+    cst_ipi: imp.CST_IPI || sistema.tributos?.cst_ipi || '',
     v_ipi: Number(imp.vIPI || 0),
     p_ipi: Number(imp.pIPI || 0),
     cst_pis: imp.CST_PIS || sistema.tributos?.cst_pis || '',
@@ -80,6 +91,15 @@ function syncSistemaComXmlItem(sistema, xmlItem) {
     p_cofins: Number(imp.pCOFINS || 0),
     v_bc_cofins: Number(imp.vBCCOFINS || 0),
   };
+  if (!Array.isArray(sistema.lotes) || !sistema.lotes.length) {
+    const rastros = Array.isArray(xmlItem.rastros) ? xmlItem.rastros : [];
+    sistema.lotes = rastros.map((r) => ({
+      num_lote: String(r.nLote || '').trim(),
+      qtd_entrada: Number(r.qLote || 0),
+      dt_validade: r.dVal || '',
+      dt_fabricacao: r.dFab || '',
+    })).filter((l) => l.num_lote);
+  }
   return sistema;
 }
 
@@ -123,9 +143,60 @@ function calcCustoUnitarioItem(sistema = {}, xmlItem = {}) {
   };
 }
 
+const DIFERENCA_MAX_NF = 0.03;
+
+function totalMercadoriaItem(xmlItem = {}, sistema = {}) {
+  const vProd = Number(
+    xmlItem.vProd != null ? xmlItem.vProd : (Number(xmlItem.vUnCom || 0) * Number(xmlItem.qCom || 0))
+  ) || 0;
+  const vDesc = Number(sistema.v_desc ?? xmlItem.vDesc ?? 0) || 0;
+  const vFrete = Number(sistema.v_frete ?? xmlItem.vFrete ?? 0) || 0;
+  const vSeg = Number(sistema.v_seguro ?? xmlItem.vSeg ?? 0) || 0;
+  const vOutro = Number(sistema.v_outro ?? xmlItem.vOutro ?? 0) || 0;
+  return round2(vProd - vDesc + vFrete + vSeg + vOutro);
+}
+
+function reconstruirVnfItens(itens = []) {
+  let recon = 0;
+  for (const it of itens) {
+    const xml = it.xml || it;
+    const sys = it.sistema || {};
+    const imp = xml.imposto || {};
+    const trib = sys.tributos || {};
+    recon += totalMercadoriaItem(xml, sys);
+    recon += Number(trib.v_ipi ?? imp.vIPI ?? 0);
+    recon += Number(trib.v_icms_st ?? imp.vICMSST ?? 0);
+    recon += Number(trib.v_fcp ?? imp.vFCP ?? 0);
+    recon += Number(trib.v_fcp_st ?? imp.vFCPST ?? 0);
+    recon -= Number(trib.v_icms_deson ?? imp.vICMSDeson ?? 0);
+  }
+  return round2(recon);
+}
+
+function validarTotaisNf(xml, itensSessao) {
+  const tot = xml?.total || {};
+  const vNf = round2(tot.vNF || 0);
+  if (vNf <= 0.009) return { ok: true, vNf: 0, recon: 0, delta: 0 };
+  const recon = reconstruirVnfItens(itensSessao || xml?.itens || []);
+  const delta = round2(Math.abs(vNf - recon));
+  if (delta > DIFERENCA_MAX_NF) {
+    return {
+      ok: false,
+      vNf,
+      recon,
+      delta,
+      erro: `Diferença de valor acima de 3 centavos (NF ${vNf.toFixed(2)} × conferido ${recon.toFixed(2)}, delta ${delta.toFixed(2)}). A nota não será gravada.`,
+    };
+  }
+  return { ok: true, vNf, recon, delta };
+}
+
 module.exports = {
   round2,
   aplicarRateiosDoXml,
   syncSistemaComXmlItem,
   calcCustoUnitarioItem,
+  totalMercadoriaItem,
+  validarTotaisNf,
+  DIFERENCA_MAX_NF,
 };

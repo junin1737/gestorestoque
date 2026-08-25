@@ -3,14 +3,18 @@
 const { withDb, query, activeTargets, hasTable, columnExists } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
-const { round2, calcCustoUnitarioItem } = require('./importacao-rateio');
+const { round2, calcCustoUnitarioItem, totalMercadoriaItem, validarTotaisNf } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
+const { buscarPorCnpj, cadastrarFornecedor, onlyDigits } = require('./importacao-fornecedor');
 
 let nfCompraObsColumnCache = undefined;
 
 async function resolveNfCompraObsColumn(db) {
   if (nfCompraObsColumnCache !== undefined) return nfCompraObsColumnCache;
   const candidates = [
+    'INF_COMP_EDIT',
+    'INF_COMP_FIXA',
+    'INF_CPL',
     'OBSERVACAO',
     'OBS',
     'INF_COMPLEMENTAR',
@@ -19,7 +23,6 @@ async function resolveNfCompraObsColumn(db) {
     'INFORMACOES_COMPLEMENTARES',
     'OBS_NF',
     'COMPLEMENTO',
-    'INF_CPL',
   ];
   for (const col of candidates) {
     try {
@@ -605,66 +608,96 @@ async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe
   }
 
   try {
-    await query(db, `
-      INSERT INTO TB_NFC_ITEM_PIS
-        (ID_NFCITEM, CST_PIS, ALIQ_PIS, POR_BC_PIS, VLR_PIS, VLR_BC_PIS)
-      VALUES (?, ?, ?, 100, ?, ?)`, [
-      idNfcItem,
-      String(trib.cst_pis || xmlImp.CST_PIS || '01').trim().slice(0, 2),
-      Number(trib.p_pis || xmlImp.pPIS || 0),
-      Number(trib.v_pis || xmlImp.vPIS || 0),
-      Number(trib.v_bc_pis || xmlImp.vBCPIS || 0),
-    ]);
+    if (xmlImp.has_pis || String(xmlImp.CST_PIS || '').trim()) {
+      await query(db, `
+        INSERT INTO TB_NFC_ITEM_PIS
+          (ID_NFCITEM, CST_PIS, ALIQ_PIS, POR_BC_PIS, VLR_PIS, VLR_BC_PIS)
+        VALUES (?, ?, ?, 100, ?, ?)`, [
+        idNfcItem,
+        String(trib.cst_pis || xmlImp.CST_PIS || '').trim().slice(0, 2),
+        Number(trib.p_pis || xmlImp.pPIS || 0),
+        Number(trib.v_pis || xmlImp.vPIS || 0),
+        Number(trib.v_bc_pis || xmlImp.vBCPIS || 0),
+      ]);
+    }
   } catch (e) { console.warn('PIS:', e.message); }
 
   try {
-    await query(db, `
-      INSERT INTO TB_NFC_ITEM_COFINS
-        (ID_NFCITEM, CST_COFINS, ALIQ_COFINS, POR_BC_COFINS, VLR_COFINS, VLR_BC_COFINS)
-      VALUES (?, ?, ?, 100, ?, ?)`, [
-      idNfcItem,
-      String(trib.cst_cofins || xmlImp.CST_COFINS || '01').trim().slice(0, 2),
-      Number(trib.p_cofins || xmlImp.pCOFINS || 0),
-      Number(trib.v_cofins || xmlImp.vCOFINS || 0),
-      Number(trib.v_bc_cofins || xmlImp.vBCCOFINS || 0),
-    ]);
+    if (xmlImp.has_cofins || String(xmlImp.CST_COFINS || '').trim()) {
+      await query(db, `
+        INSERT INTO TB_NFC_ITEM_COFINS
+          (ID_NFCITEM, CST_COFINS, ALIQ_COFINS, POR_BC_COFINS, VLR_COFINS, VLR_BC_COFINS)
+        VALUES (?, ?, ?, 100, ?, ?)`, [
+        idNfcItem,
+        String(trib.cst_cofins || xmlImp.CST_COFINS || '').trim().slice(0, 2),
+        Number(trib.p_cofins || xmlImp.pCOFINS || 0),
+        Number(trib.v_cofins || xmlImp.vCOFINS || 0),
+        Number(trib.v_bc_cofins || xmlImp.vBCCOFINS || 0),
+      ]);
+    }
   } catch (e) { console.warn('COFINS:', e.message); }
 
   try {
-    await query(db, `
-      INSERT INTO TB_NFC_ITEM_IPI
-        (ID_NFCITEM, CST_IPI, ALIQ_IPI, VLR_IPI, CENQ, IPI_VBC)
-      VALUES (?, ?, ?, ?, '999', 0)`, [
-      idNfcItem,
-      String(trib.cst_ipi || xmlImp.CST_IPI || '49').trim().slice(0, 2),
-      Number(trib.p_ipi || xmlImp.pIPI || 0),
-      Number(trib.v_ipi || xmlImp.vIPI || 0),
-    ]);
+    const hasIpi = xmlImp.has_ipi || Number(xmlImp.vIPI || trib.v_ipi || 0) > 0
+      || String(xmlImp.CST_IPI || '').trim();
+    if (hasIpi) {
+      await query(db, `
+        INSERT INTO TB_NFC_ITEM_IPI
+          (ID_NFCITEM, CST_IPI, ALIQ_IPI, VLR_IPI, CENQ, IPI_VBC)
+        VALUES (?, ?, ?, ?, '999', 0)`, [
+        idNfcItem,
+        String(trib.cst_ipi || xmlImp.CST_IPI || '').trim().slice(0, 2) || null,
+        Number(trib.p_ipi || xmlImp.pIPI || 0),
+        Number(trib.v_ipi || xmlImp.vIPI || 0),
+      ]);
+    }
   } catch (e) { console.warn('IPI:', e.message); }
 
+  const vFcp = Number(trib.v_fcp ?? xmlImp.vFCP ?? 0);
+  const vFcpSt = Number(trib.v_fcp_st ?? xmlImp.vFCPST ?? 0);
+  const bcFcp = Number(trib.v_bc_fcp ?? xmlImp.vBCFCP ?? 0);
+  const bcFcpSt = Number(trib.v_bc_fcp_st ?? xmlImp.vBCFCPST ?? 0);
+  if (hasTable('TB_NFC_ITEM_FCP') && (vFcp > 0 || vFcpSt > 0 || bcFcp > 0 || bcFcpSt > 0)) {
+    try {
+      await query(db, `
+        INSERT INTO TB_NFC_ITEM_FCP (
+          ID_NFCITEM, VLR_BC_FCP_ST, POR_FCP_ST, VLR_FCP_ST, VLR_BC_FCP, POR_FCP, VLR_FCP
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`, [
+        idNfcItem,
+        bcFcpSt,
+        Number(trib.p_fcp_st ?? xmlImp.pFCPST ?? 0),
+        vFcpSt,
+        bcFcp,
+        Number(trib.p_fcp ?? xmlImp.pFCP ?? 0),
+        vFcp,
+      ]);
+    } catch (e) { console.warn('FCP:', e.message); }
+  }
+
   const tn = tribNfe || {};
-  const aplicarReforma = String(extra.aplicarSaida || extra.aplicar_saida || 'S').toUpperCase() !== 'N';
-  if (aplicarReforma || tn.id_class_trib || tn.vlr_cbs != null || tn.vlr_cbs != null || tn.aliq_cbs != null || tn.aliq_cbs != null) {
+  const ibsXml = xmlImp.ibscbs || {};
+  const hasCbsXml = !!ibsXml.has_ibscbs;
+  if (hasCbsXml) {
     try {
       const classRow = tn.id_class_trib
         ? (await query(db, `
             SELECT FIRST 1 COD_CLASS_TRIB, CST_CLASS_TRIB, PERCENT_RED_ALIQ_CBS, PERCENT_RED_ALIQ_IBS
             FROM TB_CLASS_TRIB WHERE ID_CLASS_TRIB = ?`, [Number(tn.id_class_trib)]))[0]
         : null;
-      const codClass = String(tn._class_cod || classRow?.COD_CLASS_TRIB || '').trim().slice(0, 10);
-      const cstClass = String(tn.cst_class_trib || tn.cst_class_trib || classRow?.CST_CLASS_TRIB || '').trim().slice(0, 3);
+      const codClass = String(ibsXml.cClassTrib || tn._class_cod || classRow?.COD_CLASS_TRIB || '').trim().slice(0, 10);
+      const cstClass = String(ibsXml.CST || tn.cst_class_trib || classRow?.CST_CLASS_TRIB || '').trim().slice(0, 3);
       const redCbs = Number(tn.percent_red_aliq_cbs ?? classRow?.PERCENT_RED_ALIQ_CBS ?? 0);
       const redIbs = Number(tn.percent_red_aliq_ibs ?? classRow?.PERCENT_RED_ALIQ_IBS ?? 0);
-      const aliqCbs = Number(tn.aliq_cbs ?? tn.aliq_cbs ?? 0.9);
-      const aliqIbsUf = Number(tn.aliq_ibs_uf ?? tn.aliq_ibs_uf ?? 0.1);
-      const aliqIbsMun = Number(tn.aliq_ibs_mun ?? tn.aliq_ibs_mun ?? 0);
-      const bc = Number(tn.vlr_bc_cbs ?? tn.vlr_bc_cbs ?? extra.prcVenda ?? extra.prc_venda ?? 0);
-      const efetCbs = Number(tn.aliq_efetiva_cbs ?? tn.aliq_efetiva_cbs ?? (aliqCbs * (1 - redCbs / 100)));
-      const efetIbsUf = Number(tn.aliq_efetiva_ibs_uf ?? tn.aliq_efetiva_ibs_uf ?? (aliqIbsUf * (1 - redIbs / 100)));
-      const efetIbsMun = Number(tn.aliq_efetiva_ibs_mun ?? tn.aliq_efetiva_ibs_mun ?? (aliqIbsMun * (1 - redIbs / 100)));
-      const vlrCbs = Number(tn.vlr_cbs ?? tn.vlr_cbs ?? (bc * efetCbs / 100));
-      const vlrIbsUf = Number(tn.vlr_ibs_uf ?? tn.vlr_ibs_uf ?? (bc * efetIbsUf / 100));
-      const vlrIbsMun = Number(tn.vlr_ibs_mun ?? tn.vlr_ibs_mun ?? (bc * efetIbsMun / 100));
+      const aliqCbs = Number(ibsXml.pCBS || tn.aliq_cbs || 0);
+      const aliqIbsUf = Number(ibsXml.pIBSUF || tn.aliq_ibs_uf || 0);
+      const aliqIbsMun = Number(ibsXml.pIBSMun || tn.aliq_ibs_mun || 0);
+      const bc = Number(ibsXml.vBC || tn.vlr_bc_cbs || 0);
+      const efetCbs = Number(tn.aliq_efetiva_cbs ?? (aliqCbs * (1 - redCbs / 100)));
+      const efetIbsUf = Number(tn.aliq_efetiva_ibs_uf ?? (aliqIbsUf * (1 - redIbs / 100)));
+      const efetIbsMun = Number(tn.aliq_efetiva_ibs_mun ?? (aliqIbsMun * (1 - redIbs / 100)));
+      const vlrCbs = Number(ibsXml.vCBS || tn.vlr_cbs || (bc * efetCbs / 100));
+      const vlrIbsUf = Number(ibsXml.vIBSUF || tn.vlr_ibs_uf || (bc * efetIbsUf / 100));
+      const vlrIbsMun = Number(ibsXml.vIBSMun || tn.vlr_ibs_mun || (bc * efetIbsMun / 100));
       const gen = await query(db, `SELECT GEN_ID(GEN_TB_NFC_ITEM_CBS_IBS_ID, 1) AS ID FROM RDB$DATABASE`);
       const idCbs = Number(gen[0].ID);
       await query(db, `
@@ -714,6 +747,136 @@ async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe
   }
 }
 
+async function toSqlDate(v) {
+  const s = String(v || '').trim();
+  if (!s) return null;
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  return m ? m[1] : null;
+}
+
+async function ensureIdTransportador(db, sessao) {
+  const transp = sessao?.xml?.transp || {};
+  const t = transp.transporta || {};
+  const doc = onlyDigits(t.CNPJ || t.CPF);
+  if (!doc) return null;
+  try {
+    const found = await buscarPorCnpj(doc);
+    if (found?.id_fornec) return Number(found.id_fornec);
+  } catch { /* CPF pode falhar na busca de CNPJ 14 */ }
+  if (doc.length === 14 && String(t.xNome || '').trim()) {
+    try {
+      const out = await cadastrarFornecedor({
+        nome: String(t.xNome || '').trim(),
+        cnpj: doc,
+        insc_estad: t.IE || '',
+        end_lograd: t.xEnder || '',
+        uf: t.UF || '',
+        municipio: t.xMun || '',
+        observacao: 'Transportador incluído automaticamente via XML (NF-e).',
+      }, { nNF: sessao?.xml?.ide?.nNF, serie: sessao?.xml?.ide?.serie });
+      return Number(out.id_fornec);
+    } catch (e) {
+      console.warn('Transportador cadastro:', e.message);
+    }
+  }
+  if (doc.length === 11) {
+    try {
+      const rows = await query(db, `
+        SELECT FIRST 1 ID_FORNEC FROM TB_FORNECEDOR
+        WHERE REPLACE(REPLACE(REPLACE(REPLACE(CNPJ,'.',''),'/',''),'-',''),' ','') = ?`, [doc]);
+      if (rows[0]) return Number(rows[0].ID_FORNEC);
+    } catch (e) {
+      console.warn('Transportador CPF:', e.message);
+    }
+  }
+  return null;
+}
+
+async function gravarTransportadorNf(db, idNf, sessao) {
+  if (!hasTable('TB_NFC_TRANSPORTADOR')) return;
+  const idTransp = await ensureIdTransportador(db, sessao);
+  if (!idTransp) return;
+  const veic = sessao?.xml?.transp?.veicTransp || {};
+  const placa = String(veic.placa || '').replace(/\s/g, '').slice(0, 8) || null;
+  const uf = String(veic.UF || '').trim().slice(0, 2) || null;
+  const antt = String(veic.RNTC || '').trim().slice(0, 20) || null;
+  try {
+    await query(db, `
+      INSERT INTO TB_NFC_TRANSPORTADOR (ID_NFCOMPRA, ID_TRANSPORTADOR, PLA_VEICULO, UF_VEICULO, ANTT)
+      VALUES (?, ?, ?, ?, ?)`, [idNf, idTransp, placa, uf, antt]);
+  } catch (e) {
+    console.warn('TB_NFC_TRANSPORTADOR:', e.message);
+  }
+}
+
+async function ensureLoteProduto(db, t, {
+  idIdentificador, numLote, dtValidade, dtFab, qtd,
+}) {
+  const num = String(numLote || '').trim().slice(0, 30);
+  if (!num || !idIdentificador) return null;
+  const table = t.lote || 'TB_LOTE';
+  if (!hasTable(table)) return null;
+  const exist = await query(db, `
+    SELECT FIRST 1 ID_LOTE, QTD_ATUAL FROM ${table}
+    WHERE ID_IDENTIFICADOR = ? AND UPPER(TRIM(NUM_LOTE)) = ?`, [idIdentificador, num.toUpperCase()]);
+  const qtdN = Number(qtd || 0) || 0;
+  if (exist[0]) {
+    const idLote = Number(exist[0].ID_LOTE);
+    try {
+      await query(db, `
+        UPDATE ${table} SET QTD_ATUAL = COALESCE(QTD_ATUAL, 0) + ?
+        WHERE ID_LOTE = ?`, [qtdN, idLote]);
+    } catch (e) {
+      console.warn('Atualizar qtd lote:', e.message);
+    }
+    return idLote;
+  }
+  const idLote = await nextId(db, 'GEN_TB_LOTE_ID', table, 'ID_LOTE');
+  const dtVal = await toSqlDate(dtValidade);
+  const dtF = await toSqlDate(dtFab);
+  await query(db, `
+    INSERT INTO ${table} (ID_LOTE, NUM_LOTE, DT_VALIDAD, ID_IDENTIFICADOR, QTD_ATUAL, DT_FABRICACAO, QTD_RESERV)
+    VALUES (?, ?, ?, ?, ?, ?, 0)`, [
+    idLote, num, dtVal, idIdentificador, qtdN, dtF,
+  ]);
+  return idLote;
+}
+
+async function gravarLotesItem(db, appCfg, idNfcItem, idIdent, it) {
+  if (!hasTable('TB_NFC_ITEM_LOTE')) return;
+  const lotes = Array.isArray(it.sistema?.lotes) ? it.sistema.lotes : [];
+  if (!lotes.length) return;
+  const conversor = Number(it.sistema?.conversor ?? 1) || 1;
+  const targets = activeTargets(appCfg);
+  for (const lote of lotes) {
+    const num = String(lote.num_lote || '').trim();
+    if (!num) continue;
+    let qtdEnt = Number(lote.qtd_entrada || 0);
+    if (!(qtdEnt > 0)) {
+      qtdEnt = Number((Number(it.xml?.qCom || 0) * conversor).toFixed(6));
+    }
+    for (const target of targets) {
+      const idLote = await ensureLoteProduto(db, target.tables, {
+        idIdentificador: idIdent,
+        numLote: num,
+        dtValidade: lote.dt_validade,
+        dtFab: lote.dt_fabricacao,
+        qtd: qtdEnt,
+      });
+      if (!idLote) continue;
+      if (!target.manage) {
+        try {
+          await query(db, `
+            INSERT INTO TB_NFC_ITEM_LOTE (ID_NFCITEM, ID_LOTE, QTD_ENTRADA)
+            VALUES (?, ?, ?)`, [idNfcItem, idLote, qtdEnt]);
+        } catch (e) {
+          console.warn('TB_NFC_ITEM_LOTE:', e.message);
+        }
+      }
+    }
+  }
+}
+
 /**
  * Grava a sessão de importação nas tabelas nativas do Clipp.
  */
@@ -733,7 +896,17 @@ async function gravarNfCompra(sessao, {
     if (!it.sistema?.id_identificador && !it.sistema?.criar_novo) {
       throw new Error(`Item ${it.nItem} sem produto vinculado.`);
     }
+    if (it.lote_aba_visitada) {
+      const lotes = Array.isArray(it.sistema?.lotes) ? it.sistema.lotes : [];
+      const okLote = lotes.some((l) => String(l.num_lote || '').trim() && Number(l.qtd_entrada || 0) > 0);
+      if (!okLote) {
+        throw new Error(`Item ${it.nItem}: a aba Lote foi aberta — informe número do lote e quantidade.`);
+      }
+    }
   }
+
+  const checagemTotais = validarTotaisNf(sessao.xml, itens);
+  if (!checagemTotais.ok) throw new Error(checagemTotais.erro);
 
   const ide = sessao.xml?.ide || {};
   const emit = sessao.xml?.emit || {};
@@ -869,7 +1042,7 @@ async function gravarNfCompra(sessao, {
       agora.horaSql,
       Number(tot.vFrete || 0),
       Number(tot.vSeg || 0),
-      Number(tot.vOutro || 0),
+      0,
       String(vol0.esp || '').slice(0, 30) || null,
       String(transp.modFrete || '9').trim().slice(0, 1) || '9',
       Number(vol0.pesoL || 0),
@@ -885,20 +1058,26 @@ async function gravarNfCompra(sessao, {
 
     let parcelasGeradas = 0;
     if (geraFinanceiroNota) {
+      const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
+        ? fin.parcelas
+        : [{ nDup: '001', dVenc: agora.dataSql, vDup: tot.vNF || 0 }];
+      const somaParc = round2(parcelasXml.reduce((a, p) => a + Number(p.vDup || 0), 0));
+      const vNf = round2(tot.vNF || 0);
+      if (vNf > 0.009 && Math.abs(somaParc - vNf) > 0.03) {
+        throw new Error(
+          `Diferença de valor acima de 3 centavos no financeiro (NF ${vNf.toFixed(2)} × parcelas ${somaParc.toFixed(2)}). A nota não será gravada.`
+        );
+      }
       const idNumPag = await nextId(db, 'GEN_TB_NFCOMPRA_FMAPAGTO_ID', 'TB_NFCOMPRA_FMAPAGTO', 'ID_NUMPAG');
       await query(db, `
         INSERT INTO TB_NFCOMPRA_FMAPAGTO (ID_NUMPAG, VLR_PAGTO, ID_NFCOMPRA, ID_FMANFCE, ID_PARCELA)
         VALUES (?, ?, ?, ?, ?)`, [
         idNumPag,
-        round2(tot.vNF || 0),
+        vNf || somaParc,
         idNf,
         idFmanfce || 5,
         idParcela,
       ]);
-
-      const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
-        ? fin.parcelas
-        : [{ nDup: '001', dVenc: agora.dataSql, vDup: tot.vNF || 0 }];
 
       for (let i = 0; i < parcelasXml.length; i++) {
         const p = parcelasXml[i];
@@ -934,6 +1113,9 @@ async function gravarNfCompra(sessao, {
     const nfLabel = `${nfNumero}/${serie}`;
     let itensGravados = 0;
     let itensComEstoque = 0;
+    const temDesonCols = await columnExists(db, 'TB_NFC_ITEM', 'VLR_ICM_DESO')
+      && await columnExists(db, 'TB_NFC_ITEM', 'ID_MOTIVO_DESO');
+    await gravarTransportadorNf(db, idNf, sessao);
 
     for (let idx = 0; idx < itens.length; idx++) {
       const it = itens[idx];
@@ -1031,16 +1213,16 @@ async function gravarNfCompra(sessao, {
       const vFrete = Number(it.sistema.v_frete ?? it.xml?.vFrete ?? 0);
       const vSeg = Number(it.sistema.v_seguro ?? it.xml?.vSeg ?? 0);
       const vOutro = Number(it.sistema.v_outro ?? it.xml?.vOutro ?? 0);
-      // Com conversão, custo já embute desc/frete/etc — não reaplica no total
-      const vTotal = Math.abs(conversor - 1) > 1e-9
-        ? round2(custoInfo.totalItem)
-        : round2((qtd * vUnit) - vDesc + vFrete + vSeg + vOutro);
+      const vTotal = totalMercadoriaItem(it.xml || {}, it.sistema || {});
       const uni = String(it.sistema.uni_medida || it.xml?.uCom || 'UN').slice(0, 6);
       const cfop = String(it.sistema.cfop || it.xml?.CFOP || '').slice(0, 4);
       const csosn = String(
         it.sistema.csosn_entrada || it.sistema.csosn || it.sistema.tributos?.csosn || ''
       ).slice(0, 3);
       const estBx = flags.gera_estoque === 'S' ? 'S' : 'N';
+      const vDeson = Number(it.sistema.tributos?.v_icms_deson ?? it.xml?.imposto?.vICMSDeson ?? 0);
+      const motDeson = String(it.sistema.tributos?.mot_des_icms || it.xml?.imposto?.motDesICMS || '')
+        .replace(/\D/g, '').slice(0, 2) || null;
 
       if (flags.gera_estoque === 'S') {
         await zerarNegativoAntesTrigger(db, appCfg, {
@@ -1053,16 +1235,31 @@ async function gravarNfCompra(sessao, {
       }
 
       const idItem = await nextId(db, 'GEN_TB_NFC_ITEM_ID', 'TB_NFC_ITEM', 'ID_NFCITEM');
-      await query(db, `
-        INSERT INTO TB_NFC_ITEM (
-          ID_NFCITEM, ID_IDENTIFICADOR, ID_NFCOMPRA, NUM_ITEM, QTD_ITEM, UNI_MEDIDA,
-          VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
-          CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, [
-        idItem, idIdent, idNf, Number(it.nItem), qtd, uni,
-        vTotal, vDesc, vFrete, vSeg, vOutro,
-        cfop || null, csosn || null, estBx, vUnit, vUnit,
-      ]);
+      if (temDesonCols) {
+        await query(db, `
+          INSERT INTO TB_NFC_ITEM (
+            ID_NFCITEM, ID_IDENTIFICADOR, ID_NFCOMPRA, NUM_ITEM, QTD_ITEM, UNI_MEDIDA,
+            VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
+            CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT, VLR_ICM_DESO, ID_MOTIVO_DESO
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, [
+          idItem, idIdent, idNf, Number(it.nItem), qtd, uni,
+          vTotal, vDesc, vFrete, vSeg, vOutro,
+          cfop || null, csosn || null, estBx, vUnit, vUnit,
+          vDeson > 0 ? vDeson : null,
+          vDeson > 0 ? (motDeson ? Number(motDeson) : null) : null,
+        ]);
+      } else {
+        await query(db, `
+          INSERT INTO TB_NFC_ITEM (
+            ID_NFCITEM, ID_IDENTIFICADOR, ID_NFCOMPRA, NUM_ITEM, QTD_ITEM, UNI_MEDIDA,
+            VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
+            CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, [
+          idItem, idIdent, idNf, Number(it.nItem), qtd, uni,
+          vTotal, vDesc, vFrete, vSeg, vOutro,
+          cfop || null, csosn || null, estBx, vUnit, vUnit,
+        ]);
+      }
 
       await insertTributosItem(
         db,
@@ -1075,6 +1272,7 @@ async function gravarNfCompra(sessao, {
           prcVenda: Number(it.sistema.prc_venda || it.sistema.prc_venda || 0),
         },
       );
+      await gravarLotesItem(db, appCfg, idItem, idIdent, it);
       await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       if (flags.gera_estoque === 'S') {
         // EST_BX='S' → trigger Clipp; aqui só ManagePro (TB_*_2)

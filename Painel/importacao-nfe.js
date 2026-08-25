@@ -41,7 +41,9 @@ const ImportacaoNfe = (() => {
     { id: 'saida', label: '4 · Saída' },
     { id: 'trib_saida', label: '5 · Trib. saída' },
     { id: 'anp', label: '6 · ANP' },
+    { id: 'lote', label: 'Lote' },
   ];
+  const ITEM_TABS_ETAPA = ITEM_TABS.filter((t) => t.id !== 'lote');
 
   const NATUREZAS_CFOP_TODOS = [
     'industrializa',
@@ -1450,19 +1452,20 @@ const ImportacaoNfe = (() => {
   }
 
   function maxEtapaLiberada(it) {
-    if (!conferirEtapasAtivo()) return ITEM_TABS.length - 1;
+    if (!conferirEtapasAtivo()) return ITEM_TABS_ETAPA.length - 1;
     const ok = etapasOkOf(it);
     let max = 0;
-    for (let i = 0; i < ITEM_TABS.length; i += 1) {
-      if (ok[ITEM_TABS[i].id]) max = Math.min(ITEM_TABS.length - 1, i + 1);
+    for (let i = 0; i < ITEM_TABS_ETAPA.length; i += 1) {
+      if (ok[ITEM_TABS_ETAPA[i].id]) max = Math.min(ITEM_TABS_ETAPA.length - 1, i + 1);
       else break;
     }
     return max;
   }
 
   function canOpenEtapa(tabId, it) {
+    if (tabId === 'lote') return true;
     if (!conferirEtapasAtivo()) return true;
-    const idx = ITEM_TABS.findIndex((t) => t.id === tabId);
+    const idx = ITEM_TABS_ETAPA.findIndex((t) => t.id === tabId);
     if (idx < 0) return false;
     return idx <= maxEtapaLiberada(it);
   }
@@ -1994,6 +1997,42 @@ const ImportacaoNfe = (() => {
     `;
   }
 
+  function lotesOf(it) {
+    const sys = it?.sistema || {};
+    if (Array.isArray(sys.lotes) && sys.lotes.length) return sys.lotes;
+    const rastros = it?.xml?.rastros || [];
+    if (rastros.length) {
+      return rastros.map((r) => ({
+        num_lote: r.nLote || '',
+        qtd_entrada: r.qLote || '',
+        dt_validade: r.dVal || '',
+        dt_fabricacao: r.dFab || '',
+      }));
+    }
+    return [{ num_lote: '', qtd_entrada: '', dt_validade: '', dt_fabricacao: '' }];
+  }
+
+  function panelLote(it, sys, xml) {
+    const lotes = lotesOf(it);
+    const l0 = lotes[0] || {};
+    const qtdPadrao = Number(sys.qtd ?? xml.qCom ?? 0);
+    return `
+      <section class="imp-panel" data-panel="lote">
+        <header class="imp-section-head">
+          <h4>Lote (opcional)</h4>
+          <span class="hint">Só é obrigatório se você abrir esta aba. Quase nenhum cliente usa controle de lote.</span>
+        </header>
+        <p class="hint">Preencha como no Clipp: número do lote, validade e quantidade de entrada. O XML já sugere os dados de &lt;rastro&gt; quando existirem.</p>
+        <div class="imp-fields">
+          ${field('Número do lote', 'imp-lote-num', l0.num_lote || '', { half: true })}
+          ${field('Qtd entrada', 'imp-lote-qtd', l0.qtd_entrada || qtdPadrao || '', { type: 'number', step: '0.0001', half: true })}
+          ${field('Fabricação', 'imp-lote-fab', String(l0.dt_fabricacao || '').slice(0, 10), { type: 'date', half: true })}
+          ${field('Validade', 'imp-lote-val', String(l0.dt_validade || '').slice(0, 10), { type: 'date', half: true })}
+        </div>
+      </section>
+    `;
+  }
+
   async function hydrateClassTribRates(sys) {
     if (!sys) return;
     for (const key of ['trib_nfe', 'trib_nfce']) {
@@ -2064,7 +2103,7 @@ const ImportacaoNfe = (() => {
     const conversor = Number(sys.conversor ?? 1) || 1;
     const qtdConv = Number((qtdXml * conversor).toFixed(6));
     const tab = state.itemTab || 'vinculo';
-    const isLastTab = tab === 'anp';
+    const isLastTab = tab === 'anp' || tab === 'lote';
 
     let panelHtml = '';
     if (tab === 'vinculo') panelHtml = panelVinculo(it, sys, xml);
@@ -2072,6 +2111,7 @@ const ImportacaoNfe = (() => {
     else if (tab === 'conversao') panelHtml = panelConversao(sys, xml, qtdXml, conversor, qtdConv);
     else if (tab === 'saida') panelHtml = panelSaida(sys, xml, vinculado, descEditable);
     else if (tab === 'trib_saida') panelHtml = panelTribSaida(sys, trib, tn, tc, simples, xml);
+    else if (tab === 'lote') panelHtml = panelLote(it, sys, xml);
     else panelHtml = panelAnp(sys);
 
     const footerHtml = isLastTab
@@ -2736,6 +2776,14 @@ const ImportacaoNfe = (() => {
         id_estoque: sys.id_estoque ?? null,
         criar_novo: !!sys.criar_novo,
         desvinculado: !!sys.desvinculado,
+        lotes: $('#imp-lote-num')
+          ? [{
+              num_lote: g('#imp-lote-num') || '',
+              qtd_entrada: gn('#imp-lote-qtd') ?? '',
+              dt_fabricacao: g('#imp-lote-fab') || '',
+              dt_validade: g('#imp-lote-val') || '',
+            }]
+          : (sys.lotes || []),
         tributos: {
           origem: trib.origem || '',
           cst_icms: g('#imp-cst') || g('#imp-cst-nota') || g('#imp-cst-saida') || trib.cst_icms || '',
@@ -2750,7 +2798,18 @@ const ImportacaoNfe = (() => {
           p_st: trib.p_st ?? 0,
           v_bc_st_ret: trib.v_bc_st_ret ?? 0,
           v_icms_st_ret: trib.v_icms_st_ret ?? 0,
-          cst_ipi: g('#imp-cst-ipi') != null ? (g('#imp-cst-ipi') || '49') : (trib.cst_ipi || '49'),
+          v_icms_deson: trib.v_icms_deson ?? 0,
+          mot_des_icms: trib.mot_des_icms || '',
+          v_bc_fcp: trib.v_bc_fcp ?? 0,
+          p_fcp: trib.p_fcp ?? 0,
+          v_fcp: trib.v_fcp ?? 0,
+          v_bc_fcp_st: trib.v_bc_fcp_st ?? 0,
+          p_fcp_st: trib.p_fcp_st ?? 0,
+          v_fcp_st: trib.v_fcp_st ?? 0,
+          has_pis: !!trib.has_pis,
+          has_cofins: !!trib.has_cofins,
+          has_ipi: !!trib.has_ipi,
+          cst_ipi: g('#imp-cst-ipi') != null ? (g('#imp-cst-ipi') || trib.cst_ipi || '') : (trib.cst_ipi || ''),
           p_ipi: gn('#imp-pipi') ?? trib.p_ipi ?? 0,
           v_ipi: gn('#imp-vipi') ?? trib.v_ipi ?? 0,
           cst_pis: g('#imp-cst-pis') != null ? g('#imp-cst-pis') : (trib.cst_pis || ''),
@@ -2804,6 +2863,7 @@ const ImportacaoNfe = (() => {
       conferido: $('#imp-conferido') ? !!$('#imp-conferido').checked : !!it?.conferido,
       observacao: g('#imp-obs') != null ? (g('#imp-obs') || '') : (it?.observacao || ''),
       etapas_ok: { ...etapasOkOf(it) },
+      lote_aba_visitada: !!it?.lote_aba_visitada,
       match: (sys.id_identificador || sys.criar_novo) ? (it?.match || null) : null,
     };
   }
@@ -2878,6 +2938,17 @@ const ImportacaoNfe = (() => {
     const s = state.sessao;
     if (!it || !s) return false;
     const patch = collectItemPatch();
+    if (state.itemTab === 'lote') patch.lote_aba_visitada = true;
+    const visitouLote = !!(patch.lote_aba_visitada || it.lote_aba_visitada);
+    if (visitouLote) {
+      const lote = (patch.sistema?.lotes || [])[0] || {};
+      const num = String(lote.num_lote || '').trim();
+      const qtd = Number(lote.qtd_entrada || 0);
+      if (!num || !(qtd > 0)) {
+        deps.showMsg?.('A aba Lote foi aberta: informe o número do lote e a quantidade de entrada.');
+        return false;
+      }
+    }
     const res = await api(`/importacao/sessoes/${s.id}/itens/${it.nItem}`, {
       method: 'PUT',
       body: patch,
@@ -2927,19 +2998,21 @@ const ImportacaoNfe = (() => {
       it.conferido = patch.conferido;
       it.observacao = patch.observacao;
       if (patch.etapas_ok) it.etapas_ok = { ...etapasOkOf(it), ...patch.etapas_ok };
+      if (patch.lote_aba_visitada || tabId === 'lote') it.lote_aba_visitada = true;
     }
+    if (tabId === 'lote' && it) it.lote_aba_visitada = true;
     state.itemTab = tabId;
     renderItemScreen();
   }
 
   function avancarEtapa() {
-    const idx = ITEM_TABS.findIndex((t) => t.id === state.itemTab);
-    if (idx < 0 || idx >= ITEM_TABS.length - 1) return;
+    const idx = ITEM_TABS_ETAPA.findIndex((t) => t.id === state.itemTab);
+    if (idx < 0 || idx >= ITEM_TABS_ETAPA.length - 1) return;
     if (conferirEtapasAtivo()) {
       confirmEtapaAtual();
       deps.showToast?.('Etapa confirmada');
     }
-    setItemTab(ITEM_TABS[idx + 1].id);
+    setItemTab(ITEM_TABS_ETAPA[idx + 1].id);
   }
 
   function wireCodeSearch({ buscaSel, listSel, valueSel, endpoint, codeKey = 'codigo', extraQuery, onSelect, labelPreferDesc = false }) {
