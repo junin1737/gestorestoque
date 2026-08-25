@@ -1603,6 +1603,10 @@ function stopScanner() {
 function extractChaveNfe44(raw) {
   const digits = String(raw || '').replace(/\D/g, '');
   if (digits.length === 44) return digits;
+  if (digits.length > 44) {
+    const run = digits.match(/\d{44}/);
+    if (run) return run[0];
+  }
   const compact = String(raw || '').replace(/[\s\-._]/g, '');
   const run = compact.match(/\d{44}/) || digits.match(/\d{44}/);
   return run ? run[0].slice(0, 44) : '';
@@ -1712,16 +1716,29 @@ async function applyScannedCode(value) {
 }
 
 /** Usado pelo APK Android (câmera nativa ao vivo). */
-window.applyScannedCodeFromApp = (value) => applyScannedCode(value);
+window.applyScannedCodeFromApp = (value) => {
+  const digits = String(value || '').replace(/\D/g, '');
+  const chave = extractChaveNfe44(value) || (digits.length >= 44 ? digits.slice(0, 44) : '');
+  const pageImp = document.getElementById('page-importacao');
+  const onImportacao = pageImp && !pageImp.hidden;
+  if (chave.length === 44 && onImportacao) {
+    state.scanTarget = 'importacao';
+    if (window.ImportacaoNfe?.applyScannedChave?.(chave)) {
+      state.scanTarget = 'search';
+      return true;
+    }
+  }
+  return applyScannedCode(value);
+};
 
 function getZxingHints(forChave = false) {
   const Z = window.ZXingBrowser || window.ZXing;
   const hints = new Map();
   const BF = Z?.BarcodeFormat;
   const formats = [];
-  // Chave NF-e (navegador): formatos longos. Produto: EAN/UPC rápido — sem TRY_HARDER.
+  // Chave NF-e: CODE_128/ITF (DANFE). Também CODE_39 como fallback.
   const names = forChave
-    ? ['CODE_128', 'ITF', 'CODE_39', 'CODABAR']
+    ? ['CODE_128', 'ITF', 'CODE_39', 'CODABAR', 'EAN_13', 'EAN_8']
     : ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128', 'CODE_39'];
   if (BF) {
     for (const name of names) {
@@ -1730,14 +1747,17 @@ function getZxingHints(forChave = false) {
   }
   const DHT = Z?.DecodeHintType;
   if (formats.length) hints.set(DHT?.POSSIBLE_FORMATS ?? 2, formats);
-  if (forChave) hints.set(DHT?.TRY_HARDER ?? 3, true);
+  if (forChave) {
+    hints.set(DHT?.TRY_HARDER ?? 3, true);
+  }
   return hints;
 }
 
-function getZxingReader(forChave = isChaveScanTarget()) {
+function getZxingReader(forChave = isChaveScanTarget(), unrestricted = false) {
   const ZXing = window.ZXingBrowser || window.ZXing;
   if (!ZXing?.BrowserMultiFormatReader) return null;
   try {
+    if (unrestricted) return new ZXing.BrowserMultiFormatReader();
     return new ZXing.BrowserMultiFormatReader(getZxingHints(forChave));
   } catch {
     return new ZXing.BrowserMultiFormatReader();
@@ -1863,27 +1883,40 @@ function canvasVariantsFromImage(img, { heavy = false } = {}) {
   return variants;
 }
 
-async function detectWithBarcodeDetector(source) {
+async function detectWithBarcodeDetector(source, forChave = false) {
   if (!('BarcodeDetector' in window)) return [];
-  try {
-    const detector = new BarcodeDetector({ formats: BARCODE_FORMATS });
-    const codes = await detector.detect(source);
-    return codes.map((c) => c.rawValue).filter(Boolean);
-  } catch {
-    return [];
+  const formatSets = forChave
+    ? [
+      ['code_128'],
+      ['code_128', 'code_39'],
+      ['code_128', 'itf', 'code_39', 'ean_13'],
+      BARCODE_FORMATS,
+    ]
+    : [BARCODE_FORMATS];
+  for (const formats of formatSets) {
+    try {
+      const detector = new BarcodeDetector({ formats });
+      const codes = await detector.detect(source);
+      const vals = codes.map((c) => c.rawValue).filter(Boolean);
+      if (vals.length) return vals;
+    } catch { /* formato não suportado neste Safari — tenta próximo */ }
   }
+  return [];
 }
 
-async function detectWithZxingCanvas(canvas) {
-  const reader = getZxingReader(isChaveScanTarget());
-  if (!reader) return [];
-  try {
-    const result = await reader.decodeFromCanvas(canvas);
-    const text = result?.getText?.() || result?.text || '';
-    return text ? [text, normalizeBarcodeNumber(text)].filter(Boolean) : [];
-  } catch {
-    return [];
+async function detectWithZxingCanvas(canvas, forChave = isChaveScanTarget()) {
+  const readers = [
+    getZxingReader(forChave, false),
+    forChave ? getZxingReader(false, true) : null,
+  ].filter(Boolean);
+  for (const reader of readers) {
+    try {
+      const result = await reader.decodeFromCanvas(canvas);
+      const text = result?.getText?.() || result?.text || '';
+      if (text) return [text, normalizeBarcodeNumber(text)].filter(Boolean);
+    } catch { /* tenta próximo reader */ }
   }
+  return [];
 }
 
 async function decodeBarcodeFromImageUrl(url, file) {
@@ -1900,13 +1933,16 @@ async function decodeBarcodeFromImageUrl(url, file) {
     }
   };
   const takeIfReady = () => {
-    const best = pickBestBarcode(candidates);
-    if (!best) return '';
     if (heavy) {
-      const chave = extractChaveNfe44(best);
+      for (const c of candidates) {
+        const chave = extractChaveNfe44(c);
+        if (chave.length === 44) return chave;
+      }
+      const joined = candidates.map((c) => String(c || '').replace(/\D/g, '')).join('');
+      const chave = extractChaveNfe44(joined);
       return chave.length === 44 ? chave : '';
     }
-    return best;
+    return pickBestBarcode(candidates) || '';
   };
 
   let oriented = null;
@@ -1920,30 +1956,32 @@ async function decodeBarcodeFromImageUrl(url, file) {
 
   const img = oriented || await loadImageElement(url);
 
-  pushTexts(await detectWithBarcodeDetector(img));
+  pushTexts(await detectWithBarcodeDetector(img, heavy));
   try {
     const bitmap = oriented || await createImageBitmap(img);
-    pushTexts(await detectWithBarcodeDetector(bitmap));
+    pushTexts(await detectWithBarcodeDetector(bitmap, heavy));
     if (!oriented) bitmap.close?.();
   } catch { /* ignore */ }
 
-  try {
-    const reader = getZxingReader(heavy);
-    if (reader) {
-      const result = await reader.decodeFromImageUrl(url);
-      const text = result?.getText?.() || result?.text || '';
-      if (text) pushTexts([text]);
-    }
-  } catch { /* ignore */ }
-
-  try {
-    const reader = getZxingReader(heavy);
-    if (reader?.decodeFromImageElement && img instanceof HTMLImageElement) {
-      const result = await reader.decodeFromImageElement(img);
-      const text = result?.getText?.() || result?.text || '';
-      if (text) pushTexts([text]);
-    }
-  } catch { /* ignore */ }
+  for (const unrestricted of [false, true]) {
+    try {
+      const reader = getZxingReader(heavy, unrestricted);
+      if (reader) {
+        const result = await reader.decodeFromImageUrl(url);
+        const text = result?.getText?.() || result?.text || '';
+        if (text) pushTexts([text]);
+      }
+    } catch { /* ignore */ }
+    try {
+      const reader = getZxingReader(heavy, unrestricted);
+      if (reader?.decodeFromImageElement && img instanceof HTMLImageElement) {
+        const result = await reader.decodeFromImageElement(img);
+        const text = result?.getText?.() || result?.text || '';
+        if (text) pushTexts([text]);
+      }
+    } catch { /* ignore */ }
+    if (takeIfReady()) break;
+  }
 
   const early = takeIfReady();
   if (early) {
@@ -1959,8 +1997,8 @@ async function decodeBarcodeFromImageUrl(url, file) {
   }
   for (const canvas of variants) {
     try {
-      pushTexts(await detectWithBarcodeDetector(canvas));
-      pushTexts(await detectWithZxingCanvas(canvas));
+      pushTexts(await detectWithBarcodeDetector(canvas, heavy));
+      pushTexts(await detectWithZxingCanvas(canvas, heavy));
     } catch { /* ignore */ }
     const got = takeIfReady();
     if (got) {
@@ -2009,13 +2047,20 @@ async function startScanner(target = 'search') {
   }
   dlg.showModal();
   msg.textContent = isChaveScanTarget()
-    ? 'No iPhone/navegador: fotografe só a faixa do código de barras da chave (44 dígitos), na horizontal, bem perto e nítida.'
+    ? 'No iPhone: fotografe só a faixa do código de barras da chave (44 dígitos), na horizontal, bem perto e nítida.'
     : 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
 
   // Leitura ao vivo só no navegador seguro — nunca forçar no APK
   const canLive = !isNativeApk()
     && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext);
   if (liveBtn) liveBtn.hidden = !canLive;
+
+  // Chave no iPhone/Safari: abre a câmera direto (menos um toque)
+  if (isChaveScanTarget()) {
+    setTimeout(() => {
+      try { $('#scan-file')?.click(); } catch { /* ignore */ }
+    }, 80);
+  }
 }
 
 async function startLiveScanner() {
@@ -2054,19 +2099,25 @@ async function startLiveScanner() {
     }
 
     if ('BarcodeDetector' in window) {
-      const detector = new BarcodeDetector({
-        formats: isChaveScanTarget()
-          ? ['code_128', 'itf', 'code_39', 'codabar']
-          : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'],
-      });
-      msg.textContent = 'Aponte para o código de barras…';
-      scanControls.timer = setInterval(async () => {
-        try {
-          const codes = await detector.detect(video);
-          if (codes[0]?.rawValue) applyScannedCode(codes[0].rawValue);
-        } catch { /* ignore */ }
-      }, 450);
-      return;
+      const detectorFormats = isChaveScanTarget()
+        ? ['code_128', 'code_39', 'itf', 'ean_13']
+        : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'];
+      let detector = null;
+      try {
+        detector = new BarcodeDetector({ formats: detectorFormats });
+      } catch {
+        try { detector = new BarcodeDetector({ formats: ['code_128', 'ean_13'] }); } catch { detector = null; }
+      }
+      if (detector) {
+        msg.textContent = 'Aponte para o código de barras…';
+        scanControls.timer = setInterval(async () => {
+          try {
+            const codes = await detector.detect(video);
+            if (codes[0]?.rawValue) applyScannedCode(codes[0].rawValue);
+          } catch { /* ignore */ }
+        }, 450);
+        return;
+      }
     }
 
     msg.textContent = 'Leitura ao vivo indisponível neste navegador. Use a foto do código.';

@@ -216,16 +216,14 @@ public class MainActivity extends AppCompatActivity {
         boolean chave = "importacao".equals(m) || "chave".equals(m);
         ScanOptions options = new ScanOptions();
         if (chave) {
-            options.setDesiredBarcodeFormats(Arrays.asList(
-                    ScanOptions.CODE_128,
-                    ScanOptions.ITF,
-                    ScanOptions.CODE_39
-            ));
-            options.setPrompt("Chave NF-e — enquadre a barra na horizontal");
+            // Mesmos 1D que o estoque (que funciona) + ITF; orientação livre para a barra longa da chave
+            options.setDesiredBarcodeFormats(ScanOptions.ONE_D_CODE_TYPES);
+            options.setPrompt("Gire o celular e enquadre a barra inteira da chave (44 dígitos)");
             options.setOrientationLocked(false);
             options.setBeepEnabled(true);
             options.setBarcodeImageEnabled(false);
             options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.MIXED_SCAN);
+            options.setCaptureActivity(AnyOrientationCaptureActivity.class);
         } else {
             options.setDesiredBarcodeFormats(Arrays.asList(
                     ScanOptions.EAN_13,
@@ -241,29 +239,39 @@ public class MainActivity extends AppCompatActivity {
             options.setBarcodeImageEnabled(false);
             // NORMAL (não MIXED): MIXED tenta invertido e deixa a leitura lenta no APK
             options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.NORMAL_SCAN);
+            options.setCaptureActivity(PortraitCaptureActivity.class);
         }
-        options.setCaptureActivity(PortraitCaptureActivity.class);
         barcodeLauncher.launch(options);
     }
 
     private void deliverBarcodeToWeb(String raw) {
         try {
+            final String mode = pendingBarcodeMode == null ? "product" : pendingBarcodeMode;
             JSONObject payload = new JSONObject();
             payload.put("code", raw);
+            payload.put("mode", mode);
             final String js = "(function(p){"
                     + "var raw=p&&p.code;if(!raw)return;"
+                    + "var mode=(p&&p.mode)||'';"
                     + "var digits=String(raw).replace(/\\D/g,'');"
-                    + "var chave=digits.length>=44?digits.slice(0,44):'';"
-                    + "if(typeof window.applyScannedCodeFromApp==='function'){"
-                    + "  if(window.applyScannedCodeFromApp(chave||raw))return;"
+                    + "var chave='';"
+                    + "var m44=digits.match(/\\d{44}/);"
+                    + "if(m44)chave=m44[0];"
+                    + "else if(digits.length>=44)chave=digits.slice(0,44);"
+                    + "var forceChave=mode==='importacao'||mode==='chave';"
+                    + "if(typeof window.setGestorScanTarget==='function'&&forceChave){"
+                    + "  window.setGestorScanTarget('importacao');"
                     + "}"
-                    + "if(chave.length===44){"
+                    + "if(forceChave&&chave.length===44){"
+                    + "  if(window.ImportacaoNfe&&typeof ImportacaoNfe.applyScannedChave==='function'"
+                    + "      &&ImportacaoNfe.applyScannedChave(chave))return;"
                     + "  var inp=document.getElementById('imp-chave');"
                     + "  if(inp){inp.value=chave;"
-                    + "    if(window.ImportacaoNfe&&typeof ImportacaoNfe.applyScannedChave==='function'"
-                    + "        &&ImportacaoNfe.applyScannedChave(chave))return;"
                     + "    var btn=document.getElementById('imp-btn-consultar');"
                     + "    if(btn)btn.click();return;}"
+                    + "}"
+                    + "if(typeof window.applyScannedCodeFromApp==='function'){"
+                    + "  window.applyScannedCodeFromApp(chave||raw);return;"
                     + "}"
                     + "var inp=document.getElementById('estoque-busca');"
                     + "if(inp){inp.value=raw;inp.dispatchEvent(new Event('input',{bubbles:true}));"

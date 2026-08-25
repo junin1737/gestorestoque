@@ -4168,15 +4168,24 @@ const ImportacaoNfe = (() => {
   }
 
   function applyScannedChave(code) {
-    const chave = String(code || '').replace(/\D/g, '').slice(0, 44);
+    const chave = extractChaveDigits(code);
     if (chave.length !== 44) return false;
+    const page = document.getElementById('page-importacao');
+    if (page?.hidden) return false;
     const inp = $('#imp-chave');
-    const onConsultar = state.view === 'consultar' || state.view === 'inicio' || !!inp;
-    if (!onConsultar) return false;
+    if (!inp && state.view !== 'consultar' && state.view !== 'inicio') return false;
     if (state.view !== 'consultar') showView('consultar');
-    if (inp) inp.value = chave;
+    const field = $('#imp-chave');
+    if (field) field.value = chave;
     consultarChave();
     return true;
+  }
+
+  function extractChaveDigits(code) {
+    const digits = String(code || '').replace(/\D/g, '');
+    if (digits.length === 44) return digits;
+    const run = digits.match(/\d{44}/);
+    return run ? run[0] : (digits.length > 44 ? digits.slice(0, 44) : '');
   }
 
   function applyScannedProduto(code) {
