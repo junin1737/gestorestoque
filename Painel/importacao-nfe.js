@@ -369,6 +369,10 @@ const ImportacaoNfe = (() => {
     });
   }
 
+  const ICO_VER = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg>';
+  const ICO_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5.5 18.5 11.5"/><path d="M4 20l.7-4.2L14.8 5.7a2 2 0 0 1 2.8 0l.7.7a2 2 0 0 1 0 2.8L7.2 20.3 3 21z"/></svg>';
+  const ICO_CANCEL = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="m9 9 6 6M15 9l-6 6"/></svg>';
+
   function renderNotasLista(list) {
     const box = $('#imp-notas-lista');
     if (!box) return;
@@ -391,11 +395,11 @@ const ImportacaoNfe = (() => {
           </div>
         </div>
         ${!cancelada ? `<div class="imp-nota-acoes">
-            <button type="button" class="btn small outline imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}">Visualizar</button>
-            <button type="button" class="btn small outline imp-btn-editar-nf" data-id="${esc(n.id_nfcompra)}">Editar</button>
-            <button type="button" class="btn small outline imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}">Cancelar</button>
+            <button type="button" class="btn small outline imp-btn-ico imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}" title="Visualizar" aria-label="Visualizar">${ICO_VER}<span class="imp-btn-ico-label">Visualizar</span></button>
+            <button type="button" class="btn small outline imp-btn-ico imp-btn-editar-nf" data-id="${esc(n.id_nfcompra)}" title="Editar" aria-label="Editar">${ICO_EDIT}<span class="imp-btn-ico-label">Editar</span></button>
+            <button type="button" class="btn small outline imp-btn-ico imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}" title="Cancelar" aria-label="Cancelar">${ICO_CANCEL}<span class="imp-btn-ico-label">Cancelar</span></button>
           </div>` : `<div class="imp-nota-acoes">
-            <button type="button" class="btn small outline imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}">Visualizar</button>
+            <button type="button" class="btn small outline imp-btn-ico imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}" title="Visualizar" aria-label="Visualizar">${ICO_VER}<span class="imp-btn-ico-label">Visualizar</span></button>
           </div>`}
       </div>`;
     }).join('');
@@ -2229,6 +2233,12 @@ const ImportacaoNfe = (() => {
       }
       const custoFicha = $('#imp-custo-ficha');
       if (custoFicha) custoFicha.value = String(custoInfo.custoEstoque);
+      // Sempre atualiza o custo de estoque no item (evita gravar vUnCom × qtd convertida)
+      if (it.sistema) {
+        it.sistema.conversor = conv;
+        it.sistema.qtd = qtdConv;
+        it.sistema.prc_custo = custoInfo.custoEstoque;
+      }
     }
   }
 
@@ -2236,7 +2246,30 @@ const ImportacaoNfe = (() => {
     return v != null && String(v).trim() !== '';
   }
 
-  function applySugestoesRegra(sys, regra, estFornec) {
+  /** Aplica unidade de estoque + conversor a partir de TB_UNI_MEDIDA (ou valor já conhecido). */
+  function applyConversaoUnidade(sys, uniCode, conversorHint, xmlItem = {}) {
+    if (!sys || !uniCode) return;
+    const uni = String(uniCode || '').trim().toUpperCase();
+    if (!uni) return;
+    sys.uni_medida = uni;
+    let conv = Number(conversorHint);
+    if (!(conv > 0)) {
+      const u = (state.unidades || []).find(
+        (x) => String(x.unidade || '').trim().toUpperCase() === uni
+      );
+      conv = Number(u?.conversor || 1) || 1;
+    }
+    if (!sys.conversor_manual) {
+      sys.conversor = conv;
+    }
+    const qtdXml = Number(sys.qtd_xml ?? xmlItem.qCom ?? 0) || 0;
+    sys.qtd_xml = qtdXml;
+    sys.qtd = Number((qtdXml * Number(sys.conversor || 1)).toFixed(6));
+    const custoInfo = calcCustoNotaUnitario(sys, xmlItem);
+    if (custoInfo.custoEstoque > 0) sys.prc_custo = custoInfo.custoEstoque;
+  }
+
+  function applySugestoesRegra(sys, regra, estFornec, xmlItem = {}) {
     if (!sys) return;
     if (regra) {
       if (regra.id_regra) sys.id_regra = regra.id_regra;
@@ -2307,7 +2340,18 @@ const ImportacaoNfe = (() => {
       if (estFornec.cofins != null && sys.tributos?.p_cofins == null) {
         sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
       }
-      if (estFornec.uni_medida && !filled(sys.uni_medida_saida)) sys.uni_medida_saida = estFornec.uni_medida;
+      if (estFornec.uni_medida) {
+        if (!filled(sys.uni_medida_saida)) sys.uni_medida_saida = estFornec.uni_medida;
+        // Parametrização prévia da unidade de conversão em TB_ESTOQUE_FORNECEDOR
+        if (!sys.conversor_manual) {
+          applyConversaoUnidade(
+            sys,
+            estFornec.uni_medida,
+            estFornec.conversor,
+            xmlItem
+          );
+        }
+      }
       if (estFornec.cod_barras && !filled(sys.cod_barras)) sys.cod_barras = estFornec.cod_barras;
     }
   }
@@ -2442,6 +2486,8 @@ const ImportacaoNfe = (() => {
             it.sistema.conversor = conv.conversor ?? it.sistema.conversor;
             const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0);
             it.sistema.qtd = Number((qtdXml * Number(it.sistema.conversor || 1)).toFixed(6));
+            const custoInfo = calcCustoNotaUnitario(it.sistema, it.xml || {});
+            if (custoInfo.custoEstoque > 0) it.sistema.prc_custo = custoInfo.custoEstoque;
           }
           if (f.trib_nfe) {
             it.sistema.trib_nfe = { ...(keepSaida.trib_nfe || {}), ...(it.sistema.trib_nfe || {}), ...f.trib_nfe };
@@ -2465,7 +2511,7 @@ const ImportacaoNfe = (() => {
           idFornec ? api(`/importacao/estoque-fornecedor?${qs}`) : Promise.resolve({ item: null }),
           api(`/importacao/regra-tributo?${qs}${it.sistema.cfop ? `&cfop_entrada=${encodeURIComponent(it.sistema.cfop)}` : ''}`),
         ]);
-        applySugestoesRegra(it.sistema, rgRes.item, efRes.item);
+        applySugestoesRegra(it.sistema, rgRes.item, efRes.item, it.xml || {});
         if (rgRes.item || efRes.item) {
           deps.showToast?.('Parâmetros anteriores carregados (regra / fornecedor)');
         }
@@ -2531,7 +2577,9 @@ const ImportacaoNfe = (() => {
     let custo = parseMoney($('#imp-custo-ficha')?.value);
     if (custo === undefined) custo = gn('#imp-custo-conv');
     if (custo === undefined) custo = sys.prc_custo;
-    if (!(Number(custo) > 0) && it) {
+    // Com conversão, o custo de estoque SEMPRE é total líquido ÷ qtd convertida
+    // (evita gravar vUnCom da nota × quantidade convertida).
+    if (Math.abs(conversor - 1) > 1e-9 || !(Number(custo) > 0)) {
       const merged = {
         ...sys,
         conversor,
@@ -2547,7 +2595,10 @@ const ImportacaoNfe = (() => {
           v_icms_st: trib.v_icms_st ?? 0,
         },
       };
-      custo = calcCustoNotaUnitario(merged, it.xml || {}).custoEstoque;
+      const calc = calcCustoNotaUnitario(merged, it?.xml || {});
+      if (Math.abs(conversor - 1) > 1e-9 || !(Number(custo) > 0)) {
+        custo = calc.custoEstoque;
+      }
     }
     const custoNota = gn('#imp-custo') ?? sys.prc_custo_nota ?? calcCustoNotaUnitario({
       ...sys, conversor, qtd_xml: qtdXml, qtd, v_desc: vDesc, v_frete: vFrete, v_seguro: vSeguro, v_outro: vOutro,
@@ -3155,14 +3206,13 @@ const ImportacaoNfe = (() => {
     $('#imp-conversor')?.addEventListener('input', () => {
       const it = itemAt(state.itemIndex);
       if (it?.sistema) it.sistema.conversor_manual = true;
-      const xmlUni = String($('#imp-uni-xml')?.value || '').trim().toUpperCase();
+      // Digitação manual do conversor → unidade de estoque passa a UN
       const sel = $('#imp-uni');
-      const cur = String(sel?.value || '').trim().toUpperCase();
-      const cad = String(it?.sistema?.uni_medida_cadastro || it?.sistema?.uni_medida_saida || 'UN').trim().toUpperCase();
-      if (sel && xmlUni && cur === xmlUni && cad && cad !== xmlUni) {
-        sel.value = cad;
+      if (sel) {
+        sel.value = 'UN';
         const disp = $('#imp-uni-disp');
-        if (disp) disp.value = cad;
+        if (disp) disp.value = 'UN';
+        if (it?.sistema) it.sistema.uni_medida = 'UN';
       }
       syncQtdConvertida();
     });
@@ -3195,6 +3245,11 @@ const ImportacaoNfe = (() => {
       if (item?.sistema) {
         item.sistema.uni_medida = res.item?.unidade || unidade.toUpperCase();
         item.sistema.conversor = res.item?.conversor ?? conversor;
+        item.sistema.conversor_manual = false;
+        const qtdXml = Number(item.sistema.qtd_xml ?? item.xml?.qCom ?? 0);
+        item.sistema.qtd = Number((qtdXml * Number(item.sistema.conversor || 1)).toFixed(6));
+        const custoInfo = calcCustoNotaUnitario(item.sistema, item.xml || {});
+        if (custoInfo.custoEstoque > 0) item.sistema.prc_custo = custoInfo.custoEstoque;
       }
       deps.showToast?.('Unidade cadastrada');
       renderItemScreen();
@@ -3262,8 +3317,11 @@ const ImportacaoNfe = (() => {
     wireFiscal('#imp-uni', '#imp-uni-list', '/importacao/unidades', 'unidade', {
       onSelect: (code, desc, extra = {}) => {
         const it = itemAt(state.itemIndex);
-        if (it?.sistema) it.sistema.uni_medida = code;
-        if (!it?.sistema?.conversor_manual && extra.conversor != null && $('#imp-conversor')) {
+        if (it?.sistema) {
+          it.sistema.uni_medida = code;
+          it.sistema.conversor_manual = false;
+        }
+        if (extra.conversor != null && $('#imp-conversor')) {
           $('#imp-conversor').value = extra.conversor;
         }
         syncQtdConvertida();
@@ -3398,6 +3456,7 @@ const ImportacaoNfe = (() => {
   /* ── PARÂMETROS ─────────────────────────────────────────────────────────── */
 
   async function loadParamsView() {
+    await ensureUnidades();
     const res = await api('/importacao/params/cfop');
     const host = $('#imp-params-host');
     if (!host) return;
@@ -3465,35 +3524,25 @@ const ImportacaoNfe = (() => {
       </section>
       <section class="imp-section">
         <header class="imp-section-head"><h4>Conversões de unidade (último vínculo)</h4></header>
-        <p class="hint">Sugestão automática na conferência: unidade XML → unidade de estoque e conversor. Gravado ao salvar o item.</p>
+        <p class="hint">Unidade de estoque vem de TB_UNI_MEDIDA (com conversor). Ao escolher a unidade, o conversor é preenchido; digite o conversor manualmente se precisar ajustar. Pode cadastrar unidade na hora.</p>
         <div class="imp-params-scroll">
         <table class="imp-params-table" id="imp-params-conv-table">
           <thead>
             <tr>
               <th>Unid. XML</th>
-              <th>Unid. estoque</th>
+              <th>Unid. estoque (TB_UNI_MEDIDA)</th>
               <th>Conversor</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            ${conversoes.map((c) => `
-              <tr>
-                <td><input type="text" class="imp-conv-xml" value="${esc(c.uni_xml || '')}" /></td>
-                <td><input type="text" class="imp-conv-est" value="${esc(c.uni_estoque || '')}" /></td>
-                <td><input type="number" step="0.0001" class="imp-conv-fator" value="${esc(String(c.conversor ?? 1))}" /></td>
-                <td><button type="button" class="btn small outline imp-params-conv-del">Remover</button></td>
-              </tr>
-            `).join('') || `
-              <tr>
-                <td><input type="text" class="imp-conv-xml" placeholder="CX" /></td>
-                <td><input type="text" class="imp-conv-est" placeholder="UN" /></td>
-                <td><input type="number" step="0.0001" class="imp-conv-fator" value="1" /></td>
-                <td><button type="button" class="btn small outline imp-params-conv-del">Remover</button></td>
-              </tr>
-            `}
+            ${(conversoes.length ? conversoes : [{ uni_xml: '', uni_estoque: '', conversor: 1 }]).map((c) => paramsConvRowHtml(c)).join('')}
           </tbody>
         </table>
+        </div>
+        <div class="imp-vinc-btns" style="margin-top:.65rem">
+          <button type="button" class="btn small outline" id="imp-params-conv-add">Adicionar conversão</button>
+          <button type="button" class="btn small outline" id="imp-params-cad-unidade">Cadastrar unidade</button>
         </div>
       </section>
     `;
@@ -3505,10 +3554,131 @@ const ImportacaoNfe = (() => {
       bindParamsRowEvents();
     });
     bindParamsRowEvents();
-    $$('#imp-params-conv-table .imp-params-conv-del').forEach((btn) => {
-      btn.onclick = () => btn.closest('tr')?.remove();
+    bindParamsConvEvents();
+    $('#imp-params-conv-add')?.addEventListener('click', () => {
+      const tbody = $('#imp-params-conv-table tbody');
+      if (!tbody) return;
+      tbody.insertAdjacentHTML('beforeend', paramsConvRowHtml({}));
+      bindParamsConvEvents();
+    });
+    $('#imp-params-cad-unidade')?.addEventListener('click', async () => {
+      const unidade = await askPrompt('Unidade (ex.: CX):');
+      if (!unidade) return;
+      const descricao = (await askPrompt('Descrição da unidade:', { defaultValue: unidade })) || unidade;
+      const conversorStr = await askPrompt('Conversor (padrão 1):', { defaultValue: '1' });
+      const conversor = Number(conversorStr || 1) || 1;
+      const resCad = await api('/importacao/unidades', {
+        method: 'POST',
+        body: { unidade, descricao, conversor },
+      });
+      if (!resCad.ok) {
+        deps.showMsg?.(resCad.error || 'Erro ao cadastrar unidade');
+        return;
+      }
+      state.unidades = [];
+      await ensureUnidades();
+      deps.showToast?.(`Unidade ${resCad.item?.unidade || unidade} cadastrada`);
     });
     showView('params');
+  }
+
+  function paramsConvRowHtml(c = {}) {
+    const uni = String(c.uni_estoque || '').trim();
+    return `
+      <tr>
+        <td><input type="text" class="imp-conv-xml" value="${esc(c.uni_xml || '')}" placeholder="CX" /></td>
+        <td class="imp-params-combo" data-combo-root>
+          <input type="hidden" class="imp-conv-est" value="${esc(uni)}" />
+          <input type="search" class="imp-conv-est-disp" value="${esc(uni)}"
+            placeholder="Pesquisar unidade…" autocomplete="off" enterkeyhint="search" />
+          <div class="imp-combo-list imp-params-conv-uni-list" hidden></div>
+        </td>
+        <td><input type="number" step="0.0001" class="imp-conv-fator" value="${esc(String(c.conversor ?? 1))}" /></td>
+        <td><button type="button" class="btn small outline imp-params-conv-del">Remover</button></td>
+      </tr>
+    `;
+  }
+
+  function bindParamsConvEvents() {
+    $$('#imp-params-conv-table .imp-params-conv-del').forEach((btn) => {
+      btn.onclick = () => {
+        const tr = btn.closest('tr');
+        const tbody = tr?.parentElement;
+        tr?.remove();
+        if (tbody && !tbody.children.length) {
+          tbody.insertAdjacentHTML('beforeend', paramsConvRowHtml({}));
+          bindParamsConvEvents();
+        }
+      };
+    });
+    $$('#imp-params-conv-table tbody tr').forEach((tr) => {
+      wireParamsUnidadeCombo(tr);
+    });
+  }
+
+  function wireParamsUnidadeCombo(tr) {
+    const valueEl = tr.querySelector('.imp-conv-est');
+    const displayEl = tr.querySelector('.imp-conv-est-disp');
+    const box = tr.querySelector('.imp-params-conv-uni-list');
+    const fatorEl = tr.querySelector('.imp-conv-fator');
+    if (!displayEl || !box || !valueEl || displayEl.dataset.wired === '1') return;
+    displayEl.dataset.wired = '1';
+
+    const closeList = () => { box.hidden = true; box.innerHTML = ''; };
+    const renderList = async (term) => {
+      box.hidden = false;
+      const qs = new URLSearchParams();
+      if (term) qs.set('q', term);
+      const res = await api(`/importacao/unidades?${qs}`);
+      const list = res.itens || [];
+      if (!list.length) {
+        box.innerHTML = '<p class="hint">Nenhuma unidade — use “Cadastrar unidade”</p>';
+        return;
+      }
+      box.innerHTML = list.map((it) => {
+        const code = String(it.unidade || '');
+        const desc = String(it.descricao || '');
+        const label = desc ? `${code} — ${desc}` : code;
+        return `
+          <button type="button" class="imp-prod-opt"
+            data-code="${esc(code)}" data-label="${esc(label)}" data-conversor="${esc(String(it.conversor ?? 1))}">
+            <strong>${esc(code)}</strong>
+            <span>${esc(desc || `Conv. ${it.conversor ?? 1}`)}</span>
+          </button>`;
+      }).join('');
+      $$('.imp-prod-opt', box).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          valueEl.value = btn.dataset.code || '';
+          displayEl.value = btn.dataset.label || btn.dataset.code || '';
+          if (fatorEl && btn.dataset.conversor != null) {
+            fatorEl.value = btn.dataset.conversor;
+          }
+          closeList();
+          displayEl.blur();
+        });
+      });
+    };
+
+    displayEl.addEventListener('focus', () => {
+      displayEl.select();
+      renderList(String(displayEl.value || '').trim());
+    });
+    displayEl.addEventListener('input', () => {
+      clearTimeout(buscaCodeTimer);
+      buscaCodeTimer = setTimeout(() => renderList(String(displayEl.value || '').trim()), 220);
+      valueEl.value = String(displayEl.value || '').trim().toUpperCase();
+    });
+    displayEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'Search') {
+        e.preventDefault();
+        renderList(String(displayEl.value || '').trim()).then(() => {
+          const opts = $$('.imp-prod-opt', box);
+          if (opts.length === 1) opts[0].click();
+          else displayEl.blur();
+        });
+      }
+      if (e.key === 'Escape') closeList();
+    });
   }
 
   function paramsTaxaCell(cls, listCls, value, label, placeholder) {
@@ -3650,7 +3820,8 @@ const ImportacaoNfe = (() => {
     };
     const conversoes = $$('#imp-params-conv-table tbody tr').map((tr) => ({
       uni_xml: tr.querySelector('.imp-conv-xml')?.value || '',
-      uni_estoque: tr.querySelector('.imp-conv-est')?.value || '',
+      uni_estoque: (tr.querySelector('.imp-conv-est')?.value
+        || tr.querySelector('.imp-conv-est-disp')?.value || '').trim().toUpperCase(),
       conversor: Number(tr.querySelector('.imp-conv-fator')?.value || 1) || 1,
     })).filter((c) => c.uni_xml && c.uni_estoque);
     const res = await api('/importacao/params/cfop', {

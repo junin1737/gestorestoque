@@ -2152,3 +2152,7 @@ bootstrap().catch((err) => {
   console.error(err);
   showMsg('Falha ao iniciar: ' + err.message);
 });
+
+/* Bloqueia pinch-zoom residual no iOS Safari / PWA */
+document.addEventListener('gesturestart', (e) => { e.preventDefault(); }, { passive: false });
+document.addEventListener('gesturechange', (e) => { e.preventDefault(); }, { passive: false });

@@ -1,10 +1,61 @@
 'use strict';
 
-const { withDb, query, activeTargets, hasTable } = require('./db');
+const { withDb, query, activeTargets, hasTable, columnExists } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
 const { round2, calcCustoUnitarioItem } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
+
+let nfCompraObsColumnCache = undefined;
+
+async function resolveNfCompraObsColumn(db) {
+  if (nfCompraObsColumnCache !== undefined) return nfCompraObsColumnCache;
+  const candidates = [
+    'OBSERVACAO',
+    'OBS',
+    'INF_COMPLEMENTAR',
+    'INF_ADICIONAIS',
+    'DADOS_ADICIONAIS',
+    'INFORMACOES_COMPLEMENTARES',
+    'OBS_NF',
+    'COMPLEMENTO',
+    'INF_CPL',
+  ];
+  for (const col of candidates) {
+    try {
+      if (await columnExists(db, 'TB_NFCOMPRA', col)) {
+        nfCompraObsColumnCache = col;
+        return col;
+      }
+    } catch { /* ignore */ }
+  }
+  nfCompraObsColumnCache = null;
+  return null;
+}
+
+async function gravarInfoComplementares(db, idNf, sessao) {
+  const txt = String(
+    sessao?.xml?.infAdic?.infCpl
+    || sessao?.infAdic?.infCpl
+    || sessao?.inf_cpl
+    || sessao?.observacao_nf
+    || ''
+  ).trim();
+  if (!txt || !idNf) return;
+  const col = await resolveNfCompraObsColumn(db);
+  if (!col) {
+    console.warn('TB_NFCOMPRA: nenhuma coluna de informações complementares encontrada.');
+    return;
+  }
+  try {
+    await query(db, `UPDATE TB_NFCOMPRA SET ${col} = ? WHERE ID_NFCOMPRA = ?`, [
+      txt.slice(0, 8000),
+      idNf,
+    ]);
+  } catch (e) {
+    console.warn(`Gravar info complementares (${col}):`, e.message);
+  }
+}
 
 async function resolveItemMovimento(it, sessao) {
   const sys = it?.sistema || {};
@@ -200,8 +251,37 @@ async function insertSaldoAlterado(db, t, {
   }
 }
 
+async function zerarNegativoAntesTrigger(db, appCfg, {
+  idIdentificador, prcCusto, usuario, idFuncionario, nfLabel,
+}) {
+  const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
+  if (!zerarNeg) return;
+  const targets = activeTargets(appCfg).filter((t) => !t.manage);
+  const agora = localNow();
+  for (const target of targets) {
+    const t = target.tables;
+    const prodRows = await query(db, `
+      SELECT FIRST 1 QTD_ATUAL, PRC_MEDIO FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
+    if (!prodRows[0]) continue;
+    const qtdAtual = Number(prodRows[0].QTD_ATUAL || 0);
+    if (!(qtdAtual < 0)) continue;
+    const prcMedio = Number(prodRows[0].PRC_MEDIO || prcCusto || 0);
+    await insertSaldoAlterado(db, t, {
+      idIdentificador,
+      saldoAntigo: qtdAtual,
+      saldoNovo: 0,
+      prcMedio: prcMedio || prcCusto || 0,
+      agora,
+      idFuncionario,
+      obs: `Zera saldo negativo antes da entrada NF ${nfLabel} - ${usuario}`,
+    });
+    await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = 0 WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
+  }
+}
+
 async function entradaEstoque(db, appCfg, {
   idIdentificador, qtd, prcCusto, usuario, idFuncionario, nfLabel,
+  skipClipp = false,
 }) {
   const targets = activeTargets(appCfg);
   const agora = localNow();
@@ -209,6 +289,9 @@ async function entradaEstoque(db, appCfg, {
   const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
 
   for (const target of targets) {
+    // Com EST_BX='S' o trigger do Clipp já atualiza TB_ESTOQUE / TB_EST_SALDO_ALTERADO.
+    // Evita lançar a mesma quantidade duas vezes.
+    if (skipClipp && !target.manage) continue;
     const t = target.tables;
     const prodRows = await query(db, `
       SELECT FIRST 1 QTD_ATUAL, PRC_MEDIO FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
@@ -933,10 +1016,14 @@ async function gravarNfCompra(sessao, {
 
       const custoInfo = calcCustoUnitarioItem(it.sistema || {}, it.xml || {});
       let vUnit = Number(it.sistema.prc_custo);
-      if (!Number.isFinite(vUnit) || vUnit <= 0) {
+      // Com conversão, o unitário DEVE ser total líquido ÷ qtd convertida.
+      // Caso contrário a nota fica com valor inflado (vUnCom × qtd convertida).
+      if (Math.abs(conversor - 1) > 1e-9) {
+        vUnit = custoInfo.custoEstoque;
+      } else if (!Number.isFinite(vUnit) || vUnit <= 0) {
         vUnit = custoInfo.custoEstoque > 0
           ? custoInfo.custoEstoque
-          : (conversor > 0 ? Number(it.xml?.vUnCom || 0) / conversor : Number(it.xml?.vUnCom || 0));
+          : Number(it.xml?.vUnCom || 0);
       }
       if (!Number.isFinite(vUnit)) vUnit = 0;
       it.sistema.prc_custo = vUnit;
@@ -944,13 +1031,26 @@ async function gravarNfCompra(sessao, {
       const vFrete = Number(it.sistema.v_frete ?? it.xml?.vFrete ?? 0);
       const vSeg = Number(it.sistema.v_seguro ?? it.xml?.vSeg ?? 0);
       const vOutro = Number(it.sistema.v_outro ?? it.xml?.vOutro ?? 0);
-      const vTotal = round2((qtd * vUnit) - vDesc + vFrete + vSeg + vOutro);
+      // Com conversão, custo já embute desc/frete/etc — não reaplica no total
+      const vTotal = Math.abs(conversor - 1) > 1e-9
+        ? round2(custoInfo.totalItem)
+        : round2((qtd * vUnit) - vDesc + vFrete + vSeg + vOutro);
       const uni = String(it.sistema.uni_medida || it.xml?.uCom || 'UN').slice(0, 6);
       const cfop = String(it.sistema.cfop || it.xml?.CFOP || '').slice(0, 4);
       const csosn = String(
         it.sistema.csosn_entrada || it.sistema.csosn || it.sistema.tributos?.csosn || ''
       ).slice(0, 3);
       const estBx = flags.gera_estoque === 'S' ? 'S' : 'N';
+
+      if (flags.gera_estoque === 'S') {
+        await zerarNegativoAntesTrigger(db, appCfg, {
+          idIdentificador: idIdent,
+          prcCusto: vUnit,
+          usuario,
+          idFuncionario,
+          nfLabel,
+        });
+      }
 
       const idItem = await nextId(db, 'GEN_TB_NFC_ITEM_ID', 'TB_NFC_ITEM', 'ID_NFCITEM');
       await query(db, `
@@ -977,6 +1077,7 @@ async function gravarNfCompra(sessao, {
       );
       await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       if (flags.gera_estoque === 'S') {
+        // EST_BX='S' → trigger Clipp; aqui só ManagePro (TB_*_2)
         await entradaEstoque(db, appCfg, {
           idIdentificador: idIdent,
           qtd,
@@ -984,11 +1085,14 @@ async function gravarNfCompra(sessao, {
           usuario,
           idFuncionario,
           nfLabel,
+          skipClipp: true,
         });
         itensComEstoque += 1;
       }
       itensGravados += 1;
     }
+
+    await gravarInfoComplementares(db, idNf, sessao);
 
     return {
       id_nfcompra: idNf,

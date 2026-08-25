@@ -27,6 +27,12 @@
   --safe-t: env(safe-area-inset-top, 0px);
 }
 
+/* Evita pinch-zoom no navegador / PWA (viewport já bloqueia; reforço CSS) */
+html, body {
+  touch-action: pan-x pan-y;
+  -ms-touch-action: pan-x pan-y;
+}
+
 html[data-theme="escuro"] {
   --bg: #0f1724;
   --bg-elev: #182338;
