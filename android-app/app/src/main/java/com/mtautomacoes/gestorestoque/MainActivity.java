@@ -219,8 +219,7 @@ public class MainActivity extends AppCompatActivity {
             options.setDesiredBarcodeFormats(Arrays.asList(
                     ScanOptions.CODE_128,
                     ScanOptions.ITF,
-                    ScanOptions.CODE_39,
-                    ScanOptions.CODABAR
+                    ScanOptions.CODE_39
             ));
             options.setPrompt("Chave NF-e — enquadre a barra na horizontal");
             options.setOrientationLocked(false);
