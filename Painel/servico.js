@@ -430,7 +430,13 @@ $('#btn-verificar-update')?.addEventListener('click', async () => {
     }
     if (res?.info && !res.info.available) {
       if (status) {
-        status.textContent = `Você já está na versão mais recente (${res.info.localVersion}).`;
+        if (res.pendingPublish || res.info.pendingPublish) {
+          status.textContent = `Há versão ${res.info.gitVersion} no Git, mas falta publicar o instalador (Release v${res.info.gitVersion}). Instalada: ${res.info.localVersion}.`;
+        } else if (res.info.gitVersion && res.info.gitVersion !== res.info.localVersion) {
+          status.textContent = `Git: ${res.info.gitVersion} · instalada: ${res.info.localVersion}. Sem instalador novo no Release.`;
+        } else {
+          status.textContent = `Você já está na versão mais recente (${res.info.localVersion}).`;
+        }
       }
       return;
     }

@@ -180,7 +180,7 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
       }
 
       const itens = await query(db, `
-        SELECT ID_NFCITEM, ID_IDENTIFICADOR, NUM_ITEM, QTD_ITEM
+        SELECT ID_NFCITEM, ID_IDENTIFICADOR, NUM_ITEM, QTD_ITEM, EST_BX
         FROM TB_NFC_ITEM WHERE ID_NFCOMPRA = ?`, [id]);
 
       const targets = activeTargets(appCfg);
@@ -190,7 +190,10 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
       for (const it of itens) {
         const idIdent = Number(it.ID_IDENTIFICADOR);
         const qtd = Number(it.QTD_ITEM || 0);
-        if (!idIdent || !qtd) continue;
+        const estBx = String(it.EST_BX || '').trim().toUpperCase();
+        // Só estorna estoque dos itens que entraram (EST_BX='S'); o trigger Clipp
+        // não desfaz o cancelamento — fazemos o estorno manual aqui.
+        if (!idIdent || !qtd || estBx !== 'S') continue;
 
         for (const target of targets) {
           const t = target.tables;

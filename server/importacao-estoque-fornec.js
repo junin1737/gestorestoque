@@ -17,6 +17,7 @@ function mapEstFornec(r) {
     cst_pis: String(r.CST_PIS || '').trim(),
     aliq_icms: Number(r.ALIQ_ICMS || 0),
     uni_medida: String(r.UNI_MEDIDA || '').trim(),
+    conversor: r.CONVERSOR != null ? Number(r.CONVERSOR) : null,
     status: String(r.STATUS || 'A').trim(),
     mva: r.MVA != null ? Number(r.MVA) : null,
     cfop: String(r.CFOP || '').trim(),
@@ -24,6 +25,22 @@ function mapEstFornec(r) {
     cst_ipi: String(r.CST_IPI || '').trim(),
     cod_barras: String(r.COD_BARRAS || '').trim(),
   };
+}
+
+async function lookupConversorUnidade(db, uni) {
+  const u = String(uni || '').trim().toUpperCase();
+  if (!u) return null;
+  try {
+    const rows = await query(db, `
+      SELECT FIRST 1 CONVERSOR FROM TB_UNI_MEDIDA
+      WHERE UPPER(TRIM(UNIDADE)) = ?
+        AND (STATUS = 'A' OR STATUS IS NULL)`, [u]);
+    if (!rows[0]) return null;
+    const n = Number(rows[0].CONVERSOR);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  } catch {
+    return null;
+  }
 }
 
 async function buscarEstoqueFornecedor({ idFornec, idIdentificador, codFornecedor } = {}) {
@@ -44,7 +61,12 @@ async function buscarEstoqueFornecedor({ idFornec, idIdentificador, codFornecedo
       SELECT FIRST 1 * FROM TB_ESTOQUE_FORNECEDOR
       WHERE ${where}
       ORDER BY ID_EST_FORNEC DESC`, params);
-    return mapEstFornec(rows[0] || null);
+    const mapped = mapEstFornec(rows[0] || null);
+    if (mapped?.uni_medida && !(mapped.conversor > 0)) {
+      const conv = await lookupConversorUnidade(db, mapped.uni_medida);
+      if (conv != null) mapped.conversor = conv;
+    }
+    return mapped;
   });
 }
 

@@ -340,6 +340,8 @@ async function buildSistemaFromXmlItem(xmlItem, ufFornecedor) {
     _cti_cfe_label: cfopMap.cti_cfe_label || '',
     margem_lb: 0,
     aplicar_saida: saidaPad.aplicar_saida || 'S',
+    gera_estoque: cfopMap.gera_estoque || 'S',
+    gera_financeiro: cfopMap.gera_financeiro || 'S',
     id_regra: null,
     uni_medida_xml: xmlItem.uCom,
     uni_medida: convSug?.uni_estoque || xmlItem.uCom,
@@ -420,6 +422,7 @@ function mapSessaoForClient(s) {
   if (s.manual) out.manual = true;
   if (s.id_natope != null) out.id_natope = s.id_natope;
   if (s.natureza) out.natureza = s.natureza;
+  if (s.cfop_todos_perguntado) out.cfop_todos_perguntado = true;
   if (s.fonte) out.fonte = s.fonte;
   if (s.id_nfcompra != null) out.id_nfcompra = s.id_nfcompra;
   if (s.editar_id_nfcompra != null) out.editar_id_nfcompra = s.editar_id_nfcompra;
@@ -505,6 +508,7 @@ function updateCabecalho(sessaoId, patch = {}) {
   if (patch.dhEmi != null) s.xml.ide.dhEmi = String(patch.dhEmi);
   if (patch.id_natope !== undefined) s.id_natope = patch.id_natope != null ? Number(patch.id_natope) : null;
   if (patch.natureza !== undefined) s.natureza = patch.natureza;
+  if (patch.cfop_todos_perguntado !== undefined) s.cfop_todos_perguntado = !!patch.cfop_todos_perguntado;
   if (patch.dt_entrada != null) {
     const dt = String(patch.dt_entrada).slice(0, 10);
     s.dt_entrada = /^\d{4}-\d{2}-\d{2}$/.test(dt) ? dt : s.dt_entrada;
@@ -740,6 +744,7 @@ async function createSessao(opts = {}) {
       sistema,
       conferido: false,
       observacao: '',
+      etapas_ok: {},
     });
   }
 
@@ -929,6 +934,7 @@ async function addItemManual(sessaoId, itemPatch = {}) {
     sistema: await buildSistemaFromXmlItem(xmlItem, s.xml?.emit?.enderEmit?.UF || ''),
     conferido: false,
     observacao: '',
+    etapas_ok: {},
   };
   if (itemPatch.sistema) item.sistema = { ...item.sistema, ...itemPatch.sistema };
   s.itens.push(item);
@@ -980,6 +986,9 @@ function updateItem(sessaoId, nItem, patch) {
   if (patch.match !== undefined) item.match = patch.match;
   if (patch.conferido !== undefined) item.conferido = !!patch.conferido;
   if (patch.observacao !== undefined) item.observacao = String(patch.observacao || '');
+  if (patch.etapas_ok !== undefined && patch.etapas_ok && typeof patch.etapas_ok === 'object') {
+    item.etapas_ok = { ...(item.etapas_ok || {}), ...patch.etapas_ok };
+  }
 
   try {
     const sys = item.sistema || {};

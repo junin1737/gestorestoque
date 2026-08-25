@@ -21,6 +21,12 @@ function defaultRows() {
   ];
 }
 
+function ynFlag(v, def = 'S') {
+  if (v === true || v === 'S' || v === 's' || v === 1 || v === '1') return 'S';
+  if (v === false || v === 'N' || v === 'n' || v === 0 || v === '0') return 'N';
+  return def;
+}
+
 function normRow(it = {}) {
   return {
     cfop_origem: String(it.cfop_origem || '').replace(/\D/g, '').slice(0, 4),
@@ -36,6 +42,45 @@ function normRow(it = {}) {
     id_cti_cfe: String(it.id_cti_cfe || '').trim().slice(0, 10),
     cti_label: String(it.cti_label || '').trim().slice(0, 120),
     cti_cfe_label: String(it.cti_cfe_label || '').trim().slice(0, 120),
+    gera_estoque: ynFlag(it.gera_estoque, 'S'),
+    gera_financeiro: ynFlag(it.gera_financeiro, 'S'),
+  };
+}
+
+function findCfopConvByEntrada(cfopEntrada) {
+  const cfop = String(cfopEntrada || '').replace(/\D/g, '').slice(0, 4);
+  if (!cfop) return null;
+  const rows = (() => {
+    try {
+      const local = loadLocalParams();
+      if (local?.itens?.length) return local.itens.map(normRow);
+    } catch { /* ignore */ }
+    return [];
+  })();
+  return rows.find((r) => r.cfop_conv === cfop)
+    || rows.find((r) => r.cfop_origem === cfop)
+    || null;
+}
+
+/**
+ * Resolve se o CFOP/item gera estoque e financeiro.
+ * Prioridade: flags do item → linha dos parâmetros → padrão S.
+ */
+function resolveMovimentoFlags({ cfop, sistema } = {}) {
+  const sys = sistema || {};
+  const row = findCfopConvByEntrada(cfop || sys.cfop);
+  const geraEstoque = (sys.gera_estoque === 'S' || sys.gera_estoque === 'N')
+    ? sys.gera_estoque
+    : (row ? row.gera_estoque : 'S');
+  const geraFinanceiro = (sys.gera_financeiro === 'S' || sys.gera_financeiro === 'N')
+    ? sys.gera_financeiro
+    : (row ? row.gera_financeiro : 'S');
+  return {
+    gera_estoque: ynFlag(geraEstoque, 'S'),
+    gera_financeiro: ynFlag(geraFinanceiro, 'S'),
+    origem: (sys.gera_estoque === 'S' || sys.gera_estoque === 'N' || sys.gera_financeiro === 'S' || sys.gera_financeiro === 'N')
+      ? 'item'
+      : (row ? 'params' : 'padrao'),
   };
 }
 
@@ -111,6 +156,8 @@ function getSaidaPadrao() {
     aplicar_saida: (s.aplicar_saida === false || s.aplicar_saida === 'N') ? 'N' : 'S',
     obrigar_financeiro: (s.obrigar_financeiro === false || s.obrigar_financeiro === 'N') ? 'N' : 'S',
     zerar_negativo: (s.zerar_negativo === true || s.zerar_negativo === 'S') ? 'S' : 'N',
+    // S = só avança de etapa da conferência do item ao confirmar
+    conferir_etapas: (s.conferir_etapas === true || s.conferir_etapas === 'S') ? 'S' : 'N',
   };
 }
 
@@ -127,6 +174,11 @@ function setSaidaPadrao(saida) {
       : (saida?.zerar_negativo === false || saida?.zerar_negativo === 'N')
         ? 'N'
         : ((prev.zerar_negativo === true || prev.zerar_negativo === 'S') ? 'S' : 'N'),
+    conferir_etapas: (saida?.conferir_etapas === true || saida?.conferir_etapas === 'S')
+      ? 'S'
+      : (saida?.conferir_etapas === false || saida?.conferir_etapas === 'N')
+        ? 'N'
+        : ((prev.conferir_etapas === true || prev.conferir_etapas === 'S') ? 'S' : 'N'),
   };
   saveLocalParams(local);
   return local.saida;
@@ -260,6 +312,8 @@ async function mapCfopEntrada(cfopOrigem, ufFornecedor) {
     id_cti_cfe: found?.id_cti_cfe || '',
     cti_label: found?.cti_label || '',
     cti_cfe_label: found?.cti_cfe_label || '',
+    gera_estoque: found ? ynFlag(found.gera_estoque, 'S') : 'S',
+    gera_financeiro: found ? ynFlag(found.gera_financeiro, 'S') : 'S',
     uf_fornecedor: ufForn,
     uf_emitente: emitUf,
     same_state: useSame,
@@ -277,6 +331,9 @@ module.exports = {
   saveConversoes,
   upsertConversao,
   findConversao,
+  findCfopConvByEntrada,
+  resolveMovimentoFlags,
+  ynFlag,
   mapCfopEntrada,
   getEmitenteUf,
   applyUfDigit,

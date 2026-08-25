@@ -23,6 +23,7 @@ const ImportacaoNfe = (() => {
     emitenteSimples: null,
     xmlTextPendente: null,
     financeiroVisitado: false,
+    saidaParams: null,
   };
 
   let deps = {};
@@ -41,6 +42,39 @@ const ImportacaoNfe = (() => {
     { id: 'trib_saida', label: '5 · Trib. saída' },
     { id: 'anp', label: '6 · ANP' },
   ];
+
+  const NATUREZAS_CFOP_TODOS = [
+    'industrializa',
+    'uso e consumo',
+    'uso/consumo',
+    'uso consumo',
+    'ativo imobilizado',
+    'imobilizado',
+    'bonifica',
+    'brinde',
+  ];
+
+  function isNaturezaCfopTodos(texto) {
+    const t = String(texto || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    if (!t) return false;
+    return NATUREZAS_CFOP_TODOS.some((k) => t.includes(k));
+  }
+
+  function labelNaturezaEspecial(texto) {
+    const t = String(texto || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    if (t.includes('industrializa')) return 'compra para industrialização';
+    if (t.includes('uso') && t.includes('consumo')) return 'uso e consumo';
+    if (t.includes('imobilizado')) return 'ativo imobilizado';
+    if (t.includes('bonifica')) return 'bonificação';
+    if (t.includes('brinde')) return 'brinde';
+    return 'natureza especial';
+  }
 
   function calcVendaPorMargem(custo, margem) {
     const c = Number(custo || 0);
@@ -336,6 +370,10 @@ const ImportacaoNfe = (() => {
     });
   }
 
+  const ICO_VER = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 12s3.5-6.5 9.5-6.5S21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.6"/></svg>';
+  const ICO_EDIT = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12.5 5.5 18.5 11.5"/><path d="M4 20l.7-4.2L14.8 5.7a2 2 0 0 1 2.8 0l.7.7a2 2 0 0 1 0 2.8L7.2 20.3 3 21z"/></svg>';
+  const ICO_CANCEL = '<svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8.2"/><path d="m9 9 6 6M15 9l-6 6"/></svg>';
+
   function renderNotasLista(list) {
     const box = $('#imp-notas-lista');
     if (!box) return;
@@ -358,11 +396,11 @@ const ImportacaoNfe = (() => {
           </div>
         </div>
         ${!cancelada ? `<div class="imp-nota-acoes">
-            <button type="button" class="btn small outline imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}">Visualizar</button>
-            <button type="button" class="btn small outline imp-btn-editar-nf" data-id="${esc(n.id_nfcompra)}">Editar</button>
-            <button type="button" class="btn small outline imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}">Cancelar</button>
+            <button type="button" class="btn small outline imp-btn-ico imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}" title="Visualizar" aria-label="Visualizar">${ICO_VER}<span class="imp-btn-ico-label">Visualizar</span></button>
+            <button type="button" class="btn small outline imp-btn-ico imp-btn-editar-nf" data-id="${esc(n.id_nfcompra)}" title="Editar" aria-label="Editar">${ICO_EDIT}<span class="imp-btn-ico-label">Editar</span></button>
+            <button type="button" class="btn small outline imp-btn-ico imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}" title="Cancelar" aria-label="Cancelar">${ICO_CANCEL}<span class="imp-btn-ico-label">Cancelar</span></button>
           </div>` : `<div class="imp-nota-acoes">
-            <button type="button" class="btn small outline imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}">Visualizar</button>
+            <button type="button" class="btn small outline imp-btn-ico imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}" title="Visualizar" aria-label="Visualizar">${ICO_VER}<span class="imp-btn-ico-label">Visualizar</span></button>
           </div>`}
       </div>`;
     }).join('');
@@ -422,6 +460,72 @@ const ImportacaoNfe = (() => {
     renderSessao();
     setTab('dados');
     showView('sessao');
+    await maybeAskAplicarCfopNatureza(state.sessao);
+  }
+
+  async function aplicarCfopNaturezaTodos(natureza = {}) {
+    const s = state.sessao;
+    if (!s?.id) return false;
+    const cfop = String(natureza.cfop || s.natureza?.cfop || '').replace(/\D/g, '').slice(0, 4);
+    if (!cfop) {
+      deps.showMsg?.('Esta natureza não tem CFOP cadastrado para aplicar nos itens.');
+      return false;
+    }
+    const csosn = String(natureza.csosn_padrao || s.natureza?.csosn_padrao || '').replace(/\D/g, '').slice(0, 3);
+    const geraEstoque = (natureza.gera_estoque || s.natureza?.gera_estoque || 'S') === 'N' ? 'N' : 'S';
+    const geraFinanceiro = (natureza.gera_financeiro || s.natureza?.gera_financeiro || 'S') === 'N' ? 'N' : 'S';
+    let okCount = 0;
+    for (const it of s.itens || []) {
+      const res = await api(`/importacao/sessoes/${encodeURIComponent(s.id)}/itens/${encodeURIComponent(it.nItem)}`, {
+        method: 'PUT',
+        body: {
+          sistema: {
+            cfop,
+            ...(csosn ? { csosn_entrada: csosn, csosn } : {}),
+            gera_estoque: geraEstoque,
+            gera_financeiro: geraFinanceiro,
+          },
+        },
+      });
+      if (res.ok) {
+        okCount += 1;
+        if (res.sessao) state.sessao = res.sessao;
+      }
+    }
+    if (state.sessao) {
+      state.sessao.cfop_todos_perguntado = true;
+      try {
+        await api(`/importacao/sessoes/${encodeURIComponent(s.id)}/cabecalho`, {
+          method: 'PUT',
+          body: { cfop_todos_perguntado: true },
+        });
+      } catch { /* ignore */ }
+    }
+    deps.showToast?.(`CFOP ${cfop} aplicado a ${okCount} item(ns)`);
+    renderSessao();
+    return okCount > 0;
+  }
+
+  async function maybeAskAplicarCfopNatureza(sessao, { force = false } = {}) {
+    const s = sessao || state.sessao;
+    if (!s || s.status === 'confirmada') return;
+    if (!force && s.cfop_todos_perguntado) return;
+    const texto = s.natureza?.descricao || s.xml?.ide?.natOp || '';
+    if (!isNaturezaCfopTodos(texto)) return;
+    const cfop = String(s.natureza?.cfop || '').replace(/\D/g, '').slice(0, 4);
+    const tipo = labelNaturezaEspecial(texto);
+    const msg = cfop
+      ? `A natureza indica ${tipo}.\n\nDeseja atribuir o CFOP de entrada ${cfop} a todos os itens?`
+      : `A natureza indica ${tipo}.\n\nDeseja aplicar esta natureza (estoque/financeiro) a todos os itens?`;
+    const ok = await askConfirm(msg, { okLabel: 'Aplicar a todos', cancelLabel: 'Não' });
+    s.cfop_todos_perguntado = true;
+    try {
+      await api(`/importacao/sessoes/${encodeURIComponent(s.id)}/cabecalho`, {
+        method: 'PUT',
+        body: { cfop_todos_perguntado: true },
+      });
+    } catch { /* ignore */ }
+    if (ok) await aplicarCfopNaturezaTodos(s.natureza || {});
   }
 
   function renderSessao() {
@@ -675,23 +779,28 @@ const ImportacaoNfe = (() => {
         const sess = state.sessao;
         if (!sess?.id) return;
         const label = desc || extra?.descricao || '';
+        const natureza = {
+          id_natope: Number(code) || null,
+          descricao: label,
+          cfop: extra?.cfop || '',
+          csosn_padrao: extra?.csosn_padrao || '',
+          gera_estoque: extra?.gera_estoque || 'S',
+          gera_financeiro: extra?.gera_financeiro || 'S',
+        };
         const res = await api(`/importacao/sessoes/${sess.id}/cabecalho`, {
           method: 'PUT',
           body: {
             id_natope: Number(code) || null,
-            natureza: {
-              id_natope: Number(code) || null,
-              descricao: label,
-              cfop: extra?.cfop || '',
-              csosn_padrao: extra?.csosn_padrao || '',
-            },
+            natureza,
             natOp: label || sess.xml?.ide?.natOp || '',
+            cfop_todos_perguntado: false,
           },
         });
         if (res.ok) {
           state.sessao = res.sessao;
           deps.showToast?.('Natureza atualizada');
           renderSessao();
+          await maybeAskAplicarCfopNatureza(state.sessao, { force: true });
         } else {
           deps.showMsg?.(res.error || 'Erro ao salvar natureza');
         }
@@ -804,7 +913,12 @@ const ImportacaoNfe = (() => {
       const uniXml = sys.uni_medida_xml || xml.uCom || '';
       const uniEst = sys.uni_medida || '';
       const custo = Number(sys.prc_custo || 0);
+      const geraEst = (sys.gera_estoque || 'S') !== 'N';
+      const geraFin = (sys.gera_financeiro || 'S') !== 'N';
       const convLine = `<span class="hint imp-item-conv">Conv. ${esc(String(conversor))} · ${num(qtdXml)} ${esc(uniXml)} → ${num(qtdEst)} ${esc(uniEst)}${custo > 0 ? ` · Custo ${money(custo)}` : ''}</span>`;
+      const flagsLine = (!geraEst || !geraFin)
+        ? `<span class="hint imp-item-flags">${!geraEst ? '<span class="chip pending">Sem estoque</span>' : ''}${!geraFin ? ' <span class="chip pending">Sem financeiro</span>' : ''}</span>`
+        : '';
       return `
         <button type="button" class="imp-item-row ${cls}" data-idx="${idx}">
           <span class="imp-item-num">${esc(it.nItem)}</span>
@@ -819,6 +933,7 @@ const ImportacaoNfe = (() => {
             </div>
             <span class="hint">Cód. ${esc(xml.cProd || '—')} · Qtd ${num(xml.qCom)} ${esc(xml.uCom || '')} · CFOP ${esc(cfopOrig)} → ${esc(cfopEnt)}</span>
             ${convLine}
+            ${flagsLine}
           </div>
           <span class="imp-status ${cls}">${lbl}</span>
         </button>
@@ -1306,10 +1421,62 @@ const ImportacaoNfe = (() => {
     state.itemIndex = idx;
     state.itemTab = 'vinculo';
     const it = itemAt(idx);
+    if (it && !it.etapas_ok) it.etapas_ok = {};
     const semVinculo = !it?.sistema?.id_identificador && !it?.sistema?.criar_novo;
     state.buscaProduto = semVinculo ? (it?.xml?.xProd || '') : '';
-    renderItemScreen();
-    showView('item');
+    ensureSaidaParams().finally(() => {
+      renderItemScreen();
+      showView('item');
+    });
+  }
+
+  async function ensureSaidaParams() {
+    if (state.saidaParams) return state.saidaParams;
+    try {
+      const res = await api('/importacao/params/cfop');
+      state.saidaParams = res.saida || {};
+    } catch {
+      state.saidaParams = {};
+    }
+    return state.saidaParams;
+  }
+
+  function conferirEtapasAtivo() {
+    return String(state.saidaParams?.conferir_etapas || 'N').toUpperCase() === 'S';
+  }
+
+  function etapasOkOf(it) {
+    return (it && it.etapas_ok && typeof it.etapas_ok === 'object') ? it.etapas_ok : {};
+  }
+
+  function maxEtapaLiberada(it) {
+    if (!conferirEtapasAtivo()) return ITEM_TABS.length - 1;
+    const ok = etapasOkOf(it);
+    let max = 0;
+    for (let i = 0; i < ITEM_TABS.length; i += 1) {
+      if (ok[ITEM_TABS[i].id]) max = Math.min(ITEM_TABS.length - 1, i + 1);
+      else break;
+    }
+    return max;
+  }
+
+  function canOpenEtapa(tabId, it) {
+    if (!conferirEtapasAtivo()) return true;
+    const idx = ITEM_TABS.findIndex((t) => t.id === tabId);
+    if (idx < 0) return false;
+    return idx <= maxEtapaLiberada(it);
+  }
+
+  function confirmEtapaAtual() {
+    const it = itemAt(state.itemIndex);
+    if (!it) return;
+    const tab = state.itemTab || 'vinculo';
+    it.etapas_ok = { ...etapasOkOf(it), [tab]: true };
+    // Persiste patch local; gravação completa ao salvar item
+    const patch = collectItemPatch();
+    if (patch) {
+      it.etapas_ok = { ...etapasOkOf(it), ...(patch.etapas_ok || {}), [tab]: true };
+    }
   }
 
   function tribRow(label, xmlVal, sysId, sysVal, opts = {}) {
@@ -1385,15 +1552,32 @@ const ImportacaoNfe = (() => {
   }
 
   function itemTabNav() {
+    const it = itemAt(state.itemIndex);
+    const lock = conferirEtapasAtivo();
+    const maxLib = maxEtapaLiberada(it);
+    const ok = etapasOkOf(it);
     return `
       <nav class="imp-item-tabs" role="tablist">
-        ${ITEM_TABS.map((t) => `
-          <button type="button" class="imp-item-tab ${state.itemTab === t.id ? 'active' : ''}"
-            data-item-tab="${t.id}" role="tab" aria-selected="${state.itemTab === t.id}">
-            ${esc(t.label)}
-          </button>
-        `).join('')}
+        ${ITEM_TABS.map((t, i) => {
+          const active = state.itemTab === t.id;
+          const done = !!ok[t.id];
+          const locked = lock && i > maxLib;
+          const cls = [
+            'imp-item-tab',
+            active ? 'active' : '',
+            done ? 'is-done' : '',
+            locked ? 'is-locked' : '',
+          ].filter(Boolean).join(' ');
+          return `
+          <button type="button" class="${cls}"
+            data-item-tab="${t.id}" role="tab" aria-selected="${active}"
+            ${locked ? 'aria-disabled="true"' : ''}
+            title="${locked ? 'Confirme a etapa atual para avançar' : (done ? 'Etapa confirmada' : '')}">
+            ${esc(t.label)}${done ? ' · ok' : ''}${locked ? ' ·' : ''}
+          </button>`;
+        }).join('')}
       </nav>
+      ${lock ? '<p class="hint imp-etapas-hint">Modo etapa a etapa: confirme cada aba antes de avançar.</p>' : ''}
     `;
   }
 
@@ -1515,7 +1699,16 @@ const ImportacaoNfe = (() => {
           ${field('Desconto', 'imp-desc-val', sys.v_desc, { type: 'number', step: '0.01', third: true })}
           ${field('Seguro', 'imp-seguro', sys.v_seguro, { type: 'number', step: '0.01', third: true })}
           ${field('Outras despesas', 'imp-outro', sys.v_outro, { type: 'number', step: '0.01', third: true })}
+          <label class="imp-check imp-field half">
+            <input type="checkbox" id="imp-gera-estoque" ${ynChecked(sys.gera_estoque !== 'N') ? 'checked' : ''} />
+            Gera estoque neste item
+          </label>
+          <label class="imp-check imp-field half">
+            <input type="checkbox" id="imp-gera-financeiro" ${ynChecked(sys.gera_financeiro !== 'N') ? 'checked' : ''} />
+            Considera no financeiro da nota
+          </label>
         </div>
+        <p class="hint">Uso/consumo, imobilizado e similares costumam não movimentar estoque. Flags também vêm dos parâmetros de CFOP / TB_NAT_OPERACAO.</p>
         <div class="imp-trib-head"><span>Código</span><span>XML (nota)</span><span>Sistema</span></div>
         <div class="imp-trib-codes">
           ${tribRow('CST ICMS', imp.CST, 'imp-cst', trib.cst_icms || imp.CST, { readonly: true })}
@@ -1891,7 +2084,9 @@ const ImportacaoNfe = (() => {
         <button type="button" class="btn primary" id="imp-salvar-proximo">
           ${state.itemIndex < total - 1 ? 'Salvar e próximo →' : 'Salvar e voltar'}
         </button>`
-      : `<button type="button" class="btn primary" id="imp-proxima-etapa">Próxima etapa →</button>`;
+      : `<button type="button" class="btn primary" id="imp-proxima-etapa">${
+          conferirEtapasAtivo() ? 'Confirmar etapa e avançar →' : 'Próxima etapa →'
+        }</button>`;
 
     host.innerHTML = `
       <div class="imp-item-toolbar">
@@ -2110,6 +2305,12 @@ const ImportacaoNfe = (() => {
       }
       const custoFicha = $('#imp-custo-ficha');
       if (custoFicha) custoFicha.value = String(custoInfo.custoEstoque);
+      // Sempre atualiza o custo de estoque no item (evita gravar vUnCom × qtd convertida)
+      if (it.sistema) {
+        it.sistema.conversor = conv;
+        it.sistema.qtd = qtdConv;
+        it.sistema.prc_custo = custoInfo.custoEstoque;
+      }
     }
   }
 
@@ -2117,7 +2318,30 @@ const ImportacaoNfe = (() => {
     return v != null && String(v).trim() !== '';
   }
 
-  function applySugestoesRegra(sys, regra, estFornec) {
+  /** Aplica unidade de estoque + conversor a partir de TB_UNI_MEDIDA (ou valor já conhecido). */
+  function applyConversaoUnidade(sys, uniCode, conversorHint, xmlItem = {}) {
+    if (!sys || !uniCode) return;
+    const uni = String(uniCode || '').trim().toUpperCase();
+    if (!uni) return;
+    sys.uni_medida = uni;
+    let conv = Number(conversorHint);
+    if (!(conv > 0)) {
+      const u = (state.unidades || []).find(
+        (x) => String(x.unidade || '').trim().toUpperCase() === uni
+      );
+      conv = Number(u?.conversor || 1) || 1;
+    }
+    if (!sys.conversor_manual) {
+      sys.conversor = conv;
+    }
+    const qtdXml = Number(sys.qtd_xml ?? xmlItem.qCom ?? 0) || 0;
+    sys.qtd_xml = qtdXml;
+    sys.qtd = Number((qtdXml * Number(sys.conversor || 1)).toFixed(6));
+    const custoInfo = calcCustoNotaUnitario(sys, xmlItem);
+    if (custoInfo.custoEstoque > 0) sys.prc_custo = custoInfo.custoEstoque;
+  }
+
+  function applySugestoesRegra(sys, regra, estFornec, xmlItem = {}) {
     if (!sys) return;
     if (regra) {
       if (regra.id_regra) sys.id_regra = regra.id_regra;
@@ -2188,7 +2412,18 @@ const ImportacaoNfe = (() => {
       if (estFornec.cofins != null && sys.tributos?.p_cofins == null) {
         sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
       }
-      if (estFornec.uni_medida && !filled(sys.uni_medida_saida)) sys.uni_medida_saida = estFornec.uni_medida;
+      if (estFornec.uni_medida) {
+        if (!filled(sys.uni_medida_saida)) sys.uni_medida_saida = estFornec.uni_medida;
+        // Parametrização prévia da unidade de conversão em TB_ESTOQUE_FORNECEDOR
+        if (!sys.conversor_manual) {
+          applyConversaoUnidade(
+            sys,
+            estFornec.uni_medida,
+            estFornec.conversor,
+            xmlItem
+          );
+        }
+      }
       if (estFornec.cod_barras && !filled(sys.cod_barras)) sys.cod_barras = estFornec.cod_barras;
     }
   }
@@ -2323,6 +2558,8 @@ const ImportacaoNfe = (() => {
             it.sistema.conversor = conv.conversor ?? it.sistema.conversor;
             const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0);
             it.sistema.qtd = Number((qtdXml * Number(it.sistema.conversor || 1)).toFixed(6));
+            const custoInfo = calcCustoNotaUnitario(it.sistema, it.xml || {});
+            if (custoInfo.custoEstoque > 0) it.sistema.prc_custo = custoInfo.custoEstoque;
           }
           if (f.trib_nfe) {
             it.sistema.trib_nfe = { ...(keepSaida.trib_nfe || {}), ...(it.sistema.trib_nfe || {}), ...f.trib_nfe };
@@ -2346,7 +2583,7 @@ const ImportacaoNfe = (() => {
           idFornec ? api(`/importacao/estoque-fornecedor?${qs}`) : Promise.resolve({ item: null }),
           api(`/importacao/regra-tributo?${qs}${it.sistema.cfop ? `&cfop_entrada=${encodeURIComponent(it.sistema.cfop)}` : ''}`),
         ]);
-        applySugestoesRegra(it.sistema, rgRes.item, efRes.item);
+        applySugestoesRegra(it.sistema, rgRes.item, efRes.item, it.xml || {});
         if (rgRes.item || efRes.item) {
           deps.showToast?.('Parâmetros anteriores carregados (regra / fornecedor)');
         }
@@ -2412,7 +2649,9 @@ const ImportacaoNfe = (() => {
     let custo = parseMoney($('#imp-custo-ficha')?.value);
     if (custo === undefined) custo = gn('#imp-custo-conv');
     if (custo === undefined) custo = sys.prc_custo;
-    if (!(Number(custo) > 0) && it) {
+    // Com conversão, o custo de estoque SEMPRE é total líquido ÷ qtd convertida
+    // (evita gravar vUnCom da nota × quantidade convertida).
+    if (Math.abs(conversor - 1) > 1e-9 || !(Number(custo) > 0)) {
       const merged = {
         ...sys,
         conversor,
@@ -2428,7 +2667,10 @@ const ImportacaoNfe = (() => {
           v_icms_st: trib.v_icms_st ?? 0,
         },
       };
-      custo = calcCustoNotaUnitario(merged, it.xml || {}).custoEstoque;
+      const calc = calcCustoNotaUnitario(merged, it?.xml || {});
+      if (Math.abs(conversor - 1) > 1e-9 || !(Number(custo) > 0)) {
+        custo = calc.custoEstoque;
+      }
     }
     const custoNota = gn('#imp-custo') ?? sys.prc_custo_nota ?? calcCustoNotaUnitario({
       ...sys, conversor, qtd_xml: qtdXml, qtd, v_desc: vDesc, v_frete: vFrete, v_seguro: vSeguro, v_outro: vOutro,
@@ -2468,6 +2710,12 @@ const ImportacaoNfe = (() => {
         _cti_cfe_label: g('#imp-cti-cfe-disp') || sys._cti_cfe_label || '',
         margem_lb: margem,
         aplicar_saida: aplicarSaida,
+        gera_estoque: $('#imp-gera-estoque')
+          ? ($('#imp-gera-estoque').checked ? 'S' : 'N')
+          : (sys.gera_estoque || 'S'),
+        gera_financeiro: $('#imp-gera-financeiro')
+          ? ($('#imp-gera-financeiro').checked ? 'S' : 'N')
+          : (sys.gera_financeiro || 'S'),
         id_regra: sys.id_regra ?? null,
         uni_medida: uniEstoque || '',
         uni_medida_cadastro: sys.uni_medida_cadastro || '',
@@ -2555,6 +2803,7 @@ const ImportacaoNfe = (() => {
       },
       conferido: $('#imp-conferido') ? !!$('#imp-conferido').checked : !!it?.conferido,
       observacao: g('#imp-obs') != null ? (g('#imp-obs') || '') : (it?.observacao || ''),
+      etapas_ok: { ...etapasOkOf(it) },
       match: (sys.id_identificador || sys.criar_novo) ? (it?.match || null) : null,
     };
   }
@@ -2658,8 +2907,12 @@ const ImportacaoNfe = (() => {
   }
 
   function setItemTab(tabId) {
-    const patch = collectItemPatch();
     const it = itemAt(state.itemIndex);
+    if (!canOpenEtapa(tabId, it)) {
+      deps.showToast?.('Confirme a etapa atual antes de avançar');
+      return;
+    }
+    const patch = collectItemPatch();
     if (it && patch.sistema) {
       it.sistema = { ...it.sistema, ...patch.sistema };
       if (patch.sistema.tributos) {
@@ -2673,9 +2926,20 @@ const ImportacaoNfe = (() => {
       }
       it.conferido = patch.conferido;
       it.observacao = patch.observacao;
+      if (patch.etapas_ok) it.etapas_ok = { ...etapasOkOf(it), ...patch.etapas_ok };
     }
     state.itemTab = tabId;
     renderItemScreen();
+  }
+
+  function avancarEtapa() {
+    const idx = ITEM_TABS.findIndex((t) => t.id === state.itemTab);
+    if (idx < 0 || idx >= ITEM_TABS.length - 1) return;
+    if (conferirEtapasAtivo()) {
+      confirmEtapaAtual();
+      deps.showToast?.('Etapa confirmada');
+    }
+    setItemTab(ITEM_TABS[idx + 1].id);
   }
 
   function wireCodeSearch({ buscaSel, listSel, valueSel, endpoint, codeKey = 'codigo', extraQuery, onSelect, labelPreferDesc = false }) {
@@ -2724,6 +2988,8 @@ const ImportacaoNfe = (() => {
     descricao: it.descricao || it.desc_class_trib || '',
     conversor: it.conversor,
     unidade: it.unidade,
+    gera_estoque: it.gera_estoque,
+    gera_financeiro: it.gera_financeiro,
   }))}">
             <strong>${esc(labelPreferDesc ? (desc || code) : code)}</strong>
             <span>${esc(labelPreferDesc ? code : desc)}</span>
@@ -2905,10 +3171,7 @@ const ImportacaoNfe = (() => {
     $$('.imp-item-tab').forEach((btn) => {
       btn.addEventListener('click', () => setItemTab(btn.dataset.itemTab));
     });
-    $('#imp-proxima-etapa')?.addEventListener('click', () => {
-      const idx = ITEM_TABS.findIndex((t) => t.id === state.itemTab);
-      if (idx >= 0 && idx < ITEM_TABS.length - 1) setItemTab(ITEM_TABS[idx + 1].id);
-    });
+    $('#imp-proxima-etapa')?.addEventListener('click', () => avancarEtapa());
     $('#imp-usar-custo-nota')?.addEventListener('click', () => {
       const cur = itemAt(state.itemIndex);
       if (!cur) return;
@@ -2918,8 +3181,12 @@ const ImportacaoNfe = (() => {
       deps.showToast?.('Custo da nota aplicado');
     });
 
-    $('#imp-salvar-item')?.addEventListener('click', () => saveItem());
+    $('#imp-salvar-item')?.addEventListener('click', () => {
+      if (conferirEtapasAtivo()) confirmEtapaAtual();
+      saveItem();
+    });
     $('#imp-salvar-proximo')?.addEventListener('click', async () => {
+      if (conferirEtapasAtivo()) confirmEtapaAtual();
       const next = state.itemIndex < (state.sessao?.itens?.length || 0) - 1;
       await saveItem({ next, back: !next });
     });
@@ -3028,14 +3295,13 @@ const ImportacaoNfe = (() => {
     $('#imp-conversor')?.addEventListener('input', () => {
       const it = itemAt(state.itemIndex);
       if (it?.sistema) it.sistema.conversor_manual = true;
-      const xmlUni = String($('#imp-uni-xml')?.value || '').trim().toUpperCase();
+      // Digitação manual do conversor → unidade de estoque passa a UN
       const sel = $('#imp-uni');
-      const cur = String(sel?.value || '').trim().toUpperCase();
-      const cad = String(it?.sistema?.uni_medida_cadastro || it?.sistema?.uni_medida_saida || 'UN').trim().toUpperCase();
-      if (sel && xmlUni && cur === xmlUni && cad && cad !== xmlUni) {
-        sel.value = cad;
+      if (sel) {
+        sel.value = 'UN';
         const disp = $('#imp-uni-disp');
-        if (disp) disp.value = cad;
+        if (disp) disp.value = 'UN';
+        if (it?.sistema) it.sistema.uni_medida = 'UN';
       }
       syncQtdConvertida();
     });
@@ -3068,6 +3334,11 @@ const ImportacaoNfe = (() => {
       if (item?.sistema) {
         item.sistema.uni_medida = res.item?.unidade || unidade.toUpperCase();
         item.sistema.conversor = res.item?.conversor ?? conversor;
+        item.sistema.conversor_manual = false;
+        const qtdXml = Number(item.sistema.qtd_xml ?? item.xml?.qCom ?? 0);
+        item.sistema.qtd = Number((qtdXml * Number(item.sistema.conversor || 1)).toFixed(6));
+        const custoInfo = calcCustoNotaUnitario(item.sistema, item.xml || {});
+        if (custoInfo.custoEstoque > 0) item.sistema.prc_custo = custoInfo.custoEstoque;
       }
       deps.showToast?.('Unidade cadastrada');
       renderItemScreen();
@@ -3094,7 +3365,18 @@ const ImportacaoNfe = (() => {
       });
     };
 
-    wireFiscal('#imp-cfop', '#imp-cfop-list', '/importacao/cfop', 'cfop');
+    wireFiscal('#imp-cfop', '#imp-cfop-list', '/importacao/cfop', 'cfop', {
+      onSelect: async (code) => {
+        try {
+          const params = await api('/importacao/params/cfop');
+          const row = (params.itens || []).find((r) => String(r.cfop_conv || '') === String(code || ''));
+          if (row) {
+            if ($('#imp-gera-estoque')) $('#imp-gera-estoque').checked = row.gera_estoque !== 'N';
+            if ($('#imp-gera-financeiro')) $('#imp-gera-financeiro').checked = row.gera_financeiro !== 'N';
+          }
+        } catch { /* ignore */ }
+      },
+    });
     wireFiscal('#imp-cfop-saida', '#imp-cfop-saida-list', '/importacao/cfop', 'cfop');
     wireFiscal('#imp-cfop-nf', '#imp-cfop-nf-list', '/importacao/cfop', 'cfop');
     wireFiscal('#imp-cti', '#imp-cti-list', '/importacao/taxa-uf', 'id_cti', {
@@ -3124,8 +3406,11 @@ const ImportacaoNfe = (() => {
     wireFiscal('#imp-uni', '#imp-uni-list', '/importacao/unidades', 'unidade', {
       onSelect: (code, desc, extra = {}) => {
         const it = itemAt(state.itemIndex);
-        if (it?.sistema) it.sistema.uni_medida = code;
-        if (!it?.sistema?.conversor_manual && extra.conversor != null && $('#imp-conversor')) {
+        if (it?.sistema) {
+          it.sistema.uni_medida = code;
+          it.sistema.conversor_manual = false;
+        }
+        if (extra.conversor != null && $('#imp-conversor')) {
           $('#imp-conversor').value = extra.conversor;
         }
         syncQtdConvertida();
@@ -3260,6 +3545,7 @@ const ImportacaoNfe = (() => {
   /* ── PARÂMETROS ─────────────────────────────────────────────────────────── */
 
   async function loadParamsView() {
+    await ensureUnidades();
     const res = await api('/importacao/params/cfop');
     const host = $('#imp-params-host');
     if (!host) return;
@@ -3275,6 +3561,7 @@ const ImportacaoNfe = (() => {
           ${field('CSOSN padrão (fallback)', 'imp-params-csosn', csosn, { third: true })}
         </div>
         <h5 class="imp-sub">Conversão por linha (entrada → saída NF-e / CF-e)</h5>
+        <p class="hint">Colunas Estoque e Financeiro definem se aquele CFOP de entrada movimenta saldo ou entra no contas a pagar. Uso/consumo e imobilizado normalmente ficam sem estoque.</p>
         <div class="imp-params-scroll">
         <table class="imp-params-table" id="imp-params-table">
           <thead>
@@ -3282,6 +3569,8 @@ const ImportacaoNfe = (() => {
               <th>CFOP origem</th>
               <th>CFOP entrada</th>
               <th>CSOSN entr.</th>
+              <th>Estoque</th>
+              <th>Financeiro</th>
               <th>CFOP saí. NF-e</th>
               <th>CSOSN NF-e</th>
               <th>CST NF-e</th>
@@ -3320,39 +3609,33 @@ const ImportacaoNfe = (() => {
             <input type="checkbox" id="imp-params-zerar-neg" ${ynChecked(saida.zerar_negativo === 'S') ? 'checked' : ''} />
             Se o estoque estiver negativo na entrada, zerar e lançar a qtd da nota
           </label>
+          <label class="imp-check imp-field" style="grid-column:1/-1">
+            <input type="checkbox" id="imp-params-conferir-etapas" ${ynChecked(saida.conferir_etapas === 'S') ? 'checked' : ''} />
+            Conferir etapa a etapa no item (só avança ao confirmar cada aba)
+          </label>
         </div>
       </section>
       <section class="imp-section">
         <header class="imp-section-head"><h4>Conversões de unidade (último vínculo)</h4></header>
-        <p class="hint">Sugestão automática na conferência: unidade XML → unidade de estoque e conversor. Gravado ao salvar o item.</p>
+        <p class="hint">Unidade de estoque vem de TB_UNI_MEDIDA (com conversor). Ao escolher a unidade, o conversor é preenchido; digite o conversor manualmente se precisar ajustar. Pode cadastrar unidade na hora.</p>
         <div class="imp-params-scroll">
         <table class="imp-params-table" id="imp-params-conv-table">
           <thead>
             <tr>
               <th>Unid. XML</th>
-              <th>Unid. estoque</th>
+              <th>Unid. estoque (TB_UNI_MEDIDA)</th>
               <th>Conversor</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            ${conversoes.map((c) => `
-              <tr>
-                <td><input type="text" class="imp-conv-xml" value="${esc(c.uni_xml || '')}" /></td>
-                <td><input type="text" class="imp-conv-est" value="${esc(c.uni_estoque || '')}" /></td>
-                <td><input type="number" step="0.0001" class="imp-conv-fator" value="${esc(String(c.conversor ?? 1))}" /></td>
-                <td><button type="button" class="btn small outline imp-params-conv-del">Remover</button></td>
-              </tr>
-            `).join('') || `
-              <tr>
-                <td><input type="text" class="imp-conv-xml" placeholder="CX" /></td>
-                <td><input type="text" class="imp-conv-est" placeholder="UN" /></td>
-                <td><input type="number" step="0.0001" class="imp-conv-fator" value="1" /></td>
-                <td><button type="button" class="btn small outline imp-params-conv-del">Remover</button></td>
-              </tr>
-            `}
+            ${(conversoes.length ? conversoes : [{ uni_xml: '', uni_estoque: '', conversor: 1 }]).map((c) => paramsConvRowHtml(c)).join('')}
           </tbody>
         </table>
+        </div>
+        <div class="imp-vinc-btns" style="margin-top:.65rem">
+          <button type="button" class="btn small outline" id="imp-params-conv-add">Adicionar conversão</button>
+          <button type="button" class="btn small outline" id="imp-params-cad-unidade">Cadastrar unidade</button>
         </div>
       </section>
     `;
@@ -3364,10 +3647,131 @@ const ImportacaoNfe = (() => {
       bindParamsRowEvents();
     });
     bindParamsRowEvents();
-    $$('#imp-params-conv-table .imp-params-conv-del').forEach((btn) => {
-      btn.onclick = () => btn.closest('tr')?.remove();
+    bindParamsConvEvents();
+    $('#imp-params-conv-add')?.addEventListener('click', () => {
+      const tbody = $('#imp-params-conv-table tbody');
+      if (!tbody) return;
+      tbody.insertAdjacentHTML('beforeend', paramsConvRowHtml({}));
+      bindParamsConvEvents();
+    });
+    $('#imp-params-cad-unidade')?.addEventListener('click', async () => {
+      const unidade = await askPrompt('Unidade (ex.: CX):');
+      if (!unidade) return;
+      const descricao = (await askPrompt('Descrição da unidade:', { defaultValue: unidade })) || unidade;
+      const conversorStr = await askPrompt('Conversor (padrão 1):', { defaultValue: '1' });
+      const conversor = Number(conversorStr || 1) || 1;
+      const resCad = await api('/importacao/unidades', {
+        method: 'POST',
+        body: { unidade, descricao, conversor },
+      });
+      if (!resCad.ok) {
+        deps.showMsg?.(resCad.error || 'Erro ao cadastrar unidade');
+        return;
+      }
+      state.unidades = [];
+      await ensureUnidades();
+      deps.showToast?.(`Unidade ${resCad.item?.unidade || unidade} cadastrada`);
     });
     showView('params');
+  }
+
+  function paramsConvRowHtml(c = {}) {
+    const uni = String(c.uni_estoque || '').trim();
+    return `
+      <tr>
+        <td><input type="text" class="imp-conv-xml" value="${esc(c.uni_xml || '')}" placeholder="CX" /></td>
+        <td class="imp-params-combo" data-combo-root>
+          <input type="hidden" class="imp-conv-est" value="${esc(uni)}" />
+          <input type="search" class="imp-conv-est-disp" value="${esc(uni)}"
+            placeholder="Pesquisar unidade…" autocomplete="off" enterkeyhint="search" />
+          <div class="imp-combo-list imp-params-conv-uni-list" hidden></div>
+        </td>
+        <td><input type="number" step="0.0001" class="imp-conv-fator" value="${esc(String(c.conversor ?? 1))}" /></td>
+        <td><button type="button" class="btn small outline imp-params-conv-del">Remover</button></td>
+      </tr>
+    `;
+  }
+
+  function bindParamsConvEvents() {
+    $$('#imp-params-conv-table .imp-params-conv-del').forEach((btn) => {
+      btn.onclick = () => {
+        const tr = btn.closest('tr');
+        const tbody = tr?.parentElement;
+        tr?.remove();
+        if (tbody && !tbody.children.length) {
+          tbody.insertAdjacentHTML('beforeend', paramsConvRowHtml({}));
+          bindParamsConvEvents();
+        }
+      };
+    });
+    $$('#imp-params-conv-table tbody tr').forEach((tr) => {
+      wireParamsUnidadeCombo(tr);
+    });
+  }
+
+  function wireParamsUnidadeCombo(tr) {
+    const valueEl = tr.querySelector('.imp-conv-est');
+    const displayEl = tr.querySelector('.imp-conv-est-disp');
+    const box = tr.querySelector('.imp-params-conv-uni-list');
+    const fatorEl = tr.querySelector('.imp-conv-fator');
+    if (!displayEl || !box || !valueEl || displayEl.dataset.wired === '1') return;
+    displayEl.dataset.wired = '1';
+
+    const closeList = () => { box.hidden = true; box.innerHTML = ''; };
+    const renderList = async (term) => {
+      box.hidden = false;
+      const qs = new URLSearchParams();
+      if (term) qs.set('q', term);
+      const res = await api(`/importacao/unidades?${qs}`);
+      const list = res.itens || [];
+      if (!list.length) {
+        box.innerHTML = '<p class="hint">Nenhuma unidade — use “Cadastrar unidade”</p>';
+        return;
+      }
+      box.innerHTML = list.map((it) => {
+        const code = String(it.unidade || '');
+        const desc = String(it.descricao || '');
+        const label = desc ? `${code} — ${desc}` : code;
+        return `
+          <button type="button" class="imp-prod-opt"
+            data-code="${esc(code)}" data-label="${esc(label)}" data-conversor="${esc(String(it.conversor ?? 1))}">
+            <strong>${esc(code)}</strong>
+            <span>${esc(desc || `Conv. ${it.conversor ?? 1}`)}</span>
+          </button>`;
+      }).join('');
+      $$('.imp-prod-opt', box).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          valueEl.value = btn.dataset.code || '';
+          displayEl.value = btn.dataset.label || btn.dataset.code || '';
+          if (fatorEl && btn.dataset.conversor != null) {
+            fatorEl.value = btn.dataset.conversor;
+          }
+          closeList();
+          displayEl.blur();
+        });
+      });
+    };
+
+    displayEl.addEventListener('focus', () => {
+      displayEl.select();
+      renderList(String(displayEl.value || '').trim());
+    });
+    displayEl.addEventListener('input', () => {
+      clearTimeout(buscaCodeTimer);
+      buscaCodeTimer = setTimeout(() => renderList(String(displayEl.value || '').trim()), 220);
+      valueEl.value = String(displayEl.value || '').trim().toUpperCase();
+    });
+    displayEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === 'Search') {
+        e.preventDefault();
+        renderList(String(displayEl.value || '').trim()).then(() => {
+          const opts = $$('.imp-prod-opt', box);
+          if (opts.length === 1) opts[0].click();
+          else displayEl.blur();
+        });
+      }
+      if (e.key === 'Escape') closeList();
+    });
   }
 
   function paramsTaxaCell(cls, listCls, value, label, placeholder) {
@@ -3389,6 +3793,8 @@ const ImportacaoNfe = (() => {
         <td><input type="text" class="imp-cfop-origem" maxlength="4" value="${esc(r.cfop_origem || '')}" inputmode="numeric" title="CFOP origem" /></td>
         <td><input type="text" class="imp-cfop-conv" maxlength="4" value="${esc(r.cfop_conv || '')}" inputmode="numeric" title="CFOP entrada" /></td>
         <td><input type="text" class="imp-cfop-csosn" maxlength="3" value="${esc(r.csosn || '102')}" inputmode="numeric" title="CSOSN entrada" /></td>
+        <td class="imp-params-check"><input type="checkbox" class="imp-gera-estoque" ${ynChecked(r.gera_estoque !== 'N') ? 'checked' : ''} title="Gera estoque" /></td>
+        <td class="imp-params-check"><input type="checkbox" class="imp-gera-financeiro" ${ynChecked(r.gera_financeiro !== 'N') ? 'checked' : ''} title="Gera financeiro" /></td>
         <td><input type="text" class="imp-cfop-saida-nfe" maxlength="4" value="${esc(r.cfop_saida_nfe || '')}" inputmode="numeric" title="CFOP saída NF-e" /></td>
         <td><input type="text" class="imp-csosn-saida-nfe" maxlength="3" value="${esc(r.csosn_saida_nfe || '')}" inputmode="numeric" title="CSOSN saída NF-e" placeholder="CSOSN" /></td>
         <td><input type="text" class="imp-cst-saida-nfe" maxlength="3" value="${esc(r.cst_saida_nfe || '')}" inputmode="numeric" title="CST saída NF-e" placeholder="CST" /></td>
@@ -3485,6 +3891,8 @@ const ImportacaoNfe = (() => {
       cfop_origem: tr.querySelector('.imp-cfop-origem')?.value || '',
       cfop_conv: tr.querySelector('.imp-cfop-conv')?.value || '',
       csosn: tr.querySelector('.imp-cfop-csosn')?.value || '102',
+      gera_estoque: tr.querySelector('.imp-gera-estoque')?.checked ? 'S' : 'N',
+      gera_financeiro: tr.querySelector('.imp-gera-financeiro')?.checked ? 'S' : 'N',
       cfop_saida_nfe: tr.querySelector('.imp-cfop-saida-nfe')?.value || '',
       csosn_saida_nfe: tr.querySelector('.imp-csosn-saida-nfe')?.value || '',
       cst_saida_nfe: tr.querySelector('.imp-cst-saida-nfe')?.value || '',
@@ -3502,10 +3910,12 @@ const ImportacaoNfe = (() => {
       aplicar_saida: $('#imp-params-aplicar-saida')?.checked ? 'S' : 'N',
       obrigar_financeiro: $('#imp-params-obrigar-fin')?.checked ? 'S' : 'N',
       zerar_negativo: $('#imp-params-zerar-neg')?.checked ? 'S' : 'N',
+      conferir_etapas: $('#imp-params-conferir-etapas')?.checked ? 'S' : 'N',
     };
     const conversoes = $$('#imp-params-conv-table tbody tr').map((tr) => ({
       uni_xml: tr.querySelector('.imp-conv-xml')?.value || '',
-      uni_estoque: tr.querySelector('.imp-conv-est')?.value || '',
+      uni_estoque: (tr.querySelector('.imp-conv-est')?.value
+        || tr.querySelector('.imp-conv-est-disp')?.value || '').trim().toUpperCase(),
       conversor: Number(tr.querySelector('.imp-conv-fator')?.value || 1) || 1,
     })).filter((c) => c.uni_xml && c.uni_estoque);
     const res = await api('/importacao/params/cfop', {
@@ -3516,6 +3926,7 @@ const ImportacaoNfe = (() => {
       deps.showMsg?.(res.error || 'Erro ao salvar parâmetros');
       return;
     }
+    state.saidaParams = res.saida || saida;
     deps.showToast?.('Parâmetros salvos');
     showView('inicio');
     loadHome();
@@ -3605,7 +4016,8 @@ const ImportacaoNfe = (() => {
       try {
         const params = await api('/importacao/params/cfop');
         const obrigar = (params.saida?.obrigar_financeiro || 'S') !== 'N';
-        if (obrigar && !state.sessao?.financeiro_ok && !state.financeiroVisitado) {
+        const algumFin = (state.sessao.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
+        if (obrigar && algumFin && !state.sessao?.financeiro_ok && !state.financeiroVisitado) {
           deps.showMsg?.('Abra a aba Financeiro, confira as parcelas (valor e vencimento) e toque em Salvar financeiro antes de gravar.');
           setTab('financeiro');
           return;

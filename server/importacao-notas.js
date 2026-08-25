@@ -1,6 +1,48 @@
 'use strict';
 
-const { withDb, query } = require('./db');
+const { withDb, query, columnExists } = require('./db');
+const importacaoParams = require('./importacao-params');
+
+let natFlagColsCache = null;
+
+async function detectNatFlagColumns(db) {
+  if (natFlagColsCache) return natFlagColsCache;
+  const estCandidates = ['MOVIMENTA_ESTOQUE', 'GERA_ESTOQUE', 'ATUALIZA_ESTOQUE', 'MOV_ESTOQUE', 'ATUALIZA_EST'];
+  const finCandidates = ['GERA_FINANCEIRO', 'GERA_FINANC', 'FINANCEIRO', 'GERA_CTAPAG', 'GERA_FIN'];
+  let estCol = null;
+  let finCol = null;
+  for (const c of estCandidates) {
+    if (await columnExists(db, 'TB_NAT_OPERACAO', c)) {
+      estCol = c;
+      break;
+    }
+  }
+  for (const c of finCandidates) {
+    if (await columnExists(db, 'TB_NAT_OPERACAO', c)) {
+      finCol = c;
+      break;
+    }
+  }
+  natFlagColsCache = { estCol, finCol };
+  return natFlagColsCache;
+}
+
+function mapNatFlag(v) {
+  return importacaoParams.ynFlag(v, 'S');
+}
+
+function mapNaturezaRow(r, cols = {}) {
+  const geraEstoque = cols.estCol ? mapNatFlag(r[cols.estCol]) : 'S';
+  const geraFinanceiro = cols.finCol ? mapNatFlag(r[cols.finCol]) : 'S';
+  return {
+    id_natope: Number(r.ID_NATOPE),
+    descricao: String(r.DESCRICAO || '').trim(),
+    cfop: String(r.CFOP || '').trim(),
+    csosn_padrao: String(r.CSOSN_PADRAO || '').trim(),
+    gera_estoque: geraEstoque,
+    gera_financeiro: geraFinanceiro,
+  };
+}
 
 function toDateOnly(d) {
   if (!d) return '';
@@ -220,6 +262,11 @@ async function cadastrarUnidade({ unidade, descricao, conversor }) {
 async function listNaturezas(q) {
   const term = String(q || '').trim();
   return withDb(async (db) => {
+    const cols = await detectNatFlagColumns(db);
+    const extra = [
+      cols.estCol ? cols.estCol : null,
+      cols.finCol ? cols.finCol : null,
+    ].filter(Boolean).join(', ');
     const params = [];
     let where = `(STATUS = 'A' OR STATUS IS NULL)`;
     if (term) {
@@ -227,16 +274,47 @@ async function listNaturezas(q) {
       params.push(term, term);
     }
     const rows = await query(db, `
-      SELECT FIRST 50 ID_NATOPE, DESCRICAO, CFOP, CSOSN_PADRAO, STATUS
+      SELECT FIRST 50 ID_NATOPE, DESCRICAO, CFOP, CSOSN_PADRAO, STATUS${extra ? `, ${extra}` : ''}
       FROM TB_NAT_OPERACAO
       WHERE ${where}
       ORDER BY DESCRICAO`, params);
-    return rows.map((r) => ({
-      id_natope: Number(r.ID_NATOPE),
-      descricao: String(r.DESCRICAO || '').trim(),
-      cfop: String(r.CFOP || '').trim(),
-      csosn_padrao: String(r.CSOSN_PADRAO || '').trim(),
-    }));
+    return rows.map((r) => mapNaturezaRow(r, cols));
+  });
+}
+
+async function getNaturezaById(idNatope) {
+  const id = Number(idNatope);
+  if (!id) return null;
+  return withDb(async (db) => {
+    const cols = await detectNatFlagColumns(db);
+    const extra = [
+      cols.estCol ? cols.estCol : null,
+      cols.finCol ? cols.finCol : null,
+    ].filter(Boolean).join(', ');
+    const rows = await query(db, `
+      SELECT FIRST 1 ID_NATOPE, DESCRICAO, CFOP, CSOSN_PADRAO, STATUS${extra ? `, ${extra}` : ''}
+      FROM TB_NAT_OPERACAO
+      WHERE ID_NATOPE = ?`, [id]);
+    return rows[0] ? mapNaturezaRow(rows[0], cols) : null;
+  });
+}
+
+async function getNaturezaByCfop(cfop) {
+  const code = String(cfop || '').replace(/\D/g, '').slice(0, 4);
+  if (!code) return null;
+  return withDb(async (db) => {
+    const cols = await detectNatFlagColumns(db);
+    const extra = [
+      cols.estCol ? cols.estCol : null,
+      cols.finCol ? cols.finCol : null,
+    ].filter(Boolean).join(', ');
+    const rows = await query(db, `
+      SELECT FIRST 1 ID_NATOPE, DESCRICAO, CFOP, CSOSN_PADRAO, STATUS${extra ? `, ${extra}` : ''}
+      FROM TB_NAT_OPERACAO
+      WHERE CAST(CFOP AS VARCHAR(10)) STARTING WITH ?
+        AND (STATUS = 'A' OR STATUS IS NULL)
+      ORDER BY ID_NATOPE`, [code]);
+    return rows[0] ? mapNaturezaRow(rows[0], cols) : null;
   });
 }
 
@@ -785,6 +863,8 @@ module.exports = {
   listUnidades,
   cadastrarUnidade,
   listNaturezas,
+  getNaturezaById,
+  getNaturezaByCfop,
   listClassTrib,
   listAnp,
   listCest,
