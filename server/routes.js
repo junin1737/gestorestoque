@@ -583,16 +583,16 @@ router.get('/unidades', async (_req, res) => {
 router.post('/estoque', async (req, res) => {
   try {
     const body = req.body || {};
-    const descricao = String(body.descricao || '').trim();
+    const descricao = String(body.descricao || '').trim().slice(0, 120);
     if (!descricao) return res.json({ ok: false, error: 'Informe a descrição do produto.' });
-    const uni = String(body.uni_medida || 'UN').trim() || 'UN';
+    const uni = String(body.uni_medida || 'UN').trim().slice(0, 3) || 'UN';
     const prcVenda = Number(body.prc_venda != null ? body.prc_venda : 0.01) || 0.01;
     const prcCusto = body.prc_custo != null && body.prc_custo !== '' ? Number(body.prc_custo) : null;
     const qtd = Number(body.qtd_atual != null ? body.qtd_atual : 0) || 0;
     const idGrupo = body.id_grupo === '' || body.id_grupo == null ? null : Number(body.id_grupo);
-    const codBarras = String(body.cod_barras || '').trim();
-    const referencia = String(body.referencia || '').trim();
-    const descCmpl = String(body.desc_cmpl || '').trim();
+    const codBarras = String(body.cod_barras || '').trim().slice(0, 18);
+    const referencia = String(body.referencia || '').trim().slice(0, 18);
+    const descCmpl = String(body.desc_cmpl || '').trim().slice(0, 30);
     const gradeSerie = String(body.grade_serie || 'N').trim().toUpperCase() || 'N';
     const usuarioNome = String(body.usuarioNome || 'usuário').trim();
     const idFuncionario = Number(body.idFuncionario || 0);
@@ -758,12 +758,12 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
 
         const estSets = [];
         const estParams = [];
-        if (body.descricao !== undefined) { estSets.push('DESCRICAO = ?'); estParams.push(String(body.descricao)); }
+        if (body.descricao !== undefined) { estSets.push('DESCRICAO = ?'); estParams.push(String(body.descricao).slice(0, 120)); }
         if (body.id_grupo !== undefined) {
           estSets.push('ID_GRUPO = ?');
           estParams.push(body.id_grupo === null || body.id_grupo === '' ? null : Number(body.id_grupo));
         }
-        if (body.uni_medida !== undefined) { estSets.push('UNI_MEDIDA = ?'); estParams.push(String(body.uni_medida)); }
+        if (body.uni_medida !== undefined) { estSets.push('UNI_MEDIDA = ?'); estParams.push(String(body.uni_medida).slice(0, 3)); }
         if (body.cfop !== undefined) { estSets.push('CFOP = ?'); estParams.push(String(body.cfop || '').trim() || null); }
         if (body.cfop_nf !== undefined) { estSets.push('CFOP_NF = ?'); estParams.push(String(body.cfop_nf || '').trim() || null); }
         if (body.cst_pis !== undefined) { estSets.push('CST_PIS = ?'); estParams.push(String(body.cst_pis || '').trim() || null); }
@@ -788,9 +788,9 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
 
         const prodSets = [];
         const prodParams = [];
-        if (body.cod_barras !== undefined) { prodSets.push('COD_BARRA = ?'); prodParams.push(String(body.cod_barras)); }
-        if (body.referencia !== undefined) { prodSets.push('REFERENCIA = ?'); prodParams.push(String(body.referencia)); }
-        if (body.desc_cmpl !== undefined) { prodSets.push('DESC_CMPL = ?'); prodParams.push(String(body.desc_cmpl)); }
+        if (body.cod_barras !== undefined) { prodSets.push('COD_BARRA = ?'); prodParams.push(String(body.cod_barras).slice(0, 18)); }
+        if (body.referencia !== undefined) { prodSets.push('REFERENCIA = ?'); prodParams.push(String(body.referencia).slice(0, 18)); }
+        if (body.desc_cmpl !== undefined) { prodSets.push('DESC_CMPL = ?'); prodParams.push(String(body.desc_cmpl).slice(0, 30)); }
         if (body.cst !== undefined) { prodSets.push('CST = ?'); prodParams.push(String(body.cst || '').trim() || null); }
         if (body.csosn !== undefined) { prodSets.push('CSOSN = ?'); prodParams.push(String(body.csosn || '').trim() || null); }
         if (body.cst_cfe !== undefined) { prodSets.push('CST_CFE = ?'); prodParams.push(String(body.cst_cfe || '').trim() || null); }

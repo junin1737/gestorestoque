@@ -1013,7 +1013,7 @@ function renderDetalhe() {
       <div class="form-grid side-by-side">
         <label>ID Estoque<input value="${it.id_estoque ?? 'Novo'}" disabled /></label>
         <label>ID Identificador<input value="${it.id_identificador ?? 'Novo'}" disabled /></label>
-        <label class="full">Descrição<input id="f-descricao" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
+        <label class="full">Descrição<input id="f-descricao" maxlength="120" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
         <label>Grupo
           <div class="input-row">
             <select id="f-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>
@@ -1028,23 +1028,23 @@ function renderDetalhe() {
             ${optionsUnidades(it.uni_medida)}
           </select>
         </label>
-        <div class="ficha-cod-ref">
-        <div class="field">
-          <span>Cód. barras</span>
-          <div class="input-row barcode-row">
-            <input id="f-barras" value="${escapeAttr(it.cod_barras)}" ${editarFicha ? '' : 'disabled'} />
-            ${editarFicha ? `<button type="button" id="btn-scan-ficha-barras" class="btn icon-cam" title="Ler código de barras" aria-label="Ler código de barras">${CAMERA_ICON_SVG}</button>` : ''}
+        <div class="ficha-cod-status">
+          <div class="field">
+            <span>Cód. barras</span>
+            <div class="input-row barcode-row">
+              <input id="f-barras" maxlength="18" inputmode="numeric" autocomplete="off" value="${escapeAttr(it.cod_barras)}" ${editarFicha ? '' : 'disabled'} />
+              ${editarFicha ? `<button type="button" id="btn-scan-ficha-barras" class="btn icon-cam" title="Ler código de barras" aria-label="Ler código de barras">${CAMERA_ICON_SVG}</button>` : ''}
+            </div>
           </div>
+          <label class="ficha-status">Status
+            <select id="f-status" ${editarFicha || state.isNovo ? '' : 'disabled'}>
+              <option value="A" ${String(it.status || 'A').toUpperCase() !== 'I' ? 'selected' : ''}>Ativo</option>
+              <option value="I" ${String(it.status || 'A').toUpperCase() === 'I' ? 'selected' : ''}>Inativo</option>
+            </select>
+          </label>
         </div>
-        <label>Referência<input id="f-ref" value="${escapeAttr(it.referencia)}" ${editarFicha ? '' : 'disabled'} /></label>
-        </div>
-        <label>Status
-          <select id="f-status" ${editarFicha || state.isNovo ? '' : 'disabled'}>
-            <option value="A" ${String(it.status || 'A').toUpperCase() !== 'I' ? 'selected' : ''}>Ativo</option>
-            <option value="I" ${String(it.status || 'A').toUpperCase() === 'I' ? 'selected' : ''}>Inativo</option>
-          </select>
-        </label>
-        <label class="full">Desc. complementar<input id="f-cmpl" value="${escapeAttr(it.desc_cmpl)}" ${editarFicha ? '' : 'disabled'} /></label>
+        <label class="full">Referência<input id="f-ref" maxlength="18" value="${escapeAttr(it.referencia)}" ${editarFicha ? '' : 'disabled'} /></label>
+        <label class="full">Desc. complementar<input id="f-cmpl" maxlength="30" value="${escapeAttr(it.desc_cmpl)}" ${editarFicha ? '' : 'disabled'} /></label>
         ${!state.isNovo && editarFicha ? `
         <div class="full status-actions">
           <button type="button" class="btn ${String(it.status || 'A').toUpperCase() === 'I' ? 'ok' : 'outline'}" id="btn-toggle-status">
@@ -1668,7 +1668,7 @@ async function applyScannedCode(value) {
     }
     const inp = $('#f-barras');
     if (inp && !inp.disabled) {
-      inp.value = code;
+      inp.value = String(code || '').slice(0, 18);
       inp.dispatchEvent(new Event('input', { bubbles: true }));
       inp.focus();
     }
