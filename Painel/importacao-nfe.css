@@ -1318,6 +1318,21 @@
   color: #fff;
 }
 
+.imp-item-tab.is-done:not(.active) {
+  border-color: color-mix(in srgb, var(--ok) 45%, var(--border));
+  color: var(--ok);
+}
+
+.imp-item-tab.is-locked {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.imp-etapas-hint {
+  margin: -0.25rem 0 0.55rem;
+  font-size: 0.75rem;
+}
+
 .imp-cmp-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;

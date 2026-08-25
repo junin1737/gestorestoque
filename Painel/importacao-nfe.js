@@ -23,6 +23,7 @@ const ImportacaoNfe = (() => {
     emitenteSimples: null,
     xmlTextPendente: null,
     financeiroVisitado: false,
+    saidaParams: null,
   };
 
   let deps = {};
@@ -1420,10 +1421,62 @@ const ImportacaoNfe = (() => {
     state.itemIndex = idx;
     state.itemTab = 'vinculo';
     const it = itemAt(idx);
+    if (it && !it.etapas_ok) it.etapas_ok = {};
     const semVinculo = !it?.sistema?.id_identificador && !it?.sistema?.criar_novo;
     state.buscaProduto = semVinculo ? (it?.xml?.xProd || '') : '';
-    renderItemScreen();
-    showView('item');
+    ensureSaidaParams().finally(() => {
+      renderItemScreen();
+      showView('item');
+    });
+  }
+
+  async function ensureSaidaParams() {
+    if (state.saidaParams) return state.saidaParams;
+    try {
+      const res = await api('/importacao/params/cfop');
+      state.saidaParams = res.saida || {};
+    } catch {
+      state.saidaParams = {};
+    }
+    return state.saidaParams;
+  }
+
+  function conferirEtapasAtivo() {
+    return String(state.saidaParams?.conferir_etapas || 'N').toUpperCase() === 'S';
+  }
+
+  function etapasOkOf(it) {
+    return (it && it.etapas_ok && typeof it.etapas_ok === 'object') ? it.etapas_ok : {};
+  }
+
+  function maxEtapaLiberada(it) {
+    if (!conferirEtapasAtivo()) return ITEM_TABS.length - 1;
+    const ok = etapasOkOf(it);
+    let max = 0;
+    for (let i = 0; i < ITEM_TABS.length; i += 1) {
+      if (ok[ITEM_TABS[i].id]) max = Math.min(ITEM_TABS.length - 1, i + 1);
+      else break;
+    }
+    return max;
+  }
+
+  function canOpenEtapa(tabId, it) {
+    if (!conferirEtapasAtivo()) return true;
+    const idx = ITEM_TABS.findIndex((t) => t.id === tabId);
+    if (idx < 0) return false;
+    return idx <= maxEtapaLiberada(it);
+  }
+
+  function confirmEtapaAtual() {
+    const it = itemAt(state.itemIndex);
+    if (!it) return;
+    const tab = state.itemTab || 'vinculo';
+    it.etapas_ok = { ...etapasOkOf(it), [tab]: true };
+    // Persiste patch local; gravação completa ao salvar item
+    const patch = collectItemPatch();
+    if (patch) {
+      it.etapas_ok = { ...etapasOkOf(it), ...(patch.etapas_ok || {}), [tab]: true };
+    }
   }
 
   function tribRow(label, xmlVal, sysId, sysVal, opts = {}) {
@@ -1499,15 +1552,32 @@ const ImportacaoNfe = (() => {
   }
 
   function itemTabNav() {
+    const it = itemAt(state.itemIndex);
+    const lock = conferirEtapasAtivo();
+    const maxLib = maxEtapaLiberada(it);
+    const ok = etapasOkOf(it);
     return `
       <nav class="imp-item-tabs" role="tablist">
-        ${ITEM_TABS.map((t) => `
-          <button type="button" class="imp-item-tab ${state.itemTab === t.id ? 'active' : ''}"
-            data-item-tab="${t.id}" role="tab" aria-selected="${state.itemTab === t.id}">
-            ${esc(t.label)}
-          </button>
-        `).join('')}
+        ${ITEM_TABS.map((t, i) => {
+          const active = state.itemTab === t.id;
+          const done = !!ok[t.id];
+          const locked = lock && i > maxLib;
+          const cls = [
+            'imp-item-tab',
+            active ? 'active' : '',
+            done ? 'is-done' : '',
+            locked ? 'is-locked' : '',
+          ].filter(Boolean).join(' ');
+          return `
+          <button type="button" class="${cls}"
+            data-item-tab="${t.id}" role="tab" aria-selected="${active}"
+            ${locked ? 'aria-disabled="true"' : ''}
+            title="${locked ? 'Confirme a etapa atual para avançar' : (done ? 'Etapa confirmada' : '')}">
+            ${esc(t.label)}${done ? ' · ok' : ''}${locked ? ' ·' : ''}
+          </button>`;
+        }).join('')}
       </nav>
+      ${lock ? '<p class="hint imp-etapas-hint">Modo etapa a etapa: confirme cada aba antes de avançar.</p>' : ''}
     `;
   }
 
@@ -2014,7 +2084,9 @@ const ImportacaoNfe = (() => {
         <button type="button" class="btn primary" id="imp-salvar-proximo">
           ${state.itemIndex < total - 1 ? 'Salvar e próximo →' : 'Salvar e voltar'}
         </button>`
-      : `<button type="button" class="btn primary" id="imp-proxima-etapa">Próxima etapa →</button>`;
+      : `<button type="button" class="btn primary" id="imp-proxima-etapa">${
+          conferirEtapasAtivo() ? 'Confirmar etapa e avançar →' : 'Próxima etapa →'
+        }</button>`;
 
     host.innerHTML = `
       <div class="imp-item-toolbar">
@@ -2731,6 +2803,7 @@ const ImportacaoNfe = (() => {
       },
       conferido: $('#imp-conferido') ? !!$('#imp-conferido').checked : !!it?.conferido,
       observacao: g('#imp-obs') != null ? (g('#imp-obs') || '') : (it?.observacao || ''),
+      etapas_ok: { ...etapasOkOf(it) },
       match: (sys.id_identificador || sys.criar_novo) ? (it?.match || null) : null,
     };
   }
@@ -2834,8 +2907,12 @@ const ImportacaoNfe = (() => {
   }
 
   function setItemTab(tabId) {
-    const patch = collectItemPatch();
     const it = itemAt(state.itemIndex);
+    if (!canOpenEtapa(tabId, it)) {
+      deps.showToast?.('Confirme a etapa atual antes de avançar');
+      return;
+    }
+    const patch = collectItemPatch();
     if (it && patch.sistema) {
       it.sistema = { ...it.sistema, ...patch.sistema };
       if (patch.sistema.tributos) {
@@ -2849,9 +2926,20 @@ const ImportacaoNfe = (() => {
       }
       it.conferido = patch.conferido;
       it.observacao = patch.observacao;
+      if (patch.etapas_ok) it.etapas_ok = { ...etapasOkOf(it), ...patch.etapas_ok };
     }
     state.itemTab = tabId;
     renderItemScreen();
+  }
+
+  function avancarEtapa() {
+    const idx = ITEM_TABS.findIndex((t) => t.id === state.itemTab);
+    if (idx < 0 || idx >= ITEM_TABS.length - 1) return;
+    if (conferirEtapasAtivo()) {
+      confirmEtapaAtual();
+      deps.showToast?.('Etapa confirmada');
+    }
+    setItemTab(ITEM_TABS[idx + 1].id);
   }
 
   function wireCodeSearch({ buscaSel, listSel, valueSel, endpoint, codeKey = 'codigo', extraQuery, onSelect, labelPreferDesc = false }) {
@@ -3083,10 +3171,7 @@ const ImportacaoNfe = (() => {
     $$('.imp-item-tab').forEach((btn) => {
       btn.addEventListener('click', () => setItemTab(btn.dataset.itemTab));
     });
-    $('#imp-proxima-etapa')?.addEventListener('click', () => {
-      const idx = ITEM_TABS.findIndex((t) => t.id === state.itemTab);
-      if (idx >= 0 && idx < ITEM_TABS.length - 1) setItemTab(ITEM_TABS[idx + 1].id);
-    });
+    $('#imp-proxima-etapa')?.addEventListener('click', () => avancarEtapa());
     $('#imp-usar-custo-nota')?.addEventListener('click', () => {
       const cur = itemAt(state.itemIndex);
       if (!cur) return;
@@ -3096,8 +3181,12 @@ const ImportacaoNfe = (() => {
       deps.showToast?.('Custo da nota aplicado');
     });
 
-    $('#imp-salvar-item')?.addEventListener('click', () => saveItem());
+    $('#imp-salvar-item')?.addEventListener('click', () => {
+      if (conferirEtapasAtivo()) confirmEtapaAtual();
+      saveItem();
+    });
     $('#imp-salvar-proximo')?.addEventListener('click', async () => {
+      if (conferirEtapasAtivo()) confirmEtapaAtual();
       const next = state.itemIndex < (state.sessao?.itens?.length || 0) - 1;
       await saveItem({ next, back: !next });
     });
@@ -3520,6 +3609,10 @@ const ImportacaoNfe = (() => {
             <input type="checkbox" id="imp-params-zerar-neg" ${ynChecked(saida.zerar_negativo === 'S') ? 'checked' : ''} />
             Se o estoque estiver negativo na entrada, zerar e lançar a qtd da nota
           </label>
+          <label class="imp-check imp-field" style="grid-column:1/-1">
+            <input type="checkbox" id="imp-params-conferir-etapas" ${ynChecked(saida.conferir_etapas === 'S') ? 'checked' : ''} />
+            Conferir etapa a etapa no item (só avança ao confirmar cada aba)
+          </label>
         </div>
       </section>
       <section class="imp-section">
@@ -3817,6 +3910,7 @@ const ImportacaoNfe = (() => {
       aplicar_saida: $('#imp-params-aplicar-saida')?.checked ? 'S' : 'N',
       obrigar_financeiro: $('#imp-params-obrigar-fin')?.checked ? 'S' : 'N',
       zerar_negativo: $('#imp-params-zerar-neg')?.checked ? 'S' : 'N',
+      conferir_etapas: $('#imp-params-conferir-etapas')?.checked ? 'S' : 'N',
     };
     const conversoes = $$('#imp-params-conv-table tbody tr').map((tr) => ({
       uni_xml: tr.querySelector('.imp-conv-xml')?.value || '',
@@ -3832,6 +3926,7 @@ const ImportacaoNfe = (() => {
       deps.showMsg?.(res.error || 'Erro ao salvar parâmetros');
       return;
     }
+    state.saidaParams = res.saida || saida;
     deps.showToast?.('Parâmetros salvos');
     showView('inicio');
     loadHome();

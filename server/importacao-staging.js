@@ -744,6 +744,7 @@ async function createSessao(opts = {}) {
       sistema,
       conferido: false,
       observacao: '',
+      etapas_ok: {},
     });
   }
 
@@ -933,6 +934,7 @@ async function addItemManual(sessaoId, itemPatch = {}) {
     sistema: await buildSistemaFromXmlItem(xmlItem, s.xml?.emit?.enderEmit?.UF || ''),
     conferido: false,
     observacao: '',
+    etapas_ok: {},
   };
   if (itemPatch.sistema) item.sistema = { ...item.sistema, ...itemPatch.sistema };
   s.itens.push(item);
@@ -984,6 +986,9 @@ function updateItem(sessaoId, nItem, patch) {
   if (patch.match !== undefined) item.match = patch.match;
   if (patch.conferido !== undefined) item.conferido = !!patch.conferido;
   if (patch.observacao !== undefined) item.observacao = String(patch.observacao || '');
+  if (patch.etapas_ok !== undefined && patch.etapas_ok && typeof patch.etapas_ok === 'object') {
+    item.etapas_ok = { ...(item.etapas_ok || {}), ...patch.etapas_ok };
+  }
 
   try {
     const sys = item.sistema || {};

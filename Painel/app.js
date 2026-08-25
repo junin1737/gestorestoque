@@ -31,8 +31,25 @@ const $$ = (sel, el = document) => [...el.querySelectorAll(sel)];
 const CAMERA_ICON_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>';
 
 window.setGestorScanTarget = (target) => {
-  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
+  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
 };
+
+/** APK Android (ponte nativa). Navegador/iPhone Safari = false. */
+function isNativeApk() {
+  try {
+    if (window.__GESTOR_APP__) return true;
+    if (window.GestorApp && typeof window.GestorApp.isNativeApp === 'function') {
+      return !!window.GestorApp.isNativeApp();
+    }
+    return !!(window.GestorApp && typeof window.GestorApp.scanBarcode === 'function');
+  } catch {
+    return false;
+  }
+}
+
+function isChaveScanTarget(target = state.scanTarget) {
+  return target === 'importacao';
+}
 
 function showToast(message) {
   const el = $('#app-toast');
@@ -1664,27 +1681,31 @@ async function applyScannedCode(value) {
 /** Usado pelo APK Android (câmera nativa ao vivo). */
 window.applyScannedCodeFromApp = (value) => applyScannedCode(value);
 
-function getZxingHints() {
+function getZxingHints(forChave = false) {
   const Z = window.ZXingBrowser || window.ZXing;
   const hints = new Map();
   const BF = Z?.BarcodeFormat;
   const formats = [];
+  // Chave NF-e (navegador): formatos longos. Produto: EAN/UPC rápido — sem TRY_HARDER.
+  const names = forChave
+    ? ['CODE_128', 'ITF', 'CODE_39', 'CODABAR']
+    : ['EAN_13', 'EAN_8', 'UPC_A', 'UPC_E', 'CODE_128', 'CODE_39'];
   if (BF) {
-    for (const name of ['CODE_128', 'ITF', 'CODE_39', 'EAN_13', 'EAN_8', 'UPC_A', 'CODABAR']) {
+    for (const name of names) {
       if (BF[name] != null) formats.push(BF[name]);
     }
   }
   const DHT = Z?.DecodeHintType;
   if (formats.length) hints.set(DHT?.POSSIBLE_FORMATS ?? 2, formats);
-  hints.set(DHT?.TRY_HARDER ?? 3, true);
+  if (forChave) hints.set(DHT?.TRY_HARDER ?? 3, true);
   return hints;
 }
 
-function getZxingReader() {
+function getZxingReader(forChave = isChaveScanTarget()) {
   const ZXing = window.ZXingBrowser || window.ZXing;
   if (!ZXing?.BrowserMultiFormatReader) return null;
   try {
-    return new ZXing.BrowserMultiFormatReader(getZxingHints());
+    return new ZXing.BrowserMultiFormatReader(getZxingHints(forChave));
   } catch {
     return new ZXing.BrowserMultiFormatReader();
   }
@@ -1732,8 +1753,9 @@ function applyMono(ctx, cw, ch, mode) {
   ctx.putImageData(data, 0, 0);
 }
 
-function canvasVariantsFromImage(img) {
-  const base = drawSourceToCanvas(img, 1800);
+function canvasVariantsFromImage(img, { heavy = false } = {}) {
+  const maxEdge = heavy ? 1800 : 1400;
+  const base = drawSourceToCanvas(img, maxEdge);
   if (!base) return [];
   let w = base.width;
   let h = base.height;
@@ -1765,11 +1787,15 @@ function canvasVariantsFromImage(img) {
     variants.push(canvas);
   };
 
+  // Caminho rápido (produto / APK nunca usa isto): poucas variantes
   pushVariant(0, 0, w, h, 1, 'contrast');
-
   const cx = Math.round(w * 0.06);
   const cy = Math.round(h * 0.2);
-  pushVariant(cx, cy, Math.round(w * 0.88), Math.round(h * 0.58), 1.3, 'contrast');
+  pushVariant(cx, cy, Math.round(w * 0.88), Math.round(h * 0.58), 1.25, 'threshold');
+
+  if (!heavy) return variants;
+
+  // Caminho pesado só no navegador/iPhone para chave NF-e (44 dígitos)
   pushVariant(cx, cy, Math.round(w * 0.88), Math.round(h * 0.58), 1.5, 'threshold');
 
   const strips = [
@@ -1816,7 +1842,7 @@ async function detectWithBarcodeDetector(source) {
 }
 
 async function detectWithZxingCanvas(canvas) {
-  const reader = getZxingReader();
+  const reader = getZxingReader(isChaveScanTarget());
   if (!reader) return [];
   try {
     const result = await reader.decodeFromCanvas(canvas);
@@ -1829,6 +1855,7 @@ async function detectWithZxingCanvas(canvas) {
 
 async function decodeBarcodeFromImageUrl(url, file) {
   const candidates = [];
+  const heavy = isChaveScanTarget(); // só chave no navegador/iPhone usa variantes pesadas
   const pushTexts = (list) => {
     for (const t of list || []) {
       if (!t) continue;
@@ -1842,7 +1869,7 @@ async function decodeBarcodeFromImageUrl(url, file) {
   const takeIfReady = () => {
     const best = pickBestBarcode(candidates);
     if (!best) return '';
-    if (state.scanTarget === 'importacao') {
+    if (heavy) {
       const chave = extractChaveNfe44(best);
       return chave.length === 44 ? chave : '';
     }
@@ -1868,7 +1895,7 @@ async function decodeBarcodeFromImageUrl(url, file) {
   } catch { /* ignore */ }
 
   try {
-    const reader = getZxingReader();
+    const reader = getZxingReader(heavy);
     if (reader) {
       const result = await reader.decodeFromImageUrl(url);
       const text = result?.getText?.() || result?.text || '';
@@ -1877,7 +1904,7 @@ async function decodeBarcodeFromImageUrl(url, file) {
   } catch { /* ignore */ }
 
   try {
-    const reader = getZxingReader();
+    const reader = getZxingReader(heavy);
     if (reader?.decodeFromImageElement && img instanceof HTMLImageElement) {
       const result = await reader.decodeFromImageElement(img);
       const text = result?.getText?.() || result?.text || '';
@@ -1893,7 +1920,7 @@ async function decodeBarcodeFromImageUrl(url, file) {
 
   let variants = [];
   try {
-    variants = canvasVariantsFromImage(img);
+    variants = canvasVariantsFromImage(img, { heavy });
   } catch (err) {
     console.warn('Variantes de leitura:', err);
   }
@@ -1910,7 +1937,7 @@ async function decodeBarcodeFromImageUrl(url, file) {
   }
 
   oriented?.close?.();
-  if (state.scanTarget === 'importacao') {
+  if (heavy) {
     const joined = candidates.map((c) => String(c || '').replace(/\D/g, '')).join('');
     const chave = extractChaveNfe44(joined);
     if (chave.length === 44) return chave;
@@ -1920,11 +1947,16 @@ async function decodeBarcodeFromImageUrl(url, file) {
 }
 
 async function startScanner(target = 'search') {
-  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
-  // No APK Android: câmera nativa (WebView em HTTP local não abre getUserMedia).
+  state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
+  // APK: câmera nativa rápida (sem getUserMedia / sem decode pesado do navegador)
   try {
-    if (window.GestorApp && typeof window.GestorApp.scanBarcode === 'function') {
-      window.GestorApp.scanBarcode();
+    if (isNativeApk() && window.GestorApp) {
+      const tgt = state.scanTarget;
+      if (typeof window.GestorApp.scanBarcodeFor === 'function') {
+        window.GestorApp.scanBarcodeFor(tgt);
+      } else if (typeof window.GestorApp.scanBarcode === 'function') {
+        window.GestorApp.scanBarcode();
+      }
       return;
     }
   } catch (err) {
@@ -1943,12 +1975,13 @@ async function startScanner(target = 'search') {
     preview.removeAttribute('src');
   }
   dlg.showModal();
-  msg.textContent = state.scanTarget === 'importacao'
-    ? 'No iPhone, fotografe só a faixa preta do código de barras da chave (44 dígitos), na horizontal, bem perto e nítida.'
+  msg.textContent = isChaveScanTarget()
+    ? 'No iPhone/navegador: fotografe só a faixa do código de barras da chave (44 dígitos), na horizontal, bem perto e nítida.'
     : 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
 
-  const canLive = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
-    && (window.isSecureContext || window.__GESTOR_APP__));
+  // Leitura ao vivo só no navegador seguro — nunca forçar no APK
+  const canLive = !isNativeApk()
+    && !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && window.isSecureContext);
   if (liveBtn) liveBtn.hidden = !canLive;
 }
 
@@ -1989,7 +2022,9 @@ async function startLiveScanner() {
 
     if ('BarcodeDetector' in window) {
       const detector = new BarcodeDetector({
-        formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'codabar'],
+        formats: isChaveScanTarget()
+          ? ['code_128', 'itf', 'code_39', 'codabar']
+          : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'],
       });
       msg.textContent = 'Aponte para o código de barras…';
       scanControls.timer = setInterval(async () => {

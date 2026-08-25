@@ -62,6 +62,7 @@ public class MainActivity extends AppCompatActivity {
     private ImageView imgEmitente;
     private TextView txtEmpresa;
     private PermissionRequest pendingPermissionRequest;
+    private String pendingBarcodeMode = "product";
 
     private final ActivityResultLauncher<ScanOptions> qrLauncher =
             registerForActivityResult(new ScanContract(), result -> {
@@ -118,7 +119,7 @@ public class MainActivity extends AppCompatActivity {
         setupWebView();
         EmitenteIcon.restore(this, imgEmitente, txtEmpresa);
 
-        View.OnClickListener openBarcode = v -> startBarcodeScan();
+        View.OnClickListener openBarcode = v -> startBarcodeScan("product");
         btnScanQr.setOnClickListener(v -> startQrScan());
         btnConnect.setOnClickListener(v -> connect());
         btnChange.setOnClickListener(v -> showConnectPanel());
@@ -192,6 +193,17 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void startBarcodeScan() {
+        startBarcodeScan(pendingBarcodeMode);
+    }
+
+    /**
+     * Leitura nativa rápida.
+     * - product / ficha / ean: EAN/UPC (sem QR, sem MIXED — mais ágil)
+     * - importacao (chave NF-e): CODE_128/ITF, orientação livre
+     */
+    private void startBarcodeScan(String mode) {
+        String m = mode == null ? "product" : mode.trim().toLowerCase();
+        pendingBarcodeMode = m;
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(
@@ -201,23 +213,37 @@ public class MainActivity extends AppCompatActivity {
             );
             return;
         }
+
+        boolean chave = "importacao".equals(m) || "chave".equals(m);
         ScanOptions options = new ScanOptions();
-        options.setDesiredBarcodeFormats(Arrays.asList(
-                ScanOptions.EAN_13,
-                ScanOptions.EAN_8,
-                ScanOptions.UPC_A,
-                ScanOptions.UPC_E,
-                ScanOptions.CODE_128,
-                ScanOptions.CODE_39,
-                ScanOptions.ITF,
-                ScanOptions.QR_CODE
-        ));
-        options.setPrompt(getString(R.string.scan_barcode_hint));
-        options.setBeepEnabled(true);
-        options.setOrientationLocked(true);
+        if (chave) {
+            options.setDesiredBarcodeFormats(Arrays.asList(
+                    ScanOptions.CODE_128,
+                    ScanOptions.ITF,
+                    ScanOptions.CODE_39
+            ));
+            options.setPrompt("Chave NF-e — enquadre a barra na horizontal");
+            options.setOrientationLocked(false);
+            options.setBeepEnabled(true);
+            options.setBarcodeImageEnabled(false);
+            options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.NORMAL_SCAN);
+        } else {
+            options.setDesiredBarcodeFormats(Arrays.asList(
+                    ScanOptions.EAN_13,
+                    ScanOptions.EAN_8,
+                    ScanOptions.UPC_A,
+                    ScanOptions.UPC_E,
+                    ScanOptions.CODE_128,
+                    ScanOptions.CODE_39
+            ));
+            options.setPrompt(getString(R.string.scan_barcode_hint));
+            options.setOrientationLocked(true);
+            options.setBeepEnabled(true);
+            options.setBarcodeImageEnabled(false);
+            // NORMAL (não MIXED): MIXED tenta invertido e deixa a leitura lenta no APK
+            options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.NORMAL_SCAN);
+        }
         options.setCaptureActivity(PortraitCaptureActivity.class);
-        options.setBarcodeImageEnabled(false);
-        options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.MIXED_SCAN);
         barcodeLauncher.launch(options);
     }
 
@@ -258,15 +284,18 @@ public class MainActivity extends AppCompatActivity {
                 + "    }"
                 + "    if(!t||t.disabled)return;"
                 + "    e.preventDefault();e.stopImmediatePropagation();"
-                + "    if(typeof window.setGestorScanTarget==='function'){"
-                + "      var tgt='search';"
-                + "      if(t.id==='btn-scan-ficha-barras')tgt='ficha';"
-                + "      else if(t.id==='imp-btn-scan-chave')tgt='importacao';"
-                + "      else if(t.id==='imp-btn-scan-prod')tgt='importacao-prod';"
-                + "      else if(t.id==='imp-btn-scan-ean')tgt='importacao-ean';"
-                + "      window.setGestorScanTarget(tgt);"
-                + "    }"
-                + "    try{if(window.GestorApp){window.GestorApp.scanBarcode();}}catch(err){}"
+                + "    var tgt='search';"
+                + "    if(t.id==='btn-scan-ficha-barras')tgt='ficha';"
+                + "    else if(t.id==='imp-btn-scan-chave')tgt='importacao';"
+                + "    else if(t.id==='imp-btn-scan-prod')tgt='importacao-prod';"
+                + "    else if(t.id==='imp-btn-scan-ean')tgt='importacao-ean';"
+                + "    if(typeof window.setGestorScanTarget==='function')window.setGestorScanTarget(tgt);"
+                + "    try{"
+                + "      if(window.GestorApp){"
+                + "        if(typeof window.GestorApp.scanBarcodeFor==='function')window.GestorApp.scanBarcodeFor(tgt);"
+                + "        else if(typeof window.GestorApp.scanBarcode==='function')window.GestorApp.scanBarcode();"
+                + "      }"
+                + "    }catch(err){}"
                 + "  },true);"
                 + "}"
                 + "var m=document.querySelector('meta[name=viewport]');"
@@ -474,7 +503,22 @@ public class MainActivity extends AppCompatActivity {
         public void scanBarcode() {
             runOnUiThread(() -> {
                 Toast.makeText(MainActivity.this, R.string.scan_barcode_hint, Toast.LENGTH_SHORT).show();
-                startBarcodeScan();
+                startBarcodeScan("product");
+            });
+        }
+
+        /** target: search|ficha|importacao|importacao-prod|importacao-ean */
+        @JavascriptInterface
+        public void scanBarcodeFor(String target) {
+            final String mode = target == null ? "product" : target;
+            runOnUiThread(() -> {
+                boolean chave = "importacao".equalsIgnoreCase(mode);
+                Toast.makeText(
+                        MainActivity.this,
+                        chave ? "Leitura da chave NF-e" : getString(R.string.scan_barcode_hint),
+                        Toast.LENGTH_SHORT
+                ).show();
+                startBarcodeScan(mode);
             });
         }
 

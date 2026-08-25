@@ -156,6 +156,8 @@ function getSaidaPadrao() {
     aplicar_saida: (s.aplicar_saida === false || s.aplicar_saida === 'N') ? 'N' : 'S',
     obrigar_financeiro: (s.obrigar_financeiro === false || s.obrigar_financeiro === 'N') ? 'N' : 'S',
     zerar_negativo: (s.zerar_negativo === true || s.zerar_negativo === 'S') ? 'S' : 'N',
+    // S = só avança de etapa da conferência do item ao confirmar
+    conferir_etapas: (s.conferir_etapas === true || s.conferir_etapas === 'S') ? 'S' : 'N',
   };
 }
 
@@ -172,6 +174,11 @@ function setSaidaPadrao(saida) {
       : (saida?.zerar_negativo === false || saida?.zerar_negativo === 'N')
         ? 'N'
         : ((prev.zerar_negativo === true || prev.zerar_negativo === 'S') ? 'S' : 'N'),
+    conferir_etapas: (saida?.conferir_etapas === true || saida?.conferir_etapas === 'S')
+      ? 'S'
+      : (saida?.conferir_etapas === false || saida?.conferir_etapas === 'N')
+        ? 'N'
+        : ((prev.conferir_etapas === true || prev.conferir_etapas === 'S') ? 'S' : 'N'),
   };
   saveLocalParams(local);
   return local.saida;
