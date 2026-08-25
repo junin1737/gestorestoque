@@ -993,6 +993,15 @@ function updateItem(sessaoId, nItem, patch) {
 
   try {
     const sys = item.sistema || {};
+    const qXml = Number(sys.qtd_xml) > 0 ? Number(sys.qtd_xml) : Number(item.xml?.qCom || 0);
+    if (qXml > 0) {
+      sys.qtd_xml = qXml;
+      const conv = Number(sys.conversor || 1) || 1;
+      if (!(Number(sys.qtd) > 0)) {
+        sys.qtd = Number((qXml * conv).toFixed(6));
+      }
+    }
+    item.sistema = sys;
     if (sys.uni_medida_xml && sys.uni_medida) {
       importacaoParams.upsertConversao({
         uni_xml: sys.uni_medida_xml,

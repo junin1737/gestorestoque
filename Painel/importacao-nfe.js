@@ -2117,10 +2117,12 @@ const ImportacaoNfe = (() => {
     const footerHtml = isLastTab
       ? `
         <button type="button" class="btn outline" id="imp-salvar-item">Salvar item</button>
-        <label class="imp-check">
+        ${conferirEtapasAtivo()
+    ? ''
+    : `<label class="imp-check">
           <input type="checkbox" id="imp-conferido" ${it.conferido ? 'checked' : ''} />
           Item verificado
-        </label>
+        </label>`}
         <button type="button" class="btn primary" id="imp-salvar-proximo">
           ${state.itemIndex < total - 1 ? 'Salvar e próximo →' : 'Salvar e voltar'}
         </button>`
@@ -2477,7 +2479,12 @@ const ImportacaoNfe = (() => {
       descricao: it?.xml?.xProd || '',
       cod_fornecedor: it?.xml?.cProd || '',
       ncm: it?.xml?.NCM || '',
+      uni_medida_xml: it?.xml?.uCom || it?.sistema?.uni_medida_xml || '',
+      uni_medida: it?.sistema?.uni_medida || it?.xml?.uCom || '',
+      qtd_xml: Number(it?.sistema?.qtd_xml ?? it?.xml?.qCom ?? 0) || Number(it?.xml?.qCom || 0) || 0,
+      conversor: Number(it?.sistema?.conversor ?? 1) || 1,
     };
+    baseNovo.qtd = Number((baseNovo.qtd_xml * baseNovo.conversor).toFixed(6));
     if (ean && ean !== 'SEMGTIN' && ean.length >= 8) {
       try {
         const res = await api(`/estoque/codigo-barras?code=${encodeURIComponent(ean)}`);
@@ -2683,7 +2690,12 @@ const ImportacaoNfe = (() => {
     const vSeguro = gnDef('#imp-seguro', sys.v_seguro ?? 0);
     const vOutro = gnDef('#imp-outro', sys.v_outro ?? 0);
     const conversor = gnDef('#imp-conversor', sys.conversor ?? 1) || 1;
-    const qtdXml = gnDef('#imp-qtd-xml', sys.qtd_xml ?? it?.xml?.qCom ?? 0);
+    const qtdXmlRaw = gn('#imp-qtd-xml');
+    const qtdXml = Number(
+      qtdXmlRaw != null && qtdXmlRaw > 0
+        ? qtdXmlRaw
+        : (sys.qtd_xml ?? it?.xml?.qCom ?? 0)
+    ) || Number(it?.xml?.qCom || 0) || 0;
     const qtd = Number((qtdXml * conversor).toFixed(6));
 
     let custo = parseMoney($('#imp-custo-ficha')?.value);
@@ -2860,7 +2872,9 @@ const ImportacaoNfe = (() => {
           _class_label: g('#imp-busca-class-nfce') || tc._class_label || '',
         },
       },
-      conferido: $('#imp-conferido') ? !!$('#imp-conferido').checked : !!it?.conferido,
+      conferido: conferirEtapasAtivo()
+        ? true
+        : ($('#imp-conferido') ? !!$('#imp-conferido').checked : !!it?.conferido),
       observacao: g('#imp-obs') != null ? (g('#imp-obs') || '') : (it?.observacao || ''),
       etapas_ok: { ...etapasOkOf(it) },
       lote_aba_visitada: !!it?.lote_aba_visitada,
@@ -3065,7 +3079,7 @@ const ImportacaoNfe = (() => {
     gera_financeiro: it.gera_financeiro,
   }))}">
             <strong>${esc(labelPreferDesc ? (desc || code) : code)}</strong>
-            <span>${esc(labelPreferDesc ? code : desc)}</span>
+            <span>${esc(labelPreferDesc ? code : desc)}${it.conversor != null ? ` · conv. ${it.conversor}` : ''}</span>
           </button>`;
       }).join('');
       $$('.imp-prod-opt', box).forEach((btn) => {
@@ -3809,7 +3823,7 @@ const ImportacaoNfe = (() => {
           <button type="button" class="imp-prod-opt"
             data-code="${esc(code)}" data-label="${esc(label)}" data-conversor="${esc(String(it.conversor ?? 1))}">
             <strong>${esc(code)}</strong>
-            <span>${esc(desc || `Conv. ${it.conversor ?? 1}`)}</span>
+            <span>${esc(desc || '')}${desc ? ' · ' : ''}conv. ${esc(String(it.conversor ?? 1))}</span>
           </button>`;
       }).join('');
       $$('.imp-prod-opt', box).forEach((btn) => {

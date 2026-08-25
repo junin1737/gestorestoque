@@ -1190,7 +1190,9 @@ async function gravarNfCompra(sessao, {
       }
 
       const conversor = Number(it.sistema.conversor ?? 1) || 1;
-      const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0) || 0;
+      const qtdXml = Number(it.sistema.qtd_xml) > 0
+        ? Number(it.sistema.qtd_xml)
+        : (Number(it.xml?.qCom || 0) || 0);
       const qtd = Number((qtdXml * conversor).toFixed(6));
       it.sistema.qtd = qtd;
       it.sistema.conversor = conversor;

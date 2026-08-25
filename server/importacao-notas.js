@@ -226,14 +226,21 @@ async function listUnidades(q) {
     const params = [];
     let where = `(STATUS = 'A' OR STATUS IS NULL)`;
     if (term) {
-      where += ` AND (UPPER(UNIDADE) CONTAINING UPPER(?) OR UPPER(DESCRICAO) CONTAINING UPPER(?))`;
-      params.push(term, term);
+      where += ` AND (
+        UPPER(UNIDADE) CONTAINING UPPER(?)
+        OR UPPER(DESCRICAO) CONTAINING UPPER(?)
+        OR CAST(CONVERSOR AS VARCHAR(30)) CONTAINING ?
+      )`;
+      params.push(term, term, term);
     }
+    const convExato = Number(String(term).replace(',', '.'));
+    const orderExact = Number.isFinite(convExato) && term !== '';
     const rows = await query(db, `
       SELECT FIRST 80 UNIDADE, DESCRICAO, CONVERSOR, STATUS, VENDA_FRACIONADA
       FROM TB_UNI_MEDIDA
       WHERE ${where}
-      ORDER BY UNIDADE`, params);
+      ORDER BY ${orderExact ? 'CASE WHEN CONVERSOR = ? THEN 0 ELSE 1 END, ' : ''}CONVERSOR, UNIDADE`,
+      orderExact ? [...params, convExato] : params);
     return rows.map((r) => ({
       unidade: String(r.UNIDADE || '').trim(),
       descricao: String(r.DESCRICAO || '').trim(),
