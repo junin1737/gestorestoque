@@ -42,6 +42,39 @@ const ImportacaoNfe = (() => {
     { id: 'anp', label: '6 · ANP' },
   ];
 
+  const NATUREZAS_CFOP_TODOS = [
+    'industrializa',
+    'uso e consumo',
+    'uso/consumo',
+    'uso consumo',
+    'ativo imobilizado',
+    'imobilizado',
+    'bonifica',
+    'brinde',
+  ];
+
+  function isNaturezaCfopTodos(texto) {
+    const t = String(texto || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    if (!t) return false;
+    return NATUREZAS_CFOP_TODOS.some((k) => t.includes(k));
+  }
+
+  function labelNaturezaEspecial(texto) {
+    const t = String(texto || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+    if (t.includes('industrializa')) return 'compra para industrialização';
+    if (t.includes('uso') && t.includes('consumo')) return 'uso e consumo';
+    if (t.includes('imobilizado')) return 'ativo imobilizado';
+    if (t.includes('bonifica')) return 'bonificação';
+    if (t.includes('brinde')) return 'brinde';
+    return 'natureza especial';
+  }
+
   function calcVendaPorMargem(custo, margem) {
     const c = Number(custo || 0);
     const m = Number(margem || 0);
@@ -422,6 +455,72 @@ const ImportacaoNfe = (() => {
     renderSessao();
     setTab('dados');
     showView('sessao');
+    await maybeAskAplicarCfopNatureza(state.sessao);
+  }
+
+  async function aplicarCfopNaturezaTodos(natureza = {}) {
+    const s = state.sessao;
+    if (!s?.id) return false;
+    const cfop = String(natureza.cfop || s.natureza?.cfop || '').replace(/\D/g, '').slice(0, 4);
+    if (!cfop) {
+      deps.showMsg?.('Esta natureza não tem CFOP cadastrado para aplicar nos itens.');
+      return false;
+    }
+    const csosn = String(natureza.csosn_padrao || s.natureza?.csosn_padrao || '').replace(/\D/g, '').slice(0, 3);
+    const geraEstoque = (natureza.gera_estoque || s.natureza?.gera_estoque || 'S') === 'N' ? 'N' : 'S';
+    const geraFinanceiro = (natureza.gera_financeiro || s.natureza?.gera_financeiro || 'S') === 'N' ? 'N' : 'S';
+    let okCount = 0;
+    for (const it of s.itens || []) {
+      const res = await api(`/importacao/sessoes/${encodeURIComponent(s.id)}/itens/${encodeURIComponent(it.nItem)}`, {
+        method: 'PUT',
+        body: {
+          sistema: {
+            cfop,
+            ...(csosn ? { csosn_entrada: csosn, csosn } : {}),
+            gera_estoque: geraEstoque,
+            gera_financeiro: geraFinanceiro,
+          },
+        },
+      });
+      if (res.ok) {
+        okCount += 1;
+        if (res.sessao) state.sessao = res.sessao;
+      }
+    }
+    if (state.sessao) {
+      state.sessao.cfop_todos_perguntado = true;
+      try {
+        await api(`/importacao/sessoes/${encodeURIComponent(s.id)}/cabecalho`, {
+          method: 'PUT',
+          body: { cfop_todos_perguntado: true },
+        });
+      } catch { /* ignore */ }
+    }
+    deps.showToast?.(`CFOP ${cfop} aplicado a ${okCount} item(ns)`);
+    renderSessao();
+    return okCount > 0;
+  }
+
+  async function maybeAskAplicarCfopNatureza(sessao, { force = false } = {}) {
+    const s = sessao || state.sessao;
+    if (!s || s.status === 'confirmada') return;
+    if (!force && s.cfop_todos_perguntado) return;
+    const texto = s.natureza?.descricao || s.xml?.ide?.natOp || '';
+    if (!isNaturezaCfopTodos(texto)) return;
+    const cfop = String(s.natureza?.cfop || '').replace(/\D/g, '').slice(0, 4);
+    const tipo = labelNaturezaEspecial(texto);
+    const msg = cfop
+      ? `A natureza indica ${tipo}.\n\nDeseja atribuir o CFOP de entrada ${cfop} a todos os itens?`
+      : `A natureza indica ${tipo}.\n\nDeseja aplicar esta natureza (estoque/financeiro) a todos os itens?`;
+    const ok = await askConfirm(msg, { okLabel: 'Aplicar a todos', cancelLabel: 'Não' });
+    s.cfop_todos_perguntado = true;
+    try {
+      await api(`/importacao/sessoes/${encodeURIComponent(s.id)}/cabecalho`, {
+        method: 'PUT',
+        body: { cfop_todos_perguntado: true },
+      });
+    } catch { /* ignore */ }
+    if (ok) await aplicarCfopNaturezaTodos(s.natureza || {});
   }
 
   function renderSessao() {
@@ -675,23 +774,28 @@ const ImportacaoNfe = (() => {
         const sess = state.sessao;
         if (!sess?.id) return;
         const label = desc || extra?.descricao || '';
+        const natureza = {
+          id_natope: Number(code) || null,
+          descricao: label,
+          cfop: extra?.cfop || '',
+          csosn_padrao: extra?.csosn_padrao || '',
+          gera_estoque: extra?.gera_estoque || 'S',
+          gera_financeiro: extra?.gera_financeiro || 'S',
+        };
         const res = await api(`/importacao/sessoes/${sess.id}/cabecalho`, {
           method: 'PUT',
           body: {
             id_natope: Number(code) || null,
-            natureza: {
-              id_natope: Number(code) || null,
-              descricao: label,
-              cfop: extra?.cfop || '',
-              csosn_padrao: extra?.csosn_padrao || '',
-            },
+            natureza,
             natOp: label || sess.xml?.ide?.natOp || '',
+            cfop_todos_perguntado: false,
           },
         });
         if (res.ok) {
           state.sessao = res.sessao;
           deps.showToast?.('Natureza atualizada');
           renderSessao();
+          await maybeAskAplicarCfopNatureza(state.sessao, { force: true });
         } else {
           deps.showMsg?.(res.error || 'Erro ao salvar natureza');
         }
@@ -804,7 +908,12 @@ const ImportacaoNfe = (() => {
       const uniXml = sys.uni_medida_xml || xml.uCom || '';
       const uniEst = sys.uni_medida || '';
       const custo = Number(sys.prc_custo || 0);
+      const geraEst = (sys.gera_estoque || 'S') !== 'N';
+      const geraFin = (sys.gera_financeiro || 'S') !== 'N';
       const convLine = `<span class="hint imp-item-conv">Conv. ${esc(String(conversor))} · ${num(qtdXml)} ${esc(uniXml)} → ${num(qtdEst)} ${esc(uniEst)}${custo > 0 ? ` · Custo ${money(custo)}` : ''}</span>`;
+      const flagsLine = (!geraEst || !geraFin)
+        ? `<span class="hint imp-item-flags">${!geraEst ? '<span class="chip pending">Sem estoque</span>' : ''}${!geraFin ? ' <span class="chip pending">Sem financeiro</span>' : ''}</span>`
+        : '';
       return `
         <button type="button" class="imp-item-row ${cls}" data-idx="${idx}">
           <span class="imp-item-num">${esc(it.nItem)}</span>
@@ -819,6 +928,7 @@ const ImportacaoNfe = (() => {
             </div>
             <span class="hint">Cód. ${esc(xml.cProd || '—')} · Qtd ${num(xml.qCom)} ${esc(xml.uCom || '')} · CFOP ${esc(cfopOrig)} → ${esc(cfopEnt)}</span>
             ${convLine}
+            ${flagsLine}
           </div>
           <span class="imp-status ${cls}">${lbl}</span>
         </button>
@@ -1515,7 +1625,16 @@ const ImportacaoNfe = (() => {
           ${field('Desconto', 'imp-desc-val', sys.v_desc, { type: 'number', step: '0.01', third: true })}
           ${field('Seguro', 'imp-seguro', sys.v_seguro, { type: 'number', step: '0.01', third: true })}
           ${field('Outras despesas', 'imp-outro', sys.v_outro, { type: 'number', step: '0.01', third: true })}
+          <label class="imp-check imp-field half">
+            <input type="checkbox" id="imp-gera-estoque" ${ynChecked(sys.gera_estoque !== 'N') ? 'checked' : ''} />
+            Gera estoque neste item
+          </label>
+          <label class="imp-check imp-field half">
+            <input type="checkbox" id="imp-gera-financeiro" ${ynChecked(sys.gera_financeiro !== 'N') ? 'checked' : ''} />
+            Considera no financeiro da nota
+          </label>
         </div>
+        <p class="hint">Uso/consumo, imobilizado e similares costumam não movimentar estoque. Flags também vêm dos parâmetros de CFOP / TB_NAT_OPERACAO.</p>
         <div class="imp-trib-head"><span>Código</span><span>XML (nota)</span><span>Sistema</span></div>
         <div class="imp-trib-codes">
           ${tribRow('CST ICMS', imp.CST, 'imp-cst', trib.cst_icms || imp.CST, { readonly: true })}
@@ -2468,6 +2587,12 @@ const ImportacaoNfe = (() => {
         _cti_cfe_label: g('#imp-cti-cfe-disp') || sys._cti_cfe_label || '',
         margem_lb: margem,
         aplicar_saida: aplicarSaida,
+        gera_estoque: $('#imp-gera-estoque')
+          ? ($('#imp-gera-estoque').checked ? 'S' : 'N')
+          : (sys.gera_estoque || 'S'),
+        gera_financeiro: $('#imp-gera-financeiro')
+          ? ($('#imp-gera-financeiro').checked ? 'S' : 'N')
+          : (sys.gera_financeiro || 'S'),
         id_regra: sys.id_regra ?? null,
         uni_medida: uniEstoque || '',
         uni_medida_cadastro: sys.uni_medida_cadastro || '',
@@ -2724,6 +2849,8 @@ const ImportacaoNfe = (() => {
     descricao: it.descricao || it.desc_class_trib || '',
     conversor: it.conversor,
     unidade: it.unidade,
+    gera_estoque: it.gera_estoque,
+    gera_financeiro: it.gera_financeiro,
   }))}">
             <strong>${esc(labelPreferDesc ? (desc || code) : code)}</strong>
             <span>${esc(labelPreferDesc ? code : desc)}</span>
@@ -3094,7 +3221,18 @@ const ImportacaoNfe = (() => {
       });
     };
 
-    wireFiscal('#imp-cfop', '#imp-cfop-list', '/importacao/cfop', 'cfop');
+    wireFiscal('#imp-cfop', '#imp-cfop-list', '/importacao/cfop', 'cfop', {
+      onSelect: async (code) => {
+        try {
+          const params = await api('/importacao/params/cfop');
+          const row = (params.itens || []).find((r) => String(r.cfop_conv || '') === String(code || ''));
+          if (row) {
+            if ($('#imp-gera-estoque')) $('#imp-gera-estoque').checked = row.gera_estoque !== 'N';
+            if ($('#imp-gera-financeiro')) $('#imp-gera-financeiro').checked = row.gera_financeiro !== 'N';
+          }
+        } catch { /* ignore */ }
+      },
+    });
     wireFiscal('#imp-cfop-saida', '#imp-cfop-saida-list', '/importacao/cfop', 'cfop');
     wireFiscal('#imp-cfop-nf', '#imp-cfop-nf-list', '/importacao/cfop', 'cfop');
     wireFiscal('#imp-cti', '#imp-cti-list', '/importacao/taxa-uf', 'id_cti', {
@@ -3275,6 +3413,7 @@ const ImportacaoNfe = (() => {
           ${field('CSOSN padrão (fallback)', 'imp-params-csosn', csosn, { third: true })}
         </div>
         <h5 class="imp-sub">Conversão por linha (entrada → saída NF-e / CF-e)</h5>
+        <p class="hint">Colunas Estoque e Financeiro definem se aquele CFOP de entrada movimenta saldo ou entra no contas a pagar. Uso/consumo e imobilizado normalmente ficam sem estoque.</p>
         <div class="imp-params-scroll">
         <table class="imp-params-table" id="imp-params-table">
           <thead>
@@ -3282,6 +3421,8 @@ const ImportacaoNfe = (() => {
               <th>CFOP origem</th>
               <th>CFOP entrada</th>
               <th>CSOSN entr.</th>
+              <th>Estoque</th>
+              <th>Financeiro</th>
               <th>CFOP saí. NF-e</th>
               <th>CSOSN NF-e</th>
               <th>CST NF-e</th>
@@ -3389,6 +3530,8 @@ const ImportacaoNfe = (() => {
         <td><input type="text" class="imp-cfop-origem" maxlength="4" value="${esc(r.cfop_origem || '')}" inputmode="numeric" title="CFOP origem" /></td>
         <td><input type="text" class="imp-cfop-conv" maxlength="4" value="${esc(r.cfop_conv || '')}" inputmode="numeric" title="CFOP entrada" /></td>
         <td><input type="text" class="imp-cfop-csosn" maxlength="3" value="${esc(r.csosn || '102')}" inputmode="numeric" title="CSOSN entrada" /></td>
+        <td class="imp-params-check"><input type="checkbox" class="imp-gera-estoque" ${ynChecked(r.gera_estoque !== 'N') ? 'checked' : ''} title="Gera estoque" /></td>
+        <td class="imp-params-check"><input type="checkbox" class="imp-gera-financeiro" ${ynChecked(r.gera_financeiro !== 'N') ? 'checked' : ''} title="Gera financeiro" /></td>
         <td><input type="text" class="imp-cfop-saida-nfe" maxlength="4" value="${esc(r.cfop_saida_nfe || '')}" inputmode="numeric" title="CFOP saída NF-e" /></td>
         <td><input type="text" class="imp-csosn-saida-nfe" maxlength="3" value="${esc(r.csosn_saida_nfe || '')}" inputmode="numeric" title="CSOSN saída NF-e" placeholder="CSOSN" /></td>
         <td><input type="text" class="imp-cst-saida-nfe" maxlength="3" value="${esc(r.cst_saida_nfe || '')}" inputmode="numeric" title="CST saída NF-e" placeholder="CST" /></td>
@@ -3485,6 +3628,8 @@ const ImportacaoNfe = (() => {
       cfop_origem: tr.querySelector('.imp-cfop-origem')?.value || '',
       cfop_conv: tr.querySelector('.imp-cfop-conv')?.value || '',
       csosn: tr.querySelector('.imp-cfop-csosn')?.value || '102',
+      gera_estoque: tr.querySelector('.imp-gera-estoque')?.checked ? 'S' : 'N',
+      gera_financeiro: tr.querySelector('.imp-gera-financeiro')?.checked ? 'S' : 'N',
       cfop_saida_nfe: tr.querySelector('.imp-cfop-saida-nfe')?.value || '',
       csosn_saida_nfe: tr.querySelector('.imp-csosn-saida-nfe')?.value || '',
       cst_saida_nfe: tr.querySelector('.imp-cst-saida-nfe')?.value || '',
@@ -3605,7 +3750,8 @@ const ImportacaoNfe = (() => {
       try {
         const params = await api('/importacao/params/cfop');
         const obrigar = (params.saida?.obrigar_financeiro || 'S') !== 'N';
-        if (obrigar && !state.sessao?.financeiro_ok && !state.financeiroVisitado) {
+        const algumFin = (state.sessao.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
+        if (obrigar && algumFin && !state.sessao?.financeiro_ok && !state.financeiroVisitado) {
           deps.showMsg?.('Abra a aba Financeiro, confira as parcelas (valor e vencimento) e toque em Salvar financeiro antes de gravar.');
           setTab('financeiro');
           return;
