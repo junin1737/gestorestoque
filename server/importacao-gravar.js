@@ -2,6 +2,7 @@
 
 const { withDb, query, activeTargets, hasTable } = require('./db');
 const { findNfDuplicada } = require('./importacao-notas');
+const importacaoParams = require('./importacao-params');
 const { round2, calcCustoUnitarioItem } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
 
@@ -147,46 +148,72 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   return { id_identificador: idIdentificador, id_estoque: idEstoque };
 }
 
+async function insertSaldoAlterado(db, t, {
+  idIdentificador, saldoAntigo, saldoNovo, prcMedio, agora, idFuncionario, obs,
+}) {
+  if (!hasTable(t.saldo)) return;
+  const nextSaldo = await nextId(db, t.genSaldo, t.saldo, 'ID');
+  try {
+    await query(db, `
+      INSERT INTO ${t.saldo}
+        (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO, OBSERVACAO)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
+      nextSaldo, agora.dataSql, idIdentificador, saldoAntigo, saldoNovo, prcMedio,
+      agora.horaSql, idFuncionario || 0, String(obs || '').slice(0, 200),
+    ]);
+  } catch (e) {
+    if (String(e.message || '').includes('OBSERVACAO')) {
+      await query(db, `
+        INSERT INTO ${t.saldo}
+          (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
+        nextSaldo, agora.dataSql, idIdentificador, saldoAntigo, saldoNovo, prcMedio,
+        agora.horaSql, idFuncionario || 0,
+      ]);
+    } else {
+      console.warn('Saldo entrada NF:', e.message);
+    }
+  }
+}
+
 async function entradaEstoque(db, appCfg, {
   idIdentificador, qtd, prcCusto, usuario, idFuncionario, nfLabel,
 }) {
   const targets = activeTargets(appCfg);
   const agora = localNow();
   const obs = `Entrada NF ${nfLabel} - ${usuario}`.slice(0, 200);
+  const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
 
   for (const target of targets) {
     const t = target.tables;
     const prodRows = await query(db, `
       SELECT FIRST 1 QTD_ATUAL, PRC_MEDIO FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
     if (!prodRows[0]) continue;
-    const qtdAtual = Number(prodRows[0].QTD_ATUAL || 0);
+    let qtdAtual = Number(prodRows[0].QTD_ATUAL || 0);
     const prcMedio = Number(prodRows[0].PRC_MEDIO || prcCusto || 0);
+    if (zerarNeg && qtdAtual < 0) {
+      await insertSaldoAlterado(db, t, {
+        idIdentificador,
+        saldoAntigo: qtdAtual,
+        saldoNovo: 0,
+        prcMedio: prcMedio || prcCusto || 0,
+        agora,
+        idFuncionario,
+        obs: `Zera saldo negativo antes da entrada NF ${nfLabel} - ${usuario}`,
+      });
+      qtdAtual = 0;
+    }
     const nova = qtdAtual + Number(qtd || 0);
     await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?`, [nova, idIdentificador]);
-    if (hasTable(t.saldo)) {
-      const nextSaldo = await nextId(db, t.genSaldo, t.saldo, 'ID');
-      try {
-        await query(db, `
-          INSERT INTO ${t.saldo}
-            (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO, OBSERVACAO)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
-          nextSaldo, agora.dataSql, idIdentificador, qtdAtual, nova, prcMedio || prcCusto || 0,
-          agora.horaSql, idFuncionario || 0, obs,
-        ]);
-      } catch (e) {
-        if (String(e.message || '').includes('OBSERVACAO')) {
-          await query(db, `
-            INSERT INTO ${t.saldo}
-              (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
-            nextSaldo, agora.dataSql, idIdentificador, qtdAtual, nova, prcMedio || prcCusto || 0,
-            agora.horaSql, idFuncionario || 0,
-          ]);
-        } else {
-          console.warn('Saldo entrada NF:', e.message);
-        }
-      }
-    }
+    await insertSaldoAlterado(db, t, {
+      idIdentificador,
+      saldoAntigo: qtdAtual,
+      saldoNovo: nova,
+      prcMedio: prcMedio || prcCusto || 0,
+      agora,
+      idFuncionario,
+      obs,
+    });
   }
 }
 

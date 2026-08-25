@@ -110,19 +110,86 @@ function getSaidaPadrao() {
     csosn_saida: String(s.csosn_saida || '').trim(),
     aplicar_saida: (s.aplicar_saida === false || s.aplicar_saida === 'N') ? 'N' : 'S',
     obrigar_financeiro: (s.obrigar_financeiro === false || s.obrigar_financeiro === 'N') ? 'N' : 'S',
+    zerar_negativo: (s.zerar_negativo === true || s.zerar_negativo === 'S') ? 'S' : 'N',
   };
 }
 
 function setSaidaPadrao(saida) {
   const local = loadLocalParams() || { itens: [] };
+  const prev = local.saida || {};
   local.saida = {
     cfop_saida: String(saida?.cfop_saida || '').replace(/\D/g, '').slice(0, 4),
     csosn_saida: String(saida?.csosn_saida || '').replace(/\D/g, '').slice(0, 3),
     aplicar_saida: (saida?.aplicar_saida === false || saida?.aplicar_saida === 'N') ? 'N' : 'S',
     obrigar_financeiro: (saida?.obrigar_financeiro === false || saida?.obrigar_financeiro === 'N') ? 'N' : 'S',
+    zerar_negativo: (saida?.zerar_negativo === true || saida?.zerar_negativo === 'S')
+      ? 'S'
+      : (saida?.zerar_negativo === false || saida?.zerar_negativo === 'N')
+        ? 'N'
+        : ((prev.zerar_negativo === true || prev.zerar_negativo === 'S') ? 'S' : 'N'),
   };
   saveLocalParams(local);
   return local.saida;
+}
+
+function normConversao(it = {}) {
+  return {
+    uni_xml: String(it.uni_xml || '').trim().toUpperCase().slice(0, 10),
+    uni_estoque: String(it.uni_estoque || '').trim().toUpperCase().slice(0, 10),
+    conversor: Number(it.conversor || 1) || 1,
+    updatedAt: it.updatedAt || new Date().toISOString(),
+  };
+}
+
+function listConversoes() {
+  const local = loadLocalParams();
+  const list = Array.isArray(local?.conversoes) ? local.conversoes.map(normConversao) : [];
+  return list
+    .filter((c) => c.uni_xml && c.uni_estoque)
+    .sort((a, b) => String(b.updatedAt).localeCompare(String(a.updatedAt)));
+}
+
+function saveConversoes(itens) {
+  const local = loadLocalParams() || { itens: [] };
+  local.conversoes = (Array.isArray(itens) ? itens : [])
+    .map(normConversao)
+    .filter((c) => c.uni_xml && c.uni_estoque);
+  saveLocalParams(local);
+  return listConversoes();
+}
+
+function upsertConversao({ uni_xml, uni_estoque, conversor, id_identificador }) {
+  const row = normConversao({ uni_xml, uni_estoque, conversor, updatedAt: new Date().toISOString() });
+  if (!row.uni_xml || !row.uni_estoque) return listConversoes();
+  const local = loadLocalParams() || { itens: [] };
+  const rest = (Array.isArray(local.conversoes) ? local.conversoes : [])
+    .map(normConversao)
+    .filter((c) => c.uni_xml !== row.uni_xml);
+  rest.push(row);
+  local.conversoes = rest.slice(-80);
+  const id = Number(id_identificador || 0);
+  if (id) {
+    const prod = Array.isArray(local.conversoes_produto) ? local.conversoes_produto : [];
+    local.conversoes_produto = prod
+      .filter((c) => Number(c.id_identificador) !== id)
+      .concat([{ ...row, id_identificador: id }])
+      .slice(-200);
+  }
+  saveLocalParams(local);
+  return row;
+}
+
+function findConversao(uniXml, idIdentificador) {
+  const local = loadLocalParams();
+  const id = Number(idIdentificador || 0);
+  if (id) {
+    const prod = Array.isArray(local?.conversoes_produto) ? local.conversoes_produto : [];
+    const found = prod.find((c) => Number(c.id_identificador) === id);
+    if (found) return normConversao(found);
+  }
+  const xml = String(uniXml || '').trim().toUpperCase();
+  if (!xml) return null;
+  return listConversoes().find((c) => c.uni_xml === xml) || null;
 }
 
 function getCsosnPadrao() {
@@ -206,6 +273,10 @@ module.exports = {
   setCsosnPadrao,
   getSaidaPadrao,
   setSaidaPadrao,
+  listConversoes,
+  saveConversoes,
+  upsertConversao,
+  findConversao,
   mapCfopEntrada,
   getEmitenteUf,
   applyUfDigit,

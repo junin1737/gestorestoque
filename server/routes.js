@@ -1249,6 +1249,7 @@ router.get('/importacao/params/cfop', async (req, res) => {
       itens,
       csosn_padrao: importacaoParams.getCsosnPadrao(),
       saida: importacaoParams.getSaidaPadrao(),
+      conversoes: importacaoParams.listConversoes(),
     });
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [], csosn_padrao: '102', saida: null });
@@ -1263,7 +1264,10 @@ router.put('/importacao/params/cfop', async (req, res) => {
     const saida = req.body?.saida != null
       ? importacaoParams.setSaidaPadrao(req.body.saida)
       : importacaoParams.getSaidaPadrao();
-    res.json({ ok: true, itens, csosn_padrao: csosn, saida });
+    const conversoes = req.body?.conversoes != null
+      ? importacaoParams.saveConversoes(req.body.conversoes)
+      : importacaoParams.listConversoes();
+    res.json({ ok: true, itens, csosn_padrao: csosn, saida, conversoes });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -1404,7 +1408,8 @@ router.get('/importacao/produto-fiscal/:id', async (req, res) => {
   try {
     const item = await importacaoNotas.getProdutoFiscal(req.params.id);
     if (!item) return res.json({ ok: false, error: 'Produto não encontrado' });
-    res.json({ ok: true, item });
+    const conversao = importacaoParams.findConversao(null, req.params.id);
+    res.json({ ok: true, item, conversao });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -1511,6 +1516,30 @@ router.post('/importacao/sessoes/:id/cancelar', (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
     res.json(importacaoStaging.cancelarSessaoConfirmada(req.params.id));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/importacao/notas/:idNfcompra/resumo', async (req, res) => {
+  const okImp = importacaoSupervisorOk(req);
+  let okAlt = false;
+  if (!okImp) {
+    const uid = Number(req.query?.usuarioId ?? req.body?.usuarioId);
+    try {
+      const users = loadUsersConfig(loadAppConfig());
+      const u = (users.usuarios || []).find((x) => Number(x.id) === uid);
+      okAlt = !!(u?.supervisor || u?.permissoes?.importacao?.acesso || u?.permissoes?.alteracoes?.acesso);
+    } catch { /* ignore */ }
+  }
+  if (!okImp && !okAlt) {
+    res.json({ ok: false, error: 'Sem permissão para ver o resumo da nota.' });
+    return;
+  }
+  try {
+    const nota = await importacaoNotas.getNotaResumo(req.params.idNfcompra);
+    if (!nota) return res.json({ ok: false, error: 'Nota não encontrada' });
+    res.json({ ok: true, nota });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -1731,6 +1760,15 @@ router.put('/importacao/sessoes/:id/itens/:nItem', (req, res) => {
   try {
     const out = importacaoStaging.updateItem(req.params.id, req.params.nItem, req.body || {});
     res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/sessoes/:id/conferir-todos', (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    res.json(importacaoStaging.conferirTodosItens(req.params.id));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

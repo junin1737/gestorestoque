@@ -175,6 +175,12 @@
   margin-bottom: 0.5rem;
 }
 
+.imp-itens-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
 .imp-nota-row {
   display: flex;
   justify-content: space-between;

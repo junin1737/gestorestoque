@@ -539,6 +539,55 @@ async function getNotaById(id) {
   });
 }
 
+async function getNotaResumo(id) {
+  const idNf = Number(id);
+  if (!idNf) return null;
+  return withDb(async (db) => {
+    const cabRows = await query(db, `
+      SELECT FIRST 1 N.ID_NFCOMPRA, N.NF_NUMERO, N.NF_SERIE, N.NFE_ORIGEM, N.STATUS,
+             N.DT_EMISSAO, N.DT_ENTRADA,
+             F.NOME_FANTA AS FORNEC_FANTA, F.NOME AS FORNEC_NOME, F.CNPJ AS FORNEC_CNPJ
+      FROM TB_NFCOMPRA N
+      LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
+      WHERE N.ID_NFCOMPRA = ?`, [idNf]);
+    if (!cabRows[0]) return null;
+    const nota = mapNotaRow(cabRows[0]);
+    let itens = [];
+    try {
+      const itemRows = await query(db, `
+        SELECT I.NUM_ITEM, I.ID_IDENTIFICADOR, I.QTD_ITEM, I.UNI_MEDIDA,
+               I.VLR_UNIT, I.VLR_TOTAL, I.CFOP, I.CSOSN,
+               E.DESCRICAO
+        FROM TB_NFC_ITEM I
+        LEFT JOIN TB_EST_IDENTIFICADOR X ON X.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+        LEFT JOIN TB_ESTOQUE E ON E.ID_ESTOQUE = X.ID_ESTOQUE
+        WHERE I.ID_NFCOMPRA = ?
+        ORDER BY I.NUM_ITEM`, [idNf]);
+      itens = itemRows.map((r) => ({
+        num_item: Number(r.NUM_ITEM || 0),
+        id_identificador: Number(r.ID_IDENTIFICADOR || 0),
+        descricao: String(r.DESCRICAO || '').trim(),
+        qtd: Number(r.QTD_ITEM || 0),
+        uni_medida: String(r.UNI_MEDIDA || '').trim(),
+        vlr_unit: Number(r.VLR_UNIT || 0),
+        vlr_total: Number(r.VLR_TOTAL || 0),
+        cfop: String(r.CFOP || '').trim(),
+        csosn: String(r.CSOSN || '').trim(),
+      }));
+    } catch (err) {
+      console.warn('Resumo itens NF:', err.message);
+    }
+    const totalItens = itens.reduce((acc, it) => acc + Number(it.vlr_total || 0), 0);
+    return {
+      ...nota,
+      fornecedor_nome: nota.fornecedor_nome || String(cabRows[0].FORNEC_FANTA || cabRows[0].FORNEC_NOME || '').trim(),
+      itens,
+      qtd_itens: itens.length || nota.qtd_itens,
+      vlr_itens: totalItens || nota.vlr_itens,
+    };
+  });
+}
+
 function numOrNull(v) {
   if (v == null || v === '') return null;
   const n = Number(v);
@@ -729,6 +778,7 @@ async function getSugestaoTributoEstoque(idIdentificador) {
 module.exports = {
   listNotasCadastradas,
   getNotaById,
+  getNotaResumo,
   findNfDuplicada,
   listFormasPagto,
   listParcelamentos,

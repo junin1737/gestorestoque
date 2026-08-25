@@ -260,6 +260,13 @@ input, select, textarea {
   line-height: 1.35;
   color: var(--text);
 }
+#dlg-msg-text {
+  white-space: pre-wrap;
+  font-weight: 500;
+  max-height: 70vh;
+  overflow: auto;
+}
+.alt-row.is-clickable { cursor: pointer; }
 .toast {
   position: fixed;
   left: 50%;

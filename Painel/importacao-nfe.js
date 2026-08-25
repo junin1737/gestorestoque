@@ -804,9 +804,7 @@ const ImportacaoNfe = (() => {
       const uniXml = sys.uni_medida_xml || xml.uCom || '';
       const uniEst = sys.uni_medida || '';
       const custo = Number(sys.prc_custo || 0);
-      const convLine = (it.conferido || it.status === 'conferido')
-        ? `<span class="hint imp-item-conv">Conv. ${esc(String(conversor))} · ${num(qtdXml)} ${esc(uniXml)} → ${num(qtdEst)} ${esc(uniEst)}${custo > 0 ? ` · Custo ${money(custo)}` : ''}</span>`
-        : '';
+      const convLine = `<span class="hint imp-item-conv">Conv. ${esc(String(conversor))} · ${num(qtdXml)} ${esc(uniXml)} → ${num(qtdEst)} ${esc(uniEst)}${custo > 0 ? ` · Custo ${money(custo)}` : ''}</span>`;
       return `
         <button type="button" class="imp-item-row ${cls}" data-idx="${idx}">
           <span class="imp-item-num">${esc(it.nItem)}</span>
@@ -1552,10 +1550,7 @@ const ImportacaoNfe = (() => {
         <div class="imp-fields">
           ${field('Qtd XML', 'imp-qtd-xml', qtdXml, { type: 'number', step: '0.0001', third: true, readonly: true })}
           ${field('Unidade XML', 'imp-uni-xml', sys.uni_medida_xml || xml.uCom, { third: true, readonly: true })}
-          <label class="imp-field third">
-            <span>Unidade estoque</span>
-            <select id="imp-uni">${unidadeOptions(sys.uni_medida || xml.uCom)}</select>
-          </label>
+          ${comboField('Unidade estoque', 'imp-uni', 'imp-uni-list', sys.uni_medida || xml.uCom, { third: true, placeholder: 'Pesquisar unidade…' })}
           ${field('Conversor', 'imp-conversor', conversor, { type: 'number', step: '0.0001', third: true })}
           ${field('Entrada Estoque', 'imp-qtd', qtdConv, { type: 'number', step: '0.0001', third: true, readonly: true })}
           ${field('Custo Convertido', 'imp-custo-conv', custoInfo.custoEstoque, { type: 'number', step: '0.0001', third: true })}
@@ -2322,6 +2317,13 @@ const ImportacaoNfe = (() => {
             p_cofins: f.cofins ?? it.sistema.tributos?.p_cofins,
           };
           it.sistema.uni_medida_cadastro = f.uni_medida || it.sistema.uni_medida_cadastro;
+          if (fiscal.conversao && !it.sistema.conversor_manual) {
+            const conv = fiscal.conversao;
+            it.sistema.uni_medida = conv.uni_estoque || it.sistema.uni_medida;
+            it.sistema.conversor = conv.conversor ?? it.sistema.conversor;
+            const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0);
+            it.sistema.qtd = Number((qtdXml * Number(it.sistema.conversor || 1)).toFixed(6));
+          }
           if (f.trib_nfe) {
             it.sistema.trib_nfe = { ...(keepSaida.trib_nfe || {}), ...(it.sistema.trib_nfe || {}), ...f.trib_nfe };
             delete it.sistema.trib_nfe._class_hydrated;
@@ -2472,6 +2474,7 @@ const ImportacaoNfe = (() => {
         uni_medida_saida: uniSaida || '',
         uni_medida_xml: g('#imp-uni-xml') || sys.uni_medida_xml || '',
         conversor,
+        conversor_manual: !!sys.conversor_manual,
         qtd_xml: qtdXml,
         qtd,
         prc_custo: custo ?? 0,
@@ -2719,6 +2722,8 @@ const ImportacaoNfe = (() => {
     cfop: it.cfop,
     csosn_padrao: it.csosn_padrao,
     descricao: it.descricao || it.desc_class_trib || '',
+    conversor: it.conversor,
+    unidade: it.unidade,
   }))}">
             <strong>${esc(labelPreferDesc ? (desc || code) : code)}</strong>
             <span>${esc(labelPreferDesc ? code : desc)}</span>
@@ -3021,30 +3026,20 @@ const ImportacaoNfe = (() => {
       }
     });
     $('#imp-conversor')?.addEventListener('input', () => {
+      const it = itemAt(state.itemIndex);
+      if (it?.sistema) it.sistema.conversor_manual = true;
       const xmlUni = String($('#imp-uni-xml')?.value || '').trim().toUpperCase();
       const sel = $('#imp-uni');
       const cur = String(sel?.value || '').trim().toUpperCase();
-      const it = itemAt(state.itemIndex);
       const cad = String(it?.sistema?.uni_medida_cadastro || it?.sistema?.uni_medida_saida || 'UN').trim().toUpperCase();
       if (sel && xmlUni && cur === xmlUni && cad && cad !== xmlUni) {
-        const has = [...sel.options].some((o) => String(o.value).toUpperCase() === cad);
-        if (!has) {
-          const opt = document.createElement('option');
-          opt.value = cad;
-          opt.textContent = cad;
-          sel.appendChild(opt);
-        }
-        const match = [...sel.options].find((o) => String(o.value).toUpperCase() === cad);
-        if (match) sel.value = match.value;
+        sel.value = cad;
+        const disp = $('#imp-uni-disp');
+        if (disp) disp.value = cad;
       }
       syncQtdConvertida();
     });
-    $('#imp-uni')?.addEventListener('change', (e) => {
-      const opt = e.target.selectedOptions?.[0];
-      const conv = opt?.dataset?.conversor;
-      if (conv != null && $('#imp-conversor')) {
-        $('#imp-conversor').value = conv;
-      }
+    $('#imp-uni')?.addEventListener('change', () => {
       syncQtdConvertida();
     });
     $('#imp-margem')?.addEventListener('input', syncVendaPorMargem);
@@ -3126,6 +3121,16 @@ const ImportacaoNfe = (() => {
     wireFiscal('#imp-cst-saida', '#imp-cst-saida-list', '/importacao/cst-icms', 'codigo');
     wireFiscal('#imp-cst-cfe', '#imp-cst-cfe-list', '/importacao/cst-icms', 'codigo');
     wireFiscal('#imp-uni-ficha', '#imp-uni-ficha-list', '/importacao/unidades', 'unidade');
+    wireFiscal('#imp-uni', '#imp-uni-list', '/importacao/unidades', 'unidade', {
+      onSelect: (code, desc, extra = {}) => {
+        const it = itemAt(state.itemIndex);
+        if (it?.sistema) it.sistema.uni_medida = code;
+        if (!it?.sistema?.conversor_manual && extra.conversor != null && $('#imp-conversor')) {
+          $('#imp-conversor').value = extra.conversor;
+        }
+        syncQtdConvertida();
+      },
+    });
     wireFiscal('#imp-csosn-saida', '#imp-csosn-saida-list', '/importacao/csosn', 'codigo');
     wireFiscal('#imp-csosn-cfe', '#imp-csosn-cfe-list', '/importacao/csosn', 'codigo');
     wireFiscal('#imp-csosn-trib', '#imp-csosn-trib-list', '/importacao/csosn', 'codigo');
@@ -3261,6 +3266,7 @@ const ImportacaoNfe = (() => {
     const itens = res.itens || [];
     const csosn = res.csosn_padrao || '102';
     const saida = res.saida || {};
+    const conversoes = res.conversoes || [];
     host.innerHTML = `
       <section class="imp-section">
         <header class="imp-section-head"><h4>Parâmetros CFOP / CSOSN</h4></header>
@@ -3310,6 +3316,43 @@ const ImportacaoNfe = (() => {
             <input type="checkbox" id="imp-params-obrigar-fin" ${ynChecked(saida.obrigar_financeiro !== 'N') ? 'checked' : ''} />
             Obrigar conferência da aba Financeiro antes de gravar
           </label>
+          <label class="imp-check imp-field third">
+            <input type="checkbox" id="imp-params-zerar-neg" ${ynChecked(saida.zerar_negativo === 'S') ? 'checked' : ''} />
+            Se o estoque estiver negativo na entrada, zerar e lançar a qtd da nota
+          </label>
+        </div>
+      </section>
+      <section class="imp-section">
+        <header class="imp-section-head"><h4>Conversões de unidade (último vínculo)</h4></header>
+        <p class="hint">Sugestão automática na conferência: unidade XML → unidade de estoque e conversor. Gravado ao salvar o item.</p>
+        <div class="imp-params-scroll">
+        <table class="imp-params-table" id="imp-params-conv-table">
+          <thead>
+            <tr>
+              <th>Unid. XML</th>
+              <th>Unid. estoque</th>
+              <th>Conversor</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            ${conversoes.map((c) => `
+              <tr>
+                <td><input type="text" class="imp-conv-xml" value="${esc(c.uni_xml || '')}" /></td>
+                <td><input type="text" class="imp-conv-est" value="${esc(c.uni_estoque || '')}" /></td>
+                <td><input type="number" step="0.0001" class="imp-conv-fator" value="${esc(String(c.conversor ?? 1))}" /></td>
+                <td><button type="button" class="btn small outline imp-params-conv-del">Remover</button></td>
+              </tr>
+            `).join('') || `
+              <tr>
+                <td><input type="text" class="imp-conv-xml" placeholder="CX" /></td>
+                <td><input type="text" class="imp-conv-est" placeholder="UN" /></td>
+                <td><input type="number" step="0.0001" class="imp-conv-fator" value="1" /></td>
+                <td><button type="button" class="btn small outline imp-params-conv-del">Remover</button></td>
+              </tr>
+            `}
+          </tbody>
+        </table>
         </div>
       </section>
     `;
@@ -3321,6 +3364,9 @@ const ImportacaoNfe = (() => {
       bindParamsRowEvents();
     });
     bindParamsRowEvents();
+    $$('#imp-params-conv-table .imp-params-conv-del').forEach((btn) => {
+      btn.onclick = () => btn.closest('tr')?.remove();
+    });
     showView('params');
   }
 
@@ -3455,10 +3501,16 @@ const ImportacaoNfe = (() => {
       csosn_saida: $('#imp-params-csosn-saida')?.value || '',
       aplicar_saida: $('#imp-params-aplicar-saida')?.checked ? 'S' : 'N',
       obrigar_financeiro: $('#imp-params-obrigar-fin')?.checked ? 'S' : 'N',
+      zerar_negativo: $('#imp-params-zerar-neg')?.checked ? 'S' : 'N',
     };
+    const conversoes = $$('#imp-params-conv-table tbody tr').map((tr) => ({
+      uni_xml: tr.querySelector('.imp-conv-xml')?.value || '',
+      uni_estoque: tr.querySelector('.imp-conv-est')?.value || '',
+      conversor: Number(tr.querySelector('.imp-conv-fator')?.value || 1) || 1,
+    })).filter((c) => c.uni_xml && c.uni_estoque);
     const res = await api('/importacao/params/cfop', {
       method: 'PUT',
-      body: { itens, csosn_padrao: csosn, saida },
+      body: { itens, csosn_padrao: csosn, saida, conversoes },
     });
     if (!res.ok) {
       deps.showMsg?.(res.error || 'Erro ao salvar parâmetros');
@@ -3526,6 +3578,22 @@ const ImportacaoNfe = (() => {
     });
 
     $('#imp-btn-add-item')?.addEventListener('click', () => addItemManual());
+    $('#imp-btn-conferir-todos')?.addEventListener('click', async () => {
+      const s = state.sessao;
+      if (!s) return;
+      const res = await api(`/importacao/sessoes/${encodeURIComponent(s.id)}/conferir-todos`, { method: 'POST' });
+      if (!res.ok) {
+        deps.showMsg?.(res.error || 'Não foi possível conferir os itens.');
+        return;
+      }
+      state.sessao = res.sessao;
+      deps.showToast?.(res.message || 'Itens conferidos');
+      if (res.pendentes?.length) {
+        deps.showMsg?.(`Itens sem vínculo (não conferidos): ${res.pendentes.join(', ')}`);
+      }
+      renderItensLista();
+      updateConfirmBtn();
+    });
 
     $('#imp-btn-confirmar')?.addEventListener('click', async () => {
       if (!state.sessao) return;
@@ -3625,15 +3693,19 @@ const ImportacaoNfe = (() => {
 
   async function leaveSessaoToHome() {
     const s = state.sessao;
-    if (s?.editar_id_nfcompra && s.id) {
+    if (s?.id) {
       const ok = await askConfirm(
-        'Descartar as alterações e voltar? A nota cadastrada permanece como estava (nada será gravado).',
-        { okLabel: 'Sim, descartar', cancelLabel: 'Continuar' }
+        s.editar_id_nfcompra
+          ? 'Sair sem gravar as alterações desta nota? A nota cadastrada permanece como estava.'
+          : 'Sair da conferência sem gravar a nota? A sessão permanece em “Em conferência”.',
+        { okLabel: 'Sair', cancelLabel: 'Continuar' }
       );
       if (!ok) return false;
-      try {
-        await api(`/importacao/sessoes/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
-      } catch (_) { /* ignore */ }
+      if (s.editar_id_nfcompra) {
+        try {
+          await api(`/importacao/sessoes/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+        } catch (_) { /* ignore */ }
+      }
     }
     state.sessao = null;
     showView('inicio');
@@ -3662,13 +3734,39 @@ const ImportacaoNfe = (() => {
   }
 
   function onPageEnter() {
-    setDateFiltersToday();
-    showView('inicio');
-    loadHome();
     const title = $('#page-title');
     const sub = $('#page-sub');
     if (title) title.textContent = 'Importar NF-e';
-    if (sub) sub.textContent = 'Protótipo — conferência por item (em desenvolvimento)';
+    if (sub) sub.textContent = 'Conferência por item';
+    setDateFiltersToday();
+    if (state.view === 'item' && state.sessao) {
+      openItem(state.itemIndex);
+      return;
+    }
+    if (state.view === 'sessao' && state.sessao) {
+      renderSessao();
+      showView('sessao');
+      return;
+    }
+    if (state.view === 'params') {
+      loadParamsView();
+      return;
+    }
+    if (state.view === 'consultar') {
+      showView('consultar');
+      return;
+    }
+    showView('inicio');
+    loadHome();
+  }
+
+  function isDirtyConferencia() {
+    if (state.view === 'sessao' || state.view === 'item') return !!state.sessao;
+    if (state.view === 'consultar') {
+      const chave = String($('#imp-chave')?.value || '').replace(/\D/g, '');
+      return chave.length >= 8 || !!state.xmlTextPendente;
+    }
+    return false;
   }
 
   function init(options) {
@@ -3685,6 +3783,7 @@ const ImportacaoNfe = (() => {
     applyScannedEan,
     handleBack,
     getView: () => state.view,
+    isDirtyConferencia,
   };
 })();
 

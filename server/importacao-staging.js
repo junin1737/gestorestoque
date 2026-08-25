@@ -309,6 +309,7 @@ async function buildSistemaFromXmlItem(xmlItem, ufFornecedor) {
   const saidaPad = importacaoParams.getSaidaPadrao();
   const csosnNota = String(imp.CSOSN || '').trim();
   const csosn = csosnNota || cfopMap.csosn;
+  const convSug = importacaoParams.findConversao(xmlItem.uCom);
   return {
     id_identificador: null,
     id_estoque: null,
@@ -341,11 +342,11 @@ async function buildSistemaFromXmlItem(xmlItem, ufFornecedor) {
     aplicar_saida: saidaPad.aplicar_saida || 'S',
     id_regra: null,
     uni_medida_xml: xmlItem.uCom,
-    uni_medida: xmlItem.uCom,
+    uni_medida: convSug?.uni_estoque || xmlItem.uCom,
     uni_medida_saida: '',
-    conversor: 1,
+    conversor: convSug?.conversor || 1,
     qtd_xml: xmlItem.qCom,
-    qtd: xmlItem.qCom,
+    qtd: Number((Number(xmlItem.qCom || 0) * Number(convSug?.conversor || 1)).toFixed(6)),
     prc_custo: xmlItem.vUnCom,
     prc_custo_nota: xmlItem.vUnCom,
     prc_venda: Number(xmlItem.vUnCom || 0),
@@ -980,10 +981,60 @@ function updateItem(sessaoId, nItem, patch) {
   if (patch.conferido !== undefined) item.conferido = !!patch.conferido;
   if (patch.observacao !== undefined) item.observacao = String(patch.observacao || '');
 
+  try {
+    const sys = item.sistema || {};
+    if (sys.uni_medida_xml && sys.uni_medida) {
+      importacaoParams.upsertConversao({
+        uni_xml: sys.uni_medida_xml,
+        uni_estoque: sys.uni_medida,
+        conversor: sys.conversor,
+        id_identificador: sys.id_identificador,
+      });
+    }
+  } catch (_) { /* ignore */ }
+
   s.updatedAt = new Date().toISOString();
   s._sync = { ...(s._sync || {}), version: (s._sync?.version || 0) + 1, pendingCloud: true };
   saveStore(store);
   return { ok: true, item: mapItemForClient(item), sessao: mapSessaoForClient(s) };
+}
+
+function conferirTodosItens(sessaoId) {
+  const store = loadStore();
+  const s = store.sessoes.find((x) => x.id === sessaoId);
+  if (!s) return { ok: false, error: 'Sessão não encontrada' };
+  if (s.status === 'confirmada') return { ok: false, error: 'Nota já confirmada.' };
+  let conferidos = 0;
+  const pendentes = [];
+  for (const it of s.itens || []) {
+    const sys = it.sistema || {};
+    if (sys.id_identificador || sys.criar_novo) {
+      const xmlItem = it.xml || {};
+      const conv = importacaoParams.findConversao(sys.uni_medida_xml || xmlItem.uCom, sys.id_identificador);
+      if (conv && !sys.conversor_manual) {
+        sys.uni_medida = conv.uni_estoque || sys.uni_medida;
+        sys.conversor = conv.conversor;
+        const qtdXml = Number(sys.qtd_xml ?? xmlItem.qCom ?? 0);
+        sys.qtd = Number((qtdXml * Number(sys.conversor || 1)).toFixed(6));
+      }
+      it.conferido = true;
+      conferidos += 1;
+    } else {
+      pendentes.push(it.nItem);
+    }
+  }
+  s.updatedAt = new Date().toISOString();
+  s._sync = { ...(s._sync || {}), version: (s._sync?.version || 0) + 1, pendingCloud: true };
+  saveStore(store);
+  return {
+    ok: true,
+    conferidos,
+    pendentes,
+    message: pendentes.length
+      ? `${conferidos} item(ns) conferido(s). ${pendentes.length} ainda sem vínculo.`
+      : `${conferidos} item(ns) conferido(s).`,
+    sessao: mapSessaoForClient(s),
+  };
 }
 
 function updateFinanceiro(sessaoId, financeiro) {
@@ -1128,6 +1179,7 @@ module.exports = {
   listSessoesConfirmadas,
   getSessao,
   updateItem,
+  conferirTodosItens,
   updateFinanceiro,
   sugerirFinanceiroSessao,
   confirmarSessao,

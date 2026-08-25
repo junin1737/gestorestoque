@@ -2,6 +2,7 @@
 
 const { withDb, query, activeTargets } = require('./db');
 const { getProdutoFiscal } = require('./importacao-notas');
+const importacaoParams = require('./importacao-params');
 
 function normalizeDesc(s) {
   return String(s || '')
@@ -188,6 +189,14 @@ async function aplicarSugestoesVinculo(sessao) {
   for (const p of pendentes) {
     const f = await getProdutoFiscal(p.idLigado);
     aplicarFiscalPreservandoSaida(p.it.sistema, f);
+    const xmlItem = p.it.xml || {};
+    const conv = importacaoParams.findConversao(xmlItem.uCom, p.idLigado);
+    if (conv) {
+      p.it.sistema.uni_medida = conv.uni_estoque || p.it.sistema.uni_medida;
+      p.it.sistema.conversor = conv.conversor;
+      const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
+      p.it.sistema.qtd = Number((qtdXml * Number(conv.conversor || 1)).toFixed(6));
+    }
     p.it.match = {
       id_identificador: p.idLigado,
       id_estoque: p.it.sistema.id_estoque,

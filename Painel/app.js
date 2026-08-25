@@ -520,13 +520,13 @@ function setNavActive(page) {
 }
 
 $$('.nav-btn').forEach((btn) => {
-  btn.addEventListener('click', () => {
+  btn.addEventListener('click', async () => {
     document.body.classList.remove('sidebar-open');
-    showPage(btn.dataset.page);
+    await showPage(btn.dataset.page);
   });
 });
 $$('#mobile-nav [data-page]').forEach((btn) => {
-  btn.addEventListener('click', () => showPage(btn.dataset.page));
+  btn.addEventListener('click', async () => showPage(btn.dataset.page));
 });
 $('#dash-estoque')?.addEventListener('click', () => showPage('estoque'));
 $('#dash-importacao')?.addEventListener('click', () => showPage('importacao'));
@@ -547,7 +547,17 @@ function scrollAppTop() {
   if (alt) alt.scrollTop = 0;
 }
 
-function showPage(page) {
+async function showPage(page) {
+  const pageImp = $('#page-importacao');
+  const saindoImportacao = pageImp && !pageImp.hidden && page !== 'importacao';
+  if (saindoImportacao && window.ImportacaoNfe?.isDirtyConferencia?.()) {
+    const ok = await showConfirm(
+      'A conferência da NF-e está aberta. Sair sem salvar? Alterações deste item que ainda não foram gravadas serão perdidas. A nota permanece em “Em conferência”.',
+      { okLabel: 'Sair', cancelLabel: 'Continuar na NF-e' }
+    );
+    if (!ok) return;
+  }
+
   if (page === 'alteracoes' && !can('alteracoes', 'acesso')) {
     showMsg('Sem permissão para o relatório de alterações.');
     page = 'dashboard';
@@ -1380,6 +1390,33 @@ function tipoAlteracaoLabel(tipo) {
   return map[tipo] || tipo || 'Alteração';
 }
 
+async function abrirResumoNotaLancada(idNf) {
+  const id = Number(idNf);
+  if (!id) return;
+  const qs = `supervisor=${state.usuario?.supervisor ? '1' : '0'}&usuarioId=${encodeURIComponent(state.usuario?.id ?? 0)}`;
+  const res = await api(`/importacao/notas/${id}/resumo?${qs}`);
+  if (!res.ok || !res.nota) {
+    showMsg(res.error || 'Não foi possível carregar o resumo da nota.');
+    return;
+  }
+  const n = res.nota;
+  const linhas = (n.itens || []).map((it) => {
+    const desc = it.descricao || `ID ${it.id_identificador || '—'}`;
+    return `${it.num_item || '—'} · ${desc}  ${fmtNum(it.qtd)} ${it.uni_medida || ''}  ${fmtMoney(it.vlr_total)}`;
+  });
+  const texto = [
+    `NF ${n.nf_numero}/${n.nf_serie || '1'}`,
+    `Fornecedor: ${n.fornecedor_nome || '—'}`,
+    n.fornecedor_cnpj ? `CNPJ: ${n.fornecedor_cnpj}` : '',
+    `Entrada: ${fmtDate(n.dt_entrada)}  ·  Emissão: ${fmtDate(n.dt_emissao)}`,
+    `Itens: ${n.qtd_itens || (n.itens || []).length}  ·  Total: ${fmtMoney(n.vlr_itens)}`,
+    n.status ? `Status: ${n.status}` : '',
+    '',
+    linhas.length ? linhas.join('\n') : 'Sem itens.',
+  ].filter((x, i, arr) => x !== '' || arr[i + 1] !== '').join('\n');
+  showMsg(texto);
+}
+
 function renderAlteracoes() {
   const box = $('#alteracoes-lista');
   if (!box) return;
@@ -1412,7 +1449,7 @@ function renderAlteracoes() {
          <span class="item-price">${escapeHtml(it.resumo || '—')}</span>`;
     const detalhe = it.detalhe || (isQty ? '' : '');
     return `
-      <div class="item-row alt-row">
+      <div class="item-row alt-row ${tipo === 'notas' ? 'is-clickable' : ''}" ${tipo === 'notas' ? `data-nf="${escapeAttr(it.id_estoque)}"` : ''}>
         <div class="item-avatar alt-${escapeAttr(tipo)}" aria-hidden="true">${isQty ? 'Δ' : tipo === 'precos' ? 'R$' : tipo === 'cadastro' ? '+' : 'F'}</div>
         <div class="item-main">
           <strong title="${escapeAttr(it.descricao)}">${escapeHtml(it.descricao || 'Produto')}</strong>
@@ -1429,6 +1466,10 @@ function renderAlteracoes() {
         <div class="item-side">${side}</div>
       </div>`;
   }).join('');
+
+  $$('.alt-row[data-nf]', box).forEach((row) => {
+    row.addEventListener('click', () => abrirResumoNotaLancada(row.dataset.nf));
+  });
 }
 
 $('#btn-buscar-alt')?.addEventListener('click', () => loadAlteracoes());
@@ -1623,10 +1664,30 @@ async function applyScannedCode(value) {
 /** Usado pelo APK Android (câmera nativa ao vivo). */
 window.applyScannedCodeFromApp = (value) => applyScannedCode(value);
 
+function getZxingHints() {
+  const Z = window.ZXingBrowser || window.ZXing;
+  const hints = new Map();
+  const BF = Z?.BarcodeFormat;
+  const formats = [];
+  if (BF) {
+    for (const name of ['CODE_128', 'ITF', 'CODE_39', 'EAN_13', 'EAN_8', 'UPC_A', 'CODABAR']) {
+      if (BF[name] != null) formats.push(BF[name]);
+    }
+  }
+  const DHT = Z?.DecodeHintType;
+  if (formats.length) hints.set(DHT?.POSSIBLE_FORMATS ?? 2, formats);
+  hints.set(DHT?.TRY_HARDER ?? 3, true);
+  return hints;
+}
+
 function getZxingReader() {
   const ZXing = window.ZXingBrowser || window.ZXing;
   if (!ZXing?.BrowserMultiFormatReader) return null;
-  return new ZXing.BrowserMultiFormatReader();
+  try {
+    return new ZXing.BrowserMultiFormatReader(getZxingHints());
+  } catch {
+    return new ZXing.BrowserMultiFormatReader();
+  }
 }
 
 const BARCODE_FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39', 'itf', 'codabar'];
@@ -1642,99 +1703,103 @@ async function loadImageElement(url) {
   return img;
 }
 
-function canvasVariantsFromImage(img) {
-  const w = img.naturalWidth || img.width;
-  const h = img.naturalHeight || img.height;
-  if (!w || !h) return [];
+function drawSourceToCanvas(src, maxEdge = 1800) {
+  const w = src.naturalWidth || src.width;
+  const h = src.naturalHeight || src.height;
+  if (!w || !h) return null;
+  const scale = Math.min(1, maxEdge / Math.max(w, h));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(w * scale));
+  canvas.height = Math.max(1, Math.round(h * scale));
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return null;
+  ctx.drawImage(src, 0, 0, canvas.width, canvas.height);
+  return canvas;
+}
 
-  const max = 1600;
-  const srcW = w;
-  const srcH = h;
-  let work = img;
-  if (Math.max(w, h) > max) {
-    const s = max / Math.max(w, h);
-    const c = document.createElement('canvas');
-    c.width = Math.round(w * s);
-    c.height = Math.round(h * s);
-    const ctx0 = c.getContext('2d');
-    if (ctx0) ctx0.drawImage(img, 0, 0, c.width, c.height);
-    work = c;
-    w = c.width;
-    h = c.height;
+function applyMono(ctx, cw, ch, mode) {
+  if (mode === 'raw' || !ctx) return;
+  const data = ctx.getImageData(0, 0, cw, ch);
+  const px = data.data;
+  for (let i = 0; i < px.length; i += 4) {
+    let y = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
+    if (mode === 'contrast') y = (y - 128) * 1.7 + 128;
+    else if (mode === 'threshold') y = y > 145 ? 255 : 0;
+    else if (mode === 'invert') y = 255 - y;
+    y = Math.max(0, Math.min(255, y));
+    px[i] = px[i + 1] = px[i + 2] = y;
   }
-  const src = work;
+  ctx.putImageData(data, 0, 0);
+}
 
-  const variants = [];
-  const pushVariant = (sx, sy, sw, sh, scale, mode) => {
+function canvasVariantsFromImage(img) {
+  const base = drawSourceToCanvas(img, 1800);
+  if (!base) return [];
+  let w = base.width;
+  let h = base.height;
+  const src = base;
+  const variants = [base];
+
+  const pushVariant = (sx, sy, sw, sh, scale, mode, vStretch = 1) => {
     const cw = Math.max(1, Math.round(sw * scale));
-    const ch = Math.max(1, Math.round(sh * scale));
+    const srcH = Math.max(1, Math.round(sh * scale));
+    const ch = Math.max(1, Math.round(srcH * vStretch));
     const canvas = document.createElement('canvas');
     canvas.width = cw;
     canvas.height = ch;
     const ctx = canvas.getContext('2d', { willReadFrequently: true });
     if (!ctx) return;
-    ctx.imageSmoothingEnabled = true;
-    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, cw, ch);
-
-    if (mode !== 'raw') {
-      const data = ctx.getImageData(0, 0, cw, ch);
-      const px = data.data;
-      for (let i = 0; i < px.length; i += 4) {
-        let y = 0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2];
-        if (mode === 'contrast') {
-          y = (y - 128) * 1.55 + 128;
-        } else if (mode === 'threshold') {
-          y = y > 140 ? 255 : 0;
-        } else if (mode === 'invert') {
-          y = 255 - y;
-        }
-        y = Math.max(0, Math.min(255, y));
-        px[i] = px[i + 1] = px[i + 2] = y;
-      }
-      ctx.putImageData(data, 0, 0);
+    ctx.imageSmoothingEnabled = false;
+    if (vStretch > 1) {
+      const tmp = document.createElement('canvas');
+      tmp.width = cw;
+      tmp.height = srcH;
+      const tctx = tmp.getContext('2d');
+      if (!tctx) return;
+      tctx.drawImage(src, sx, sy, sw, sh, 0, 0, cw, srcH);
+      ctx.drawImage(tmp, 0, 0, cw, srcH, 0, 0, cw, ch);
+    } else {
+      ctx.drawImage(src, sx, sy, sw, sh, 0, 0, cw, ch);
     }
+    applyMono(ctx, cw, ch, mode);
     variants.push(canvas);
   };
 
-  // Original e com contraste em escalas úteis
-  for (const scale of [1]) {
-    pushVariant(0, 0, w, h, scale, 'raw');
-    pushVariant(0, 0, w, h, scale, 'contrast');
+  pushVariant(0, 0, w, h, 1, 'contrast');
+
+  const cx = Math.round(w * 0.06);
+  const cy = Math.round(h * 0.2);
+  pushVariant(cx, cy, Math.round(w * 0.88), Math.round(h * 0.58), 1.3, 'contrast');
+  pushVariant(cx, cy, Math.round(w * 0.88), Math.round(h * 0.58), 1.5, 'threshold');
+
+  const strips = [
+    [0, 0, w, Math.max(40, Math.round(h * 0.18))],
+    [0, Math.round(h * 0.02), w, Math.max(40, Math.round(h * 0.22))],
+    [0, Math.round(h * 0.08), w, Math.max(40, Math.round(h * 0.2))],
+    [0, Math.round(h * 0.32), w, Math.max(40, Math.round(h * 0.28))],
+    [0, Math.round(h * 0.7), w, Math.max(40, Math.round(h * 0.28))],
+  ];
+  for (const [sx, sy, sw, sh] of strips) {
+    pushVariant(sx, sy, sw, sh, 1.6, 'raw', 3);
+    pushVariant(sx, sy, sw, sh, 1.8, 'contrast', 3);
+    pushVariant(sx, sy, sw, sh, 2, 'threshold', 3);
   }
 
-  // Recorte central (usuário costuma centralizar o código)
-  const cx = Math.round(w * 0.08);
-  const cy = Math.round(h * 0.22);
-  const cw = Math.round(w * 0.84);
-  const ch = Math.round(h * 0.56);
-  pushVariant(cx, cy, cw, ch, 1.4, 'contrast');
-  pushVariant(cx, cy, cw, ch, 1.8, 'threshold');
-
-  // Faixa horizontal (barras de produto)
-  const bx = Math.round(w * 0.05);
-  const by = Math.round(h * 0.35);
-  const bw = Math.round(w * 0.9);
-  const bh = Math.round(h * 0.3);
-  pushVariant(bx, by, bw, bh, 2, 'contrast');
-  pushVariant(bx, by, bw, bh, 2.2, 'threshold');
-
-  // DANFE: código da chave (Code 128) costuma ficar na faixa superior
-  const th = Math.max(48, Math.round(h * 0.3));
-  pushVariant(0, 0, w, th, 2.2, 'contrast');
-  pushVariant(0, 0, w, th, 2.6, 'threshold');
-  pushVariant(Math.round(w * 0.02), Math.round(h * 0.01), Math.round(w * 0.96), Math.round(h * 0.22), 2.4, 'raw');
-
-  // Foto deitada (iPhone na vertical fotografando o DANFE na horizontal)
-  const rot = document.createElement('canvas');
-  rot.width = h;
-  rot.height = w;
-  const rctx = rot.getContext('2d', { willReadFrequently: true });
-  if (rctx) {
-    rctx.translate(h, 0);
-    rctx.rotate(Math.PI / 2);
-    rctx.drawImage(img, 0, 0);
+  const addRotated = (radians) => {
+    const rot = document.createElement('canvas');
+    const landscape = Math.abs(Math.cos(radians)) < 0.1;
+    rot.width = landscape ? h : w;
+    rot.height = landscape ? w : h;
+    const rctx = rot.getContext('2d', { willReadFrequently: true });
+    if (!rctx) return;
+    rctx.translate(rot.width / 2, rot.height / 2);
+    rctx.rotate(radians);
+    rctx.drawImage(src, -w / 2, -h / 2);
     variants.push(rot);
-  }
+  };
+  addRotated(Math.PI / 2);
+  addRotated(Math.PI);
+  addRotated((3 * Math.PI) / 2);
 
   return variants;
 }
@@ -1756,22 +1821,50 @@ async function detectWithZxingCanvas(canvas) {
   try {
     const result = await reader.decodeFromCanvas(canvas);
     const text = result?.getText?.() || result?.text || '';
-    return text ? [text] : [];
+    return text ? [text, normalizeBarcodeNumber(text)].filter(Boolean) : [];
   } catch {
     return [];
   }
 }
 
-async function decodeBarcodeFromImageUrl(url) {
+async function decodeBarcodeFromImageUrl(url, file) {
   const candidates = [];
-  const img = await loadImageElement(url);
+  const pushTexts = (list) => {
+    for (const t of list || []) {
+      if (!t) continue;
+      candidates.push(t);
+      const digits = normalizeBarcodeNumber(t);
+      if (digits) candidates.push(digits);
+      const chave = extractChaveNfe44(t);
+      if (chave) candidates.push(chave);
+    }
+  };
+  const takeIfReady = () => {
+    const best = pickBestBarcode(candidates);
+    if (!best) return '';
+    if (state.scanTarget === 'importacao') {
+      const chave = extractChaveNfe44(best);
+      return chave.length === 44 ? chave : '';
+    }
+    return best;
+  };
 
-  // 1) Imagem original
-  candidates.push(...await detectWithBarcodeDetector(img));
+  let oriented = null;
+  if (file) {
+    try {
+      oriented = await createImageBitmap(file, { imageOrientation: 'from-image' });
+    } catch {
+      try { oriented = await createImageBitmap(file); } catch { oriented = null; }
+    }
+  }
+
+  const img = oriented || await loadImageElement(url);
+
+  pushTexts(await detectWithBarcodeDetector(img));
   try {
-    const bitmap = await createImageBitmap(img);
-    candidates.push(...await detectWithBarcodeDetector(bitmap));
-    bitmap.close?.();
+    const bitmap = oriented || await createImageBitmap(img);
+    pushTexts(await detectWithBarcodeDetector(bitmap));
+    if (!oriented) bitmap.close?.();
   } catch { /* ignore */ }
 
   try {
@@ -1779,32 +1872,48 @@ async function decodeBarcodeFromImageUrl(url) {
     if (reader) {
       const result = await reader.decodeFromImageUrl(url);
       const text = result?.getText?.() || result?.text || '';
-      if (text) candidates.push(text);
+      if (text) pushTexts([text]);
     }
   } catch { /* ignore */ }
 
-  if (pickBestBarcode(candidates)) {
-    const early = pickBestBarcode(candidates);
-    if (state.scanTarget === 'importacao') {
-      const chave = extractChaveNfe44(early);
-      if (chave.length === 44) return chave;
-    } else {
-      return early;
+  try {
+    const reader = getZxingReader();
+    if (reader?.decodeFromImageElement && img instanceof HTMLImageElement) {
+      const result = await reader.decodeFromImageElement(img);
+      const text = result?.getText?.() || result?.text || '';
+      if (text) pushTexts([text]);
+    }
+  } catch { /* ignore */ }
+
+  const early = takeIfReady();
+  if (early) {
+    oriented?.close?.();
+    return early;
+  }
+
+  let variants = [];
+  try {
+    variants = canvasVariantsFromImage(img);
+  } catch (err) {
+    console.warn('Variantes de leitura:', err);
+  }
+  for (const canvas of variants) {
+    try {
+      pushTexts(await detectWithBarcodeDetector(canvas));
+      pushTexts(await detectWithZxingCanvas(canvas));
+    } catch { /* ignore */ }
+    const got = takeIfReady();
+    if (got) {
+      oriented?.close?.();
+      return got;
     }
   }
 
-  // 2) Variantes processadas (contraste / recorte / threshold)
-  const variants = canvasVariantsFromImage(img);
-  for (const canvas of variants) {
-    candidates.push(...await detectWithBarcodeDetector(canvas));
-    candidates.push(...await detectWithZxingCanvas(canvas));
-    const best = pickBestBarcode(candidates);
-    if (state.scanTarget === 'importacao') {
-      const chave = extractChaveNfe44(best);
-      if (chave.length === 44) return chave;
-    } else if (best) {
-      return best;
-    }
+  oriented?.close?.();
+  if (state.scanTarget === 'importacao') {
+    const joined = candidates.map((c) => String(c || '').replace(/\D/g, '')).join('');
+    const chave = extractChaveNfe44(joined);
+    if (chave.length === 44) return chave;
   }
 
   return pickBestBarcode(candidates);
@@ -1835,7 +1944,7 @@ async function startScanner(target = 'search') {
   }
   dlg.showModal();
   msg.textContent = state.scanTarget === 'importacao'
-    ? 'No iPhone, fotografe a faixa preta da chave de acesso (44 dígitos), na horizontal, ocupando a largura da tela.'
+    ? 'No iPhone, fotografe só a faixa preta do código de barras da chave (44 dígitos), na horizontal, bem perto e nítida.'
     : 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
 
   const canLive = !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia
@@ -1910,7 +2019,7 @@ async function onScanFileSelected(file) {
   }
   $('#scan-video').hidden = true;
   try {
-    const code = await decodeBarcodeFromImageUrl(url);
+    const code = await decodeBarcodeFromImageUrl(url, file);
     if (!applyScannedCode(code)) {
       msg.textContent = 'Não encontrei o número. Tire outra foto mais perto, com boa luz e só o código.';
     }
