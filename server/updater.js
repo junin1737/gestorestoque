@@ -274,25 +274,34 @@ async function checkForGitUpdate() {
   const remotePkg = await fetchRemotePackageVersion();
   const gitVersion = String(remotePkg.version || '').trim() || '0.0.0';
 
-  // Baixa o instalador da release da versão do package.json (não a "latest" antiga)
+  // Preferência: release com a mesma versão do package.json da main
   let release = await fetchReleaseAssetByTag(gitVersion);
+  let exactReleaseMissing = !release?.asset;
+
+  // Fallback: latest só se for MAIS NOVA que a instalada (nunca mascara código novo sem instalador)
   if (!release?.asset) {
-    release = await fetchLatestReleaseAsset();
+    const latest = await fetchLatestReleaseAsset();
+    if (latest?.asset && cmpVersion(latest.tag, localVersion) > 0) {
+      release = latest;
+    } else if (!release && latest) {
+      release = latest;
+    }
   }
 
-  const remoteVersion = (release?.asset && release.tag)
-    ? release.tag
-    : gitVersion;
+  const hasInstallerNewer = !!(release?.asset && cmpVersion(release.tag, localVersion) > 0);
+  const gitNewer = cmpVersion(gitVersion, localVersion) > 0;
+  // Código no Git à frente, mas sem .exe no Release dessa versão
+  const pendingPublish = gitNewer && exactReleaseMissing && !hasInstallerNewer;
 
-  const available = cmpVersion(remoteVersion, localVersion) > 0 && !!release?.asset;
   return {
-    available,
+    available: hasInstallerNewer,
+    pendingPublish,
     localVersion,
-    remoteVersion,
+    remoteVersion: hasInstallerNewer ? release.tag : gitVersion,
     gitVersion,
     release,
-    downloadUrl: release?.asset?.url || null,
-    assetName: release?.asset?.name || null,
+    downloadUrl: hasInstallerNewer ? release.asset.url : null,
+    assetName: hasInstallerNewer ? release.asset.name : null,
   };
 }
 
@@ -305,6 +314,27 @@ async function promptAndUpdate(parentWindow) {
   }
 
   if (!info.available) {
+    if (info.pendingPublish) {
+      const win = parentWindow && !parentWindow.isDestroyed() ? parentWindow : BrowserWindow.getFocusedWindow();
+      await dialog.showMessageBox(win || undefined, {
+        type: 'warning',
+        buttons: ['OK'],
+        defaultId: 0,
+        title: 'Instalador ainda não publicado',
+        message: `Há versão ${info.gitVersion} no GitHub, mas o instalador ainda não foi publicado.`,
+        detail: [
+          `Versão instalada: ${info.localVersion}`,
+          `Versão no package.json (main): ${info.gitVersion}`,
+          '',
+          'No PC de build (Windows):',
+          '1) git pull',
+          '2) npm run build',
+          `3) Criar Release v${info.gitVersion} anexando dist\\GestorEstoque-Setup-${info.gitVersion}.exe`,
+        ].join('\n'),
+        noLink: true,
+      });
+      return { ok: true, updated: false, pendingPublish: true, info };
+    }
     return { ok: true, updated: false, info };
   }
 
