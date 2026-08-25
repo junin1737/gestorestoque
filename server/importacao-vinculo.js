@@ -197,6 +197,37 @@ async function aplicarSugestoesVinculo(sessao) {
       const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
       p.it.sistema.qtd = Number((qtdXml * Number(conv.conversor || 1)).toFixed(6));
     }
+    // Parametrização prévia em TB_ESTOQUE_FORNECEDOR (unidade + conversor TB_UNI_MEDIDA)
+    try {
+      const idFornec = Number(sessao?.fornecedor?.id_fornec || 0);
+      if (idFornec && p.idLigado) {
+        const { buscarEstoqueFornecedor } = require('./importacao-estoque-fornec');
+        const { calcCustoUnitarioItem } = require('./importacao-rateio');
+        const ef = await buscarEstoqueFornecedor({
+          idFornec,
+          idIdentificador: p.idLigado,
+          codFornecedor: xmlItem.cProd || p.it.sistema?.cod_fornecedor,
+        });
+        if (ef?.uni_medida && !p.it.sistema.conversor_manual) {
+          if (!p.it.sistema.uni_medida_saida) p.it.sistema.uni_medida_saida = ef.uni_medida;
+          p.it.sistema.uni_medida = ef.uni_medida;
+          if (ef.conversor > 0) p.it.sistema.conversor = ef.conversor;
+          const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
+          p.it.sistema.qtd = Number((qtdXml * Number(p.it.sistema.conversor || 1)).toFixed(6));
+          const custoInfo = calcCustoUnitarioItem(p.it.sistema, xmlItem);
+          if (custoInfo.custoEstoque > 0) p.it.sistema.prc_custo = custoInfo.custoEstoque;
+        }
+      }
+    } catch (e) {
+      console.warn('Conversão estoque-fornecedor:', e.message);
+    }
+    if (conv || Number(p.it.sistema.conversor || 1) !== 1) {
+      try {
+        const { calcCustoUnitarioItem } = require('./importacao-rateio');
+        const custoInfo = calcCustoUnitarioItem(p.it.sistema, xmlItem);
+        if (custoInfo.custoEstoque > 0) p.it.sistema.prc_custo = custoInfo.custoEstoque;
+      } catch { /* ignore */ }
+    }
     p.it.match = {
       id_identificador: p.idLigado,
       id_estoque: p.it.sistema.id_estoque,

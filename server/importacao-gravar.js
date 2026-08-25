@@ -1,10 +1,85 @@
 'use strict';
 
-const { withDb, query, activeTargets, hasTable } = require('./db');
-const { findNfDuplicada } = require('./importacao-notas');
+const { withDb, query, activeTargets, hasTable, columnExists } = require('./db');
+const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
 const { round2, calcCustoUnitarioItem } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
+
+let nfCompraObsColumnCache = undefined;
+
+async function resolveNfCompraObsColumn(db) {
+  if (nfCompraObsColumnCache !== undefined) return nfCompraObsColumnCache;
+  const candidates = [
+    'OBSERVACAO',
+    'OBS',
+    'INF_COMPLEMENTAR',
+    'INF_ADICIONAIS',
+    'DADOS_ADICIONAIS',
+    'INFORMACOES_COMPLEMENTARES',
+    'OBS_NF',
+    'COMPLEMENTO',
+    'INF_CPL',
+  ];
+  for (const col of candidates) {
+    try {
+      if (await columnExists(db, 'TB_NFCOMPRA', col)) {
+        nfCompraObsColumnCache = col;
+        return col;
+      }
+    } catch { /* ignore */ }
+  }
+  nfCompraObsColumnCache = null;
+  return null;
+}
+
+async function gravarInfoComplementares(db, idNf, sessao) {
+  const txt = String(
+    sessao?.xml?.infAdic?.infCpl
+    || sessao?.infAdic?.infCpl
+    || sessao?.inf_cpl
+    || sessao?.observacao_nf
+    || ''
+  ).trim();
+  if (!txt || !idNf) return;
+  const col = await resolveNfCompraObsColumn(db);
+  if (!col) {
+    console.warn('TB_NFCOMPRA: nenhuma coluna de informações complementares encontrada.');
+    return;
+  }
+  try {
+    await query(db, `UPDATE TB_NFCOMPRA SET ${col} = ? WHERE ID_NFCOMPRA = ?`, [
+      txt.slice(0, 8000),
+      idNf,
+    ]);
+  } catch (e) {
+    console.warn(`Gravar info complementares (${col}):`, e.message);
+  }
+}
+
+async function resolveItemMovimento(it, sessao) {
+  const sys = it?.sistema || {};
+  const cfop = String(sys.cfop || it?.xml?.CFOP || '').replace(/\D/g, '').slice(0, 4);
+  let flags = importacaoParams.resolveMovimentoFlags({ cfop, sistema: sys });
+  if (flags.origem === 'padrao') {
+    try {
+      const nat = (cfop ? await getNaturezaByCfop(cfop) : null)
+        || (sessao?.id_natope ? await getNaturezaById(sessao.id_natope) : null)
+        || sessao?.natureza
+        || null;
+      if (nat) {
+        flags = {
+          gera_estoque: importacaoParams.ynFlag(nat.gera_estoque, 'S'),
+          gera_financeiro: importacaoParams.ynFlag(nat.gera_financeiro, 'S'),
+          origem: 'natureza',
+        };
+      }
+    } catch (e) {
+      console.warn('Flags natureza:', e.message);
+    }
+  }
+  return flags;
+}
 
 function localNow() {
   const d = new Date();
@@ -176,8 +251,37 @@ async function insertSaldoAlterado(db, t, {
   }
 }
 
+async function zerarNegativoAntesTrigger(db, appCfg, {
+  idIdentificador, prcCusto, usuario, idFuncionario, nfLabel,
+}) {
+  const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
+  if (!zerarNeg) return;
+  const targets = activeTargets(appCfg).filter((t) => !t.manage);
+  const agora = localNow();
+  for (const target of targets) {
+    const t = target.tables;
+    const prodRows = await query(db, `
+      SELECT FIRST 1 QTD_ATUAL, PRC_MEDIO FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
+    if (!prodRows[0]) continue;
+    const qtdAtual = Number(prodRows[0].QTD_ATUAL || 0);
+    if (!(qtdAtual < 0)) continue;
+    const prcMedio = Number(prodRows[0].PRC_MEDIO || prcCusto || 0);
+    await insertSaldoAlterado(db, t, {
+      idIdentificador,
+      saldoAntigo: qtdAtual,
+      saldoNovo: 0,
+      prcMedio: prcMedio || prcCusto || 0,
+      agora,
+      idFuncionario,
+      obs: `Zera saldo negativo antes da entrada NF ${nfLabel} - ${usuario}`,
+    });
+    await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = 0 WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
+  }
+}
+
 async function entradaEstoque(db, appCfg, {
   idIdentificador, qtd, prcCusto, usuario, idFuncionario, nfLabel,
+  skipClipp = false,
 }) {
   const targets = activeTargets(appCfg);
   const agora = localNow();
@@ -185,6 +289,9 @@ async function entradaEstoque(db, appCfg, {
   const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
 
   for (const target of targets) {
+    // Com EST_BX='S' o trigger do Clipp já atualiza TB_ESTOQUE / TB_EST_SALDO_ALTERADO.
+    // Evita lançar a mesma quantidade duas vezes.
+    if (skipClipp && !target.manage) continue;
     const t = target.tables;
     const prodRows = await query(db, `
       SELECT FIRST 1 QTD_ATUAL, PRC_MEDIO FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
@@ -719,6 +826,21 @@ async function gravarNfCompra(sessao, {
     const idFmanfce = fin.id_fmanfce != null ? Number(fin.id_fmanfce) : 5;
     const idNatope = sessao.id_natope != null ? Number(sessao.id_natope) : 9;
 
+    const itemFlags = [];
+    for (const it of itens) {
+      itemFlags.push(await resolveItemMovimento(it, sessao));
+    }
+    let geraFinanceiroNota = itemFlags.some((f) => f.gera_financeiro === 'S');
+    try {
+      const natNota = sessao.natureza
+        || (sessao.id_natope ? await getNaturezaById(sessao.id_natope) : null);
+      if (natNota && importacaoParams.ynFlag(natNota.gera_financeiro, 'S') === 'N'
+        && !itemFlags.some((f) => f.origem === 'item' && f.gera_financeiro === 'S')
+        && !itemFlags.some((f) => f.origem === 'params' && f.gera_financeiro === 'S')) {
+        geraFinanceiroNota = false;
+      }
+    } catch { /* ignore */ }
+
     await query(db, `
       INSERT INTO TB_NFCOMPRA (
         ID_NFCOMPRA, ID_COMPRADOR, ID_FORNEC, NF_NUMERO, NF_SERIE, NF_MODELO,
@@ -761,54 +883,61 @@ async function gravarNfCompra(sessao, {
       chave || null,
     ]);
 
-    const idNumPag = await nextId(db, 'GEN_TB_NFCOMPRA_FMAPAGTO_ID', 'TB_NFCOMPRA_FMAPAGTO', 'ID_NUMPAG');
-    await query(db, `
-      INSERT INTO TB_NFCOMPRA_FMAPAGTO (ID_NUMPAG, VLR_PAGTO, ID_NFCOMPRA, ID_FMANFCE, ID_PARCELA)
-      VALUES (?, ?, ?, ?, ?)`, [
-      idNumPag,
-      round2(tot.vNF || 0),
-      idNf,
-      idFmanfce || 5,
-      idParcela,
-    ]);
-
-    const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
-      ? fin.parcelas
-      : [{ nDup: '001', dVenc: agora.dataSql, vDup: tot.vNF || 0 }];
-
-    for (let i = 0; i < parcelasXml.length; i++) {
-      const p = parcelasXml[i];
-      const idCta = await nextId(db, 'GEN_TB_CTAPAG_ID', 'TB_CONTA_PAGAR', 'ID_CTAPAG');
-      const doc = `${String(nfNumero).padStart(9, '0')}-${String(i + 1).padStart(2, '0')}`;
+    let parcelasGeradas = 0;
+    if (geraFinanceiroNota) {
+      const idNumPag = await nextId(db, 'GEN_TB_NFCOMPRA_FMAPAGTO_ID', 'TB_NFCOMPRA_FMAPAGTO', 'ID_NUMPAG');
       await query(db, `
-        INSERT INTO TB_CONTA_PAGAR (
-          ID_CTAPAG, DOCUMENTO, HISTORICO, DT_EMISSAO, DT_VENCTO, VLR_CTAPAG,
-          TIP_CTAPAG, ID_PORTADOR, ID_FORNEC, CTA_MANUAL, OBSERVACAO
-        ) VALUES (?, ?, ?, ?, ?, ?, 'N', 1, ?, 'N', ?)`, [
-        idCta,
-        doc.slice(0, 20),
-        `Compra NF ${String(nfNumero).padStart(9, '0')}/${serie}/${modelo}`.slice(0, 80),
-        agora.dataSql,
-        toDateSql(p.dVenc) || agora.dataSql,
-        round2(p.vDup || 0),
-        Number(sessao.fornecedor.id_fornec),
-        `Importado via Gestor Estoque — chave ${chave}`.slice(0, 200),
+        INSERT INTO TB_NFCOMPRA_FMAPAGTO (ID_NUMPAG, VLR_PAGTO, ID_NFCOMPRA, ID_FMANFCE, ID_PARCELA)
+        VALUES (?, ?, ?, ?, ?)`, [
+        idNumPag,
+        round2(tot.vNF || 0),
+        idNf,
+        idFmanfce || 5,
+        idParcela,
       ]);
-      await ensureContaMovtos(db, idCta, {
-        vlr: round2(p.vDup || 0),
-        historico: `Compra NF ${String(nfNumero).padStart(9, '0')}/${serie}/${modelo}`,
-        dataSql: agora.dataSql,
-        horaSql: agora.horaSql,
-      });
-      await query(db, `
-        INSERT INTO TB_NFC_CTAPAG (ID_NFCOMPRA, ID_CTAPAG, ID_NUMPAG)
-        VALUES (?, ?, ?)`, [idNf, idCta, idNumPag]);
+
+      const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
+        ? fin.parcelas
+        : [{ nDup: '001', dVenc: agora.dataSql, vDup: tot.vNF || 0 }];
+
+      for (let i = 0; i < parcelasXml.length; i++) {
+        const p = parcelasXml[i];
+        const idCta = await nextId(db, 'GEN_TB_CTAPAG_ID', 'TB_CONTA_PAGAR', 'ID_CTAPAG');
+        const doc = `${String(nfNumero).padStart(9, '0')}-${String(i + 1).padStart(2, '0')}`;
+        await query(db, `
+          INSERT INTO TB_CONTA_PAGAR (
+            ID_CTAPAG, DOCUMENTO, HISTORICO, DT_EMISSAO, DT_VENCTO, VLR_CTAPAG,
+            TIP_CTAPAG, ID_PORTADOR, ID_FORNEC, CTA_MANUAL, OBSERVACAO
+          ) VALUES (?, ?, ?, ?, ?, ?, 'N', 1, ?, 'N', ?)`, [
+          idCta,
+          doc.slice(0, 20),
+          `Compra NF ${String(nfNumero).padStart(9, '0')}/${serie}/${modelo}`.slice(0, 80),
+          agora.dataSql,
+          toDateSql(p.dVenc) || agora.dataSql,
+          round2(p.vDup || 0),
+          Number(sessao.fornecedor.id_fornec),
+          `Importado via Gestor Estoque — chave ${chave}`.slice(0, 200),
+        ]);
+        await ensureContaMovtos(db, idCta, {
+          vlr: round2(p.vDup || 0),
+          historico: `Compra NF ${String(nfNumero).padStart(9, '0')}/${serie}/${modelo}`,
+          dataSql: agora.dataSql,
+          horaSql: agora.horaSql,
+        });
+        await query(db, `
+          INSERT INTO TB_NFC_CTAPAG (ID_NFCOMPRA, ID_CTAPAG, ID_NUMPAG)
+          VALUES (?, ?, ?)`, [idNf, idCta, idNumPag]);
+        parcelasGeradas += 1;
+      }
     }
 
     const nfLabel = `${nfNumero}/${serie}`;
     let itensGravados = 0;
+    let itensComEstoque = 0;
 
-    for (const it of itens) {
+    for (let idx = 0; idx < itens.length; idx++) {
+      const it = itens[idx];
+      const flags = itemFlags[idx] || { gera_estoque: 'S', gera_financeiro: 'S' };
       let idIdent = it.sistema?.id_identificador ? Number(it.sistema.id_identificador) : null;
       if (!idIdent && it.sistema?.criar_novo) {
         const created = await criarProdutoBasico(db, appCfg, it.sistema, it.xml);
@@ -887,24 +1016,41 @@ async function gravarNfCompra(sessao, {
 
       const custoInfo = calcCustoUnitarioItem(it.sistema || {}, it.xml || {});
       let vUnit = Number(it.sistema.prc_custo);
-      if (!Number.isFinite(vUnit) || vUnit <= 0) {
+      // Com conversão, o unitário DEVE ser total líquido ÷ qtd convertida.
+      // Caso contrário a nota fica com valor inflado (vUnCom × qtd convertida).
+      if (Math.abs(conversor - 1) > 1e-9) {
+        vUnit = custoInfo.custoEstoque;
+      } else if (!Number.isFinite(vUnit) || vUnit <= 0) {
         vUnit = custoInfo.custoEstoque > 0
           ? custoInfo.custoEstoque
-          : (conversor > 0 ? Number(it.xml?.vUnCom || 0) / conversor : Number(it.xml?.vUnCom || 0));
+          : Number(it.xml?.vUnCom || 0);
       }
       if (!Number.isFinite(vUnit)) vUnit = 0;
-      // Garante custo unitário (já / conversor) no estoque
       it.sistema.prc_custo = vUnit;
       const vDesc = Number(it.sistema.v_desc ?? it.xml?.vDesc ?? 0);
       const vFrete = Number(it.sistema.v_frete ?? it.xml?.vFrete ?? 0);
       const vSeg = Number(it.sistema.v_seguro ?? it.xml?.vSeg ?? 0);
       const vOutro = Number(it.sistema.v_outro ?? it.xml?.vOutro ?? 0);
-      const vTotal = round2((qtd * vUnit) - vDesc + vFrete + vSeg + vOutro);
+      // Com conversão, custo já embute desc/frete/etc — não reaplica no total
+      const vTotal = Math.abs(conversor - 1) > 1e-9
+        ? round2(custoInfo.totalItem)
+        : round2((qtd * vUnit) - vDesc + vFrete + vSeg + vOutro);
       const uni = String(it.sistema.uni_medida || it.xml?.uCom || 'UN').slice(0, 6);
       const cfop = String(it.sistema.cfop || it.xml?.CFOP || '').slice(0, 4);
       const csosn = String(
         it.sistema.csosn_entrada || it.sistema.csosn || it.sistema.tributos?.csosn || ''
       ).slice(0, 3);
+      const estBx = flags.gera_estoque === 'S' ? 'S' : 'N';
+
+      if (flags.gera_estoque === 'S') {
+        await zerarNegativoAntesTrigger(db, appCfg, {
+          idIdentificador: idIdent,
+          prcCusto: vUnit,
+          usuario,
+          idFuncionario,
+          nfLabel,
+        });
+      }
 
       const idItem = await nextId(db, 'GEN_TB_NFC_ITEM_ID', 'TB_NFC_ITEM', 'ID_NFCITEM');
       await query(db, `
@@ -912,10 +1058,10 @@ async function gravarNfCompra(sessao, {
           ID_NFCITEM, ID_IDENTIFICADOR, ID_NFCOMPRA, NUM_ITEM, QTD_ITEM, UNI_MEDIDA,
           VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
           CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'S', ?, ?, 0)`, [
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, [
         idItem, idIdent, idNf, Number(it.nItem), qtd, uni,
         vTotal, vDesc, vFrete, vSeg, vOutro,
-        cfop || null, csosn || null, vUnit, vUnit,
+        cfop || null, csosn || null, estBx, vUnit, vUnit,
       ]);
 
       await insertTributosItem(
@@ -930,23 +1076,32 @@ async function gravarNfCompra(sessao, {
         },
       );
       await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
-      await entradaEstoque(db, appCfg, {
-        idIdentificador: idIdent,
-        qtd,
-        prcCusto: vUnit,
-        usuario,
-        idFuncionario,
-        nfLabel,
-      });
+      if (flags.gera_estoque === 'S') {
+        // EST_BX='S' → trigger Clipp; aqui só ManagePro (TB_*_2)
+        await entradaEstoque(db, appCfg, {
+          idIdentificador: idIdent,
+          qtd,
+          prcCusto: vUnit,
+          usuario,
+          idFuncionario,
+          nfLabel,
+          skipClipp: true,
+        });
+        itensComEstoque += 1;
+      }
       itensGravados += 1;
     }
+
+    await gravarInfoComplementares(db, idNf, sessao);
 
     return {
       id_nfcompra: idNf,
       nf_numero: nfNumero,
       nf_serie: serie,
       itens_gravados: itensGravados,
-      parcelas: parcelasXml.length,
+      itens_estoque: itensComEstoque,
+      parcelas: parcelasGeradas,
+      gera_financeiro: geraFinanceiroNota ? 'S' : 'N',
     };
   });
 }
