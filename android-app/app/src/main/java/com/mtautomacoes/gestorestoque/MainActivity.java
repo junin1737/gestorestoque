@@ -40,6 +40,10 @@ import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
+import com.google.mlkit.vision.barcode.common.Barcode;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
+import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 import com.google.zxing.client.android.Intents;
 import com.journeyapps.barcodescanner.ScanContract;
 import com.journeyapps.barcodescanner.ScanOptions;
@@ -197,8 +201,8 @@ public class MainActivity extends AppCompatActivity {
 
     /**
      * Leitura nativa rápida.
-     * - product / ficha / ean: EAN/UPC (sem QR, sem MIXED — mais ágil)
-     * - importacao (chave NF-e): CODE_128/ITF, orientação livre
+     * - product / ficha / ean: ZXing EAN/UPC (ágil)
+     * - importacao (chave NF-e): Google Code Scanner com auto-zoom (CODE_128 longo + QR)
      */
     private void startBarcodeScan(String mode) {
         String m = mode == null ? "product" : mode.trim().toLowerCase();
@@ -214,33 +218,80 @@ public class MainActivity extends AppCompatActivity {
         }
 
         boolean chave = "importacao".equals(m) || "chave".equals(m);
-        ScanOptions options = new ScanOptions();
         if (chave) {
-            // Mesmos 1D que o estoque (que funciona) + ITF; orientação livre para a barra longa da chave
-            options.setDesiredBarcodeFormats(ScanOptions.ONE_D_CODE_TYPES);
-            options.setPrompt("Gire o celular e enquadre a barra inteira da chave (44 dígitos)");
-            options.setOrientationLocked(false);
-            options.setBeepEnabled(true);
-            options.setBarcodeImageEnabled(false);
-            options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.MIXED_SCAN);
-            options.setCaptureActivity(AnyOrientationCaptureActivity.class);
-        } else {
-            options.setDesiredBarcodeFormats(Arrays.asList(
-                    ScanOptions.EAN_13,
-                    ScanOptions.EAN_8,
-                    ScanOptions.UPC_A,
-                    ScanOptions.UPC_E,
-                    ScanOptions.CODE_128,
-                    ScanOptions.CODE_39
-            ));
-            options.setPrompt(getString(R.string.scan_barcode_hint));
-            options.setOrientationLocked(true);
-            options.setBeepEnabled(true);
-            options.setBarcodeImageEnabled(false);
-            // NORMAL (não MIXED): MIXED tenta invertido e deixa a leitura lenta no APK
-            options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.NORMAL_SCAN);
-            options.setCaptureActivity(PortraitCaptureActivity.class);
+            startChaveNfeScan();
+            return;
         }
+
+        ScanOptions options = new ScanOptions();
+        options.setDesiredBarcodeFormats(Arrays.asList(
+                ScanOptions.EAN_13,
+                ScanOptions.EAN_8,
+                ScanOptions.UPC_A,
+                ScanOptions.UPC_E,
+                ScanOptions.CODE_128,
+                ScanOptions.CODE_39
+        ));
+        options.setPrompt(getString(R.string.scan_barcode_hint));
+        options.setOrientationLocked(true);
+        options.setBeepEnabled(true);
+        options.setBarcodeImageEnabled(false);
+        options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.NORMAL_SCAN);
+        options.setCaptureActivity(PortraitCaptureActivity.class);
+        barcodeLauncher.launch(options);
+    }
+
+    /** Google Code Scanner — auto-zoom resolve CODE_128 da chave (ZXing costuma falhar). */
+    private void startChaveNfeScan() {
+        try {
+            GmsBarcodeScannerOptions options = new GmsBarcodeScannerOptions.Builder()
+                    .setBarcodeFormats(
+                            Barcode.FORMAT_CODE_128,
+                            Barcode.FORMAT_ITF,
+                            Barcode.FORMAT_CODE_39,
+                            Barcode.FORMAT_QR_CODE
+                    )
+                    .enableAutoZoom()
+                    .build();
+            GmsBarcodeScanner scanner = GmsBarcodeScanning.getClient(this, options);
+            scanner.startScan()
+                    .addOnSuccessListener(barcode -> {
+                        String raw = barcode.getRawValue();
+                        if (raw == null || raw.isEmpty()) {
+                            Toast.makeText(this, "Não li a chave. Tente de novo mais perto.", Toast.LENGTH_LONG).show();
+                            return;
+                        }
+                        deliverBarcodeToWeb(raw);
+                    })
+                    .addOnCanceledListener(() ->
+                            Toast.makeText(this, R.string.scan_canceled, Toast.LENGTH_SHORT).show())
+                    .addOnFailureListener(e -> {
+                        Toast.makeText(
+                                this,
+                                "Scanner Google indisponível, tentando modo alternativo…",
+                                Toast.LENGTH_SHORT
+                        ).show();
+                        startChaveNfeScanZxingFallback();
+                    });
+        } catch (Exception e) {
+            startChaveNfeScanZxingFallback();
+        }
+    }
+
+    private void startChaveNfeScanZxingFallback() {
+        ScanOptions options = new ScanOptions();
+        options.setDesiredBarcodeFormats(Arrays.asList(
+                ScanOptions.CODE_128,
+                ScanOptions.ITF,
+                ScanOptions.CODE_39,
+                ScanOptions.QR_CODE
+        ));
+        options.setPrompt("Gire o celular e enquadre a barra OU o QR da chave");
+        options.setOrientationLocked(false);
+        options.setBeepEnabled(true);
+        options.setBarcodeImageEnabled(false);
+        options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.MIXED_SCAN);
+        options.setCaptureActivity(AnyOrientationCaptureActivity.class);
         barcodeLauncher.launch(options);
     }
 

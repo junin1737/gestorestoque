@@ -10,8 +10,8 @@ android {
         applicationId "com.mtautomacoes.gestorestoque"
         minSdk 24
         targetSdk 34
-        versionCode 17
-        versionName "1.0.16"
+        versionCode 18
+        versionName "1.0.17"
     }
 
     buildTypes {
@@ -33,4 +33,6 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'com.google.android.material:material:1.12.0'
     implementation 'com.journeyapps:zxing-android-embedded:4.3.0'
+    // Leitura da chave NF-e (CODE_128 longo): auto-zoom do Google Code Scanner
+    implementation 'com.google.android.gms:play-services-code-scanner:16.1.0'
 }
