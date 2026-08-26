@@ -8,6 +8,12 @@ const { ensureFirebirdClientPath } = require('./nativePath');
 
 ensureFirebirdClientPath();
 
+try {
+  require('./importacao-params').ensureImportacaoParamsDefaults();
+} catch (err) {
+  console.warn('Defaults parâmetros NF-e:', err.message);
+}
+
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, '..', 'Painel'), {

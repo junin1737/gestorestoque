@@ -5,20 +5,56 @@ const path = require('path');
 const { withDb, query } = require('./db');
 const { loadAppConfig, saveAppConfig, getAppDataDir } = require('./config');
 
+const SEED_VERSION = 1;
+
 function paramsFile() {
   return path.join(getAppDataDir(), 'importacao-cfop-params.json');
 }
 
+function bundledDefaultsPath() {
+  return path.join(__dirname, 'defaults', 'importacao-cfop-params.json');
+}
+
+function loadBundledDefaults() {
+  try {
+    const raw = fs.readFileSync(bundledDefaultsPath(), 'utf8');
+    return JSON.parse(raw);
+  } catch (err) {
+    console.warn('Defaults importação CFOP:', err.message);
+    return null;
+  }
+}
+
+/** Padrão de fábrica (espelho da base Limpo / parâmetros MT). */
 function defaultRows() {
+  const bundled = loadBundledDefaults();
+  if (Array.isArray(bundled?.itens) && bundled.itens.length) {
+    return bundled.itens.map((r) => ({ ...r }));
+  }
   return [
     { cfop_origem: '5102', cfop_conv: '1102', csosn: '102', cfop_saida_nfe: '5102', csosn_saida_nfe: '102', cst_saida_nfe: '', cfop_saida_cfe: '5102', csosn_saida_cfe: '102', cst_saida_cfe: '' },
     { cfop_origem: '5405', cfop_conv: '1403', csosn: '102', cfop_saida_nfe: '5405', csosn_saida_nfe: '500', cst_saida_nfe: '', cfop_saida_cfe: '5405', csosn_saida_cfe: '500', cst_saida_cfe: '' },
     { cfop_origem: '6102', cfop_conv: '2102', csosn: '102', cfop_saida_nfe: '6102', csosn_saida_nfe: '102', cst_saida_nfe: '', cfop_saida_cfe: '6102', csosn_saida_cfe: '102', cst_saida_cfe: '' },
     { cfop_origem: '6403', cfop_conv: '2403', csosn: '102', cfop_saida_nfe: '6403', csosn_saida_nfe: '500', cst_saida_nfe: '', cfop_saida_cfe: '6403', csosn_saida_cfe: '500', cst_saida_cfe: '' },
-    { cfop_origem: '5403', cfop_conv: '1403', csosn: '102', cfop_saida_nfe: '5403', csosn_saida_nfe: '500', cst_saida_nfe: '', cfop_saida_cfe: '5403', csosn_saida_cfe: '500', cst_saida_cfe: '' },
-    { cfop_origem: '5101', cfop_conv: '1102', csosn: '102', cfop_saida_nfe: '5101', csosn_saida_nfe: '102', cst_saida_nfe: '', cfop_saida_cfe: '5101', csosn_saida_cfe: '102', cst_saida_cfe: '' },
-    { cfop_origem: '6101', cfop_conv: '2102', csosn: '102', cfop_saida_nfe: '6101', csosn_saida_nfe: '102', cst_saida_nfe: '', cfop_saida_cfe: '6101', csosn_saida_cfe: '102', cst_saida_cfe: '' },
   ];
+}
+
+function defaultSaida() {
+  const bundled = loadBundledDefaults();
+  return {
+    cfop_saida: '',
+    csosn_saida: '',
+    aplicar_saida: 'S',
+    obrigar_financeiro: 'S',
+    zerar_negativo: 'S',
+    conferir_etapas: 'S',
+    ...(bundled?.saida || {}),
+  };
+}
+
+function defaultConversoes() {
+  const bundled = loadBundledDefaults();
+  return Array.isArray(bundled?.conversoes) ? bundled.conversoes.map((c) => ({ ...c })) : [];
 }
 
 function ynFlag(v, def = 'S') {
@@ -85,6 +121,7 @@ function resolveMovimentoFlags({ cfop, sistema } = {}) {
 }
 
 function loadLocalParams() {
+  ensureImportacaoParamsDefaults();
   const p = paramsFile();
   if (!fs.existsSync(p)) return null;
   try {
@@ -96,6 +133,107 @@ function loadLocalParams() {
 
 function saveLocalParams(data) {
   fs.writeFileSync(paramsFile(), JSON.stringify(data, null, 2), 'utf8');
+}
+
+/**
+ * Garante parâmetros padrão de fábrica (CFOP/saída/conversões).
+ * - Cliente novo (sem arquivo): grava o pacote completo.
+ * - Cliente existente: só acrescenta CFOPs/conversões que ainda não existem (não sobrescreve).
+ * O usuário continua podendo adicionar/editar regras na tela de Parâmetros.
+ */
+function ensureImportacaoParamsDefaults() {
+  const p = paramsFile();
+  const seed = loadBundledDefaults() || {
+    seed_version: SEED_VERSION,
+    csosn_padrao: '102',
+    saida: defaultSaida(),
+    itens: defaultRows(),
+    conversoes: defaultConversoes(),
+  };
+
+  let local = null;
+  if (fs.existsSync(p)) {
+    try {
+      local = JSON.parse(fs.readFileSync(p, 'utf8'));
+    } catch {
+      local = null;
+    }
+  }
+
+  if (!local || !Array.isArray(local.itens) || !local.itens.length) {
+    const fresh = {
+      seed_version: SEED_VERSION,
+      csosn_padrao: String(seed.csosn_padrao || '102'),
+      saida: { ...defaultSaida(), ...(seed.saida || {}) },
+      itens: (seed.itens || []).map((r) => normRow(r)),
+      conversoes: (seed.conversoes || []).map((c) => normConversao(c)),
+      conversoes_produto: [],
+    };
+    try {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      saveLocalParams(fresh);
+    } catch (err) {
+      console.warn('Falha ao gravar defaults importação:', err.message);
+    }
+    return fresh;
+  }
+
+  let changed = false;
+  const byOrigem = new Map();
+  for (const it of local.itens) {
+    const key = String(it.cfop_origem || '').replace(/\D/g, '').slice(0, 4);
+    if (key) byOrigem.set(key, it);
+  }
+  for (const seedIt of seed.itens || []) {
+    const key = String(seedIt.cfop_origem || '').replace(/\D/g, '').slice(0, 4);
+    if (!key || byOrigem.has(key)) continue;
+    local.itens.push(normRow(seedIt));
+    byOrigem.set(key, seedIt);
+    changed = true;
+  }
+
+  if (!local.saida || typeof local.saida !== 'object') {
+    local.saida = { ...defaultSaida(), ...(seed.saida || {}) };
+    changed = true;
+  } else {
+    const defSaida = { ...defaultSaida(), ...(seed.saida || {}) };
+    for (const [k, v] of Object.entries(defSaida)) {
+      if (local.saida[k] == null || local.saida[k] === '') {
+        local.saida[k] = v;
+        changed = true;
+      }
+    }
+  }
+
+  if (!local.csosn_padrao) {
+    local.csosn_padrao = String(seed.csosn_padrao || '102');
+    changed = true;
+  }
+
+  const convList = Array.isArray(local.conversoes) ? local.conversoes : [];
+  const convKeys = new Set(convList.map((c) => String(c.uni_xml || '').trim().toUpperCase()).filter(Boolean));
+  for (const seedConv of seed.conversoes || []) {
+    const key = String(seedConv.uni_xml || '').trim().toUpperCase();
+    if (!key || convKeys.has(key)) continue;
+    convList.push(normConversao(seedConv));
+    convKeys.add(key);
+    changed = true;
+  }
+  local.conversoes = convList;
+
+  if (Number(local.seed_version || 0) < SEED_VERSION) {
+    local.seed_version = SEED_VERSION;
+    changed = true;
+  }
+
+  if (changed) {
+    try {
+      saveLocalParams(local);
+    } catch (err) {
+      console.warn('Falha ao mesclar defaults importação:', err.message);
+    }
+  }
+  return local;
 }
 
 async function listCfopConv() {
@@ -337,4 +475,5 @@ module.exports = {
   mapCfopEntrada,
   getEmitenteUf,
   applyUfDigit,
+  ensureImportacaoParamsDefaults,
 };
