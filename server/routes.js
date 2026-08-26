@@ -1468,6 +1468,18 @@ router.post('/importacao/regra-tributo', async (req, res) => {
 });
 
 const importacaoCancel = require('./importacao-cancel');
+const importacaoScanChave = require('./importacao-scan-chave');
+
+router.post('/importacao/decode-chave', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const dataUrl = req.body?.image || req.body?.dataUrl || '';
+    const out = await importacaoScanChave.decodeChaveFromDataUrl(dataUrl);
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message || String(err) });
+  }
+});
 
 router.post('/importacao/sessoes', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;

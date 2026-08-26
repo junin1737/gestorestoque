@@ -2043,7 +2043,7 @@ async function decodeBarcodeFromImageUrl(url, file) {
 
 async function startScanner(target = 'search') {
   state.scanTarget = ['ficha', 'importacao', 'importacao-prod', 'importacao-ean'].includes(target) ? target : 'search';
-  // APK: câmera nativa (produto = ZXing; chave = Google Code Scanner com auto-zoom)
+  // APK: câmera nativa (produto = ZXing; chave = ML Kit contínuo)
   try {
     if (isNativeApk() && window.GestorApp) {
       const tgt = state.scanTarget;
@@ -2075,17 +2075,33 @@ async function startScanner(target = 'search') {
   if (liveBtn) liveBtn.hidden = !canLive;
 
   if (isChaveScanTarget()) {
-    msg.textContent = canLive
-      ? 'Aponte para a barra da chave ou o QR da DANFE. Mantenha perto e nítido.'
-      : 'Fotografe a faixa do código de barras da chave (44 dígitos) ou o QR, na horizontal e bem nítida.';
-    // iPhone/Safari: leitura ao vivo contínua funciona bem melhor que foto única
-    if (canLive) {
-      setTimeout(() => { startLiveScanner().catch(() => {}); }, 60);
-    }
+    // iPhone: foto + decode no servidor Windows (Safari falha no CODE_128 longo)
+    msg.textContent = 'Fotografe a faixa da chave (barra) ou o QR da DANFE, bem perto e nítida.';
+    // click síncrono — iOS exige gesto do usuário para abrir a câmera
+    try { $('#scan-file')?.click(); } catch { /* ignore */ }
     return;
   }
 
   msg.textContent = 'Toque em “Abrir câmera”, foque só no código de barras e confirme a foto.';
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ''));
+    reader.onerror = () => reject(reader.error || new Error('Falha ao ler imagem'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function decodeChaveViaServidor(file) {
+  const dataUrl = await fileToDataUrl(file);
+  const res = await api('/importacao/decode-chave', {
+    method: 'POST',
+    body: { image: dataUrl },
+  });
+  if (res?.ok && res.chave) return res.chave;
+  throw new Error(res?.error || 'Servidor não leu a chave');
 }
 
 async function startLiveScanner() {
@@ -2169,7 +2185,9 @@ async function onScanFileSelected(file) {
   const msg = $('#scan-msg');
   const preview = $('#scan-preview');
   if (!file) return;
-  msg.textContent = 'Lendo número do código…';
+  msg.textContent = isChaveScanTarget()
+    ? 'Lendo chave… (pode usar o PC se o iPhone não conseguir)'
+    : 'Lendo número do código…';
   const url = URL.createObjectURL(file);
   if (preview) {
     preview.src = url;
@@ -2177,14 +2195,28 @@ async function onScanFileSelected(file) {
   }
   $('#scan-video').hidden = true;
   try {
-    const code = await decodeBarcodeFromImageUrl(url, file);
-    if (!applyScannedCode(code)) {
-      msg.textContent = 'Não encontrei o número. Tire outra foto mais perto, com boa luz e só o código.';
+    let code = await decodeBarcodeFromImageUrl(url, file);
+    if (isChaveScanTarget()) {
+      const localChave = extractChaveNfe44(code);
+      if (localChave.length === 44) code = localChave;
+      else {
+        msg.textContent = 'Enviando foto ao servidor para ler a chave…';
+        try {
+          code = await decodeChaveViaServidor(file);
+        } catch (err) {
+          msg.textContent = err.message || 'Não li a chave. Tire outra foto mais perto da barra ou do QR.';
+          return;
+        }
+      }
+    }
+    if (!await applyScannedCode(code)) {
+      msg.textContent = isChaveScanTarget()
+        ? 'Não encontrei os 44 dígitos. Fotografe só a faixa da chave ou o QR, bem perto.'
+        : 'Não encontrei o número. Tire outra foto mais perto, com boa luz e só o código.';
     }
   } catch (err) {
     msg.textContent = `Não foi possível ler o número do código. Tire outra foto mais perto. (${err.message || 'erro'})`;
   } finally {
-    // mantém preview; revoga depois de um tempo
     setTimeout(() => URL.revokeObjectURL(url), 30000);
   }
 }

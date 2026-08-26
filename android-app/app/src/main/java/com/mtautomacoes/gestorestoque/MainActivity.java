@@ -32,6 +32,7 @@ import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
 import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
@@ -40,10 +41,6 @@ import androidx.core.content.ContextCompat;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
-import com.google.mlkit.vision.barcode.common.Barcode;
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanner;
-import com.google.mlkit.vision.codescanner.GmsBarcodeScannerOptions;
-import com.google.mlkit.vision.codescanner.GmsBarcodeScanning;
 import com.google.zxing.client.android.Intents;
 import com.journeyapps.barcodescanner.ScanContract;
 import com.journeyapps.barcodescanner.ScanOptions;
@@ -92,6 +89,20 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 deliverBarcodeToWeb(result.getContents());
+            });
+
+    private final ActivityResultLauncher<Intent> chaveNfeLauncher =
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() != RESULT_OK || result.getData() == null) {
+                    Toast.makeText(this, R.string.scan_canceled, Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                String raw = result.getData().getStringExtra(ChaveNfeScanActivity.EXTRA_RAW);
+                if (raw == null || raw.isEmpty()) {
+                    Toast.makeText(this, "Não li a chave. Tente de novo.", Toast.LENGTH_LONG).show();
+                    return;
+                }
+                deliverBarcodeToWeb(raw);
             });
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
@@ -241,38 +252,11 @@ public class MainActivity extends AppCompatActivity {
         barcodeLauncher.launch(options);
     }
 
-    /** Google Code Scanner — auto-zoom resolve CODE_128 da chave (ZXing costuma falhar). */
+    /** Scanner contínuo ML Kit + CameraX (rápido). */
     private void startChaveNfeScan() {
         try {
-            GmsBarcodeScannerOptions options = new GmsBarcodeScannerOptions.Builder()
-                    .setBarcodeFormats(
-                            Barcode.FORMAT_CODE_128,
-                            Barcode.FORMAT_ITF,
-                            Barcode.FORMAT_CODE_39,
-                            Barcode.FORMAT_QR_CODE
-                    )
-                    .enableAutoZoom()
-                    .build();
-            GmsBarcodeScanner scanner = GmsBarcodeScanning.getClient(this, options);
-            scanner.startScan()
-                    .addOnSuccessListener(barcode -> {
-                        String raw = barcode.getRawValue();
-                        if (raw == null || raw.isEmpty()) {
-                            Toast.makeText(this, "Não li a chave. Tente de novo mais perto.", Toast.LENGTH_LONG).show();
-                            return;
-                        }
-                        deliverBarcodeToWeb(raw);
-                    })
-                    .addOnCanceledListener(() ->
-                            Toast.makeText(this, R.string.scan_canceled, Toast.LENGTH_SHORT).show())
-                    .addOnFailureListener(e -> {
-                        Toast.makeText(
-                                this,
-                                "Scanner Google indisponível, tentando modo alternativo…",
-                                Toast.LENGTH_SHORT
-                        ).show();
-                        startChaveNfeScanZxingFallback();
-                    });
+            Intent intent = new Intent(this, ChaveNfeScanActivity.class);
+            chaveNfeLauncher.launch(intent);
         } catch (Exception e) {
             startChaveNfeScanZxingFallback();
         }
