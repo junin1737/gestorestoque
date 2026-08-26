@@ -1498,18 +1498,28 @@ router.post('/importacao/sessoes', async (req, res) => {
     const sessao = await importacaoStaging.aplicarVinculosSessao(out.sessao.id);
     const ide = sessao?.xml?.ide || {};
     const emit = sessao?.xml?.emit || {};
-    let avisoDuplicada = null;
-    try {
-      const dup = await importacaoNotas.findNfDuplicada({
-        chave: sessao?.chave || chave,
-        nfNumero: ide.nNF,
-        serie: ide.serie,
-        idFornec: forn?.id_fornec,
-        cnpj: emit.CNPJ || forn?.cadastro?.cnpj,
-      });
-      if (dup) avisoDuplicada = dup.aviso;
-    } catch (_) { /* base sem NFCOMPRA / falha pontual */ }
-    res.json({ ok: true, sessao, fonte: out.fonte, avisoDuplicada, sefazErro: out.sefazErro || null });
+    const editarId = Number(sessao?.editar_id_nfcompra || body.editarIdNfcompra || 0);
+    if (!editarId) {
+      try {
+        const dup = await importacaoNotas.findNfDuplicada({
+          chave: sessao?.chave || chave,
+          nfNumero: ide.nNF,
+          serie: ide.serie,
+          idFornec: forn?.id_fornec,
+          cnpj: emit.CNPJ || forn?.cadastro?.cnpj,
+        });
+        if (dup) {
+          try { importacaoStaging.deleteSessao(out.sessao.id); } catch (_) { /* ignore */ }
+          return res.json({
+            ok: false,
+            error: dup.aviso || 'Esta NF já está lançada para o fornecedor e não está cancelada.',
+            code: 'DUPLICADA',
+            nota: dup,
+          });
+        }
+      } catch (_) { /* base sem NFCOMPRA / falha pontual — gravação ainda valida */ }
+    }
+    res.json({ ok: true, sessao, fonte: out.fonte, sefazErro: out.sefazErro || null });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

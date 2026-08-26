@@ -3604,9 +3604,6 @@ const ImportacaoNfe = (() => {
         `Demonstração com dados simulados (NF ${nNf}, ${qtd} itens). Para dados reais, configure o certificado ou anexe o XML.`
       );
     }
-    if (res.avisoDuplicada) {
-      deps.showMsg?.(res.avisoDuplicada);
-    }
   }
 
   async function criarManual() {

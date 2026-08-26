@@ -121,10 +121,11 @@ async function listNotasCadastradas({ de, ate, nfNumero, fornecedor, dataCampo }
   });
 }
 
-/** NF já cadastrada (não cancelada) pela chave ou pelo nº + fornecedor. */
+/** NF já cadastrada (não cancelada) pela chave ou pelo nº + série + fornecedor. */
 async function findNfDuplicada({ chave, nfNumero, serie, idFornec, cnpj } = {}) {
   const chaveDig = String(chave || '').replace(/\D/g, '');
   const nnf = Number(String(nfNumero || '').replace(/\D/g, '') || 0);
+  const serieNorm = String(serie ?? '').trim();
   const cnpjDig = String(cnpj || '').replace(/\D/g, '');
   const idForn = idFornec != null && idFornec !== '' ? Number(idFornec) : null;
   if (!chaveDig && !nnf) return null;
@@ -156,6 +157,11 @@ async function findNfDuplicada({ chave, nfNumero, serie, idFornec, cnpj } = {}) 
         fornClause = `REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(F.CNPJ,'')),'.',''),'/',''),'-',''),' ','') = ?`;
         params.push(cnpjDig);
       }
+      let serieClause = '';
+      if (serieNorm !== '') {
+        serieClause = ' AND TRIM(COALESCE(N.NF_SERIE, \'\')) = ?';
+        params.push(serieNorm);
+      }
       rows = await query(db, `
         SELECT FIRST 3
           N.ID_NFCOMPRA, N.NF_NUMERO, N.NF_SERIE, N.NF_MODELO,
@@ -168,14 +174,14 @@ async function findNfDuplicada({ chave, nfNumero, serie, idFornec, cnpj } = {}) 
         LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
         WHERE UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
           AND N.NF_NUMERO = ?
-          AND (${fornClause})
+          AND (${fornClause})${serieClause}
         ORDER BY N.ID_NFCOMPRA DESC`, params);
     }
     if (!rows.length) return null;
     const nota = mapNotaRow(rows[0]);
     return {
       ...nota,
-      aviso: `Já existe a NF ${nota.nf_numero}/${nota.nf_serie || '—'} deste fornecedor no banco (cód. ${nota.id_nfcompra}). Evite entrada duplicada.`,
+      aviso: `NF ${nota.nf_numero}/${nota.nf_serie || '—'} deste fornecedor já está lançada (cód. ${nota.id_nfcompra}) e não está cancelada. Não é possível importar de novo. Cancele a nota no Clipp se precisar reimportar.`,
     };
   });
 }

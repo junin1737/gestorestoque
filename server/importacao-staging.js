@@ -1122,6 +1122,26 @@ async function confirmarSessao(sessaoId, opts = {}) {
     return { ok: false, error: 'Fornecedor não vinculado. Vincule ou cadastre o emitente da NF-e.' };
   }
 
+  if (!Number(s.editar_id_nfcompra)) {
+    try {
+      const { findNfDuplicada } = require('./importacao-notas');
+      const dup = await findNfDuplicada({
+        chave: s.chave,
+        nfNumero: s.xml?.ide?.nNF || s.cabecalho?.nNF,
+        serie: s.xml?.ide?.serie || s.cabecalho?.serie,
+        idFornec: s.fornecedor.id_fornec,
+        cnpj: s.xml?.emit?.CNPJ || s.fornecedor?.cadastro?.cnpj,
+      });
+      if (dup) {
+        return {
+          ok: false,
+          error: dup.aviso || 'Esta NF já está lançada para o fornecedor e não está cancelada.',
+          code: 'DUPLICADA',
+        };
+      }
+    } catch (_) { /* gravação ainda valida */ }
+  }
+
   // Reaplica valores de tributos/rateios do XML nos itens antes de gravar
   for (const it of s.itens) {
     if (it.xml && it.sistema) syncSistemaComXmlItem(it.sistema, it.xml);
