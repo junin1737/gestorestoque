@@ -2151,9 +2151,9 @@ const ImportacaoNfe = (() => {
       ${itemTabNav()}
       <div class="imp-item-scroll">
         ${panelHtml}
-      </div>
-      <div class="imp-item-footer">
-        ${footerHtml}
+        <div class="imp-item-footer">
+          ${footerHtml}
+        </div>
       </div>
     `;
 
@@ -4139,7 +4139,7 @@ const ImportacaoNfe = (() => {
         const params = await api('/importacao/params/cfop');
         const obrigar = (params.saida?.obrigar_financeiro || 'S') !== 'N';
         const algumFin = (state.sessao.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
-        if (obrigar && algumFin && !state.sessao?.financeiro_ok && !state.financeiroVisitado) {
+        if (obrigar && algumFin && !state.sessao?.financeiro_ok) {
           deps.showMsg?.('Abra a aba Financeiro, confira as parcelas (valor e vencimento) e toque em Salvar financeiro antes de gravar.');
           setTab('financeiro');
           return;
@@ -4148,12 +4148,19 @@ const ImportacaoNfe = (() => {
       const vNfConf = Number(state.sessao?.xml?.total?.vNF || 0);
       const parcConf = state.sessao?.financeiro?.parcelas || [];
       const somaParcConf = parcConf.reduce((acc, p) => acc + Number(p.vDup || 0), 0);
-      if (vNfConf > 0.009 && parcConf.length && Math.abs(vNfConf - somaParcConf) > 0.03) {
-        deps.showMsg?.(
-          `Soma das parcelas (${somaParcConf.toFixed(2)}) difere do total da NF (${vNfConf.toFixed(2)}). Ajuste na aba Financeiro.`
-        );
-        setTab('financeiro');
-        return;
+      if (vNfConf > 0.009) {
+        if (!parcConf.length) {
+          deps.showMsg?.(`Informe as parcelas na aba Financeiro (total da NF ${vNfConf.toFixed(2)}) e salve antes de gravar.`);
+          setTab('financeiro');
+          return;
+        }
+        if (Math.abs(vNfConf - somaParcConf) > 0.03) {
+          deps.showMsg?.(
+            `Soma das parcelas (${somaParcConf.toFixed(2)}) difere do total da NF (${vNfConf.toFixed(2)}). Ajuste na aba Financeiro.`
+          );
+          setTab('financeiro');
+          return;
+        }
       }
       const nItens = state.sessao.itens?.length || 0;
       const nNf = state.sessao.xml?.ide?.nNF || state.sessao.cabecalho?.nNF || '—';

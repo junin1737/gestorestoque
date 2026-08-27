@@ -639,8 +639,8 @@
 
 .imp-item-scroll {
   flex: 1;
-  overflow-y: auto;
-  padding-bottom: 4.5rem;
+  overflow-y: visible;
+  padding-bottom: 1rem;
 }
 
 .imp-section {
@@ -1092,20 +1092,18 @@
 }
 
 .imp-item-footer {
-  position: sticky;
-  bottom: calc(var(--nav-h) + var(--safe-b) + 0.25rem);
+  position: static;
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
   justify-content: flex-end;
-  padding: 0.65rem 0.75rem;
-  margin-top: 0.5rem;
+  padding: 0.75rem 0.65rem;
+  margin: 1rem 0 0;
   background: var(--bg-elev);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  z-index: 20;
-  box-shadow: 0 -4px 16px color-mix(in srgb, var(--fg) 8%, transparent);
+  z-index: 1;
 }
 
 .imp-item-footer .btn {
@@ -1164,13 +1162,11 @@
 
   .imp-item-footer {
     grid-column: 1 / -1;
-    position: sticky;
-    bottom: 0.5rem;
+    position: static;
     background: var(--bg-elev);
     border: 1px solid var(--border);
     border-radius: var(--radius);
     padding: 0.75rem 1rem;
-    box-shadow: var(--shadow);
   }
 }
 
@@ -1255,13 +1251,12 @@
     flex-direction: column;
     max-height: none;
     min-height: 0;
-    padding-bottom: calc(var(--nav-h) + var(--safe-b) + 4.75rem);
   }
 
   .imp-item-scroll {
     overflow: visible;
     max-height: none;
-    padding-bottom: 1rem;
+    padding-bottom: calc(var(--nav-h) + var(--safe-b) + 1.5rem);
   }
 
   .imp-trib-head,
@@ -1271,16 +1266,16 @@
   }
 
   .imp-item-footer {
-    position: fixed;
-    left: 0.5rem;
-    right: 0.5rem;
-    bottom: calc(var(--nav-h) + var(--safe-b) + 0.35rem);
-    margin: 0;
+    position: static;
+    left: auto;
+    right: auto;
+    bottom: auto;
+    margin: 1.25rem 0 0;
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
     justify-content: stretch;
-    z-index: 40;
+    z-index: 1;
   }
 
   .imp-item-footer .btn.primary {

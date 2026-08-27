@@ -1173,9 +1173,12 @@ async function confirmarSessao(sessaoId, opts = {}) {
     }
   }
 
-  const checagemFin = validarFinanceiroNf(s.xml, s.financeiro);
-  if (!checagemFin.ok) {
-    return { ok: false, error: checagemFin.erro };
+  const precisaValidarFin = (s.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
+  if (precisaValidarFin) {
+    const checagemFin = validarFinanceiroNf(s.xml, s.financeiro);
+    if (!checagemFin.ok) {
+      return { ok: false, error: checagemFin.erro };
+    }
   }
 
   let gravacao;

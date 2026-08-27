@@ -1251,7 +1251,9 @@ async function gravarNfCompra(sessao, {
       const csosn = String(
         it.sistema.csosn_entrada || it.sistema.csosn || it.sistema.tributos?.csosn || ''
       ).slice(0, 3);
-      const estBx = flags.gera_estoque === 'S' ? 'S' : 'N';
+      // INSERT com EST_BX='N' para o trigger BI não movimentar; depois marcamos 'S'
+      // (cancelamento/relatórios) e lançamos o saldo manualmente.
+      const estBxInsert = 'N';
       const vDeson = Number(it.sistema.tributos?.v_icms_deson ?? it.xml?.imposto?.vICMSDeson ?? 0);
       const motDeson = String(it.sistema.tributos?.mot_des_icms || it.xml?.imposto?.motDesICMS || '')
         .replace(/\D/g, '').slice(0, 2) || null;
@@ -1267,6 +1269,10 @@ async function gravarNfCompra(sessao, {
       }
 
       const idItem = await nextId(db, 'GEN_TB_NFC_ITEM_ID', 'TB_NFC_ITEM', 'ID_NFCITEM');
+      // QTD já convertida + UN (fator 1) — alinhado à entrada manual e ao cancelamento.
+      const qtdInsert = qtdEstoque > 0 ? qtdEstoque : qtdNf;
+      const uniInsert = 'UN';
+      const vUnitInsert = vUnitEstoque > 0 ? vUnitEstoque : vUnitNf;
       if (temDesonCols) {
         await query(db, `
           INSERT INTO TB_NFC_ITEM (
@@ -1274,9 +1280,9 @@ async function gravarNfCompra(sessao, {
             VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
             CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT, VLR_ICM_DESO, ID_MOTIVO_DESO
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, [
-          idItem, idIdent, idNf, Number(it.nItem), qtdNf, uni,
+          idItem, idIdent, idNf, Number(it.nItem), qtdInsert, uniInsert,
           vTotal, vDesc, vFrete, vSeg, vOutro,
-          cfop || null, csosn || null, estBx, vUnitNf, vUnitNf,
+          cfop || null, csosn || null, estBxInsert, vUnitInsert, vUnitInsert,
           vDeson > 0 ? vDeson : null,
           vDeson > 0 ? (motDeson ? Number(motDeson) : null) : null,
         ]);
@@ -1287,9 +1293,9 @@ async function gravarNfCompra(sessao, {
             VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
             CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, [
-          idItem, idIdent, idNf, Number(it.nItem), qtdNf, uni,
+          idItem, idIdent, idNf, Number(it.nItem), qtdInsert, uniInsert,
           vTotal, vDesc, vFrete, vSeg, vOutro,
-          cfop || null, csosn || null, estBx, vUnitNf, vUnitNf,
+          cfop || null, csosn || null, estBxInsert, vUnitInsert, vUnitInsert,
         ]);
       }
 
@@ -1306,8 +1312,7 @@ async function gravarNfCompra(sessao, {
       );
       await gravarLotesItem(db, appCfg, idItem, idIdent, it);
       await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
-      if (flags.gera_estoque === 'S') {
-        // EST_BX='S' → trigger Clipp; ManagePro (*_2) via entradaEstoque
+      if (flags.gera_estoque === 'S' && qtdEstoque > 0) {
         await entradaEstoque(db, appCfg, {
           idIdentificador: idIdent,
           qtd: qtdEstoque,
@@ -1315,8 +1320,13 @@ async function gravarNfCompra(sessao, {
           usuario,
           idFuncionario,
           nfLabel,
-          skipClipp: true,
+          skipClipp: false,
         });
+        try {
+          await query(db, `UPDATE TB_NFC_ITEM SET EST_BX = 'S' WHERE ID_NFCITEM = ?`, [idItem]);
+        } catch (e) {
+          console.warn('Marcar EST_BX:', e.message);
+        }
         itensComEstoque += 1;
       }
       itensGravados += 1;

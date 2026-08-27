@@ -195,7 +195,15 @@ function validarFinanceiroNf(xml, financeiro) {
   const vNf = round2(xml?.total?.vNF || 0);
   if (vNf <= 0.009) return { ok: true, vNf: 0, soma: 0, delta: 0 };
   const parcelas = Array.isArray(financeiro?.parcelas) ? financeiro.parcelas : [];
-  if (!parcelas.length) return { ok: true, vNf, soma: vNf, delta: 0 };
+  if (!parcelas.length) {
+    return {
+      ok: false,
+      vNf,
+      soma: 0,
+      delta: vNf,
+      erro: `Informe as parcelas do financeiro (total da NF ${vNf.toFixed(2)}). Abra a aba Financeiro, confira e salve antes de gravar.`,
+    };
+  }
   const soma = round2(parcelas.reduce((a, p) => a + Number(p.vDup || 0), 0));
   const delta = round2(Math.abs(vNf - soma));
   if (delta > DIFERENCA_MAX_NF) {
