@@ -285,6 +285,8 @@ async function zerarNegativoAntesTrigger(db, appCfg, {
 async function entradaEstoque(db, appCfg, {
   idIdentificador, qtd, prcCusto, usuario, idFuncionario, nfLabel,
   skipClipp = false,
+  /** false = só atualiza QTD_ATUAL (entrada por NF compra não deve ir em TB_EST_SALDO_ALTERADO). */
+  registrarAlteracao = true,
 }) {
   const targets = activeTargets(appCfg);
   const agora = localNow();
@@ -312,18 +314,21 @@ async function entradaEstoque(db, appCfg, {
         obs: `Zera saldo negativo antes da entrada NF ${nfLabel} - ${usuario}`,
       });
       qtdAtual = 0;
+      await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = 0 WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
     }
     const nova = qtdAtual + Number(qtd || 0);
     await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?`, [nova, idIdentificador]);
-    await insertSaldoAlterado(db, t, {
-      idIdentificador,
-      saldoAntigo: qtdAtual,
-      saldoNovo: nova,
-      prcMedio: prcMedio || prcCusto || 0,
-      agora,
-      idFuncionario,
-      obs,
-    });
+    if (registrarAlteracao) {
+      await insertSaldoAlterado(db, t, {
+        idIdentificador,
+        saldoAntigo: qtdAtual,
+        saldoNovo: nova,
+        prcMedio: prcMedio || prcCusto || 0,
+        agora,
+        idFuncionario,
+        obs,
+      });
+    }
   }
 }
 
@@ -1313,6 +1318,8 @@ async function gravarNfCompra(sessao, {
       await gravarLotesItem(db, appCfg, idItem, idIdent, it);
       await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       if (flags.gera_estoque === 'S' && qtdEstoque > 0) {
+        // Atualiza QTD_ATUAL sem gravar em TB_EST_SALDO_ALTERADO — a movimentação
+        // no relatório do Clipp já vem como "NF Compra" pelo item da nota.
         await entradaEstoque(db, appCfg, {
           idIdentificador: idIdent,
           qtd: qtdEstoque,
@@ -1321,6 +1328,7 @@ async function gravarNfCompra(sessao, {
           idFuncionario,
           nfLabel,
           skipClipp: false,
+          registrarAlteracao: false,
         });
         try {
           await query(db, `UPDATE TB_NFC_ITEM SET EST_BX = 'S' WHERE ID_NFCITEM = ?`, [idItem]);
