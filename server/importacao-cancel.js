@@ -180,7 +180,7 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
       }
 
       const itens = await query(db, `
-        SELECT ID_NFCITEM, ID_IDENTIFICADOR, NUM_ITEM, QTD_ITEM, EST_BX
+        SELECT ID_NFCITEM, ID_IDENTIFICADOR, NUM_ITEM, QTD_ITEM, UNI_MEDIDA, EST_BX
         FROM TB_NFC_ITEM WHERE ID_NFCOMPRA = ?`, [id]);
 
       const targets = activeTargets(appCfg);
@@ -189,11 +189,24 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
 
       for (const it of itens) {
         const idIdent = Number(it.ID_IDENTIFICADOR);
-        const qtd = Number(it.QTD_ITEM || 0);
+        const qtdItem = Number(it.QTD_ITEM || 0);
         const estBx = String(it.EST_BX || '').trim().toUpperCase();
         // Só estorna estoque dos itens que entraram (EST_BX='S'); o trigger Clipp
         // não desfaz o cancelamento — fazemos o estorno manual aqui.
-        if (!idIdent || !qtd || estBx !== 'S') continue;
+        if (!idIdent || !qtdItem || estBx !== 'S') continue;
+
+        // Entrada no Clipp = QTD_ITEM × CONVERSOR(UNI_MEDIDA); espelhar no estorno.
+        let conv = 1;
+        const uni = String(it.UNI_MEDIDA || '').trim();
+        if (uni) {
+          try {
+            const urows = await query(db, `
+              SELECT FIRST 1 CONVERSOR FROM TB_UNI_MEDIDA WHERE UNIDADE = ?`, [uni]);
+            const n = Number(urows[0]?.CONVERSOR);
+            if (n > 0) conv = n;
+          } catch { /* ignore */ }
+        }
+        const qtd = Number((qtdItem * conv).toFixed(6));
 
         for (const target of targets) {
           const t = target.tables;

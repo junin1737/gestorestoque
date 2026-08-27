@@ -1190,40 +1190,63 @@ async function gravarNfCompra(sessao, {
       const qtdXml = Number(it.sistema.qtd_xml) > 0
         ? Number(it.sistema.qtd_xml)
         : (Number(it.xml?.qCom || 0) || 0);
-      // Quantidade em unidade de estoque (já convertida).
-      const qtd = Number((qtdXml * conversor).toFixed(6));
-      it.sistema.qtd = qtd;
+      let qtdEstoque = Number(it.sistema.qtd);
+      if (!(qtdEstoque > 0)) {
+        qtdEstoque = Number((qtdXml * conversor).toFixed(6));
+      }
+      it.sistema.qtd = qtdEstoque;
       it.sistema.conversor = conversor;
       it.sistema.qtd_xml = qtdXml;
 
       const custoInfo = calcCustoUnitarioItem(it.sistema || {}, it.xml || {});
-      let vUnit = Number(it.sistema.prc_custo);
-      // Com conversão, o unitário DEVE ser total líquido ÷ qtd convertida.
-      // Caso contrário a nota fica com valor inflado (vUnCom × qtd convertida).
-      if (Math.abs(conversor - 1) > 1e-9) {
-        vUnit = custoInfo.custoEstoque;
-      } else if (!Number.isFinite(vUnit) || vUnit <= 0) {
-        vUnit = custoInfo.custoEstoque > 0
+      let vUnitEstoque = Number(it.sistema.prc_custo);
+      if (Math.abs(conversor - 1) > 1e-9 || !(vUnitEstoque > 0)) {
+        vUnitEstoque = custoInfo.custoEstoque > 0
           ? custoInfo.custoEstoque
           : Number(it.xml?.vUnCom || 0);
       }
-      if (!Number.isFinite(vUnit)) vUnit = 0;
-      it.sistema.prc_custo = vUnit;
+      if (!Number.isFinite(vUnitEstoque)) vUnitEstoque = 0;
+      it.sistema.prc_custo = vUnitEstoque;
+      const vTotal = totalMercadoriaItem(it.xml || {}, it.sistema || {});
       const vDesc = Number(it.sistema.v_desc ?? it.xml?.vDesc ?? 0);
       const vFrete = Number(it.sistema.v_frete ?? it.xml?.vFrete ?? 0);
       const vSeg = Number(it.sistema.v_seguro ?? it.xml?.vSeg ?? 0);
       const vOutro = Number(it.sistema.v_outro ?? it.xml?.vOutro ?? 0);
-      const vTotal = totalMercadoriaItem(it.xml || {}, it.sistema || {});
-      // QTD_ITEM já está convertida: UNI_MEDIDA precisa ter CONVERSOR=1.
-      // Se gravar a unidade de compra (ex. "58" com conversor 58), o Clipp
-      // (trigger/SINTEGRA) multiplica de novo → estoque e Sef inflados.
-      const uniCompra = String(it.sistema.uni_medida || it.xml?.uCom || 'UN').trim().slice(0, 6) || 'UN';
-      const uniSaida = String(it.sistema.uni_medida_saida || '').trim().slice(0, 6);
-      let uni = uniCompra;
-      if (Math.abs(conversor - 1) > 1e-9) {
-        const saidaOk = uniSaida && uniSaida.toUpperCase() !== uniCompra.toUpperCase();
-        uni = saidaOk ? uniSaida : 'UN';
+
+      // Clipp: trigger/SINTEGRA usam QTD_ITEM × CONVERSOR(TB_UNI_MEDIDA da UNI_MEDIDA).
+      // Se o conversor do app bate com a unidade, grava qtd da nota + essa unidade.
+      // Senão (ex.: digitou conversor e forçou UN), grava qtd já convertida com UN.
+      let uni = String(it.sistema.uni_medida || it.xml?.uCom || 'UN').trim().slice(0, 6) || 'UN';
+      let convTabela = 1;
+      try {
+        const urows = await query(db, `
+          SELECT FIRST 1 CONVERSOR FROM TB_UNI_MEDIDA WHERE UNIDADE = ?`, [uni]);
+        const n = Number(urows[0]?.CONVERSOR);
+        if (n > 0) convTabela = n;
+      } catch { /* ignore */ }
+      const usaFatorUnidade = Math.abs(conversor - convTabela) <= 1e-6;
+      let qtdNf;
+      let vUnitNf;
+      if (usaFatorUnidade && qtdXml > 0) {
+        qtdNf = qtdXml;
+        vUnitNf = Number((vTotal / qtdNf).toFixed(6));
+      } else {
+        qtdNf = qtdEstoque > 0 ? qtdEstoque : qtdXml;
+        uni = String(it.sistema.uni_medida_saida || 'UN').trim().slice(0, 6) || 'UN';
+        // Garante unidade com fator 1 para o trigger não remultiplicar
+        try {
+          const u2 = await query(db, `
+            SELECT FIRST 1 CONVERSOR FROM TB_UNI_MEDIDA WHERE UNIDADE = ?`, [uni]);
+          if (!(Number(u2[0]?.CONVERSOR) > 0) || Math.abs(Number(u2[0].CONVERSOR) - 1) > 1e-6) {
+            uni = 'UN';
+          }
+        } catch {
+          uni = 'UN';
+        }
+        vUnitNf = vUnitEstoque;
       }
+      if (!(vUnitNf > 0)) vUnitNf = Number(it.xml?.vUnCom || 0) || vUnitEstoque;
+
       const cfop = String(it.sistema.cfop || it.xml?.CFOP || '').slice(0, 4);
       const csosn = String(
         it.sistema.csosn_entrada || it.sistema.csosn || it.sistema.tributos?.csosn || ''
@@ -1236,7 +1259,7 @@ async function gravarNfCompra(sessao, {
       if (flags.gera_estoque === 'S') {
         await zerarNegativoAntesTrigger(db, appCfg, {
           idIdentificador: idIdent,
-          prcCusto: vUnit,
+          prcCusto: vUnitEstoque,
           usuario,
           idFuncionario,
           nfLabel,
@@ -1251,9 +1274,9 @@ async function gravarNfCompra(sessao, {
             VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
             CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT, VLR_ICM_DESO, ID_MOTIVO_DESO
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, [
-          idItem, idIdent, idNf, Number(it.nItem), qtd, uni,
+          idItem, idIdent, idNf, Number(it.nItem), qtdNf, uni,
           vTotal, vDesc, vFrete, vSeg, vOutro,
-          cfop || null, csosn || null, estBx, vUnit, vUnit,
+          cfop || null, csosn || null, estBx, vUnitNf, vUnitNf,
           vDeson > 0 ? vDeson : null,
           vDeson > 0 ? (motDeson ? Number(motDeson) : null) : null,
         ]);
@@ -1264,9 +1287,9 @@ async function gravarNfCompra(sessao, {
             VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
             CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, [
-          idItem, idIdent, idNf, Number(it.nItem), qtd, uni,
+          idItem, idIdent, idNf, Number(it.nItem), qtdNf, uni,
           vTotal, vDesc, vFrete, vSeg, vOutro,
-          cfop || null, csosn || null, estBx, vUnit, vUnit,
+          cfop || null, csosn || null, estBx, vUnitNf, vUnitNf,
         ]);
       }
 
@@ -1284,11 +1307,11 @@ async function gravarNfCompra(sessao, {
       await gravarLotesItem(db, appCfg, idItem, idIdent, it);
       await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       if (flags.gera_estoque === 'S') {
-        // EST_BX='S' → trigger Clipp; aqui só ManagePro (TB_*_2)
+        // EST_BX='S' → trigger Clipp; ManagePro (*_2) via entradaEstoque
         await entradaEstoque(db, appCfg, {
           idIdentificador: idIdent,
-          qtd,
-          prcCusto: vUnit,
+          qtd: qtdEstoque,
+          prcCusto: vUnitEstoque,
           usuario,
           idFuncionario,
           nfLabel,

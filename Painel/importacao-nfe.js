@@ -1756,7 +1756,7 @@ const ImportacaoNfe = (() => {
           ${field('Unidade XML', 'imp-uni-xml', sys.uni_medida_xml || xml.uCom, { third: true, readonly: true })}
           ${comboField('Unidade estoque', 'imp-uni', 'imp-uni-list', sys.uni_medida || xml.uCom, { third: true, placeholder: 'Pesquisar unidade…' })}
           ${field('Conversor', 'imp-conversor', conversor, { type: 'number', step: '0.0001', third: true })}
-          ${field('Entrada Estoque', 'imp-qtd', qtdConv, { type: 'number', step: '0.0001', third: true, readonly: true })}
+          ${field('Entrada Estoque', 'imp-qtd', qtdConv, { type: 'number', step: '0.0001', third: true })}
           ${field('Custo Convertido', 'imp-custo-conv', custoInfo.custoEstoque, { type: 'number', step: '0.0001', third: true })}
         </div>
         <p class="hint">Custo Convertido = total líquido do item ÷ entrada estoque. Ao salvar, este valor alimenta o preço de custo.</p>
@@ -2135,7 +2135,7 @@ const ImportacaoNfe = (() => {
           ${state.itemIndex < total - 1 ? 'Salvar e próximo →' : 'Salvar e voltar'}
         </button>`
       : `<button type="button" class="btn primary" id="imp-proxima-etapa">${
-          conferirEtapasAtivo() ? 'Confirmar etapa e avançar →' : 'Próxima etapa →'
+          conferirEtapasAtivo() ? 'Confirmar e pular etapa →' : 'Pular etapa →'
         }</button>`;
 
     host.innerHTML = `
@@ -2321,26 +2321,28 @@ const ImportacaoNfe = (() => {
     });
   }
 
-  function syncQtdConvertida() {
+  function syncQtdConvertida(opts = {}) {
     const qtdXml = Number($('#imp-qtd-xml')?.value || 0);
     const conv = Number($('#imp-conversor')?.value || 1) || 1;
     const qtdConv = Number((qtdXml * conv).toFixed(6));
     const out = $('#imp-qtd');
-    if (out) out.value = String(qtdConv);
+    if (out && !opts.fromQtdField) out.value = String(qtdConv);
     const prevConv = $('#imp-conv-preview');
     const prevQtd = $('#imp-qtd-preview');
     if (prevConv) prevConv.textContent = String(conv);
     if (prevQtd) {
       const uni = $('#imp-uni')?.value || '';
-      prevQtd.textContent = `${qtdConv} ${uni}`.trim();
+      const qtdShow = opts.fromQtdField && out ? Number(out.value || 0) : qtdConv;
+      prevQtd.textContent = `${qtdShow} ${uni}`.trim();
     }
     const it = itemAt(state.itemIndex);
     if (it) {
+      const qtdFinal = opts.fromQtdField && out ? Number(out.value || 0) : qtdConv;
       const custoInfo = calcCustoNotaUnitario({
         ...(it.sistema || {}),
         conversor: conv,
         qtd_xml: qtdXml,
-        qtd: qtdConv,
+        qtd: qtdFinal > 0 ? qtdFinal : qtdConv,
         v_desc: Number($('#imp-desc-val')?.value ?? it.sistema?.v_desc ?? 0),
         v_frete: Number($('#imp-frete')?.value ?? it.sistema?.v_frete ?? 0),
         v_seguro: Number($('#imp-seguro')?.value ?? it.sistema?.v_seguro ?? 0),
@@ -2358,7 +2360,7 @@ const ImportacaoNfe = (() => {
       // Sempre atualiza o custo de estoque no item (evita gravar vUnCom × qtd convertida)
       if (it.sistema) {
         it.sistema.conversor = conv;
-        it.sistema.qtd = qtdConv;
+        it.sistema.qtd = qtdFinal > 0 ? qtdFinal : qtdConv;
         it.sistema.prc_custo = custoInfo.custoEstoque;
       }
     }
@@ -2704,7 +2706,13 @@ const ImportacaoNfe = (() => {
         ? qtdXmlRaw
         : (sys.qtd_xml ?? it?.xml?.qCom ?? 0)
     ) || Number(it?.xml?.qCom || 0) || 0;
-    const qtd = Number((qtdXml * conversor).toFixed(6));
+    const qtdCampo = gn('#imp-qtd');
+    let qtd = Number((qtdXml * conversor).toFixed(6));
+    if (qtdCampo != null && qtdCampo > 0 && $('#imp-qtd')) {
+      qtd = qtdCampo;
+    } else if (Number(sys.qtd) > 0 && Math.abs(Number(sys.qtd) - qtd) > 1e-9 && sys.conversor_manual) {
+      qtd = Number(sys.qtd);
+    }
 
     let custo = parseMoney($('#imp-custo-ficha')?.value);
     if (custo === undefined) custo = gn('#imp-custo-conv');
@@ -3399,6 +3407,28 @@ const ImportacaoNfe = (() => {
         if (it?.sistema) it.sistema.uni_medida = 'UN';
       }
       syncQtdConvertida();
+    });
+    $('#imp-qtd')?.addEventListener('input', () => {
+      const it = itemAt(state.itemIndex);
+      const qtdXml = Number($('#imp-qtd-xml')?.value || it?.sistema?.qtd_xml || it?.xml?.qCom || 0);
+      const qtd = Number($('#imp-qtd')?.value || 0);
+      if (qtdXml > 0 && qtd > 0) {
+        const conv = Number((qtd / qtdXml).toFixed(6)) || 1;
+        if ($('#imp-conversor')) $('#imp-conversor').value = String(conv);
+        if (it?.sistema) {
+          it.sistema.conversor_manual = true;
+          it.sistema.conversor = conv;
+          it.sistema.qtd = qtd;
+          it.sistema.uni_medida = 'UN';
+        }
+        const sel = $('#imp-uni');
+        if (sel) {
+          sel.value = 'UN';
+          const disp = $('#imp-uni-disp');
+          if (disp) disp.value = 'UN';
+        }
+      }
+      syncQtdConvertida({ fromQtdField: true });
     });
     $('#imp-uni')?.addEventListener('change', () => {
       syncQtdConvertida();

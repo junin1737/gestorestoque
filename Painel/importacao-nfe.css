@@ -1098,11 +1098,23 @@
   flex-wrap: wrap;
   gap: 0.5rem;
   align-items: center;
-  justify-content: space-between;
-  padding: 0.65rem 0;
+  justify-content: flex-end;
+  padding: 0.65rem 0.75rem;
   margin-top: 0.5rem;
-  background: linear-gradient(to top, var(--bg) 70%, transparent);
-  z-index: 4;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  z-index: 20;
+  box-shadow: 0 -4px 16px color-mix(in srgb, var(--fg) 8%, transparent);
+}
+
+.imp-item-footer .btn {
+  min-height: 2.6rem;
+  flex: 1 1 auto;
+}
+
+.imp-item-footer .btn.primary {
+  flex: 1 1 100%;
 }
 
 .imp-check {
@@ -1239,15 +1251,17 @@
   }
 
   #imp-view-item {
-    display: block;
+    display: flex;
+    flex-direction: column;
     max-height: none;
     min-height: 0;
+    padding-bottom: calc(var(--nav-h) + var(--safe-b) + 4.75rem);
   }
 
   .imp-item-scroll {
     overflow: visible;
     max-height: none;
-    padding-bottom: 4.5rem;
+    padding-bottom: 1rem;
   }
 
   .imp-trib-head,
@@ -1257,13 +1271,21 @@
   }
 
   .imp-item-footer {
+    position: fixed;
+    left: 0.5rem;
+    right: 0.5rem;
+    bottom: calc(var(--nav-h) + var(--safe-b) + 0.35rem);
+    margin: 0;
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
+    justify-content: stretch;
+    z-index: 40;
   }
 
   .imp-item-footer .btn.primary {
     order: 0;
+    flex: 1 1 100%;
   }
 }
 
