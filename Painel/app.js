@@ -1174,18 +1174,25 @@ function renderDetalhe() {
   const base = Number(it.qtd_atual || 0);
   let syncing = false;
 
-  function updateDiffFromAddRem() {
-    const add = parseBrMoney(qAdd?.value || 0);
-    const rem = parseBrMoney(qRem?.value || 0);
-    const delta = add - rem;
+  function paintDiff(delta) {
     const box = $('#q-diff');
-    box.textContent = delta === 0
+    if (!box) return;
+    const d = Number.isFinite(delta) ? delta : 0;
+    box.textContent = d === 0
       ? 'Diferença: 0'
-      : delta > 0
-        ? `Diferença: +${fmtNum(delta)} — Será adicionado ao estoque`
-        : `Diferença: ${fmtNum(delta)} — Será removido do estoque`;
-    box.className = `diff-box ${delta > 0 ? 'pos' : delta < 0 ? 'neg' : ''}`;
-    if (!syncing && qAtual) {
+      : d > 0
+        ? `Diferença: +${fmtNum(d)} — Será adicionado ao estoque`
+        : `Diferença: ${fmtNum(d)} — Será removido do estoque`;
+    box.className = `diff-box ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}`;
+  }
+
+  function updateDiffFromAddRem() {
+    if (syncing) return;
+    const add = parseBrMoney(qAdd?.value ?? 0);
+    const rem = parseBrMoney(qRem?.value ?? 0);
+    const delta = add - rem;
+    paintDiff(delta);
+    if (qAtual) {
       syncing = true;
       qAtual.value = fmtMoney2(base + delta);
       syncing = false;
@@ -1194,23 +1201,30 @@ function renderDetalhe() {
 
   function updateAddRemFromAtual() {
     if (syncing || !qAtual) return;
-    const nova = Number(qAtual.value || 0);
+    const nova = parseBrMoney(qAtual.value);
     const delta = nova - base;
     syncing = true;
     if (delta >= 0) {
-      if (qAdd) qAdd.value = String(delta);
-      if (qRem) qRem.value = '0';
+      if (qAdd) qAdd.value = fmtMoney2(delta);
+      if (qRem) qRem.value = fmtMoney2(0);
     } else {
-      if (qAdd) qAdd.value = '0';
-      if (qRem) qRem.value = String(Math.abs(delta));
+      if (qAdd) qAdd.value = fmtMoney2(0);
+      if (qRem) qRem.value = fmtMoney2(Math.abs(delta));
     }
     syncing = false;
-    updateDiffFromAddRem();
+    paintDiff(delta);
   }
 
   qAdd?.addEventListener('input', updateDiffFromAddRem);
   qRem?.addEventListener('input', updateDiffFromAddRem);
   qAtual?.addEventListener('input', updateAddRemFromAtual);
+  qAtual?.addEventListener('blur', () => {
+    if (!qAtual || syncing) return;
+    syncing = true;
+    qAtual.value = fmtMoney2(parseBrMoney(qAtual.value));
+    syncing = false;
+    updateAddRemFromAtual();
+  });
   updateDiffFromAddRem();
 
   $('#btn-toggle-status')?.addEventListener('click', async () => {
