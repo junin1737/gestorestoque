@@ -1190,6 +1190,7 @@ async function gravarNfCompra(sessao, {
       const qtdXml = Number(it.sistema.qtd_xml) > 0
         ? Number(it.sistema.qtd_xml)
         : (Number(it.xml?.qCom || 0) || 0);
+      // Quantidade em unidade de estoque (já convertida).
       const qtd = Number((qtdXml * conversor).toFixed(6));
       it.sistema.qtd = qtd;
       it.sistema.conversor = conversor;
@@ -1213,7 +1214,16 @@ async function gravarNfCompra(sessao, {
       const vSeg = Number(it.sistema.v_seguro ?? it.xml?.vSeg ?? 0);
       const vOutro = Number(it.sistema.v_outro ?? it.xml?.vOutro ?? 0);
       const vTotal = totalMercadoriaItem(it.xml || {}, it.sistema || {});
-      const uni = String(it.sistema.uni_medida || it.xml?.uCom || 'UN').slice(0, 6);
+      // QTD_ITEM já está convertida: UNI_MEDIDA precisa ter CONVERSOR=1.
+      // Se gravar a unidade de compra (ex. "58" com conversor 58), o Clipp
+      // (trigger/SINTEGRA) multiplica de novo → estoque e Sef inflados.
+      const uniCompra = String(it.sistema.uni_medida || it.xml?.uCom || 'UN').trim().slice(0, 6) || 'UN';
+      const uniSaida = String(it.sistema.uni_medida_saida || '').trim().slice(0, 6);
+      let uni = uniCompra;
+      if (Math.abs(conversor - 1) > 1e-9) {
+        const saidaOk = uniSaida && uniSaida.toUpperCase() !== uniCompra.toUpperCase();
+        uni = saidaOk ? uniSaida : 'UN';
+      }
       const cfop = String(it.sistema.cfop || it.xml?.CFOP || '').slice(0, 4);
       const csosn = String(
         it.sistema.csosn_entrada || it.sistema.csosn || it.sistema.tributos?.csosn || ''
