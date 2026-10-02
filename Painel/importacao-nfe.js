@@ -122,7 +122,7 @@ const ImportacaoNfe = (() => {
   function parseMoney(v) {
     if (v == null || v === '') return undefined;
     if (typeof v === 'number') return v;
-    const s = String(v).trim();
+    const s = String(v).trim().replace(/R\$\s?/gi, '');
     if (!s) return undefined;
     const normalized = s.includes(',')
       ? s.replace(/\./g, '').replace(',', '.')
@@ -133,7 +133,7 @@ const ImportacaoNfe = (() => {
   function moneyInput(n) {
     const v = Number(n);
     if (!Number.isFinite(v)) return '';
-    return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+    return v.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
   function num(n) {
     return deps.fmtNum ? deps.fmtNum(n) : String(n ?? '');
@@ -413,15 +413,14 @@ const ImportacaoNfe = (() => {
           </div>
           <div class="imp-sessao-meta">
             <span class="chip ${cancelada ? 'pending' : 'ok'}">${cancelada ? 'Cancelada' : 'Cadastrada'}</span>
+            <div class="imp-nota-acoes">
+              <button type="button" class="btn small outline imp-btn-ico imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}" title="Visualizar" aria-label="Visualizar">${ICO_VER}<span class="imp-btn-ico-label">Visualizar</span></button>
+              ${!cancelada ? `
+              <button type="button" class="btn small outline imp-btn-ico imp-btn-editar-nf" data-id="${esc(n.id_nfcompra)}" title="Editar" aria-label="Editar">${ICO_EDIT}<span class="imp-btn-ico-label">Editar</span></button>
+              <button type="button" class="btn small outline imp-btn-ico imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}" title="Cancelar" aria-label="Cancelar">${ICO_CANCEL}<span class="imp-btn-ico-label">Cancelar</span></button>` : ''}
+            </div>
           </div>
         </div>
-        ${!cancelada ? `<div class="imp-nota-acoes">
-            <button type="button" class="btn small outline imp-btn-ico imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}" title="Visualizar" aria-label="Visualizar">${ICO_VER}<span class="imp-btn-ico-label">Visualizar</span></button>
-            <button type="button" class="btn small outline imp-btn-ico imp-btn-editar-nf" data-id="${esc(n.id_nfcompra)}" title="Editar" aria-label="Editar">${ICO_EDIT}<span class="imp-btn-ico-label">Editar</span></button>
-            <button type="button" class="btn small outline imp-btn-ico imp-btn-cancelar-nf" data-id="${esc(n.id_nfcompra)}" title="Cancelar" aria-label="Cancelar">${ICO_CANCEL}<span class="imp-btn-ico-label">Cancelar</span></button>
-          </div>` : `<div class="imp-nota-acoes">
-            <button type="button" class="btn small outline imp-btn-ico imp-btn-ver-nf" data-id="${esc(n.id_nfcompra)}" title="Visualizar" aria-label="Visualizar">${ICO_VER}<span class="imp-btn-ico-label">Visualizar</span></button>
-          </div>`}
       </div>`;
     }).join('');
     $$('.imp-btn-ver-nf', box).forEach((btn) => {
@@ -979,9 +978,9 @@ const ImportacaoNfe = (() => {
       const descForn = xml.xProd || '—';
       const qtdXml = Number(sys.qtd_xml ?? xml.qCom ?? 0);
       const uniXml = sys.uni_medida_xml || xml.uCom || '';
-      const done = it.status === 'conferido';
+      const done = it.status === 'conferido' || !!it.conferido;
       return `
-        <button type="button" class="imp-item-row ${cls}${Number(state.itemIndex) === Number(idx) && state.view === 'item' ? ' is-current' : ''}" data-idx="${idx}">
+        <button type="button" class="imp-item-row ${done ? 'ok' : cls}${Number(state.itemIndex) === Number(idx) && state.view === 'item' ? ' is-current' : ''}" data-idx="${idx}">
           <span class="imp-item-num">${done ? '✓' : esc(it.nItem)}</span>
           <div class="imp-item-main">
             <strong>${esc(descForn)}</strong>
@@ -1010,10 +1009,14 @@ const ImportacaoNfe = (() => {
         : opts.third
           ? 'imp-field third'
           : 'imp-field';
+    const input = `<input id="${id}" type="${type}" value="${esc(value ?? '')}" ${ro} ${dis}${step} />`;
+    const control = opts.money
+      ? `<div class="imp-input-affix"><span>R$</span>${input}</div>`
+      : input;
     return `
       <label class="${cls}">
         <span>${esc(label)}</span>
-        <input id="${id}" type="${type}" value="${esc(value ?? '')}" ${ro} ${dis}${step} />
+        ${control}
       </label>
     `;
   }
@@ -1547,7 +1550,7 @@ const ImportacaoNfe = (() => {
     return `
       <div class="imp-trib-row ${same ? 'is-match' : ''}">
         <span class="imp-trib-lbl">${esc(label)}</span>
-        <span class="imp-trib-xml" title="Valor na NF-e">${esc(xmlTxt)}</span>
+        <input class="imp-trib-xml" type="text" value="${esc(xmlTxt)}" readonly tabindex="-1" title="Valor na NF-e" />
         <input class="imp-trib-sys" id="${sysId}" type="${opts.type || 'text'}" value="${esc(sysVal ?? '')}" ${opts.readonly ? 'readonly' : ''} ${opts.disabled ? 'disabled' : ''} />
       </div>
     `;
@@ -1562,7 +1565,7 @@ const ImportacaoNfe = (() => {
     return `
       <div class="imp-trib-row imp-trib-search-row ${same ? 'is-match' : ''}" data-combo-root>
         <span class="imp-trib-lbl">${esc(label)}</span>
-        <span class="imp-trib-xml" title="Valor na NF-e">${esc(xmlTxt)}</span>
+        <input class="imp-trib-xml" type="text" value="${esc(xmlTxt)}" readonly tabindex="-1" title="Valor na NF-e" />
         <div class="imp-trib-search">
           <input type="hidden" id="${valueId}" value="${esc(sysVal ?? '')}" />
           <input id="${displayId}" class="imp-trib-sys imp-combo-input" type="search"
@@ -1738,7 +1741,11 @@ const ImportacaoNfe = (() => {
   }
 
   function panelEntrada(sys, xml, trib, imp, simples) {
-    const csosnEnt = sys.csosn_entrada || sys.csosn || trib.csosn || '';
+    const csosnEnt = sys.csosn_entrada || sys.csosn || trib.csosn || imp.CSOSN || '';
+    const cstIcmsSys = trib.cst_icms || sys.cst_icms || imp.CST || '';
+    const cstIpiSys = trib.cst_ipi || '49';
+    const cstPisSys = trib.cst_pis || imp.CST_PIS || '';
+    const cstCofSys = trib.cst_cofins || imp.CST_COFINS || '';
     const custoInfo = calcCustoNotaUnitario(sys, xml);
     const custoNota = sys.prc_custo_nota != null
       ? sys.prc_custo_nota
@@ -1749,6 +1756,16 @@ const ImportacaoNfe = (() => {
           <h4>Tributos e custos de entrada</h4>
           <span class="hint">Custo unitário = valor da nota (sem conversão). CST/CSOSN: XML × sistema</span>
         </header>
+        <div class="imp-flags-row">
+          <label class="imp-check">
+            <input type="checkbox" id="imp-gera-estoque" ${ynChecked(sys.gera_estoque !== 'N') ? 'checked' : ''} />
+            Gera estoque neste item
+          </label>
+          <label class="imp-check">
+            <input type="checkbox" id="imp-gera-financeiro" ${ynChecked(sys.gera_financeiro !== 'N') ? 'checked' : ''} />
+            Considera no financeiro da nota
+          </label>
+        </div>
         <div class="imp-fields">
           ${field('CFOP origem (nota)', 'imp-cfop-origem', sys.cfop_origem || xml.CFOP, { third: true, readonly: true })}
           ${searchableCodeField('CFOP entrada', 'imp-cfop', 'imp-busca-cfop', 'imp-cfop-list', sys.cfop, { half: true, placeholder: 'Buscar CFOP…' })}
@@ -1760,26 +1777,18 @@ const ImportacaoNfe = (() => {
           ${field('Desconto', 'imp-desc-val', sys.v_desc, { type: 'number', step: '0.01', third: true })}
           ${field('Seguro', 'imp-seguro', sys.v_seguro, { type: 'number', step: '0.01', third: true })}
           ${field('Outras despesas', 'imp-outro', sys.v_outro, { type: 'number', step: '0.01', third: true })}
-          <label class="imp-check imp-field half">
-            <input type="checkbox" id="imp-gera-estoque" ${ynChecked(sys.gera_estoque !== 'N') ? 'checked' : ''} />
-            Gera estoque neste item
-          </label>
-          <label class="imp-check imp-field half">
-            <input type="checkbox" id="imp-gera-financeiro" ${ynChecked(sys.gera_financeiro !== 'N') ? 'checked' : ''} />
-            Considera no financeiro da nota
-          </label>
         </div>
         <p class="hint">Uso/consumo, imobilizado e similares costumam não movimentar estoque. Flags também vêm dos parâmetros de CFOP / TB_NAT_OPERACAO.</p>
         <div class="imp-trib-head"><span>Código</span><span>XML (nota)</span><span>Sistema</span></div>
         <div class="imp-trib-codes">
-          ${tribRow('CST ICMS', imp.CST, 'imp-cst', trib.cst_icms || imp.CST, { readonly: true })}
+          ${tribRow('CST ICMS', imp.CST, 'imp-cst', cstIcmsSys, { readonly: true })}
           ${simples
-    ? tribSearchRow('CSOSN', imp.CSOSN || '—', 'imp-csosn-trib', 'imp-busca-csosn-trib', 'imp-csosn-trib-list', sys.csosn_entrada || trib.csosn || sys.csosn)
+    ? tribSearchRow('CSOSN', imp.CSOSN, 'imp-csosn-trib', 'imp-busca-csosn-trib', 'imp-csosn-trib-list', csosnEnt)
     : '<div class="imp-trib-row imp-trib-spacer"></div>'}
-          ${tribSearchRow('CST IPI', imp.CST_IPI, 'imp-cst-ipi', 'imp-busca-cst-ipi', 'imp-cst-ipi-list', trib.cst_ipi || '49')}
+          ${tribSearchRow('CST IPI', imp.CST_IPI, 'imp-cst-ipi', 'imp-busca-cst-ipi', 'imp-cst-ipi-list', cstIpiSys)}
           <div class="imp-trib-row imp-trib-spacer"></div>
-          ${tribSearchRow('CST PIS', imp.CST_PIS, 'imp-cst-pis', 'imp-busca-cst-pis', 'imp-cst-pis-list', trib.cst_pis)}
-          ${tribSearchRow('CST COFINS', imp.CST_COFINS, 'imp-cst-cof', 'imp-busca-cst-cof', 'imp-cst-cof-list', trib.cst_cofins)}
+          ${tribSearchRow('CST PIS', imp.CST_PIS, 'imp-cst-pis', 'imp-busca-cst-pis', 'imp-cst-pis-list', cstPisSys)}
+          ${tribSearchRow('CST COFINS', imp.CST_COFINS, 'imp-cst-cof', 'imp-busca-cst-cof', 'imp-cst-cof-list', cstCofSys)}
         </div>
         <p class="hint">Bases e valores de ICMS/ST/IPI/PIS/COFINS seguem o XML na gravação; aqui só os códigos.</p>
       </section>
@@ -1803,10 +1812,11 @@ const ImportacaoNfe = (() => {
           <span class="imp-cmp-arrow" aria-hidden="true">›</span>
           <article class="imp-cmp-mini">
             <span>No estoque</span>
-            <strong id="imp-qtd-preview">${num(qtdConv)} ${esc(uniEst)}</strong>
-            <div class="imp-fields" style="margin:0.65rem 0 0">
-              ${comboField('Unidade de estoque', 'imp-uni', 'imp-uni-list', uniEst, { full: true, placeholder: 'Pesquisar unidade…' })}
-              ${field(`Cada ${uniXml || 'CX'} tem quantas ${uniEst}?`, 'imp-conversor', conversor, { type: 'number', step: '0.0001', full: true })}
+            <strong id="imp-qtd-preview">${num(qtdConv)}</strong>
+            <p class="imp-conv-fator-hint">1 × ${num(conversor)}</p>
+            <input type="hidden" id="imp-uni" value="${esc(uniEst)}" />
+            <div class="imp-fields" style="margin:0.15rem 0 0">
+              ${field('Converter em:', 'imp-conversor', conversor, { type: 'number', step: '0.0001', full: true })}
             </div>
           </article>
         </div>
@@ -1900,9 +1910,9 @@ const ImportacaoNfe = (() => {
         </div>
         <div class="imp-block-title">Preço</div>
         <div class="imp-fields">
-          ${field('Preço custo', 'imp-custo-ficha', moneyInput(sys.prc_custo ?? custoInfo.custoEstoque), { third: true })}
+          ${field('Preço custo', 'imp-custo-ficha', moneyInput(sys.prc_custo ?? custoInfo.custoEstoque), { third: true, money: true })}
           ${field('Margem LB %', 'imp-margem', sys.margem_lb ?? 0, { type: 'number', step: '0.01', third: true })}
-          ${field('Preço venda', 'imp-venda', moneyInput(sys.prc_venda), { third: true })}
+          ${field('Preço venda', 'imp-venda', moneyInput(sys.prc_venda), { third: true, money: true })}
           ${field('Status', 'imp-status-prod', sys.status || 'A', { third: true })}
           ${comboField('Unidade', 'imp-uni-ficha', 'imp-uni-ficha-list', sys.uni_medida_saida || sys.uni_medida || '', { third: true, placeholder: 'Pesquisar unidade (TB_UNI_MEDIDA)…' })}
         </div>
@@ -2018,18 +2028,20 @@ const ImportacaoNfe = (() => {
             ${field('Cód. créd. pres. IBS', 'imp-nfe-cod-ibs', tn.cod_cred_presu_ibs || '', { third: true })}
             ${field('Alíq. créd. pres. IBS', 'imp-nfe-aliq-ibs', tn.aliq_cred_presu_ibs ?? 0, { type: 'number', step: '0.0001', third: true })}
             ${field('Class. trib. regular', 'imp-nfe-class-reg', tn.id_class_trib_regular ?? '', { third: true })}
-            <label class="imp-check imp-field third">
-              <input type="checkbox" id="imp-nfe-deduz-cbs" ${ynChecked(tn.deduz_cred_presu_cbs) ? 'checked' : ''} />
-              Deduz créd. pres. CBS
-            </label>
-            <label class="imp-check imp-field third">
-              <input type="checkbox" id="imp-nfe-deduz-ibs" ${ynChecked(tn.deduz_cred_presu_ibs) ? 'checked' : ''} />
-              Deduz créd. pres. IBS
-            </label>
-            <label class="imp-check imp-field third">
-              <input type="checkbox" id="imp-nfe-bem-usado" ${ynChecked(tn.ind_bem_movel_usado) ? 'checked' : ''} />
-              Bem móvel usado
-            </label>
+            <div class="imp-flags-row">
+              <label class="imp-check">
+                <input type="checkbox" id="imp-nfe-deduz-cbs" ${ynChecked(tn.deduz_cred_presu_cbs) ? 'checked' : ''} />
+                Deduz créd. pres. CBS
+              </label>
+              <label class="imp-check">
+                <input type="checkbox" id="imp-nfe-deduz-ibs" ${ynChecked(tn.deduz_cred_presu_ibs) ? 'checked' : ''} />
+                Deduz créd. pres. IBS
+              </label>
+              <label class="imp-check">
+                <input type="checkbox" id="imp-nfe-bem-usado" ${ynChecked(tn.ind_bem_movel_usado) ? 'checked' : ''} />
+                Bem móvel usado
+              </label>
+            </div>
           </div>
           <div class="imp-fields">
             ${comboField('Classificação tributária NFC-e', 'imp-nfce-class', 'imp-class-nfce-list', tc.id_class_trib ?? '', {
@@ -2111,7 +2123,7 @@ const ImportacaoNfe = (() => {
           <h4>Lote (opcional)</h4>
           <span class="hint">Só preencha se o produto controla lote. Desmarque para não exigir.</span>
         </header>
-        <label class="imp-check imp-aplicar-saida">
+        <label class="imp-check">
           <input type="checkbox" id="imp-trabalha-lote" ${usaLote ? 'checked' : ''} />
           Trabalha com lote
         </label>
@@ -2254,6 +2266,7 @@ const ImportacaoNfe = (() => {
 
     bindItemEvents(it);
     if (tab === 'vinculo') loadProdutosBusca(state.buscaProduto);
+    renderItensLista();
   }
 
   async function loadProdutosBusca(q) {
@@ -2428,7 +2441,9 @@ const ImportacaoNfe = (() => {
     if (prevQtd) {
       const uni = $('#imp-uni')?.value || '';
       const qtdShow = opts.fromQtdField && out ? Number(out.value || 0) : qtdConv;
-      prevQtd.textContent = `${qtdShow} ${uni}`.trim();
+      prevQtd.textContent = String(num(qtdShow));
+      const hint = document.querySelector('.imp-conv-fator-hint');
+      if (hint) hint.textContent = `1 × ${num(conv)}`;
       const banner = $('#imp-result-qtd');
       if (banner) banner.textContent = `${num(qtdShow)} ${uni}`.trim();
     }
@@ -2995,9 +3010,7 @@ const ImportacaoNfe = (() => {
           _class_label: g('#imp-busca-class-nfce') || tc._class_label || '',
         },
       },
-      conferido: conferirEtapasAtivo()
-        ? true
-        : ($('#imp-conferido') ? !!$('#imp-conferido').checked : !!it?.conferido),
+      conferido: $('#imp-conferido') ? !!$('#imp-conferido').checked : !!it?.conferido,
       observacao: g('#imp-obs') != null ? (g('#imp-obs') || '') : (it?.observacao || ''),
       etapas_ok: { ...etapasOkOf(it) },
       lote_aba_visitada: !!it?.lote_aba_visitada,
@@ -3075,6 +3088,7 @@ const ImportacaoNfe = (() => {
     const s = state.sessao;
     if (!it || !s) return false;
     const patch = collectItemPatch();
+    if (state.itemTab === 'lote') patch.conferido = true;
     const usaLote = String(patch.sistema?.trabalha_lote || '').toUpperCase() === 'S';
     patch.lote_aba_visitada = usaLote;
     if (usaLote) {
