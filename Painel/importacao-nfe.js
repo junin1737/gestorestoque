@@ -1795,6 +1795,17 @@ const ImportacaoNfe = (() => {
     `;
   }
 
+  function convFatorFmt(n) {
+    const x = Number(n);
+    if (!Number.isFinite(x)) return '0';
+    if (Math.abs(x - Math.round(x)) < 1e-9) return String(Math.round(x));
+    return num(x);
+  }
+
+  function convFatorHint(qtdXml, conversor) {
+    return `${convFatorFmt(qtdXml)} × ${convFatorFmt(conversor)}`;
+  }
+
   function panelConversao(sys, xml, qtdXml, conversor, qtdConv) {
     const custoInfo = calcCustoNotaUnitario({ ...sys, conversor, qtd_xml: qtdXml, qtd: qtdConv }, xml);
     const uniXml = sys.uni_medida_xml || xml.uCom || '';
@@ -1813,7 +1824,7 @@ const ImportacaoNfe = (() => {
           <article class="imp-cmp-mini">
             <span>No estoque</span>
             <strong id="imp-qtd-preview">${num(qtdConv)}</strong>
-            <p class="imp-conv-fator-hint">1 × ${num(conversor)}</p>
+            <p class="imp-conv-fator-hint">${esc(convFatorHint(qtdXml, conversor))}</p>
             <input type="hidden" id="imp-uni" value="${esc(uniEst)}" />
             <div class="imp-fields" style="margin:0.15rem 0 0">
               ${field('Converter em:', 'imp-conversor', conversor, { type: 'number', step: '0.0001', full: true })}
@@ -2443,7 +2454,7 @@ const ImportacaoNfe = (() => {
       const qtdShow = opts.fromQtdField && out ? Number(out.value || 0) : qtdConv;
       prevQtd.textContent = String(num(qtdShow));
       const hint = document.querySelector('.imp-conv-fator-hint');
-      if (hint) hint.textContent = `1 × ${num(conv)}`;
+      if (hint) hint.textContent = convFatorHint(qtdXml, conv);
       const banner = $('#imp-result-qtd');
       if (banner) banner.textContent = `${num(qtdShow)} ${uni}`.trim();
     }
@@ -3550,14 +3561,6 @@ const ImportacaoNfe = (() => {
     $('#imp-conversor')?.addEventListener('input', () => {
       const it = itemAt(state.itemIndex);
       if (it?.sistema) it.sistema.conversor_manual = true;
-      // Digitação manual do conversor → unidade de estoque passa a UN
-      const sel = $('#imp-uni');
-      if (sel) {
-        sel.value = 'UN';
-        const disp = $('#imp-uni-disp');
-        if (disp) disp.value = 'UN';
-        if (it?.sistema) it.sistema.uni_medida = 'UN';
-      }
       syncQtdConvertida();
     });
     $('#imp-qtd')?.addEventListener('input', () => {

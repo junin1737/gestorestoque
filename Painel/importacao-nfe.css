@@ -1808,6 +1808,7 @@
   border-radius: 14px;
   padding: 0.9rem 1rem;
   min-width: 0;
+  overflow: visible;
 }
 .imp-cmp-mini > span { display: block; font-size: 0.7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
 .imp-cmp-mini > strong { display: block; font-size: 1.55rem; margin: 0.2rem 0 0.35rem; overflow-wrap: anywhere; }
