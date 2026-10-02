@@ -3,8 +3,10 @@ const express = require('express');
 const path = require('path');
 const os = require('os');
 const routes = require('./routes');
-const { PORT } = require('./config');
+const { PORT: DEFAULT_PORT } = require('./config');
 const { ensureFirebirdClientPath } = require('./nativePath');
+
+const PORT = Number(process.env.GESTOR_PORT || DEFAULT_PORT) || DEFAULT_PORT;
 
 ensureFirebirdClientPath();
 

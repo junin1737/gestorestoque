@@ -35,15 +35,14 @@ const ImportacaoNfe = (() => {
   let buscaCodeTimer = null;
 
   const ITEM_TABS = [
-    { id: 'vinculo', label: '1 · Vínculo' },
-    { id: 'entrada', label: '2 · Entrada' },
-    { id: 'conversao', label: '3 · Conversão' },
-    { id: 'saida', label: '4 · Saída' },
-    { id: 'trib_saida', label: '5 · Trib. saída' },
-    { id: 'anp', label: '6 · ANP' },
-    { id: 'lote', label: 'Lote' },
+    { id: 'vinculo', label: 'Vínculo' },
+    { id: 'entrada', label: 'Entrada' },
+    { id: 'conversao', label: 'Conversão' },
+    { id: 'saida', label: 'Preço de venda' },
+    { id: 'trib_saida', label: 'Tributos de saída' },
+    { id: 'lote', label: 'Lote / ANP' },
   ];
-  const ITEM_TABS_ETAPA = ITEM_TABS.filter((t) => t.id !== 'lote');
+  const ITEM_TABS_ETAPA = ITEM_TABS;
 
   const NATUREZAS_CFOP_TODOS = [
     'industrializa',
@@ -238,10 +237,29 @@ const ImportacaoNfe = (() => {
   function showView(name) {
     state.view = name;
     const views = ['inicio', 'consultar', 'params', 'sessao', 'item'];
+    const desktop = window.matchMedia('(min-width: 981px)').matches;
     views.forEach((v) => {
       const el = $(`#imp-view-${v}`);
-      if (el) el.hidden = v !== name;
+      if (!el) return;
+      if (desktop && name === 'item' && (v === 'sessao' || v === 'item')) {
+        el.hidden = false;
+        return;
+      }
+      el.hidden = v !== name;
     });
+    const page = $('#page-importacao');
+    page?.classList.toggle('imp-layout-item', name === 'item');
+    page?.classList.toggle('imp-layout-sessao', name === 'sessao' || name === 'item');
+    if (name === 'item' && desktop) {
+      const tabItens = $('#imp-tab-itens');
+      const tabDados = $('#imp-tab-dados');
+      const tabFin = $('#imp-tab-financeiro');
+      if (tabItens) tabItens.hidden = false;
+      if (tabDados) tabDados.hidden = true;
+      if (tabFin) tabFin.hidden = true;
+      $$('#imp-tabs .imp-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'itens'));
+    }
+    renderNfChrome();
     deps.scrollAppTop?.();
   }
 
@@ -537,6 +555,7 @@ const ImportacaoNfe = (() => {
     renderItensLista();
     updateAddItemBtn();
     updateConfirmBtn();
+    renderNfChrome();
     if (state.tab === 'financeiro') {
       state.financeiroVisitado = true;
       renderFinanceiro();
@@ -607,6 +626,60 @@ const ImportacaoNfe = (() => {
       : (!fornOk
         ? 'Vincule o fornecedor antes de gravar'
         : 'Confira todos os itens antes de gravar');
+  }
+
+  function renderNfChrome() {
+    const el = $('#imp-nf-chrome');
+    const s = state.sessao;
+    if (!el) return;
+    if (!s || (state.view !== 'sessao' && state.view !== 'item')) {
+      el.hidden = true;
+      el.innerHTML = '';
+      return;
+    }
+    const ide = s.xml?.ide || {};
+    const emit = s.xml?.emit || {};
+    const tot = s.xml?.total || {};
+    const conferidos = s.resumo?.conferidos || 0;
+    const total = s.resumo?.total || 0;
+    const pct = total ? Math.round((conferidos / total) * 100) : 0;
+    const itensOk = total > 0 && s.resumo?.pendentes === 0 && conferidos === total;
+    const fornOk = !!s?.fornecedor?.id_fornec;
+    const ok = !!(itensOk && fornOk);
+    const fornNome = emit.xFant || emit.xNome || s.fornecedor?.cadastro?.nome_fanta || s.fornecedor?.cadastro?.nome || '';
+    el.hidden = false;
+    el.innerHTML = `
+      <button type="button" class="imp-chrome-back" id="imp-chrome-voltar" aria-label="Voltar">
+        <svg viewBox="0 0 24 24"><path d="M15 5 8 12l7 7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="imp-chrome-title">
+        <strong>NF-e ${esc(ide.nNF || '—')} · ${esc(fornNome)}</strong>
+        <span>Série ${esc(ide.serie || '—')} · ${esc(ide.natOp || s.natureza?.descricao || '')}</span>
+      </div>
+      <div class="imp-chrome-progress" title="${conferidos} de ${total} itens">
+        <div style="width:${pct}%"></div>
+      </div>
+      <span class="imp-chrome-count">${conferidos} de ${total} itens</span>
+      <strong class="imp-chrome-total">Total ${money(tot.vNF)}</strong>
+      <button type="button" class="btn" id="imp-chrome-danfe">DANFE</button>
+      <button type="button" class="btn" id="imp-chrome-fin">Financeiro</button>
+      <button type="button" class="btn primary ${ok ? '' : 'is-disabled'}" id="imp-chrome-gravar" aria-disabled="${ok ? 'false' : 'true'}">Gravar nota</button>
+    `;
+    $('#imp-chrome-voltar')?.addEventListener('click', () => {
+      if (state.view === 'item') {
+        showView('sessao');
+        renderSessao();
+      } else {
+        $('#imp-voltar-inicio')?.click();
+      }
+    });
+    $('#imp-chrome-danfe')?.addEventListener('click', () => $('#imp-btn-ver-pdf')?.click());
+    $('#imp-chrome-fin')?.addEventListener('click', () => {
+      showView('sessao');
+      const finTab = document.querySelector('#imp-tabs .imp-tab[data-tab="financeiro"]');
+      finTab?.click();
+    });
+    $('#imp-chrome-gravar')?.addEventListener('click', () => $('#imp-btn-confirmar')?.click());
   }
 
   function kv(label, value) {
@@ -900,44 +973,21 @@ const ImportacaoNfe = (() => {
       return;
     }
     box.innerHTML = itens.map((it, idx) => {
-      const [lbl, cls] = statusLabel(it.status);
       const xml = it.xml || {};
       const sys = it.sistema || {};
-      const cfopOrig = sys.cfop_origem || xml.CFOP || '—';
-      const cfopEnt = sys.cfop || '—';
+      const cls = it.status === 'conferido' ? 'ok' : (it.status === 'vinculado' ? 'warn' : 'pending');
       const descForn = xml.xProd || '—';
-      const descEst = sys.criar_novo
-        ? `(novo) ${sys.descricao || xml.xProd || '—'}`
-        : (sys.descricao || (sys.id_identificador ? `ID ${sys.id_identificador}` : '— sem vínculo —'));
-      const conversor = Number(sys.conversor ?? 1) || 1;
       const qtdXml = Number(sys.qtd_xml ?? xml.qCom ?? 0);
-      const qtdEst = Number(sys.qtd ?? (qtdXml * conversor));
       const uniXml = sys.uni_medida_xml || xml.uCom || '';
-      const uniEst = sys.uni_medida || '';
-      const custo = Number(sys.prc_custo || 0);
-      const geraEst = (sys.gera_estoque || 'S') !== 'N';
-      const geraFin = (sys.gera_financeiro || 'S') !== 'N';
-      const convLine = `<span class="hint imp-item-conv">Conv. ${esc(String(conversor))} · ${num(qtdXml)} ${esc(uniXml)} → ${num(qtdEst)} ${esc(uniEst)}${custo > 0 ? ` · Custo ${money(custo)}` : ''}</span>`;
-      const flagsLine = (!geraEst || !geraFin)
-        ? `<span class="hint imp-item-flags">${!geraEst ? '<span class="chip pending">Sem estoque</span>' : ''}${!geraFin ? ' <span class="chip pending">Sem financeiro</span>' : ''}</span>`
-        : '';
+      const done = it.status === 'conferido';
       return `
-        <button type="button" class="imp-item-row ${cls}" data-idx="${idx}">
-          <span class="imp-item-num">${esc(it.nItem)}</span>
+        <button type="button" class="imp-item-row ${cls}${Number(state.itemIndex) === Number(idx) && state.view === 'item' ? ' is-current' : ''}" data-idx="${idx}">
+          <span class="imp-item-num">${done ? '✓' : esc(it.nItem)}</span>
           <div class="imp-item-main">
-            <div class="imp-item-conf">
-              <span class="hint">Fornecedor</span>
-              <strong>${esc(descForn)}</strong>
-            </div>
-            <div class="imp-item-conf">
-              <span class="hint">Estoque</span>
-              <strong class="${sys.id_identificador || sys.criar_novo ? '' : 'imp-muted'}">${esc(descEst)}</strong>
-            </div>
-            <span class="hint">Cód. ${esc(xml.cProd || '—')} · Qtd ${num(xml.qCom)} ${esc(xml.uCom || '')} · CFOP ${esc(cfopOrig)} → ${esc(cfopEnt)}</span>
-            ${convLine}
-            ${flagsLine}
+            <strong>${esc(descForn)}</strong>
+            <span class="hint">${sys.id_identificador || sys.criar_novo ? `${esc(String(sys.id_identificador || 'novo'))} · ${num(qtdXml)} ${esc(uniXml)}` : 'Sem vínculo'}</span>
           </div>
-          <span class="imp-status ${cls}">${lbl}</span>
+          <span class="imp-item-val">${money(xml.vProd || xml.vUnCom)}</span>
         </button>
       `;
     }).join('');
@@ -1471,7 +1521,6 @@ const ImportacaoNfe = (() => {
   }
 
   function canOpenEtapa(tabId, it) {
-    if (tabId === 'lote') return true;
     if (!conferirEtapasAtivo()) return true;
     const idx = ITEM_TABS_ETAPA.findIndex((t) => t.id === tabId);
     if (idx < 0) return false;
@@ -1567,28 +1616,29 @@ const ImportacaoNfe = (() => {
     const lock = conferirEtapasAtivo();
     const maxLib = maxEtapaLiberada(it);
     const ok = etapasOkOf(it);
+    const curIdx = ITEM_TABS.findIndex((t) => t.id === state.itemTab);
     return `
-      <nav class="imp-item-tabs" role="tablist">
+      <nav class="imp-stepper" role="tablist">
         ${ITEM_TABS.map((t, i) => {
           const active = state.itemTab === t.id;
-          const done = !!ok[t.id];
+          const done = !!ok[t.id] || i < curIdx;
           const locked = lock && i > maxLib;
           const cls = [
-            'imp-item-tab',
-            active ? 'active' : '',
+            'imp-step',
+            active ? 'is-active' : '',
             done ? 'is-done' : '',
             locked ? 'is-locked' : '',
           ].filter(Boolean).join(' ');
           return `
-          <button type="button" class="${cls}"
-            data-item-tab="${t.id}" role="tab" aria-selected="${active}"
-            ${locked ? 'aria-disabled="true"' : ''}
-            title="${locked ? 'Confirme a etapa atual para avançar' : (done ? 'Etapa confirmada' : '')}">
-            ${esc(t.label)}${done ? ' · ok' : ''}${locked ? ' ·' : ''}
-          </button>`;
+          <button type="button" class="${cls}" data-item-tab="${t.id}" role="tab"
+            aria-selected="${active}" ${locked ? 'aria-disabled="true"' : ''}
+            title="${esc(t.label)}">
+            <span class="imp-step-num">${done && !active ? '✓' : (i + 1)}</span>
+            <span class="imp-step-lbl">${esc(t.label)}</span>
+          </button>
+          ${i < ITEM_TABS.length - 1 ? '<span class="imp-step-line"></span>' : ''}`;
         }).join('')}
       </nav>
-      ${lock ? '<p class="hint imp-etapas-hint">Modo etapa a etapa: confirme cada aba antes de avançar.</p>' : ''}
     `;
   }
 
@@ -1738,30 +1788,45 @@ const ImportacaoNfe = (() => {
 
   function panelConversao(sys, xml, qtdXml, conversor, qtdConv) {
     const custoInfo = calcCustoNotaUnitario({ ...sys, conversor, qtd_xml: qtdXml, qtd: qtdConv }, xml);
+    const uniXml = sys.uni_medida_xml || xml.uCom || '';
+    const uniEst = sys.uni_medida || 'UN';
+    const qtdAtual = Number(sys.qtd_atual || 0);
+    const qtdDepois = qtdAtual + Number(qtdConv || 0);
     return `
       <section class="imp-panel" data-panel="conversao">
-        <header class="imp-section-head">
-          <h4>Conversão e quantidade</h4>
-          <span class="hint">Entrada estoque = qtd XML × conversor · custo convertido alimenta o preço de custo</span>
-        </header>
-        <div class="imp-conv-summary">
-          <div><span>Na nota</span><strong>${num(qtdXml)} ${esc(sys.uni_medida_xml || xml.uCom || '')}</strong></div>
-          <div class="imp-conv-x">×</div>
-          <div><span>Conversor</span><strong id="imp-conv-preview">${num(conversor)}</strong></div>
-          <div class="imp-conv-x">=</div>
-          <div><span>No estoque</span><strong id="imp-qtd-preview">${num(qtdConv)} ${esc(sys.uni_medida || '')}</strong></div>
+        <div class="imp-cmp-pair">
+          <article class="imp-cmp-mini">
+            <span>Na nota</span>
+            <strong>${num(qtdXml)} ${esc(uniXml)}</strong>
+            <p class="hint">${esc(uniXml)} · ${money(xml.vUnCom)} un. · ${money(xml.vProd || xml.vUnCom * qtdXml)} total</p>
+          </article>
+          <span class="imp-cmp-arrow" aria-hidden="true">›</span>
+          <article class="imp-cmp-mini">
+            <span>No estoque</span>
+            <strong id="imp-qtd-preview">${num(qtdConv)} ${esc(uniEst)}</strong>
+            <div class="imp-fields" style="margin:0.65rem 0 0">
+              ${comboField('Unidade de estoque', 'imp-uni', 'imp-uni-list', uniEst, { full: true, placeholder: 'Pesquisar unidade…' })}
+              ${field(`Cada ${uniXml || 'CX'} tem quantas ${uniEst}?`, 'imp-conversor', conversor, { type: 'number', step: '0.0001', full: true })}
+            </div>
+          </article>
         </div>
-        <div class="imp-fields">
-          ${field('Qtd XML', 'imp-qtd-xml', qtdXml, { type: 'number', step: '0.0001', third: true, readonly: true })}
-          ${field('Unidade XML', 'imp-uni-xml', sys.uni_medida_xml || xml.uCom, { third: true, readonly: true })}
-          ${comboField('Unidade estoque', 'imp-uni', 'imp-uni-list', sys.uni_medida || xml.uCom, { third: true, placeholder: 'Pesquisar unidade…' })}
-          ${field('Conversor', 'imp-conversor', conversor, { type: 'number', step: '0.0001', third: true })}
-          ${field('Entrada Estoque', 'imp-qtd', qtdConv, { type: 'number', step: '0.0001', third: true })}
-          ${field('Custo Convertido', 'imp-custo-conv', custoInfo.custoEstoque, { type: 'number', step: '0.0001', third: true })}
+        <div class="imp-result-banner">
+          Entram no estoque <strong id="imp-result-qtd">${num(qtdConv)} ${esc(uniEst)}</strong>
+          <span> · custo unitário ${money(custoInfo.custoEstoque)}${Number.isFinite(qtdAtual) ? ` · estoque atual ${num(qtdAtual)} → ${num(qtdDepois)}` : ''}</span>
         </div>
-        <p class="hint">Custo Convertido = total líquido do item ÷ entrada estoque. Ao salvar, este valor alimenta o preço de custo.</p>
+        <label class="imp-check">
+          <input type="checkbox" id="imp-lembrar-conv" ${sys.lembrar_conversao === false ? '' : 'checked'} />
+          Lembrar. Esta conversão será usada automaticamente nas próximas notas deste fornecedor.
+        </label>
+        <div class="imp-fields" hidden>
+          ${field('Qtd XML', 'imp-qtd-xml', qtdXml, { type: 'number', step: '0.0001', readonly: true })}
+          ${field('Unidade XML', 'imp-uni-xml', uniXml, { readonly: true })}
+          ${field('Entrada Estoque', 'imp-qtd', qtdConv, { type: 'number', step: '0.0001' })}
+          ${field('Custo Convertido', 'imp-custo-conv', custoInfo.custoEstoque, { type: 'number', step: '0.0001' })}
+        </div>
+        <p class="hint">Custo convertido = total líquido do item ÷ quantidade de estoque.</p>
         <div class="imp-vinc-btns">
-          <button type="button" class="btn small outline" id="imp-cad-unidade">Cadastrar unidade</button>
+          <button type="button" class="btn small" id="imp-cad-unidade">Cadastrar unidade</button>
         </div>
       </section>
     `;
@@ -2111,7 +2176,7 @@ const ImportacaoNfe = (() => {
     const conversor = Number(sys.conversor ?? 1) || 1;
     const qtdConv = Number((qtdXml * conversor).toFixed(6));
     const tab = state.itemTab || 'vinculo';
-    const isLastTab = tab === 'anp' || tab === 'lote';
+    const isLastTab = tab === 'lote';
 
     let panelHtml = '';
     if (tab === 'vinculo') panelHtml = panelVinculo(it, sys, xml);
@@ -2119,11 +2184,13 @@ const ImportacaoNfe = (() => {
     else if (tab === 'conversao') panelHtml = panelConversao(sys, xml, qtdXml, conversor, qtdConv);
     else if (tab === 'saida') panelHtml = panelSaida(sys, xml, vinculado, descEditable);
     else if (tab === 'trib_saida') panelHtml = panelTribSaida(sys, trib, tn, tc, simples, xml);
-    else if (tab === 'lote') panelHtml = panelLote(it, sys, xml);
+    else if (tab === 'lote') panelHtml = `${panelLote(it, sys, xml)}${panelAnp(sys)}`;
     else panelHtml = panelAnp(sys);
 
+    const tabIdx = ITEM_TABS.findIndex((t) => t.id === tab);
     const footerHtml = isLastTab
       ? `
+        <button type="button" class="btn" id="imp-etapa-anterior">Etapa anterior</button>
         <button type="button" class="btn outline" id="imp-salvar-item">Salvar item</button>
         ${conferirEtapasAtivo()
     ? ''
@@ -2132,28 +2199,33 @@ const ImportacaoNfe = (() => {
           Item verificado
         </label>`}
         <button type="button" class="btn primary" id="imp-salvar-proximo">
-          ${state.itemIndex < total - 1 ? 'Salvar e próximo →' : 'Salvar e voltar'}
+          ${state.itemIndex < total - 1 ? 'Confirmar' : 'Confirmar'}
         </button>`
-      : `<button type="button" class="btn primary" id="imp-proxima-etapa">${
-          conferirEtapasAtivo() ? 'Confirmar e pular etapa →' : 'Pular etapa →'
+      : `
+        <button type="button" class="btn" id="imp-etapa-anterior" ${tabIdx <= 0 ? 'disabled' : ''}>Etapa anterior</button>
+        <button type="button" class="btn primary" id="imp-proxima-etapa">${
+          conferirEtapasAtivo() ? 'Confirmar' : 'Confirmar'
         }</button>`;
 
     host.innerHTML = `
       <div class="imp-item-toolbar">
-        <button type="button" class="btn" id="imp-item-voltar">← Itens</button>
+        <button type="button" class="btn" id="imp-item-voltar">Itens</button>
+        <div class="imp-item-heading">
+          <h3>Item ${esc(it.nItem)} · ${esc(xml.xProd || sys.descricao || '')}</h3>
+          <p class="hint">${vinculado ? `Vinculado · ${esc(sys.id_identificador || 'novo')}` : 'Sem vínculo'} · CFOP ${esc(xml.CFOP || '')}</p>
+        </div>
         <div class="imp-item-nav">
-          <button type="button" class="btn small" id="imp-item-prev" ${state.itemIndex <= 0 ? 'disabled' : ''}>← Anterior</button>
-          <span>Item ${it.nItem} / ${total}</span>
-          <button type="button" class="btn small" id="imp-item-next" ${state.itemIndex >= total - 1 ? 'disabled' : ''}>Próximo →</button>
+          <button type="button" class="btn small" id="imp-item-prev" ${state.itemIndex <= 0 ? 'disabled' : ''}>Anterior</button>
+          <button type="button" class="btn small" id="imp-item-next" ${state.itemIndex >= total - 1 ? 'disabled' : ''}>Próximo</button>
         </div>
         <span class="imp-status ${stCls}">${stLbl}</span>
       </div>
       ${itemTabNav()}
       <div class="imp-item-scroll">
         ${panelHtml}
-        <div class="imp-item-footer">
-          ${footerHtml}
-        </div>
+      </div>
+      <div class="imp-item-footer">
+        ${footerHtml}
       </div>
     `;
 
@@ -2334,6 +2406,8 @@ const ImportacaoNfe = (() => {
       const uni = $('#imp-uni')?.value || '';
       const qtdShow = opts.fromQtdField && out ? Number(out.value || 0) : qtdConv;
       prevQtd.textContent = `${qtdShow} ${uni}`.trim();
+      const banner = $('#imp-result-qtd');
+      if (banner) banner.textContent = `${num(qtdShow)} ${uni}`.trim();
     }
     const it = itemAt(state.itemIndex);
     if (it) {
@@ -3045,6 +3119,15 @@ const ImportacaoNfe = (() => {
     setItemTab(ITEM_TABS_ETAPA[idx + 1].id);
   }
 
+  function voltarEtapa() {
+    const idx = ITEM_TABS_ETAPA.findIndex((t) => t.id === state.itemTab);
+    if (idx <= 0) return;
+    const patch = collectItemPatch();
+    const it = itemAt(state.itemIndex);
+    if (it && patch.sistema) it.sistema = { ...it.sistema, ...patch.sistema };
+    setItemTab(ITEM_TABS_ETAPA[idx - 1].id);
+  }
+
   function wireCodeSearch({ buscaSel, listSel, valueSel, endpoint, codeKey = 'codigo', extraQuery, onSelect, labelPreferDesc = false }) {
     const valueEl = $(valueSel);
     const displayEl = $(`${valueSel}-disp`) || $(buscaSel);
@@ -3271,10 +3354,11 @@ const ImportacaoNfe = (() => {
       if (state.itemIndex >= (state.sessao?.itens?.length || 0) - 1) return;
       saveItem({ next: true });
     });
-    $$('.imp-item-tab').forEach((btn) => {
+    $$('.imp-step').forEach((btn) => {
       btn.addEventListener('click', () => setItemTab(btn.dataset.itemTab));
     });
     $('#imp-proxima-etapa')?.addEventListener('click', () => avancarEtapa());
+    $('#imp-etapa-anterior')?.addEventListener('click', () => voltarEtapa());
     $('#imp-usar-custo-nota')?.addEventListener('click', () => {
       const cur = itemAt(state.itemIndex);
       if (!cur) return;
@@ -4295,7 +4379,7 @@ const ImportacaoNfe = (() => {
   function onPageEnter() {
     const title = $('#page-title');
     const sub = $('#page-sub');
-    if (title) title.textContent = 'Importar NF-e';
+    if (title) title.textContent = 'Notas de entrada';
     if (sub) sub.textContent = 'Conferência por item';
     setDateFiltersToday();
     if (state.view === 'item' && state.sessao) {

@@ -500,10 +500,30 @@ $('#form-login').addEventListener('submit', async (e) => {
   enterApp();
 });
 
+function isDesktopLayout() {
+  return window.matchMedia('(min-width: 981px)').matches;
+}
+
+function setMaisOpen(open) {
+  const sheet = $('#mais-sheet');
+  if (!sheet) return;
+  sheet.hidden = !open;
+}
+
+function fillUserChrome() {
+  const nome = state.usuario?.nome || '—';
+  if ($('#user-nome')) $('#user-nome').textContent = nome;
+  if ($('#side-user-nome')) $('#side-user-nome').textContent = nome;
+  if ($('#side-user-role')) {
+    $('#side-user-role').textContent = state.usuario?.supervisor ? 'Supervisor' : 'Usuário';
+  }
+  if ($('#side-user-avatar')) $('#side-user-avatar').textContent = initialsFromName(nome);
+}
+
 function enterApp() {
   $('#view-login').hidden = true;
   $('#view-app').hidden = false;
-  $('#user-nome').textContent = state.usuario.nome;
+  fillUserChrome();
   const canUsers = can('usuarios', 'acesso');
   const canAlt = can('alteracoes', 'acesso');
   const canEst = can('estoque', 'acesso');
@@ -521,6 +541,8 @@ function enterApp() {
   if ($('#dash-importacao')) $('#dash-importacao').hidden = !showImp;
   const cfgSrv = $('#btn-config-servidor');
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
+  const cfgMais = $('#btn-config-servidor-mais');
+  if (cfgMais) cfgMais.hidden = !isNativeApk();
   showPage('dashboard');
   loadUnidades();
 }
@@ -539,10 +561,24 @@ function trocarUsuario() {
   loadFuncionarios();
 }
 
-$('#btn-logout').addEventListener('click', trocarUsuario);
-$('#btn-trocar-usuario').addEventListener('click', trocarUsuario);
-$('#btn-trocar-usuario-top').addEventListener('click', trocarUsuario);
-$('#btn-trocar-mobile')?.addEventListener('click', trocarUsuario);
+$('#btn-logout')?.addEventListener('click', trocarUsuario);
+$('#btn-trocar-usuario')?.addEventListener('click', trocarUsuario);
+$('#btn-trocar-mobile')?.addEventListener('click', () => {
+  setMaisOpen(false);
+  trocarUsuario();
+});
+$('#btn-mais-mobile')?.addEventListener('click', () => setMaisOpen(true));
+$('#mais-sheet-back')?.addEventListener('click', () => setMaisOpen(false));
+$('#mais-sheet')?.querySelectorAll('[data-page]').forEach((btn) => {
+  btn.addEventListener('click', async () => {
+    setMaisOpen(false);
+    await showPage(btn.dataset.page);
+  });
+});
+$('#btn-config-servidor-mais')?.addEventListener('click', () => {
+  setMaisOpen(false);
+  $('#btn-config-servidor')?.click();
+});
 
 (function wireServerConfig() {
   const btn = $('#btn-config-servidor');
@@ -585,6 +621,10 @@ initUiScale();
 function setNavActive(page) {
   $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
+  const mais = $('#btn-mais-mobile');
+  if (mais) {
+    mais.classList.toggle('active', ['alteracoes', 'usuarios', 'preferencias'].includes(page));
+  }
 }
 
 $$('.nav-btn').forEach((btn) => {
@@ -635,7 +675,7 @@ async function showPage(page) {
     page = 'dashboard';
   }
   if (page === 'importacao' && !(state.usuario?.supervisor || can('importacao', 'acesso'))) {
-    showMsg('Importação NF-e em desenvolvimento — disponível apenas para supervisor.');
+    showMsg('Sem permissão para notas de entrada.');
     page = 'dashboard';
   }
 
@@ -645,6 +685,9 @@ async function showPage(page) {
   if ($('#page-importacao')) $('#page-importacao').hidden = page !== 'importacao';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
+  if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
+  const estActions = $('#topbar-estoque-actions');
+  if (estActions) estActions.hidden = page !== 'estoque';
 
   if (page === 'dashboard') {
     $('#page-title').textContent = 'Início';
@@ -653,6 +696,9 @@ async function showPage(page) {
     $('#page-title').textContent = 'Usuários';
     $('#page-sub').textContent = 'Permissões por módulo';
     loadUsuarios();
+  } else if (page === 'preferencias') {
+    $('#page-title').textContent = 'Preferências';
+    $('#page-sub').textContent = 'Tema e tamanho da tela';
   } else if (page === 'alteracoes') {
     $('#page-title').textContent = 'Alterações';
     $('#page-sub').textContent = 'Histórico de saldos editados no painel';
@@ -672,19 +718,29 @@ function showEstoqueLista() {
   state.selecionado = null;
   state.isNovo = false;
   state.scanTarget = 'search';
+  $('#page-estoque')?.classList.remove('has-ficha');
   $('#estoque-lista-view').hidden = false;
   $('#estoque-edit-view').hidden = true;
   $('#page-title').textContent = 'Estoque';
-  $('#page-sub').textContent = 'Toque em um produto para editar';
+  $('#page-sub').textContent = '';
   renderEstoqueLista();
   scrollAppTop();
 }
 
 function showEstoqueEdicao() {
-  $('#estoque-lista-view').hidden = true;
+  const page = $('#page-estoque');
+  page?.classList.add('has-ficha');
   $('#estoque-edit-view').hidden = false;
-  $('#page-title').textContent = state.isNovo ? 'Novo produto' : 'Editar produto';
-  $('#page-sub').textContent = 'Altere os dados e salve ou cancele';
+  if (isDesktopLayout()) {
+    $('#estoque-lista-view').hidden = false;
+    $('#page-title').textContent = 'Estoque';
+    $('#page-sub').textContent = '';
+    renderEstoqueLista();
+  } else {
+    $('#estoque-lista-view').hidden = true;
+    $('#page-title').textContent = state.isNovo ? 'Novo produto' : (state.selecionado?.descricao || 'Produto');
+    $('#page-sub').textContent = '';
+  }
   scrollAppTop();
 }
 
@@ -698,6 +754,42 @@ $('#estoque-status-filtro')?.addEventListener('change', (e) => {
   state.estoqueStatus = String(e.target.value || 'A').toUpperCase();
   loadEstoque();
 });
+$$('#estoque-status-seg .seg-btn').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    $$('#estoque-status-seg .seg-btn').forEach((b) => b.classList.toggle('active', b === btn));
+    const status = String(btn.dataset.status || 'A');
+    const sel = $('#estoque-status-filtro');
+    if (sel) sel.value = status;
+    state.estoqueStatus = status;
+    loadEstoque();
+  });
+});
+$('#estoque-grupo-filtro')?.addEventListener('change', () => renderEstoqueLista());
+$('#btn-exportar-estoque')?.addEventListener('click', () => exportarEstoqueCsv());
+
+function exportarEstoqueCsv() {
+  const list = estoqueFiltrado();
+  const cols = ['codigo', 'produto', 'grupo', 'estoque', 'unidade', 'venda', ...(podeVerCusto() ? ['custo'] : [])];
+  const lines = [cols.join(';')];
+  for (const it of list) {
+    const row = [
+      it.id_estoque ?? it.id_identificador,
+      `"${String(it.descricao || '').replace(/"/g, '""')}"`,
+      `"${String(it.grupo || '').replace(/"/g, '""')}"`,
+      String(it.qtd_atual ?? 0).replace('.', ','),
+      it.uni_medida || 'UN',
+      String(it.prc_venda ?? 0).replace('.', ','),
+    ];
+    if (podeVerCusto()) row.push(String(it.prc_custo ?? 0).replace('.', ','));
+    lines.push(row.join(';'));
+  }
+  const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'estoque.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
 $('#estoque-busca').addEventListener('keydown', (e) => {
   if (e.key === 'Enter' || e.key === 'Search') {
     e.preventDefault();
@@ -747,59 +839,109 @@ async function loadEstoque() {
   renderEstoqueLista();
 }
 
+function estoqueFiltrado() {
+  const grupo = String($('#estoque-grupo-filtro')?.value || '');
+  const list = state.estoqueLista || [];
+  if (!grupo) return list;
+  return list.filter((it) => String(it.grupo || '') === grupo);
+}
+
+function syncGrupoFiltro() {
+  const sel = $('#estoque-grupo-filtro');
+  if (!sel) return;
+  const cur = sel.value;
+  const grupos = [...new Set((state.estoqueLista || []).map((it) => String(it.grupo || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  sel.innerHTML = `<option value="">Grupo</option>${grupos.map((g) => `<option value="${escapeAttr(g)}" ${g === cur ? 'selected' : ''}>${escapeHtml(g)}</option>`).join('')}`;
+}
+
+function qtdClass(qtd) {
+  const n = Number(qtd || 0);
+  if (n < 0) return 'is-neg';
+  if (n > 0 && n <= 5) return 'is-low';
+  return '';
+}
+
 function renderEstoqueLista() {
   const box = $('#estoque-lista');
-  const listPanel = box.closest('.list-panel') || box.parentElement;
-  if (!state.estoqueLista.length) {
+  if (!box) return;
+  const list = estoqueFiltrado();
+  const total = (state.estoqueLista || []).length;
+  const foot = $('#estoque-foot');
+  const sub = $('#page-sub');
+  const pageEst = $('#page-estoque');
+  if (sub && pageEst && !pageEst.hidden && (isDesktopLayout() || !pageEst.classList.contains('has-ficha'))) {
+    sub.textContent = total ? `${total} produto${total === 1 ? '' : 's'}` : '';
+  }
+  if (foot) {
+    foot.innerHTML = list.length
+      ? `<span>Mostrando ${list.length} de ${total}</span><span>Ordenado por cadastro mais recente</span>`
+      : '';
+  }
+  syncGrupoFiltro();
+
+  if (!list.length) {
     box.innerHTML = '<p class="empty">Nenhum produto encontrado</p>';
-    const head = listPanel.querySelector('.list-panel-head');
-    if (head) head.querySelector('[data-count]').textContent = '0 itens';
     return;
   }
 
-  let head = listPanel.querySelector('.list-panel-head');
-  if (!head) {
-    head = document.createElement('div');
-    head.className = 'list-panel-head';
-    head.innerHTML = '<strong>Produtos</strong><span data-count></span>';
-    listPanel.insertBefore(head, box);
-  }
-  head.querySelector('[data-count]').textContent = `${state.estoqueLista.length} ite${state.estoqueLista.length === 1 ? 'm' : 'ns'}`;
-
-  box.innerHTML = state.estoqueLista.map((it) => {
+  const selectedId = state.selecionado?.id_identificador;
+  const rows = list.map((it) => {
     const qtd = Number(it.qtd_atual || 0);
-    const stockClass = qtd <= 0 ? 'zero' : qtd <= 5 ? 'low' : '';
+    const cls = qtdClass(qtd);
+    const active = Number(selectedId) === Number(it.id_identificador) ? 'is-active' : '';
     const inativo = String(it.status || 'A').toUpperCase() === 'I';
-    const initials = String(it.descricao || '?')
-      .split(/\s+/)
-      .filter(Boolean)
-      .slice(0, 2)
-      .map((w) => w[0])
-      .join('')
-      .toUpperCase();
-    return `
-    <div class="item-row ${state.selecionado?.id_identificador === it.id_identificador ? 'active' : ''} ${inativo ? 'inactive' : ''}"
-         data-id="${it.id_identificador}">
-      <div class="item-avatar" aria-hidden="true">${escapeHtml(initials || '#')}</div>
-      <div class="item-main">
-        <strong title="${escapeAttr(it.descricao)}">${escapeHtml(it.descricao)}</strong>
-        <div class="item-meta">
-          <span class="chip">ID ${it.id_identificador}</span>
-          <span class="chip">#${it.id_estoque}</span>
-          ${inativo ? '<span class="chip chip-inativo">Inativo</span>' : '<span class="chip chip-ativo">Ativo</span>'}
-          ${it.grupo ? `<span class="chip">${escapeHtml(it.grupo)}</span>` : ''}
-          ${it.cod_barras ? `<span class="chip">${escapeHtml(it.cod_barras)}</span>` : ''}
-          ${it.referencia ? `<span class="chip">${escapeHtml(it.referencia)}</span>` : ''}
-        </div>
-      </div>
-      <div class="item-side">
-        <span class="stock-badge ${stockClass}">${fmtNum(qtd)} ${escapeHtml(it.uni_medida || 'un')}</span>
-        <span class="item-price">${fmtMoney(it.prc_venda)}</span>
-      </div>
-    </div>`;
-  }).join('');
+    const uni = escapeHtml(it.uni_medida || 'UN');
+    const barras = it.cod_barras || it.referencia || '';
+    return { it, qtd, cls, active, inativo, uni, barras };
+  });
 
-  $$('.item-row', box).forEach((row) => {
+  const table = `
+    <div class="est-table-wrap">
+      <table class="est-table">
+        <thead>
+          <tr>
+            <th>Código</th>
+            <th>Produto</th>
+            <th>Grupo</th>
+            <th>Estoque</th>
+            <th>Venda</th>
+            ${podeVerCusto() ? '<th>Custo</th>' : ''}
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(({ it, qtd, cls, active, uni, barras }) => `
+            <tr class="${active}" data-id="${it.id_identificador}">
+              <td>${escapeHtml(String(it.id_estoque ?? it.id_identificador).padStart(6, '0'))}</td>
+              <td>
+                <div class="prod-name">${escapeHtml(it.descricao)}</div>
+                ${barras ? `<div class="prod-sub">${escapeHtml(barras)}</div>` : ''}
+              </td>
+              <td>${escapeHtml(it.grupo || '—')}</td>
+              <td class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</td>
+              <td>${fmtMoney(it.prc_venda)}</td>
+              ${podeVerCusto() ? `<td>${fmtMoney(it.prc_custo)}</td>` : ''}
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>`;
+
+  const cards = `
+    <div class="est-cards">
+      ${rows.map(({ it, qtd, cls, active, uni, barras }) => `
+        <div class="est-card ${active}" data-id="${it.id_identificador}">
+          <div class="est-card-ico" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+          </div>
+          <div>
+            <strong>${escapeHtml(it.descricao)}</strong>
+            <div class="prod-sub">${escapeHtml(String(it.id_estoque ?? '').padStart(6, '0'))}${barras ? ` · ${escapeHtml(barras)}` : ''}${it.prc_venda != null ? ` · ${fmtMoney(it.prc_venda)}` : ''}</div>
+          </div>
+          <span class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</span>
+        </div>`).join('')}
+    </div>`;
+
+  box.innerHTML = table + cards;
+  box.querySelectorAll('[data-id]').forEach((row) => {
     row.addEventListener('click', () => openProduto(Number(row.dataset.id)));
   });
 }
@@ -930,8 +1072,13 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   }
   if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
   showToast(state.isNovo ? 'Produto cadastrado com sucesso.' : 'Dados alterados com sucesso.');
-  showEstoqueLista();
+  const keepId = res.item?.id_identificador || it.id_identificador;
   await loadEstoque();
+  if (isDesktopLayout() && keepId && !state.isNovo) {
+    await openProduto(Number(keepId));
+  } else {
+    showEstoqueLista();
+  }
 });
 
 function inp(id, val, dis) {
@@ -1034,13 +1181,26 @@ function renderDetalhe() {
   const showSerial = it.grade_serie === 'S';
   const showLote = !!it.controla_lote;
 
+  const qtd = Number(it.qtd_atual || 0);
+  const uni = escapeHtml(it.uni_medida || 'UN');
+  const inativo = String(it.status || 'A').toUpperCase() === 'I';
+  const desktop = isDesktopLayout();
+
   $('#estoque-detalhe').innerHTML = `
+    ${desktop ? `
+    <div class="ficha-aside-head">
+      <div>
+        <h2>${escapeHtml(it.descricao || 'Novo produto')}</h2>
+        <p class="hint">Cód. ${escapeHtml(String(it.id_estoque ?? 'novo'))} · Ident. ${escapeHtml(String(it.id_identificador ?? 'novo'))}</p>
+      </div>
+      <span class="${inativo ? 'chip-inativo' : 'chip-ativo'}">${inativo ? 'Inativo' : 'Ativo'}</span>
+    </div>` : ''}
     <div class="tabs">
       <button class="tab active" data-tab="ficha">Ficha</button>
-      <button class="tab" data-tab="estoque-precos">Estoque e preços</button>
-      ${!state.isNovo ? '<button class="tab" data-tab="tributos">Tributos</button>' : ''}
-      ${!state.isNovo ? '<button class="tab" data-tab="reforma">Reforma tributária</button>' : ''}
-      ${showGrade || showSerial || showLote ? '<button class="tab" data-tab="controle">Grade / Lote / Serial</button>' : ''}
+      <button class="tab" data-tab="precos">Preços</button>
+      <button class="tab" data-tab="quantidade">Quantidade</button>
+      ${!state.isNovo ? '<button class="tab" data-tab="fiscal">Fiscal</button>' : ''}
+      ${showGrade || showSerial || showLote ? '<button class="tab" data-tab="controle">Grade / Lote</button>' : ''}
     </div>
     <div class="tab-pane" data-pane="ficha">
       <div class="form-grid side-by-side">
@@ -1087,7 +1247,7 @@ function renderDetalhe() {
         </div>` : ''}
       </div>
     </div>
-    <div class="tab-pane" data-pane="estoque-precos" hidden>
+    <div class="tab-pane" data-pane="precos" hidden>
       <div class="form-grid side-by-side">
         <label>Preço de venda<input id="p-venda" inputmode="decimal" value="${escapeAttr(fmtMoney2(it.prc_venda))}" ${editarVenda ? '' : 'disabled'} /></label>
         <label>Preço de custo
@@ -1095,28 +1255,37 @@ function renderDetalhe() {
             value="${verCusto ? escapeAttr(fmtMoney2(it.prc_custo)) : '****'}" ${editarCusto ? '' : 'disabled'} class="${verCusto ? '' : 'masked'}" />
         </label>
         <p class="hint full">${verCusto ? `Margem: ${fmtMargem(it.prc_venda, it.prc_custo)}` : 'Custo oculto pela permissão do usuário.'}</p>
-        <label class="full">Quantidade atual (banco)
-          <input id="q-atual" inputmode="decimal" value="${escapeAttr(fmtMoney2(it.qtd_atual))}" ${editarQtd ? '' : 'disabled'} />
+      </div>
+    </div>
+    <div class="tab-pane" data-pane="quantidade" hidden>
+      <input id="q-atual" type="hidden" value="${escapeAttr(fmtMoney2(it.qtd_atual))}" ${editarQtd ? '' : 'disabled'} />
+      <input id="q-add" type="hidden" value="${escapeAttr(fmtMoney2(0))}" />
+      <input id="q-rem" type="hidden" value="${escapeAttr(fmtMoney2(0))}" />
+      <div class="qty-hero">
+        <span>Quantidade atual</span>
+        <strong id="q-hero">${fmtNum(qtd)} ${uni}</strong>
+      </div>
+      <p class="hint" style="margin:0 0 0.35rem;font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Ajustar</p>
+      <div class="qty-stepper">
+        <button type="button" id="q-minus" ${editarQtd ? '' : 'disabled'}>−</button>
+        <div class="qty-delta" id="q-delta-lbl">0</div>
+        <button type="button" id="q-plus" ${editarQtd ? '' : 'disabled'}>+</button>
+      </div>
+      <div class="qty-pair">
+        <label>Nova quantidade
+          <input id="q-nova" inputmode="decimal" value="${escapeAttr(fmtMoney2(it.qtd_atual))}" ${editarQtd ? '' : 'disabled'} />
         </label>
+        <div id="q-diff" class="diff-box">Diferença: 0</div>
       </div>
-      <div class="qty-box">
-        <div class="qty-card add">
-          <div>Adicionar</div>
-          <input id="q-add" inputmode="decimal" value="${escapeAttr(fmtMoney2(0))}" ${editarQtd ? '' : 'disabled'} />
-        </div>
-        <div class="qty-card rem">
-          <div>Remover</div>
-          <input id="q-rem" inputmode="decimal" value="${escapeAttr(fmtMoney2(0))}" ${editarQtd ? '' : 'disabled'} />
-        </div>
-      </div>
-      <div id="q-diff" class="diff-box">Diferença: 0</div>
+      <label class="qty-obs">Observação (opcional)
+        <input id="q-obs" maxlength="120" placeholder="Contagem de prateleira" ${editarQtd ? '' : 'disabled'} />
+      </label>
+      ${!desktop ? `<div class="qty-sticky-save"><button type="button" class="btn primary" id="btn-salvar-contagem">Salvar contagem</button></div>` : ''}
     </div>
     ${!state.isNovo ? `
-    <div class="tab-pane" data-pane="tributos" hidden>
+    <div class="tab-pane" data-pane="fiscal" hidden>
       <div id="trib-host" class="trib-host"><p class="hint">Carregando última entrada e parâmetros…</p></div>
-    </div>
-    <div class="tab-pane" data-pane="reforma" hidden>
-      <div id="ref-host" class="trib-host"><p class="hint">Carregando classificação da reforma tributária…</p></div>
+      <div id="ref-host" class="trib-host" style="margin-top:1rem"></div>
     </div>` : ''}
     <div class="tab-pane" data-pane="controle" hidden>
       ${showGrade ? `
@@ -1155,6 +1324,11 @@ function renderDetalhe() {
         </table>
       ` : ''}
     </div>
+    ${desktop ? `
+    <div class="ficha-aside-actions">
+      <button type="button" class="btn" id="btn-cancelar-produto-aside">Cancelar</button>
+      <button type="button" class="btn primary" id="btn-salvar-produto-aside">Salvar contagem</button>
+    </div>` : ''}
   `;
 
   $$('.tab', $('#estoque-detalhe')).forEach((tab) => {
@@ -1164,68 +1338,79 @@ function renderDetalhe() {
       $$('.tab-pane', $('#estoque-detalhe')).forEach((p) => {
         p.hidden = p.dataset.pane !== tab.dataset.tab;
       });
-      if (tab.dataset.tab === 'tributos' || tab.dataset.tab === 'reforma') loadTributosProduto(it, editarFicha);
+      if (tab.dataset.tab === 'fiscal' || tab.dataset.tab === 'tributos' || tab.dataset.tab === 'reforma') loadTributosProduto(it, editarFicha);
     });
   });
 
   const qAtual = $('#q-atual');
   const qAdd = $('#q-add');
   const qRem = $('#q-rem');
+  const qNova = $('#q-nova');
+  const qDeltaLbl = $('#q-delta-lbl');
   const base = Number(it.qtd_atual || 0);
+  const uniTxt = it.uni_medida || 'UN';
   let syncing = false;
 
   function paintDiff(delta) {
     const box = $('#q-diff');
-    if (!box) return;
     const d = Number.isFinite(delta) ? delta : 0;
-    box.textContent = d === 0
-      ? 'Diferença: 0'
-      : d > 0
-        ? `Diferença: +${fmtNum(d)} — Será adicionado ao estoque`
-        : `Diferença: ${fmtNum(d)} — Será removido do estoque`;
-    box.className = `diff-box ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}`;
+    if (box) {
+      box.textContent = d === 0 ? '0' : `${d > 0 ? '+' : ''}${fmtNum(d)} ${uniTxt}`;
+      box.className = `diff-box ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}`;
+    }
+    if (qDeltaLbl) {
+      qDeltaLbl.textContent = d === 0 ? '0' : `${d > 0 ? '+' : ''}${fmtNum(d)}`;
+      qDeltaLbl.classList.toggle('is-neg', d < 0);
+    }
+  }
+
+  function applyDelta(delta) {
+    const d = Number.isFinite(delta) ? delta : 0;
+    syncing = true;
+    if (qAdd) qAdd.value = fmtMoney2(d > 0 ? d : 0);
+    if (qRem) qRem.value = fmtMoney2(d < 0 ? Math.abs(d) : 0);
+    if (qAtual) qAtual.value = fmtMoney2(base + d);
+    if (qNova) qNova.value = fmtMoney2(base + d);
+    syncing = false;
+    paintDiff(d);
   }
 
   function updateDiffFromAddRem() {
     if (syncing) return;
     const add = parseBrMoney(qAdd?.value ?? 0);
     const rem = parseBrMoney(qRem?.value ?? 0);
-    const delta = add - rem;
-    paintDiff(delta);
-    if (qAtual) {
-      syncing = true;
-      qAtual.value = fmtMoney2(base + delta);
-      syncing = false;
-    }
+    applyDelta(add - rem);
   }
 
   function updateAddRemFromAtual() {
     if (syncing || !qAtual) return;
-    const nova = parseBrMoney(qAtual.value);
-    const delta = nova - base;
-    syncing = true;
-    if (delta >= 0) {
-      if (qAdd) qAdd.value = fmtMoney2(delta);
-      if (qRem) qRem.value = fmtMoney2(0);
-    } else {
-      if (qAdd) qAdd.value = fmtMoney2(0);
-      if (qRem) qRem.value = fmtMoney2(Math.abs(delta));
-    }
-    syncing = false;
-    paintDiff(delta);
+    applyDelta(parseBrMoney(qAtual.value) - base);
   }
 
   qAdd?.addEventListener('input', updateDiffFromAddRem);
   qRem?.addEventListener('input', updateDiffFromAddRem);
   qAtual?.addEventListener('input', updateAddRemFromAtual);
-  qAtual?.addEventListener('blur', () => {
-    if (!qAtual || syncing) return;
-    syncing = true;
-    qAtual.value = fmtMoney2(parseBrMoney(qAtual.value));
-    syncing = false;
-    updateAddRemFromAtual();
+  qNova?.addEventListener('input', () => {
+    if (syncing) return;
+    applyDelta(parseBrMoney(qNova.value) - base);
   });
-  updateDiffFromAddRem();
+  $('#q-plus')?.addEventListener('click', () => {
+    const cur = parseBrMoney(qNova?.value ?? qAtual?.value ?? base);
+    applyDelta((cur + 1) - base);
+  });
+  $('#q-minus')?.addEventListener('click', () => {
+    const cur = parseBrMoney(qNova?.value ?? qAtual?.value ?? base);
+    applyDelta((cur - 1) - base);
+  });
+  $('#btn-salvar-contagem')?.addEventListener('click', () => $('#btn-salvar-produto')?.click());
+  $('#btn-salvar-produto-aside')?.addEventListener('click', () => $('#btn-salvar-produto')?.click());
+  $('#btn-cancelar-produto-aside')?.addEventListener('click', () => $('#btn-cancelar-produto')?.click());
+  applyDelta(0);
+
+  if (!desktop && !state.isNovo) {
+    const qTab = $('#estoque-detalhe .tab[data-tab="quantidade"]');
+    qTab?.click();
+  }
 
   $('#btn-toggle-status')?.addEventListener('click', async () => {
     const atual = String(it.status || 'A').toUpperCase() === 'I' ? 'I' : 'A';

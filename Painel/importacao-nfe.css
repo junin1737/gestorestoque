@@ -112,17 +112,17 @@
   margin-bottom: 0.85rem;
   padding: 0.85rem 1rem;
   text-align: left;
-  border: 1px dashed #e6b84d;
+  border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #fff8e6;
-  color: #5c3d00;
+  background: var(--bg-elev);
+  color: var(--text);
   cursor: pointer;
   font: inherit;
 }
 
 .imp-params-card strong { font-size: 0.95rem; }
-.imp-params-card span { font-size: 0.82rem; line-height: 1.4; }
-.imp-params-card:hover { border-style: solid; background: #ffeec0; }
+.imp-params-card span { font-size: 0.82rem; line-height: 1.4; color: var(--muted); }
+.imp-params-card:hover { border-color: var(--accent); }
 
 .imp-nf-totais .btn { margin-top: 0.35rem; }
 
@@ -1630,3 +1630,172 @@
 }
 
 /* filtro nnf/forn handled above in .imp-filtro-datas */
+
+/* ===== LAYOUT 2026 NF-e ===== */
+.imp-nf-chrome {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.55rem 0.75rem;
+  margin-bottom: 0.65rem;
+}
+.imp-chrome-back {
+  border: 0; background: transparent; color: var(--text);
+  width: 2rem; height: 2rem; display: grid; place-items: center; cursor: pointer; border-radius: 8px;
+}
+.imp-chrome-back svg { width: 1.2rem; height: 1.2rem; }
+.imp-chrome-title { min-width: 0; flex: 1; }
+.imp-chrome-title strong { display: block; font-size: 0.95rem; }
+.imp-chrome-title span { color: var(--muted); font-size: 0.75rem; }
+.imp-chrome-progress {
+  width: 7rem; height: 0.35rem; background: #e5eaf3; border-radius: 99px; overflow: hidden;
+}
+.imp-chrome-progress > div { height: 100%; background: var(--accent); }
+.imp-chrome-count, .imp-chrome-total { font-size: 0.8rem; white-space: nowrap; }
+.imp-chrome-total { font-weight: 800; }
+.imp-stepper {
+  display: flex; align-items: center; gap: 0.2rem;
+  flex-wrap: nowrap; overflow-x: auto;
+  padding: 0.2rem 0 0.75rem;
+}
+.imp-step {
+  border: 0; background: transparent; display: flex; align-items: center; gap: 0.35rem;
+  color: var(--muted); font: inherit; font-size: 0.75rem; font-weight: 650; cursor: pointer;
+  padding: 0.15rem; white-space: nowrap;
+}
+.imp-step-num {
+  width: 1.45rem; height: 1.45rem; border-radius: 50%;
+  border: 1.5px solid var(--border); display: grid; place-items: center;
+  font-size: 0.72rem; font-weight: 800;
+}
+.imp-step.is-active { color: var(--accent); }
+.imp-step.is-active .imp-step-num { background: var(--accent); color: #fff; border-color: var(--accent); }
+.imp-step.is-done .imp-step-num { background: var(--ok); color: #fff; border-color: var(--ok); }
+.imp-step-line { flex: 0 0 1.1rem; height: 2px; background: var(--border); }
+.imp-cmp-pair {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 0.75rem;
+  align-items: stretch;
+  margin-bottom: 0.85rem;
+}
+.imp-cmp-mini {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 0.9rem 1rem;
+}
+.imp-cmp-mini > span { display: block; font-size: 0.7rem; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.imp-cmp-mini > strong { display: block; font-size: 1.55rem; margin: 0.2rem 0 0.35rem; }
+.imp-cmp-arrow { align-self: center; color: var(--muted); font-size: 1.4rem; }
+.imp-result-banner {
+  background: #eef4ff;
+  color: var(--accent);
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  font-weight: 650;
+  margin-bottom: 0.75rem;
+}
+.imp-result-banner strong { font-size: 1.15rem; }
+.imp-result-banner span { color: var(--muted); font-weight: 500; font-size: 0.85rem; }
+.imp-item-footer {
+  display: flex; gap: 0.5rem; justify-content: flex-end; align-items: center; flex-wrap: wrap;
+  padding: 0.75rem 0 0.25rem;
+  position: sticky; bottom: 0;
+  background: linear-gradient(transparent, var(--bg) 18%, var(--bg));
+}
+.imp-item-footer .btn.primary { min-width: 9rem; }
+.imp-item-row {
+  display: grid;
+  grid-template-columns: 1.6rem 1fr auto;
+  gap: 0.55rem;
+  width: 100%;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  padding: 0.65rem 0.7rem;
+  border-radius: 10px;
+  cursor: pointer;
+  color: inherit;
+  font: inherit;
+}
+.imp-item-row.is-current { background: #eef4ff; box-shadow: inset 3px 0 0 var(--accent); }
+.imp-item-row.ok .imp-item-num { background: var(--ok); color: #fff; }
+.imp-item-num {
+  width: 1.45rem; height: 1.45rem; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 0.7rem; font-weight: 800;
+  background: var(--bg); color: var(--muted);
+}
+.imp-item-main strong { display: block; font-size: 0.85rem; }
+.imp-item-val { font-size: 0.8rem; font-weight: 700; color: var(--muted); }
+.imp-item-heading h3 { margin: 0; font-size: 1.05rem; }
+#imp-view-item { display: flex; flex-direction: column; min-height: 0; }
+#imp-item-host { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.imp-item-scroll { flex: 1; overflow: auto; min-height: 0; }
+
+@media (min-width: 981px) {
+  #page-importacao.imp-layout-item {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    grid-template-rows: auto 1fr;
+    gap: 0.65rem;
+    overflow: hidden;
+  }
+  #page-importacao.imp-layout-item #imp-nf-chrome {
+    grid-column: 1 / -1;
+  }
+  #page-importacao.imp-layout-item #imp-view-sessao {
+    display: flex !important;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+  }
+  #page-importacao.imp-layout-item #imp-view-sessao .imp-sessao-toolbar,
+  #page-importacao.imp-layout-item #imp-view-sessao .imp-tabs,
+  #page-importacao.imp-layout-item #imp-tab-dados,
+  #page-importacao.imp-layout-item #imp-tab-financeiro {
+    display: none !important;
+  }
+  #page-importacao.imp-layout-item #imp-tab-itens {
+    display: flex !important;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    flex: 1;
+  }
+  #page-importacao.imp-layout-item #imp-itens-lista { overflow: auto; flex: 1; }
+  #page-importacao.imp-layout-item #imp-view-item {
+    display: flex !important;
+    min-height: 0;
+    overflow: hidden;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 0.75rem 1rem;
+  }
+  #page-importacao.imp-layout-item #imp-item-voltar { display: none; }
+  #page-importacao.imp-layout-sessao .imp-sessao-toolbar { display: none; }
+}
+
+@media (max-width: 980px) {
+  .imp-nf-chrome { display: none; }
+  .imp-cmp-pair { grid-template-columns: 1fr; }
+  .imp-cmp-arrow { display: none; }
+  .imp-step-lbl { display: none; }
+  .imp-item-footer {
+    position: sticky;
+    bottom: 0;
+    padding-bottom: calc(0.4rem + var(--safe-b));
+  }
+  .imp-item-footer .btn { flex: 1; min-height: 2.85rem; }
+  .imp-item-nav { display: none; }
+}
+

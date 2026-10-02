@@ -3,12 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
-  <meta name="theme-color" content="#1e3a5f" />
+  <meta name="theme-color" content="#0b1b33" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Gestor Estoque</title>
-  <link rel="stylesheet" href="styles.css?v=171" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=171" />
+  <link rel="stylesheet" href="styles.css?v=173" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=173" />
 </head>
 <body>
   <div id="app">
@@ -18,10 +18,10 @@
         <aside class="login-brand">
           <div class="brand-logo-wrap" id="login-logo-wrap">
             <img id="login-logo" alt="" hidden />
-            <div id="login-logo-placeholder" class="logo-placeholder">MT</div>
+            <div id="login-logo-placeholder" class="logo-placeholder">SE</div>
           </div>
           <h1 id="login-empresa">Gestor Estoque</h1>
-          <p>Painel Administrativo</p>
+          <p>Gestor Estoque</p>
         </aside>
         <div class="login-card-wrap">
           <form id="form-login" class="login-card" autocomplete="off">
@@ -34,15 +34,16 @@
             <label>Senha
               <div class="input-row">
                 <input id="login-senha" type="password" placeholder="Digite sua senha" required />
-                <button type="button" id="toggle-senha" class="icon-btn" title="Mostrar senha">👁</button>
+                <button type="button" id="toggle-senha" class="icon-btn" title="Mostrar senha" aria-label="Mostrar senha">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.75"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
+                </button>
               </div>
             </label>
             <p id="login-erro" class="erro" hidden></p>
-            <p id="svc-status" class="hint">Verificando serviço…</p>
             <div class="login-actions">
-              <button type="submit" class="btn primary block">ENTRAR</button>
+              <button type="submit" class="btn primary block">Entrar</button>
             </div>
-            <p class="hint center-hint">A base é configurada no aplicativo do serviço no computador do servidor.</p>
+            <p id="svc-status" class="hint login-svc">Verificando serviço…</p>
           </form>
         </div>
       </div>
@@ -58,50 +59,76 @@
         <div class="side-brand">
           <div class="brand-logo-wrap sm" id="side-logo-wrap">
             <img id="side-logo" alt="" hidden />
-            <div id="side-logo-placeholder" class="logo-placeholder sm">MT</div>
+            <div id="side-logo-placeholder" class="logo-placeholder sm">SE</div>
           </div>
-          <strong id="side-empresa">Empresa</strong>
+          <div class="side-brand-text">
+            <strong id="side-empresa">Empresa</strong>
+            <span>Gestor Estoque</span>
+          </div>
         </div>
         <nav class="side-nav">
-          <button class="nav-btn active" data-page="dashboard">Início</button>
-          <button class="nav-btn" data-page="estoque" id="nav-estoque">Estoque</button>
-          <button class="nav-btn" data-page="importacao" id="nav-importacao">Importar NF-e <span class="dev-badge">Em Desenvolvimento</span></button>
-          <button class="nav-btn" data-page="alteracoes" id="nav-alteracoes">Alterações</button>
-          <button class="nav-btn" data-page="usuarios" id="nav-usuarios">Usuários</button>
+          <button class="nav-btn active" data-page="dashboard">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Início
+          </button>
+          <button class="nav-btn" data-page="estoque" id="nav-estoque">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M12 20V9.5M3 8.5l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
+            Estoque
+          </button>
+          <button class="nav-btn" data-page="importacao" id="nav-importacao">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h7l5 5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M14 3.5V9h5.5M9 13h6M9 17h4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Notas de entrada
+            <span class="nav-badge" id="nav-imp-badge" hidden>0</span>
+          </button>
+          <button class="nav-btn" data-page="alteracoes" id="nav-alteracoes">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15v4M12 11v8M16 8v11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Alterações
+          </button>
+          <p class="nav-section">Administração</p>
+          <button class="nav-btn" data-page="usuarios" id="nav-usuarios">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M4 19c.4-3 2.4-5 5-5s4.6 2 5 5M16.5 8.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM20 19c-.3-2.2-1.6-3.7-3.5-3.7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Usuários
+          </button>
+          <button class="nav-btn" data-page="preferencias" id="nav-preferencias">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12 3.5v2.2M12 18.3V20.5M4.6 6.5l1.6 1.6M17.8 16l1.6 1.6M3.5 12h2.2M18.3 12H20.5M4.6 17.5l1.6-1.6M17.8 8.1l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Preferências
+          </button>
         </nav>
         <div class="side-bottom">
-          <label class="tema-inline">Tema
-            <select id="tema-rapido">
-              <option value="claro">Claro</option>
-              <option value="escuro">Escuro</option>
-              <option value="empresa">Empresa</option>
-            </select>
-          </label>
-          <label class="tema-inline">Tamanho da tela
-            <select id="ui-scale">
-              <option value="compacto">Compacto</option>
-              <option value="padrao" selected>Padrão</option>
-              <option value="confortavel">Confortável</option>
-              <option value="grande">Grande</option>
-            </select>
-          </label>
-          <button id="btn-trocar-usuario" class="btn small block outline-light">Trocar usuário</button>
+          <div class="side-user">
+            <div class="side-user-avatar" id="side-user-avatar">—</div>
+            <div class="side-user-meta">
+              <strong id="side-user-nome">—</strong>
+              <span id="side-user-role">Usuário</span>
+            </div>
+            <button type="button" id="btn-trocar-usuario" class="side-logout" title="Trocar usuário / Sair" aria-label="Trocar usuário">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 8V6.5A1.5 1.5 0 0 0 12.5 5h-7A1.5 1.5 0 0 0 4 6.5v11A1.5 1.5 0 0 0 5.5 19h7a1.5 1.5 0 0 0 1.5-1.5V16M10 12h10m0 0-3-3m3 3-3 3" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </button>
+          </div>
+          <button type="button" id="btn-logout" class="btn small block outline-light" hidden>Sair</button>
           <button type="button" id="btn-config-servidor" class="btn small block outline-light" hidden>Configurar servidor</button>
-          <button id="btn-logout" class="btn small block">Sair</button>
         </div>
       </aside>
       <button type="button" id="sidebar-backdrop" class="sidebar-backdrop" hidden aria-label="Fechar menu"></button>
 
       <main class="main">
         <header class="topbar">
-          <button type="button" id="btn-menu-mobile" class="btn-icon-menu" aria-label="Menu">☰</button>
+          <button type="button" id="btn-menu-mobile" class="btn-icon-menu" aria-label="Menu">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+          </button>
           <div class="topbar-text">
             <h1 id="page-title">Início</h1>
             <p id="page-sub">Dashboard</p>
           </div>
-          <div class="topbar-actions">
-            <div class="user-chip"><span id="user-nome">—</span></div>
-            <button id="btn-trocar-usuario-top" class="btn small">Trocar usuário</button>
+          <div class="topbar-actions" id="topbar-actions">
+            <div class="user-chip desktop-only"><span id="user-nome">—</span></div>
+            <div id="topbar-estoque-actions" class="topbar-page-actions" hidden>
+              <button type="button" id="btn-exportar-estoque" class="btn">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10m0 0 3.5-3.5M12 14 8.5 10.5M5 18h14" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                Exportar
+              </button>
+              <button type="button" id="btn-novo-produto" class="btn primary">+ Novo produto</button>
+            </div>
           </div>
         </header>
 
@@ -109,38 +136,22 @@
         <div id="page-dashboard" class="page">
           <div class="dash-grid">
             <button type="button" id="dash-estoque" class="dash-card">
-              <span class="dash-icon box" aria-hidden="true">
-                <svg viewBox="0 0 64 64" width="64" height="64" fill="none">
-                  <path d="M8 22L32 10l24 12v28L32 62 8 50V22z" fill="#c4a574" stroke="#8a6a3d" stroke-width="2"/>
-                  <path d="M8 22l24 12 24-12" stroke="#8a6a3d" stroke-width="2"/>
-                  <path d="M32 34v28" stroke="#8a6a3d" stroke-width="2"/>
-                  <path d="M20 16l24 12" stroke="#a67c42" stroke-width="3" stroke-linecap="round"/>
-                  <rect x="26" y="28" width="12" height="8" rx="1" fill="#e8d5a8" stroke="#8a6a3d"/>
-                </svg>
+              <span class="dash-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M12 20V9.5M3 8.5l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
               </span>
               <strong>Estoque</strong>
               <span>Produtos, preços e quantidades</span>
             </button>
             <button type="button" id="dash-importacao" class="dash-card">
-              <span class="dash-icon nfe" aria-hidden="true">
-                <svg viewBox="0 0 64 64" width="64" height="64" fill="none">
-                  <rect x="10" y="8" width="44" height="52" rx="4" fill="#e8f0fe" stroke="#2f6fed" stroke-width="2"/>
-                  <path d="M18 20h28M18 28h20M18 36h24M18 44h16" stroke="#1e3a5f" stroke-width="2" stroke-linecap="round"/>
-                  <rect x="38" y="38" width="18" height="18" rx="3" fill="#2f6fed"/>
-                  <path d="M42 47h10M47 42v10" stroke="#fff" stroke-width="2" stroke-linecap="round"/>
-                </svg>
+              <span class="dash-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M7 3.5h7l5 5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M14 3.5V9h5.5M9 13h6M9 17h4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
               </span>
-              <strong>Importar NF-e <span class="dev-badge">Em Desenvolvimento</span></strong>
-              <span>Entrada com conferência por item</span>
+              <strong>Notas de entrada</strong>
+              <span>Conferência da NF-e por item</span>
             </button>
             <button type="button" id="dash-alteracoes" class="dash-card" hidden>
-              <span class="dash-icon report" aria-hidden="true">
-                <svg viewBox="0 0 64 64" width="64" height="64" fill="none">
-                  <rect x="12" y="8" width="40" height="48" rx="4" fill="#d7e6fb" stroke="#2f6fed" stroke-width="2"/>
-                  <path d="M22 22h20M22 32h20M22 42h12" stroke="#1e3a5f" stroke-width="2.5" stroke-linecap="round"/>
-                  <circle cx="44" cy="44" r="10" fill="#2f6fed"/>
-                  <path d="M44 39v6l4 2" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                </svg>
+              <span class="dash-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15v4M12 11v8M16 8v11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
               </span>
               <strong>Alterações</strong>
               <span>Relatório de saldos editados</span>
@@ -150,59 +161,62 @@
 
         <!-- ESTOQUE -->
         <div id="page-estoque" class="page" hidden>
-          <div id="estoque-lista-view">
-            <div class="toolbar estoque-toolbar">
-              <div class="estoque-toolbar-row search-row">
-                <div class="search-field">
-                  <button type="button" class="search-ico" id="btn-icon-buscar" title="Buscar" aria-label="Buscar">
-                    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M20 20l-3.2-3.2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+          <div class="estoque-split">
+            <div id="estoque-lista-view">
+              <div class="toolbar estoque-toolbar">
+                <div class="estoque-toolbar-row search-row">
+                  <div class="search-field">
+                    <button type="button" class="search-ico" id="btn-icon-buscar" title="Buscar" aria-label="Buscar">
+                      <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M20 20l-3.2-3.2" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+                    </button>
+                    <input id="estoque-busca" type="search" placeholder="Buscar por nome, código ou barras" enterkeyhint="search" />
+                    <button type="button" id="btn-limpar-busca" class="btn-clear-search" hidden title="Limpar filtro" aria-label="Limpar filtro">×</button>
+                  </div>
+                  <button type="button" id="btn-scan-barras" class="btn icon-cam primary" title="Ler código de barras" aria-label="Ler código de barras">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
                   </button>
-                  <input id="estoque-busca" type="search" placeholder="Buscar..." enterkeyhint="search" />
-                  <button type="button" id="btn-limpar-busca" class="btn-clear-search" hidden title="Voltar filtro anterior / limpar" aria-label="Limpar filtro">×</button>
+                  <button type="button" id="btn-buscar-estoque" class="btn primary desktop-only">Buscar</button>
                 </div>
-                <button type="button" id="btn-scan-barras" class="btn icon-cam" title="Ler código de barras" aria-label="Ler código de barras">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
-                </button>
-                <button type="button" id="btn-buscar-estoque" class="btn primary">Buscar</button>
-              </div>
-              <div class="estoque-toolbar-row actions-row">
-                <button type="button" id="btn-novo-produto" class="btn primary">+ Novo</button>
-                <label class="toolbar-select">
-                  <span>Status:</span>
-                  <select id="estoque-status-filtro">
+                <div class="estoque-toolbar-row actions-row">
+                  <div class="seg" id="estoque-status-seg" role="tablist">
+                    <button type="button" class="seg-btn active" data-status="A">Ativos</button>
+                    <button type="button" class="seg-btn" data-status="I">Inativos</button>
+                    <button type="button" class="seg-btn" data-status="ALL">Todos</button>
+                  </div>
+                  <select id="estoque-status-filtro" hidden>
                     <option value="A" selected>Ativos</option>
                     <option value="I">Inativos</option>
                     <option value="ALL">Todos</option>
                   </select>
-                </label>
+                  <select id="estoque-grupo-filtro" class="toolbar-select-plain" title="Grupo">
+                    <option value="">Grupo</option>
+                  </select>
+                </div>
               </div>
+              <div class="panel list-panel list-panel-full">
+                <div id="estoque-lista" class="item-list"></div>
+              </div>
+              <p class="est-foot hint" id="estoque-foot"></p>
             </div>
-            <div class="panel list-panel list-panel-full">
-              <div id="estoque-lista" class="item-list"></div>
-            </div>
-          </div>
 
-          <div id="estoque-edit-view" hidden>
-            <div class="edit-toolbar">
-              <button type="button" id="btn-cancelar-produto" class="btn">Cancelar</button>
-              <div class="edit-title">
-                <strong id="edit-produto-nome">Produto</strong>
-                <span id="edit-produto-meta" class="hint"></span>
+            <div id="estoque-edit-view" hidden>
+              <div class="edit-toolbar">
+                <button type="button" id="btn-cancelar-produto" class="btn">Cancelar</button>
+                <div class="edit-title">
+                  <strong id="edit-produto-nome">Produto</strong>
+                  <span id="edit-produto-meta" class="hint"></span>
+                </div>
+                <button type="button" id="btn-salvar-produto" class="btn primary">Salvar</button>
               </div>
-              <button type="button" id="btn-salvar-produto" class="btn primary">Salvar</button>
+              <div class="panel detail-panel" id="estoque-detalhe"></div>
             </div>
-            <div class="panel detail-panel" id="estoque-detalhe"></div>
           </div>
         </div>
 
         <!-- IMPORTAÇÃO NF-e -->
         <div id="page-importacao" class="page" hidden>
-          <div class="imp-dev-banner" role="status">
-            <strong>Em Desenvolvimento</strong>
-            <span>Módulo em testes — disponível apenas para o supervisor até a integração com a SEFAZ ficar pronta.</span>
-          </div>
+          <div id="imp-nf-chrome" class="imp-nf-chrome" hidden></div>
 
-          <!-- Lista do dia -->
           <div id="imp-view-inicio">
             <div class="imp-home-toolbar">
               <div class="imp-filtro-datas">
@@ -218,17 +232,17 @@
                 <label class="imp-filtro-grow">Fornecedor <input type="search" id="imp-filtro-forn" placeholder="Nome ou CNPJ" autocomplete="off" /></label>
                 <div class="imp-filtro-btns">
                   <button type="button" class="btn small" id="imp-btn-filtrar">Filtrar</button>
-                  <button type="button" class="btn small outline" id="imp-btn-hoje">Hoje</button>
+                  <button type="button" class="btn small" id="imp-btn-hoje">Hoje</button>
                 </div>
               </div>
               <div class="imp-home-acoes">
                 <button type="button" class="btn primary" id="imp-btn-nova">Nova nota</button>
-                <button type="button" class="btn outline" id="imp-btn-manual">Lançamento manual</button>
+                <button type="button" class="btn" id="imp-btn-manual">Lançamento manual</button>
               </div>
             </div>
             <button type="button" class="imp-params-card" id="imp-btn-params">
               <strong>Parâmetros CFOP / tributos</strong>
-              <span>Conversão de CFOP de entrada, CSOSN e padrões de saída (venda) para a regra tributária.</span>
+              <span>Conversão de CFOP de entrada, CSOSN e padrões de saída.</span>
             </button>
             <div class="imp-sessoes-panel">
               <h3>Em conferência</h3>
@@ -240,51 +254,47 @@
             </div>
           </div>
 
-          <!-- Consultar chave -->
           <div id="imp-view-consultar" hidden>
             <div class="imp-sessao-toolbar">
-              <button type="button" class="btn" id="imp-voltar-lista">← Voltar</button>
+              <button type="button" class="btn" id="imp-voltar-lista">Voltar</button>
             </div>
             <div class="imp-capture-card">
               <h3>Consultar NF-e</h3>
-              <p class="hint">Informe a chave (44 dígitos). Com certificado configurado, a consulta busca a nota na SEFAZ; senão use o XML anexado ou em Downloads.</p>
+              <p class="hint">Informe a chave (44 dígitos). Com certificado, a consulta busca na SEFAZ; senão use o XML.</p>
               <div class="imp-capture-row">
                 <div class="search-field">
                   <input id="imp-chave" type="text" inputmode="numeric" maxlength="54"
                     placeholder="Chave de acesso (44 dígitos)" autocomplete="off" />
                 </div>
-                <button type="button" id="imp-btn-scan-chave" class="btn icon-cam" title="Ler chave" aria-label="Ler chave">
-                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>
+                <button type="button" id="imp-btn-scan-chave" class="btn icon-cam primary" title="Ler chave" aria-label="Ler chave">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
                 </button>
                 <button type="button" id="imp-btn-consultar" class="btn primary">Consultar</button>
               </div>
               <div class="imp-actions-inline">
-                <label class="btn outline small" style="cursor:pointer">
+                <label class="btn small" style="cursor:pointer">
                   Anexar XML
                   <input type="file" id="imp-xml-file" accept=".xml,text/xml" hidden />
                 </label>
-                <button type="button" id="imp-btn-demo" class="btn outline small">Carregar demonstração</button>
-                <span class="hint">Prefira anexar o XML ou colocar o arquivo em Downloads com o nome da chave</span>
+                <button type="button" id="imp-btn-demo" class="btn small">Carregar demonstração</button>
               </div>
             </div>
           </div>
 
-          <!-- Parâmetros CFOP -->
           <div id="imp-view-params" hidden>
             <div class="imp-sessao-toolbar">
-              <button type="button" class="btn" id="imp-params-voltar">← Voltar</button>
+              <button type="button" class="btn" id="imp-params-voltar">Voltar</button>
               <button type="button" class="btn primary" id="imp-params-salvar">Salvar parâmetros</button>
             </div>
             <div id="imp-params-host"></div>
           </div>
 
-          <!-- Sessão da nota -->
           <div id="imp-view-sessao" hidden>
             <div class="imp-sessao-toolbar">
-              <button type="button" class="btn" id="imp-voltar-inicio">← Lista</button>
-              <button type="button" class="btn outline" id="imp-btn-ver-pdf" title="Visualizar nota">Ver PDF</button>
-              <button type="button" class="btn outline" id="imp-btn-params-sessao" title="Parâmetros CFOP">CFOP</button>
-              <button type="button" class="btn primary is-disabled" id="imp-btn-confirmar" aria-disabled="true">Confirmar gravação</button>
+              <button type="button" class="btn" id="imp-voltar-inicio">Lista</button>
+              <button type="button" class="btn" id="imp-btn-ver-pdf" title="Visualizar nota">DANFE</button>
+              <button type="button" class="btn" id="imp-btn-params-sessao" title="Parâmetros CFOP">CFOP</button>
+              <button type="button" class="btn primary is-disabled" id="imp-btn-confirmar" aria-disabled="true">Gravar nota</button>
             </div>
             <div class="imp-tabs" id="imp-tabs">
               <button type="button" class="imp-tab active" data-tab="dados">Dados da NF</button>
@@ -297,10 +307,14 @@
             </div>
             <div id="imp-tab-itens" class="imp-tab-panel" hidden>
               <div class="list-panel-head imp-itens-head">
-                <span>Toque no item para vincular, converter e parametrizar</span>
+                <span>Itens da nota</span>
+                <div class="imp-itens-filter">
+                  <button type="button" class="seg-btn active" id="imp-itens-todos">Todos</button>
+                  <button type="button" class="seg-btn" id="imp-itens-pendentes">Pendentes</button>
+                </div>
                 <div class="imp-itens-actions">
-                  <button type="button" class="btn small outline" id="imp-btn-conferir-todos">Verificar todos (reposição)</button>
-                  <button type="button" class="btn small outline" id="imp-btn-add-item" hidden>+ Item</button>
+                  <button type="button" class="btn small" id="imp-btn-conferir-todos">Verificar todos</button>
+                  <button type="button" class="btn small" id="imp-btn-add-item" hidden>+ Item</button>
                 </div>
               </div>
               <div id="imp-itens-lista"></div>
@@ -339,7 +353,7 @@
               </div>
             </div>
             <button type="button" id="btn-buscar-alt" class="btn primary">Atualizar</button>
-            <button type="button" id="btn-exportar-alt" class="btn outline">Exportar / Compartilhar PDF</button>
+            <button type="button" id="btn-exportar-alt" class="btn">Exportar PDF</button>
           </div>
           <div class="tabs alt-tabs" id="alt-tabs" role="tablist">
             <button type="button" class="tab active" data-alt-tipo="todos">Todas</button>
@@ -366,23 +380,59 @@
           <div id="usuarios-lista" class="users-grid"></div>
         </div>
 
+        <div id="page-preferencias" class="page" hidden>
+          <div class="pref-card">
+            <h3>Aparência</h3>
+            <label>Tema
+              <select id="tema-rapido">
+                <option value="claro">Claro</option>
+                <option value="escuro">Escuro</option>
+                <option value="empresa">Empresa</option>
+              </select>
+            </label>
+            <label>Tamanho da tela
+              <select id="ui-scale">
+                <option value="compacto">Compacto</option>
+                <option value="padrao" selected>Padrão</option>
+                <option value="confortavel">Confortável</option>
+                <option value="grande">Grande</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
         <nav class="mobile-nav" id="mobile-nav">
-          <button type="button" data-page="dashboard" class="active">Início</button>
-          <button type="button" data-page="estoque" id="nav-estoque-mobile">Estoque</button>
-          <button type="button" data-page="importacao" id="nav-importacao-mobile">NF-e <span class="dev-badge">Dev</span></button>
-          <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile" hidden>Alterações</button>
-          <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
-          <button type="button" id="btn-trocar-mobile">Trocar</button>
+          <button type="button" data-page="dashboard" class="active">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Início
+          </button>
+          <button type="button" data-page="estoque" id="nav-estoque-mobile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M12 20V9.5M3 8.5l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
+            Estoque
+          </button>
+          <button type="button" data-page="importacao" id="nav-importacao-mobile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h7l5 5V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M14 3.5V9h5.5" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
+            Notas
+          </button>
+          <button type="button" id="btn-mais-mobile">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 7h14M5 12h14M5 17h10" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Mais
+          </button>
         </nav>
 
-        <footer class="app-footer in-app">
-          <span>MT Automações (34) 3674-1937</span>
-          <a href="https://www.instagram.com/mtautomacoes" target="_blank" rel="noopener">Instagram</a>
-        </footer>
+        <div id="mais-sheet" class="mais-sheet" hidden>
+          <button type="button" class="mais-sheet-back" id="mais-sheet-back" aria-label="Fechar"></button>
+          <div class="mais-sheet-card">
+            <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
+            <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
+            <button type="button" data-page="preferencias">Preferências</button>
+            <button type="button" id="btn-config-servidor-mais" hidden>Configurar servidor</button>
+            <button type="button" id="btn-trocar-mobile">Trocar usuário / Sair</button>
+          </div>
+        </div>
       </main>
     </section>
 
-    <!-- SCANNER -->
     <dialog id="dlg-scan" class="dlg">
       <div class="dlg-card scan-card">
         <h3>Ler código de barras</h3>
@@ -390,7 +440,7 @@
         <input id="scan-file" type="file" accept="image/*" capture="environment" hidden />
         <div class="scan-actions">
           <button type="button" id="btn-scan-foto" class="btn primary block">Abrir câmera / galeria</button>
-          <button type="button" id="btn-scan-live" class="btn outline block" hidden>Leitura ao vivo</button>
+          <button type="button" id="btn-scan-live" class="btn block" hidden>Leitura ao vivo</button>
         </div>
         <img id="scan-preview" class="scan-preview" alt="" hidden />
         <video id="scan-video" playsinline muted hidden></video>
@@ -436,7 +486,7 @@
         <div class="dlg-danfe-bar">
           <strong>Visualizar nota</strong>
           <div class="dlg-danfe-actions">
-            <button type="button" id="dlg-danfe-print" class="btn small outline">Imprimir</button>
+            <button type="button" id="dlg-danfe-print" class="btn small">Imprimir</button>
             <button type="button" id="dlg-danfe-fechar" class="btn small">Fechar</button>
           </div>
         </div>
@@ -446,8 +496,8 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=171"></script>
-  <script src="importacao-nfe.js?v=171"></script>
-  <script src="app.js?v=171"></script>
+  <script src="vendor/zxing-browser.min.js?v=173"></script>
+  <script src="importacao-nfe.js?v=173"></script>
+  <script src="app.js?v=173"></script>
 </body>
 </html>
