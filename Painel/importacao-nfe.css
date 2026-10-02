@@ -1229,6 +1229,16 @@
   margin-bottom: 0.35rem;
 }
 
+.imp-parc-row .imp-field {
+  grid-column: auto;
+  min-width: 0;
+}
+
+#imp-fin-host .imp-fields,
+#imp-fin-host .imp-parc-box {
+  max-width: 56rem;
+}
+
 /* Dashboard card importação */
 .dash-icon.nfe svg { filter: drop-shadow(0 2px 4px rgba(47, 111, 237, 0.25)); }
 

@@ -1348,25 +1348,25 @@ const ImportacaoNfe = (() => {
       <div class="imp-section">
         <p class="hint">Faturamento sugerido pelo XML: <strong>${tPagLbl}</strong></p>
         <div class="imp-fields">
-          ${field('Valor total NF', 'imp-vnf', s.xml?.total?.vNF, { type: 'number', step: '0.01', half: true, readonly: true })}
-          ${field('Valor produtos', 'imp-vprod', s.xml?.total?.vProd, { type: 'number', step: '0.01', half: true, readonly: true })}
-          ${field('Frete', 'imp-vfrete-tot', s.xml?.total?.vFrete, { type: 'number', step: '0.01', half: true, readonly: true })}
-          <label class="imp-field half">
+          ${field('Valor total NF', 'imp-vnf', s.xml?.total?.vNF, { type: 'number', step: '0.01', third: true, readonly: true })}
+          ${field('Valor produtos', 'imp-vprod', s.xml?.total?.vProd, { type: 'number', step: '0.01', third: true, readonly: true })}
+          ${field('Frete', 'imp-vfrete-tot', s.xml?.total?.vFrete, { type: 'number', step: '0.01', third: true, readonly: true })}
+          <label class="imp-field third">
             <span>Forma de pagamento (faturamento)</span>
             <select id="imp-fmpag">${formasOpts}</select>
           </label>
-          <label class="imp-field half">
+          <label class="imp-field third">
             <span>Parcelamento</span>
             <select id="imp-parcelamento">${parcOpts}</select>
           </label>
-          ${field('Fatura (nFat)', 'imp-nfat', fin.nFat || '', { half: true })}
-          ${field('tPag XML', 'imp-tpag', fin.tPag || '', { half: true, readonly: true })}
+          ${field('Fatura (nFat)', 'imp-nfat', fin.nFat || '', { third: true })}
+          ${field('tPag XML', 'imp-tpag', fin.tPag || '', { third: true, readonly: true })}
         </div>
         <h4 class="imp-sub">Parcelas (valor e vencimento editáveis)</h4>
         <div id="imp-parcelas" class="imp-parc-box">${parc.length ? parc.map((p, i) => `
           <div class="imp-parc-row" data-i="${i}">
-            ${field(`Parcela ${p.nDup || i + 1}`, `imp-parc-v-${i}`, p.vDup, { type: 'number', step: '0.01', half: true })}
-            ${field('Vencimento', `imp-parc-d-${i}`, String(p.dVenc || '').slice(0, 10), { type: 'date', half: true })}
+            ${field(`Parcela ${p.nDup || i + 1}`, `imp-parc-v-${i}`, p.vDup, { type: 'number', step: '0.01' })}
+            ${field('Vencimento', `imp-parc-d-${i}`, String(p.dVenc || '').slice(0, 10), { type: 'date' })}
           </div>
         `).join('') : '<p class="hint">Nenhuma parcela informada no XML</p>'}</div>
         <div class="imp-item-footer">
@@ -1413,8 +1413,8 @@ const ImportacaoNfe = (() => {
       }
       boxParc.innerHTML = list.map((p, i) => `
           <div class="imp-parc-row" data-i="${i}">
-            ${field(`Parcela ${p.nDup || i + 1}`, `imp-parc-v-${i}`, p.vDup, { type: 'number', step: '0.01', half: true })}
-            ${field('Vencimento', `imp-parc-d-${i}`, String(p.dVenc || '').slice(0, 10), { type: 'date', half: true })}
+            ${field(`Parcela ${p.nDup || i + 1}`, `imp-parc-v-${i}`, p.vDup, { type: 'number', step: '0.01' })}
+            ${field('Vencimento', `imp-parc-d-${i}`, String(p.dVenc || '').slice(0, 10), { type: 'date' })}
           </div>`).join('');
     }
     function rebuildParcelasFromParcelamento() {
@@ -1977,10 +1977,14 @@ const ImportacaoNfe = (() => {
     const aplicar = ynChecked(sys.aplicar_saida !== undefined ? sys.aplicar_saida : 'S');
     const tribOut = applySimplesPisCofinsRates(trib, simples);
     const custoInfo = calcCustoNotaUnitario(sys, xml);
-    const cbs = calcCbsIbs(tn, tn.vlr_bc_cbs != null && tn.vlr_bc_cbs !== ''
+    const cbsBase = tn.vlr_bc_cbs != null && tn.vlr_bc_cbs !== ''
       ? tn.vlr_bc_cbs
-      : (Number(sys.prc_venda) > 0 ? Number(sys.prc_venda) : custoInfo.totalItem));
-    const nfceCbs = calcCbsIbs(tc, 0);
+      : (Number(sys.prc_venda) > 0 ? Number(sys.prc_venda) : custoInfo.totalItem);
+    const cbs = calcCbsIbs(tn, cbsBase);
+    const nfceBase = tc.vlr_bc_cbs != null && Number(tc.vlr_bc_cbs) > 0
+      ? tc.vlr_bc_cbs
+      : cbsBase;
+    const nfceCbs = calcCbsIbs(tc, nfceBase);
     return `
       <section class="imp-panel" data-panel="trib_saida">
         <header class="imp-section-head">
@@ -2054,6 +2058,7 @@ const ImportacaoNfe = (() => {
               </label>
             </div>
           </div>
+          <div class="imp-block-title">Reforma Tributária NFC-e — CBS / IBS</div>
           <div class="imp-fields">
             ${comboField('Classificação tributária NFC-e', 'imp-nfce-class', 'imp-class-nfce-list', tc.id_class_trib ?? '', {
     full: true,
@@ -2061,12 +2066,16 @@ const ImportacaoNfe = (() => {
     displayLabel: tc._class_label || (tc.id_class_trib != null ? String(tc.id_class_trib) : ''),
     placeholder: 'Pesquisar classificação…',
   })}
+            ${field('Base CBS/IBS', 'imp-nfce-bc-cbs', nfceCbs.vlr_bc_cbs, { type: 'number', step: '0.01', third: true })}
             ${field('Alíq. CBS %', 'imp-nfce-aliq-cbs-pad', nfceCbs.aliq_cbs, { type: 'number', step: '0.0001', third: true })}
             ${field('Alíq. IBS UF %', 'imp-nfce-aliq-ibs-uf', nfceCbs.aliq_ibs_uf, { type: 'number', step: '0.0001', third: true })}
             ${field('% red. alíq. CBS', 'imp-nfce-red-cbs', nfceCbs.percent_red_aliq_cbs, { type: 'number', step: '0.0001', third: true, readonly: true })}
             ${field('% red. alíq. IBS', 'imp-nfce-red-ibs', nfceCbs.percent_red_aliq_ibs, { type: 'number', step: '0.0001', third: true, readonly: true })}
             ${field('Alíq. efetiva CBS', 'imp-nfce-efet-cbs', nfceCbs.aliq_efetiva_cbs, { type: 'number', step: '0.0001', third: true, readonly: true })}
             ${field('Alíq. efetiva IBS UF', 'imp-nfce-efet-ibs-uf', nfceCbs.aliq_efetiva_ibs_uf, { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('Vlr CBS', 'imp-nfce-vlr-cbs', nfceCbs.vlr_cbs, { type: 'number', step: '0.01', third: true, readonly: true })}
+            ${field('Vlr IBS UF', 'imp-nfce-vlr-ibs-uf', nfceCbs.vlr_ibs_uf, { type: 'number', step: '0.01', third: true, readonly: true })}
+            ${field('Vlr IBS total', 'imp-nfce-vlr-ibs-tot', nfceCbs.vlr_ibs_tot, { type: 'number', step: '0.01', third: true, readonly: true })}
             ${field('Diferimento CBS', 'imp-nfce-dif-cbs', tc.diferimento_cbs ?? 0, { type: 'number', step: '0.0001', third: true })}
             ${field('Diferimento IBS UF', 'imp-nfce-dif-ibs-uf', tc.diferimento_ibs_uf ?? 0, { type: 'number', step: '0.0001', third: true })}
             ${field('Diferimento IBS Mun', 'imp-nfce-dif-ibs-mun', tc.diferimento_ibs_mun ?? 0, { type: 'number', step: '0.0001', third: true })}
@@ -2177,7 +2186,7 @@ const ImportacaoNfe = (() => {
           aliq_ibs_mun: Number(t.aliq_ibs_mun != null ? t.aliq_ibs_mun : (c.aliq_ibs_mun || 0)),
           _class_hydrated: true,
         };
-        Object.assign(next, calcCbsIbs(next, key === 'trib_nfe' ? cbsBaseFromScreen(sys) : 0));
+        Object.assign(next, calcCbsIbs(next, cbsBaseFromScreen(sys)));
         sys[key] = next;
       } catch (_) { /* ignore */ }
     }
@@ -3015,6 +3024,11 @@ const ImportacaoNfe = (() => {
           aliq_ibs_uf: gnDef('#imp-nfce-aliq-ibs-uf', tc.aliq_ibs_uf ?? 0),
           aliq_efetiva_cbs: gnDef('#imp-nfce-efet-cbs', tc.aliq_efetiva_cbs ?? 0),
           aliq_efetiva_ibs_uf: gnDef('#imp-nfce-efet-ibs-uf', tc.aliq_efetiva_ibs_uf ?? 0),
+          vlr_bc_cbs: gnDef('#imp-nfce-bc-cbs', tc.vlr_bc_cbs ?? 0),
+          vlr_bc_ibs: gnDef('#imp-nfce-bc-cbs', tc.vlr_bc_ibs ?? 0),
+          vlr_cbs: gnDef('#imp-nfce-vlr-cbs', tc.vlr_cbs ?? 0),
+          vlr_ibs_uf: gnDef('#imp-nfce-vlr-ibs-uf', tc.vlr_ibs_uf ?? 0),
+          vlr_ibs_tot: gnDef('#imp-nfce-vlr-ibs-tot', tc.vlr_ibs_tot ?? 0),
           diferimento_cbs: gnDef('#imp-nfce-dif-cbs', tc.diferimento_cbs ?? 0),
           diferimento_ibs_uf: gnDef('#imp-nfce-dif-ibs-uf', tc.diferimento_ibs_uf ?? 0),
           diferimento_ibs_mun: gnDef('#imp-nfce-dif-ibs-mun', tc.diferimento_ibs_mun ?? 0),
@@ -3347,7 +3361,7 @@ const ImportacaoNfe = (() => {
       aliq_ibs_mun: Number(prev.aliq_ibs_mun != null ? prev.aliq_ibs_mun : (extra.aliq_ibs_mun || 0)),
       _class_hydrated: true,
     };
-    Object.assign(next, calcCbsIbs(next, target === 'nfe' ? cbsBaseFromScreen(it.sistema) : 0));
+    Object.assign(next, calcCbsIbs(next, cbsBaseFromScreen(it.sistema)));
     if (target === 'nfe') syncCbsIbsFields(next, 'nfe');
     else syncCbsIbsFields(next, 'nfce');
     it.sistema[key] = next;
@@ -3357,18 +3371,16 @@ const ImportacaoNfe = (() => {
     if (!cbs) return;
     const set = (id, v) => { if ($(id)) $(id).value = v == null ? '' : String(v); };
     const pfx = target === 'nfce' ? 'imp-nfce' : 'imp-nfe';
-    if (target === 'nfe') set('#imp-nfe-bc-cbs', cbs.vlr_bc_cbs);
+    set(`#${pfx}-bc-cbs`, cbs.vlr_bc_cbs);
     set(`#${pfx}-aliq-cbs-pad`, cbs.aliq_cbs);
     set(`#${pfx}-aliq-ibs-uf`, cbs.aliq_ibs_uf);
     set(`#${pfx}-red-cbs`, cbs.percent_red_aliq_cbs);
     set(`#${pfx}-red-ibs`, cbs.percent_red_aliq_ibs);
     set(`#${pfx}-efet-cbs`, cbs.aliq_efetiva_cbs);
     set(`#${pfx}-efet-ibs-uf`, cbs.aliq_efetiva_ibs_uf);
-    if (target === 'nfe') {
-      set('#imp-nfe-vlr-cbs', cbs.vlr_cbs);
-      set('#imp-nfe-vlr-ibs-uf', cbs.vlr_ibs_uf);
-      set('#imp-nfe-vlr-ibs-tot', cbs.vlr_ibs_tot);
-    }
+    set(`#${pfx}-vlr-cbs`, cbs.vlr_cbs);
+    set(`#${pfx}-vlr-ibs-uf`, cbs.vlr_ibs_uf);
+    set(`#${pfx}-vlr-ibs-tot`, cbs.vlr_ibs_tot);
   }
 
   function recalcCbsIbsFromInputs() {
@@ -3397,7 +3409,11 @@ const ImportacaoNfe = (() => {
       aliq_cbs: Number($('#imp-nfce-aliq-cbs-pad')?.value || it.sistema.trib_nfce?.aliq_cbs || 0),
       aliq_ibs_uf: Number($('#imp-nfce-aliq-ibs-uf')?.value || it.sistema.trib_nfce?.aliq_ibs_uf || 0),
     };
-    const nfce = calcCbsIbs(tc, 0);
+    const nfceBase = (venda != null && venda > 0)
+      ? venda
+      : Number($('#imp-nfce-bc-cbs')?.value || base || 0);
+    if (venda != null && venda > 0 && $('#imp-nfce-bc-cbs')) $('#imp-nfce-bc-cbs').value = String(venda);
+    const nfce = calcCbsIbs(tc, nfceBase);
     it.sistema.trib_nfce = { ...tc, ...nfce };
     syncCbsIbsFields(nfce, 'nfce');
   }
@@ -3521,6 +3537,7 @@ const ImportacaoNfe = (() => {
     $('#imp-nfe-bc-cbs')?.addEventListener('input', recalcCbsIbsFromInputs);
     $('#imp-nfe-aliq-cbs-pad')?.addEventListener('input', recalcCbsIbsFromInputs);
     $('#imp-nfe-aliq-ibs-uf')?.addEventListener('input', recalcCbsIbsFromInputs);
+    $('#imp-nfce-bc-cbs')?.addEventListener('input', recalcCbsIbsFromInputs);
     $('#imp-nfce-aliq-cbs-pad')?.addEventListener('input', recalcCbsIbsFromInputs);
     $('#imp-nfce-aliq-ibs-uf')?.addEventListener('input', recalcCbsIbsFromInputs);
     $('#imp-trabalha-lote')?.addEventListener('change', (e) => {
