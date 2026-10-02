@@ -1537,7 +1537,7 @@
   font-weight: 600;
 }
 
-.imp-saida-block.is-off {
+.imp-lote-block.is-off {
   opacity: 0.45;
   pointer-events: none;
   filter: grayscale(0.15);

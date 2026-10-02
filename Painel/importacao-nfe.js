@@ -1915,8 +1915,9 @@ const ImportacaoNfe = (() => {
   }
 
   function calcCbsIbs(tn = {}, base = 0) {
-    const aliqCbs = Number(tn.aliq_cbs) > 0 ? Number(tn.aliq_cbs) : 0.9;
-    const aliqIbsUf = Number(tn.aliq_ibs_uf) > 0 ? Number(tn.aliq_ibs_uf) : 0.1;
+    const hasClass = tn.id_class_trib != null && tn.id_class_trib !== '';
+    const aliqCbs = Number(tn.aliq_cbs) > 0 ? Number(tn.aliq_cbs) : (hasClass ? 0.9 : 0);
+    const aliqIbsUf = Number(tn.aliq_ibs_uf) > 0 ? Number(tn.aliq_ibs_uf) : (hasClass ? 0.1 : 0);
     const aliqIbsMun = Number(tn.aliq_ibs_mun != null ? tn.aliq_ibs_mun : 0);
     const redCbs = Number(tn.percent_red_aliq_cbs || 0);
     const redIbs = Number(tn.percent_red_aliq_ibs || 0);
@@ -1958,6 +1959,7 @@ const ImportacaoNfe = (() => {
     const cbs = calcCbsIbs(tn, tn.vlr_bc_cbs != null && tn.vlr_bc_cbs !== ''
       ? tn.vlr_bc_cbs
       : (Number(sys.prc_venda) > 0 ? Number(sys.prc_venda) : custoInfo.totalItem));
+    const nfceCbs = calcCbsIbs(tc, 0);
     return `
       <section class="imp-panel" data-panel="trib_saida">
         <header class="imp-section-head">
@@ -2036,8 +2038,12 @@ const ImportacaoNfe = (() => {
     displayLabel: tc._class_label || (tc.id_class_trib != null ? String(tc.id_class_trib) : ''),
     placeholder: 'Pesquisar classificação…',
   })}
-            ${field('% red. alíq. CBS', 'imp-nfce-red-cbs', tc.percent_red_aliq_cbs ?? '', { type: 'number', step: '0.0001', third: true, readonly: true })}
-            ${field('% red. alíq. IBS', 'imp-nfce-red-ibs', tc.percent_red_aliq_ibs ?? '', { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('Alíq. CBS %', 'imp-nfce-aliq-cbs-pad', nfceCbs.aliq_cbs, { type: 'number', step: '0.0001', third: true })}
+            ${field('Alíq. IBS UF %', 'imp-nfce-aliq-ibs-uf', nfceCbs.aliq_ibs_uf, { type: 'number', step: '0.0001', third: true })}
+            ${field('% red. alíq. CBS', 'imp-nfce-red-cbs', nfceCbs.percent_red_aliq_cbs, { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('% red. alíq. IBS', 'imp-nfce-red-ibs', nfceCbs.percent_red_aliq_ibs, { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('Alíq. efetiva CBS', 'imp-nfce-efet-cbs', nfceCbs.aliq_efetiva_cbs, { type: 'number', step: '0.0001', third: true, readonly: true })}
+            ${field('Alíq. efetiva IBS UF', 'imp-nfce-efet-ibs-uf', nfceCbs.aliq_efetiva_ibs_uf, { type: 'number', step: '0.0001', third: true, readonly: true })}
             ${field('Diferimento CBS', 'imp-nfce-dif-cbs', tc.diferimento_cbs ?? 0, { type: 'number', step: '0.0001', third: true })}
             ${field('Diferimento IBS UF', 'imp-nfce-dif-ibs-uf', tc.diferimento_ibs_uf ?? 0, { type: 'number', step: '0.0001', third: true })}
             ${field('Diferimento IBS Mun', 'imp-nfce-dif-ibs-mun', tc.diferimento_ibs_mun ?? 0, { type: 'number', step: '0.0001', third: true })}
@@ -2070,6 +2076,15 @@ const ImportacaoNfe = (() => {
     `;
   }
 
+  function usaLoteAtivo(sys = {}, xml = {}) {
+    const flag = String(sys.trabalha_lote ?? '').trim().toUpperCase();
+    if (flag === 'S') return true;
+    if (flag === 'N') return false;
+    if (sys.controla_lote) return true;
+    const rastros = xml.rastros || [];
+    return Array.isArray(rastros) && rastros.length > 0;
+  }
+
   function lotesOf(it) {
     const sys = it?.sistema || {};
     if (Array.isArray(sys.lotes) && sys.lotes.length) return sys.lotes;
@@ -2089,18 +2104,25 @@ const ImportacaoNfe = (() => {
     const lotes = lotesOf(it);
     const l0 = lotes[0] || {};
     const qtdPadrao = Number(sys.qtd ?? xml.qCom ?? 0);
+    const usaLote = usaLoteAtivo(sys, xml);
     return `
       <section class="imp-panel" data-panel="lote">
         <header class="imp-section-head">
           <h4>Lote (opcional)</h4>
-          <span class="hint">Só é obrigatório se você abrir esta aba. Quase nenhum cliente usa controle de lote.</span>
+          <span class="hint">Só preencha se o produto controla lote. Desmarque para não exigir.</span>
         </header>
-        <p class="hint">Preencha como no Clipp: número do lote, validade e quantidade de entrada. O XML já sugere os dados de &lt;rastro&gt; quando existirem.</p>
-        <div class="imp-fields">
-          ${field('Número do lote', 'imp-lote-num', l0.num_lote || '', { half: true })}
-          ${field('Qtd entrada', 'imp-lote-qtd', l0.qtd_entrada || qtdPadrao || '', { type: 'number', step: '0.0001', half: true })}
-          ${field('Fabricação', 'imp-lote-fab', String(l0.dt_fabricacao || '').slice(0, 10), { type: 'date', half: true })}
-          ${field('Validade', 'imp-lote-val', String(l0.dt_validade || '').slice(0, 10), { type: 'date', half: true })}
+        <label class="imp-check imp-aplicar-saida">
+          <input type="checkbox" id="imp-trabalha-lote" ${usaLote ? 'checked' : ''} />
+          Trabalha com lote
+        </label>
+        <div class="imp-lote-block ${usaLote ? '' : 'is-off'}" id="imp-lote-block">
+          <p class="hint">Preencha como no Clipp: número do lote, validade e quantidade de entrada. O XML já sugere os dados de &lt;rastro&gt; quando existirem.</p>
+          <div class="imp-fields">
+            ${field('Número do lote', 'imp-lote-num', l0.num_lote || '', { half: true })}
+            ${field('Qtd entrada', 'imp-lote-qtd', l0.qtd_entrada || qtdPadrao || '', { type: 'number', step: '0.0001', half: true })}
+            ${field('Fabricação', 'imp-lote-fab', String(l0.dt_fabricacao || '').slice(0, 10), { type: 'date', half: true })}
+            ${field('Validade', 'imp-lote-val', String(l0.dt_validade || '').slice(0, 10), { type: 'date', half: true })}
+          </div>
         </div>
       </section>
     `;
@@ -2111,28 +2133,29 @@ const ImportacaoNfe = (() => {
     for (const key of ['trib_nfe', 'trib_nfce']) {
       const t = sys[key];
       if (!t?.id_class_trib) continue;
-      if (t._class_hydrated && Number(t.aliq_cbs) > 0 && (key === 'trib_nfce' || Number(t.vlr_bc_cbs) > 0)) continue;
+      const hasAliq = Number(t.aliq_cbs) > 0 && t.percent_red_aliq_cbs != null;
+      if (t._class_hydrated && hasAliq) continue;
       try {
         const res = await api(`/importacao/class-trib?id=${encodeURIComponent(t.id_class_trib)}`);
         const c = (res.itens || [])[0];
         if (!c) {
-          sys[key] = { ...t, _class_hydrated: true };
+          sys[key] = { ...t, ...calcCbsIbs(t), _class_hydrated: true };
           continue;
         }
-        sys[key] = {
+        const next = {
           ...t,
-          _class_label: `${c.cod_class_trib} — ${c.desc_class_trib}`,
-          _class_cod: c.cod_class_trib,
+          _class_label: `${c.cod_class_trib || c.codigo || ''} — ${c.desc_class_trib || c.descricao || ''}`.trim(),
+          _class_cod: c.cod_class_trib || c.codigo || t._class_cod,
           percent_red_aliq_cbs: c.percent_red_aliq_cbs,
           percent_red_aliq_ibs: c.percent_red_aliq_ibs,
           cst_class_trib: c.cst_class_trib || t.cst_class_trib || '',
-          aliq_cbs: Number(t.aliq_cbs) > 0 ? Number(t.aliq_cbs) : 0.9,
-          aliq_ibs_uf: Number(t.aliq_ibs_uf) > 0 ? Number(t.aliq_ibs_uf) : 0.1,
+          aliq_cbs: Number(t.aliq_cbs) > 0 ? Number(t.aliq_cbs) : (Number(c.aliq_cbs) || 0.9),
+          aliq_ibs_uf: Number(t.aliq_ibs_uf) > 0 ? Number(t.aliq_ibs_uf) : (Number(c.aliq_ibs_uf) || 0.1),
+          aliq_ibs_mun: Number(t.aliq_ibs_mun != null ? t.aliq_ibs_mun : (c.aliq_ibs_mun || 0)),
           _class_hydrated: true,
         };
-        if (key === 'trib_nfe') {
-          Object.assign(sys[key], calcCbsIbs(sys[key], cbsBaseFromScreen(sys)));
-        }
+        Object.assign(next, calcCbsIbs(next, key === 'trib_nfe' ? cbsBaseFromScreen(sys) : 0));
+        sys[key] = next;
       } catch (_) { /* ignore */ }
     }
   }
@@ -2657,6 +2680,7 @@ const ImportacaoNfe = (() => {
             ncm: f.ncm || it.sistema.ncm,
             cest: f.cest || it.sistema.cest || '',
             anp: f.anp || it.sistema.anp || '',
+            controla_lote: !!f.controla_lote,
             cfop_saida: f.cfop || keepSaida.cfop_saida || '',
             cfop_nf: f.cfop_nf || keepSaida.cfop_nf || '',
             csosn_saida: f.csosn || keepSaida.csosn_saida || '',
@@ -2865,6 +2889,9 @@ const ImportacaoNfe = (() => {
         uni_medida_xml: g('#imp-uni-xml') || sys.uni_medida_xml || '',
         conversor,
         conversor_manual: !!sys.conversor_manual,
+        trabalha_lote: $('#imp-trabalha-lote')
+          ? ($('#imp-trabalha-lote').checked ? 'S' : 'N')
+          : (sys.trabalha_lote || 'N'),
         qtd_xml: qtdXml,
         qtd,
         prc_custo: custo ?? 0,
@@ -2878,14 +2905,16 @@ const ImportacaoNfe = (() => {
         id_estoque: sys.id_estoque ?? null,
         criar_novo: !!sys.criar_novo,
         desvinculado: !!sys.desvinculado,
-        lotes: $('#imp-lote-num')
-          ? [{
-              num_lote: g('#imp-lote-num') || '',
-              qtd_entrada: gn('#imp-lote-qtd') ?? '',
-              dt_fabricacao: g('#imp-lote-fab') || '',
-              dt_validade: g('#imp-lote-val') || '',
-            }]
-          : (sys.lotes || []),
+        lotes: $('#imp-trabalha-lote') && !$('#imp-trabalha-lote').checked
+          ? []
+          : ($('#imp-lote-num')
+            ? [{
+                num_lote: g('#imp-lote-num') || '',
+                qtd_entrada: gn('#imp-lote-qtd') ?? '',
+                dt_fabricacao: g('#imp-lote-fab') || '',
+                dt_validade: g('#imp-lote-val') || '',
+              }]
+            : (sys.lotes || [])),
         tributos: {
           origem: trib.origem || '',
           cst_icms: g('#imp-cst') || g('#imp-cst-nota') || g('#imp-cst-saida') || trib.cst_icms || '',
@@ -2956,6 +2985,10 @@ const ImportacaoNfe = (() => {
           id_class_trib: gnNull('#imp-nfce-class') ?? tc.id_class_trib ?? null,
           percent_red_aliq_cbs: gnDef('#imp-nfce-red-cbs', tc.percent_red_aliq_cbs ?? 0),
           percent_red_aliq_ibs: gnDef('#imp-nfce-red-ibs', tc.percent_red_aliq_ibs ?? 0),
+          aliq_cbs: gnDef('#imp-nfce-aliq-cbs-pad', tc.aliq_cbs ?? 0),
+          aliq_ibs_uf: gnDef('#imp-nfce-aliq-ibs-uf', tc.aliq_ibs_uf ?? 0),
+          aliq_efetiva_cbs: gnDef('#imp-nfce-efet-cbs', tc.aliq_efetiva_cbs ?? 0),
+          aliq_efetiva_ibs_uf: gnDef('#imp-nfce-efet-ibs-uf', tc.aliq_efetiva_ibs_uf ?? 0),
           diferimento_cbs: gnDef('#imp-nfce-dif-cbs', tc.diferimento_cbs ?? 0),
           diferimento_ibs_uf: gnDef('#imp-nfce-dif-ibs-uf', tc.diferimento_ibs_uf ?? 0),
           diferimento_ibs_mun: gnDef('#imp-nfce-dif-ibs-mun', tc.diferimento_ibs_mun ?? 0),
@@ -3042,14 +3075,14 @@ const ImportacaoNfe = (() => {
     const s = state.sessao;
     if (!it || !s) return false;
     const patch = collectItemPatch();
-    if (state.itemTab === 'lote') patch.lote_aba_visitada = true;
-    const visitouLote = !!(patch.lote_aba_visitada || it.lote_aba_visitada);
-    if (visitouLote) {
+    const usaLote = String(patch.sistema?.trabalha_lote || '').toUpperCase() === 'S';
+    patch.lote_aba_visitada = usaLote;
+    if (usaLote) {
       const lote = (patch.sistema?.lotes || [])[0] || {};
       const num = String(lote.num_lote || '').trim();
       const qtd = Number(lote.qtd_entrada || 0);
       if (!num || !(qtd > 0)) {
-        deps.showMsg?.('A aba Lote foi aberta: informe o número do lote e a quantidade de entrada.');
+        deps.showMsg?.('Trabalha com lote: informe o número do lote e a quantidade de entrada.');
         return false;
       }
     }
@@ -3102,9 +3135,7 @@ const ImportacaoNfe = (() => {
       it.conferido = patch.conferido;
       it.observacao = patch.observacao;
       if (patch.etapas_ok) it.etapas_ok = { ...etapasOkOf(it), ...patch.etapas_ok };
-      if (patch.lote_aba_visitada || tabId === 'lote') it.lote_aba_visitada = true;
     }
-    if (tabId === 'lote' && it) it.lote_aba_visitada = true;
     state.itemTab = tabId;
     renderItemScreen();
   }
@@ -3286,31 +3317,33 @@ const ImportacaoNfe = (() => {
       percent_red_aliq_cbs: Number(extra.percent_red_aliq_cbs || 0),
       percent_red_aliq_ibs: Number(extra.percent_red_aliq_ibs || 0),
       cst_class_trib: extra.cst_class_trib || prev.cst_class_trib || '',
-      aliq_cbs: Number(prev.aliq_cbs) > 0 ? Number(prev.aliq_cbs) : 0.9,
-      aliq_ibs_uf: Number(prev.aliq_ibs_uf) > 0 ? Number(prev.aliq_ibs_uf) : 0.1,
-      aliq_ibs_mun: Number(prev.aliq_ibs_mun || 0),
+      aliq_cbs: Number(prev.aliq_cbs) > 0 ? Number(prev.aliq_cbs) : (Number(extra.aliq_cbs) || 0.9),
+      aliq_ibs_uf: Number(prev.aliq_ibs_uf) > 0 ? Number(prev.aliq_ibs_uf) : (Number(extra.aliq_ibs_uf) || 0.1),
+      aliq_ibs_mun: Number(prev.aliq_ibs_mun != null ? prev.aliq_ibs_mun : (extra.aliq_ibs_mun || 0)),
       _class_hydrated: true,
     };
-    if (target === 'nfe') {
-      Object.assign(next, calcCbsIbs(next, cbsBaseFromScreen(it.sistema)));
-      syncCbsIbsFields(next);
-    }
+    Object.assign(next, calcCbsIbs(next, target === 'nfe' ? cbsBaseFromScreen(it.sistema) : 0));
+    if (target === 'nfe') syncCbsIbsFields(next, 'nfe');
+    else syncCbsIbsFields(next, 'nfce');
     it.sistema[key] = next;
   }
 
-  function syncCbsIbsFields(cbs) {
+  function syncCbsIbsFields(cbs, target = 'nfe') {
     if (!cbs) return;
     const set = (id, v) => { if ($(id)) $(id).value = v == null ? '' : String(v); };
-    set('#imp-nfe-bc-cbs', cbs.vlr_bc_cbs);
-    set('#imp-nfe-aliq-cbs-pad', cbs.aliq_cbs);
-    set('#imp-nfe-aliq-ibs-uf', cbs.aliq_ibs_uf);
-    set('#imp-nfe-red-cbs', cbs.percent_red_aliq_cbs);
-    set('#imp-nfe-red-ibs', cbs.percent_red_aliq_ibs);
-    set('#imp-nfe-efet-cbs', cbs.aliq_efetiva_cbs);
-    set('#imp-nfe-efet-ibs-uf', cbs.aliq_efetiva_ibs_uf);
-    set('#imp-nfe-vlr-cbs', cbs.vlr_cbs);
-    set('#imp-nfe-vlr-ibs-uf', cbs.vlr_ibs_uf);
-    set('#imp-nfe-vlr-ibs-tot', cbs.vlr_ibs_tot);
+    const pfx = target === 'nfce' ? 'imp-nfce' : 'imp-nfe';
+    if (target === 'nfe') set('#imp-nfe-bc-cbs', cbs.vlr_bc_cbs);
+    set(`#${pfx}-aliq-cbs-pad`, cbs.aliq_cbs);
+    set(`#${pfx}-aliq-ibs-uf`, cbs.aliq_ibs_uf);
+    set(`#${pfx}-red-cbs`, cbs.percent_red_aliq_cbs);
+    set(`#${pfx}-red-ibs`, cbs.percent_red_aliq_ibs);
+    set(`#${pfx}-efet-cbs`, cbs.aliq_efetiva_cbs);
+    set(`#${pfx}-efet-ibs-uf`, cbs.aliq_efetiva_ibs_uf);
+    if (target === 'nfe') {
+      set('#imp-nfe-vlr-cbs', cbs.vlr_cbs);
+      set('#imp-nfe-vlr-ibs-uf', cbs.vlr_ibs_uf);
+      set('#imp-nfe-vlr-ibs-tot', cbs.vlr_ibs_tot);
+    }
   }
 
   function recalcCbsIbsFromInputs() {
@@ -3318,17 +3351,30 @@ const ImportacaoNfe = (() => {
     if (!it?.sistema) return;
     const tn = {
       ...(it.sistema.trib_nfe || {}),
+      id_class_trib: $('#imp-nfe-class')?.value || it.sistema.trib_nfe?.id_class_trib,
       percent_red_aliq_cbs: Number($('#imp-nfe-red-cbs')?.value || 0),
       percent_red_aliq_ibs: Number($('#imp-nfe-red-ibs')?.value || 0),
-      aliq_cbs: Number($('#imp-nfe-aliq-cbs-pad')?.value || 0.9),
-      aliq_ibs_uf: Number($('#imp-nfe-aliq-ibs-uf')?.value || 0.1),
+      aliq_cbs: Number($('#imp-nfe-aliq-cbs-pad')?.value || 0),
+      aliq_ibs_uf: Number($('#imp-nfe-aliq-ibs-uf')?.value || 0),
     };
     const venda = parseMoney($('#imp-venda')?.value);
     const base = (venda != null && venda > 0) ? venda : Number($('#imp-nfe-bc-cbs')?.value || 0);
     if (venda != null && venda > 0 && $('#imp-nfe-bc-cbs')) $('#imp-nfe-bc-cbs').value = String(venda);
     const cbs = calcCbsIbs(tn, base);
     it.sistema.trib_nfe = { ...tn, ...cbs };
-    syncCbsIbsFields(cbs);
+    syncCbsIbsFields(cbs, 'nfe');
+
+    const tc = {
+      ...(it.sistema.trib_nfce || {}),
+      id_class_trib: $('#imp-nfce-class')?.value || it.sistema.trib_nfce?.id_class_trib,
+      percent_red_aliq_cbs: Number($('#imp-nfce-red-cbs')?.value || it.sistema.trib_nfce?.percent_red_aliq_cbs || 0),
+      percent_red_aliq_ibs: Number($('#imp-nfce-red-ibs')?.value || it.sistema.trib_nfce?.percent_red_aliq_ibs || 0),
+      aliq_cbs: Number($('#imp-nfce-aliq-cbs-pad')?.value || it.sistema.trib_nfce?.aliq_cbs || 0),
+      aliq_ibs_uf: Number($('#imp-nfce-aliq-ibs-uf')?.value || it.sistema.trib_nfce?.aliq_ibs_uf || 0),
+    };
+    const nfce = calcCbsIbs(tc, 0);
+    it.sistema.trib_nfce = { ...tc, ...nfce };
+    syncCbsIbsFields(nfce, 'nfce');
   }
 
   function applySimplesPisCofinsFromCst() {
@@ -3450,6 +3496,14 @@ const ImportacaoNfe = (() => {
     $('#imp-nfe-bc-cbs')?.addEventListener('input', recalcCbsIbsFromInputs);
     $('#imp-nfe-aliq-cbs-pad')?.addEventListener('input', recalcCbsIbsFromInputs);
     $('#imp-nfe-aliq-ibs-uf')?.addEventListener('input', recalcCbsIbsFromInputs);
+    $('#imp-nfce-aliq-cbs-pad')?.addEventListener('input', recalcCbsIbsFromInputs);
+    $('#imp-nfce-aliq-ibs-uf')?.addEventListener('input', recalcCbsIbsFromInputs);
+    $('#imp-trabalha-lote')?.addEventListener('change', (e) => {
+      const block = $('#imp-lote-block');
+      if (block) block.classList.toggle('is-off', !e.target.checked);
+      const cur = itemAt(state.itemIndex);
+      if (cur?.sistema) cur.sistema.trabalha_lote = e.target.checked ? 'S' : 'N';
+    });
     $('#imp-cst-pis-saida-disp')?.addEventListener('change', applySimplesPisCofinsFromCst);
     $('#imp-cst-pis-saida')?.addEventListener('change', applySimplesPisCofinsFromCst);
     applySimplesPisCofinsFromCst();

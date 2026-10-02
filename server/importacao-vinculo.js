@@ -114,6 +114,15 @@ async function buscarVinculoFornecedor(db, idFornec, cProd) {
   return rows[0] ? Number(rows[0].ID_IDENTIFICADOR) : null;
 }
 
+function firstFilled(...vals) {
+  for (const v of vals) {
+    if (v == null) continue;
+    const s = String(v).trim();
+    if (s !== '') return typeof v === 'number' ? v : s;
+  }
+  return '';
+}
+
 function aplicarFiscalPreservandoSaida(sistema, f) {
   if (!f) return sistema;
   sistema.id_identificador = f.id_identificador;
@@ -130,14 +139,24 @@ function aplicarFiscalPreservandoSaida(sistema, f) {
   sistema.cest = sistema.cest || f.cest || '';
   sistema.status = f.status || sistema.status || 'A';
   sistema.criar_novo = false;
-  if (!sistema.cfop_saida) sistema.cfop_saida = f.cfop || '';
-  if (!sistema.cfop_nf) sistema.cfop_nf = f.cfop_nf || '';
-  if (!sistema.csosn_saida) sistema.csosn_saida = f.csosn || '';
-  if (!sistema.csosn_cfe) sistema.csosn_cfe = f.csosn_cfe || '';
-  if (!sistema.cst_saida) sistema.cst_saida = f.cst || '';
-  if (!sistema.cst_cfe) sistema.cst_cfe = f.cst_cfe || '';
-  if (!sistema.id_cti) sistema.id_cti = f.id_cti || '';
-  if (!sistema.id_cti_cfe) sistema.id_cti_cfe = f.id_cti_cfe || '';
+  sistema.controla_lote = !!f.controla_lote;
+  // Cadastro do Clipp prevalece sobre parâmetro de CFOP (ex.: CSOSN 500 no produto vs 102 no mapa).
+  sistema.cfop_saida = firstFilled(f.cfop, sistema.cfop_saida);
+  sistema.cfop_nf = firstFilled(f.cfop_nf, sistema.cfop_nf);
+  sistema.csosn_saida = firstFilled(f.csosn, sistema.csosn_saida);
+  sistema.csosn_cfe = firstFilled(f.csosn_cfe, sistema.csosn_cfe);
+  sistema.cst_saida = firstFilled(f.cst, sistema.cst_saida);
+  sistema.cst_cfe = firstFilled(f.cst_cfe, sistema.cst_cfe);
+  sistema.id_cti = firstFilled(f.id_cti, sistema.id_cti);
+  sistema.id_cti_cfe = firstFilled(f.id_cti_cfe, sistema.id_cti_cfe);
+  if (f.trib_nfe) {
+    sistema.trib_nfe = { ...(sistema.trib_nfe || {}), ...f.trib_nfe };
+    delete sistema.trib_nfe._class_hydrated;
+  }
+  if (f.trib_nfce) {
+    sistema.trib_nfce = { ...(sistema.trib_nfce || {}), ...f.trib_nfce };
+    delete sistema.trib_nfce._class_hydrated;
+  }
   return sistema;
 }
 

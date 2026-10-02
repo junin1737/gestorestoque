@@ -331,24 +331,88 @@ async function getNaturezaByCfop(cfop) {
   });
 }
 
+/** Alíquotas-padrão 2026 (LC 214/2025) — Clipp não grava ALIQ_CBS no cadastro, só a classificação. */
+const ALIQ_CBS_PADRAO = 0.9;
+const ALIQ_IBS_UF_PADRAO = 0.1;
+const ALIQ_IBS_MUN_PADRAO = 0;
+
+function mapClassTribRow(r) {
+  return {
+    id_class_trib: Number(r.ID_CLASS_TRIB),
+    cod_class_trib: String(r.COD_CLASS_TRIB || '').trim(),
+    desc_class_trib: String(r.DESC_CLASS_TRIB || '').trim(),
+    percent_red_aliq_cbs: Number(r.PERCENT_RED_ALIQ_CBS || 0),
+    percent_red_aliq_ibs: Number(r.PERCENT_RED_ALIQ_IBS || 0),
+    cst_class_trib: String(r.CST_CLASS_TRIB || '').trim(),
+    ind_nfe: String(r.IND_NFE || '').trim(),
+    ind_nfce: String(r.IND_NFCE || '').trim(),
+    ind_trib_regular: String(r.IND_TRIB_REGULAR || '').trim(),
+    ind_cred_presumido: String(r.IND_CRED_PRESUMIDO || '').trim(),
+    codigo: String(r.COD_CLASS_TRIB || '').trim(),
+    descricao: String(r.DESC_CLASS_TRIB || '').trim(),
+    aliq_cbs: ALIQ_CBS_PADRAO,
+    aliq_ibs_uf: ALIQ_IBS_UF_PADRAO,
+    aliq_ibs_mun: ALIQ_IBS_MUN_PADRAO,
+  };
+}
+
+function enrichTribRates(trib, classRow) {
+  if (!trib || !trib.id_class_trib) return trib;
+  const redCbs = Number(
+    trib.percent_red_aliq_cbs != null && trib.percent_red_aliq_cbs !== ''
+      ? trib.percent_red_aliq_cbs
+      : (classRow?.PERCENT_RED_ALIQ_CBS ?? classRow?.percent_red_aliq_cbs ?? 0)
+  );
+  const redIbs = Number(
+    trib.percent_red_aliq_ibs != null && trib.percent_red_aliq_ibs !== ''
+      ? trib.percent_red_aliq_ibs
+      : (classRow?.PERCENT_RED_ALIQ_IBS ?? classRow?.percent_red_aliq_ibs ?? 0)
+  );
+  const aliqCbs = Number(trib.aliq_cbs) > 0 ? Number(trib.aliq_cbs) : ALIQ_CBS_PADRAO;
+  const aliqIbsUf = Number(trib.aliq_ibs_uf) > 0 ? Number(trib.aliq_ibs_uf) : ALIQ_IBS_UF_PADRAO;
+  const aliqIbsMun = Number(trib.aliq_ibs_mun != null ? trib.aliq_ibs_mun : ALIQ_IBS_MUN_PADRAO);
+  const efetCbs = aliqCbs * (1 - Math.min(100, Math.max(0, redCbs)) / 100);
+  const efetIbsUf = aliqIbsUf * (1 - Math.min(100, Math.max(0, redIbs)) / 100);
+  const efetIbsMun = aliqIbsMun * (1 - Math.min(100, Math.max(0, redIbs)) / 100);
+  const cod = String(classRow?.COD_CLASS_TRIB || trib._class_cod || '').trim();
+  const desc = String(classRow?.DESC_CLASS_TRIB || classRow?.desc_class_trib || '').trim();
+  return {
+    ...trib,
+    percent_red_aliq_cbs: redCbs,
+    percent_red_aliq_ibs: redIbs,
+    cst_class_trib: trib.cst_class_trib || String(classRow?.CST_CLASS_TRIB || classRow?.cst_class_trib || '').trim(),
+    _class_cod: trib._class_cod || cod,
+    _class_label: trib._class_label || (cod || desc ? `${cod}${desc ? ` — ${desc}` : ''}`.trim() : ''),
+    aliq_cbs: aliqCbs,
+    aliq_ibs_uf: aliqIbsUf,
+    aliq_ibs_mun: aliqIbsMun,
+    aliq_efetiva_cbs: Number(efetCbs.toFixed(4)),
+    aliq_efetiva_ibs_uf: Number(efetIbsUf.toFixed(4)),
+    aliq_efetiva_ibs_mun: Number(efetIbsMun.toFixed(4)),
+  };
+}
+
+async function classTribById(db, id) {
+  const idNum = Number(id);
+  if (!idNum) return null;
+  try {
+    const rows = await query(db, `
+      SELECT FIRST 1
+        ID_CLASS_TRIB, COD_CLASS_TRIB, DESC_CLASS_TRIB,
+        PERCENT_RED_ALIQ_CBS, PERCENT_RED_ALIQ_IBS, CST_CLASS_TRIB
+      FROM TB_CLASS_TRIB
+      WHERE ID_CLASS_TRIB = ?`, [idNum]);
+    return rows[0] || null;
+  } catch {
+    return null;
+  }
+}
+
 async function listClassTrib(q, id) {
   const idNum = id != null && String(id).trim() !== '' ? Number(id) : null;
   const term = String(q || '').trim();
   return withDb(async (db) => {
-    const mapRow = (r) => ({
-      id_class_trib: Number(r.ID_CLASS_TRIB),
-      cod_class_trib: String(r.COD_CLASS_TRIB || '').trim(),
-      desc_class_trib: String(r.DESC_CLASS_TRIB || '').trim(),
-      percent_red_aliq_cbs: Number(r.PERCENT_RED_ALIQ_CBS || 0),
-      percent_red_aliq_ibs: Number(r.PERCENT_RED_ALIQ_IBS || 0),
-      cst_class_trib: String(r.CST_CLASS_TRIB || '').trim(),
-      ind_nfe: String(r.IND_NFE || '').trim(),
-      ind_nfce: String(r.IND_NFCE || '').trim(),
-      ind_trib_regular: String(r.IND_TRIB_REGULAR || '').trim(),
-      ind_cred_presumido: String(r.IND_CRED_PRESUMIDO || '').trim(),
-      codigo: String(r.COD_CLASS_TRIB || '').trim(),
-      descricao: String(r.DESC_CLASS_TRIB || '').trim(),
-    });
+    const mapRow = mapClassTribRow;
 
     if (idNum) {
       const rows = await query(db, `
@@ -536,7 +600,7 @@ async function getProdutoFiscal(idIdentificador) {
         E.CFOP, E.CFOP_NF, E.CST_PIS, E.CST_COFINS, E.PIS, E.COFINS,
         E.ID_CTI, E.ID_CTI_CFE, E.STATUS,
         P.COD_BARRA, P.REFERENCIA, P.DESC_CMPL, P.COD_NCM, P.COD_CEST, P.ANP,
-        P.CST, P.CSOSN, P.CST_CFE, P.CSOSN_CFE, P.QTD_ATUAL
+        P.CST, P.CSOSN, P.CST_CFE, P.CSOSN_CFE, P.QTD_ATUAL, P.CONTROLA_LOTE_VENDA
       FROM ${t.estoque} E
       JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
       JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
@@ -566,6 +630,7 @@ async function getProdutoFiscal(idIdentificador) {
           deduz_cred_presu_ibs: String(t1[0].DEDUZ_CRED_PRESU_IBS || 'N').slice(0, 1),
           ind_bem_movel_usado: String(t1[0].IND_BEM_MOVEL_USADO || 'N').slice(0, 1),
         };
+        tribNfe = enrichTribRates(tribNfe, await classTribById(db, tribNfe.id_class_trib));
       }
       const t2 = await query(db, `
         SELECT FIRST 1 ID_CLASS_TRIB, DIFERIMENTO_CBS, DIFERIMENTO_IBS_UF, DIFERIMENTO_IBS_MUN
@@ -577,6 +642,7 @@ async function getProdutoFiscal(idIdentificador) {
           diferimento_ibs_uf: Number(t2[0].DIFERIMENTO_IBS_UF || 0),
           diferimento_ibs_mun: Number(t2[0].DIFERIMENTO_IBS_MUN || 0),
         };
+        tribNfce = enrichTribRates(tribNfce, await classTribById(db, tribNfce.id_class_trib));
       }
     } catch { /* bases sem reforma */ }
     return {
@@ -610,6 +676,7 @@ async function getProdutoFiscal(idIdentificador) {
       cst_cfe: String(r.CST_CFE || '').trim(),
       csosn_cfe: String(r.CSOSN_CFE || '').trim(),
       qtd_atual: Number(r.QTD_ATUAL || 0),
+      controla_lote: String(r.CONTROLA_LOTE_VENDA || 'N').trim().toUpperCase() === 'S',
       trib_nfe: tribNfe,
       trib_nfce: tribNfce,
     };
@@ -847,10 +914,10 @@ async function getSugestaoTributoEstoque(idIdentificador) {
       sugestao = {
         cfop: conv.cfop_saida || atual?.cfop || '',
         cfop_nf: conv.cfop_cfe || atual?.cfop_nf || '',
-        csosn: (regra && regra.aplicar_saida ? regra.csosn_saida : null) || conv.csosn_saida || conv.csosn || atual?.csosn || '',
+        csosn: (regra && regra.aplicar_saida ? regra.csosn_saida : null) || conv.csosn_saida || atual?.csosn || '',
         cst: (regra && regra.aplicar_saida ? regra.cst_saida : null) || conv.cst_saida || atual?.cst || '',
-        csosn_cfe: (regra && regra.csosn_cfe) || conv.csosn_cfe || atual?.csosn_cfe || '',
-        cst_cfe: (regra && regra.cst_cfe) || conv.cst_cfe || atual?.cst_cfe || '',
+        csosn_cfe: (regra && regra.aplicar_saida ? regra.csosn_cfe : null) || conv.csosn_cfe || atual?.csosn_cfe || '',
+        cst_cfe: (regra && regra.aplicar_saida ? regra.cst_cfe : null) || conv.cst_cfe || atual?.cst_cfe || '',
         cst_pis: (regra && regra.cst_pis_saida) || atual?.cst_pis || '',
         cst_cofins: (regra && regra.cst_cofins_saida) || atual?.cst_cofins || '',
         pis: regra && regra.pis != null ? regra.pis : atual?.pis,

@@ -1051,12 +1051,22 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
     body.ncm = $('#t-ncm')?.value || '';
     body.cest = $('#t-cest')?.value || '';
   }
-  if ($('#r-id-class-trib')) {
+  if ($('#r-id-class-trib') || $('#r-id-class-trib-nfce')) {
     body.trib_nfe = {
-      id_class_trib: $('#r-id-class-trib').value || null,
+      id_class_trib: $('#r-id-class-trib')?.value || null,
       diferimento_cbs: Number($('#r-dif-cbs')?.value || 0),
       diferimento_ibs_uf: Number($('#r-dif-ibs-uf')?.value || 0),
       diferimento_ibs_mun: Number($('#r-dif-ibs-mun')?.value || 0),
+      aliq_cbs: Number($('#r-aliq-cbs')?.value || 0),
+      aliq_ibs_uf: Number($('#r-aliq-ibs-uf')?.value || 0),
+    };
+    body.trib_nfce = {
+      id_class_trib: $('#r-id-class-trib-nfce')?.value || null,
+      diferimento_cbs: Number($('#r-nfce-dif-cbs')?.value || 0),
+      diferimento_ibs_uf: Number($('#r-nfce-dif-ibs-uf')?.value || 0),
+      diferimento_ibs_mun: Number($('#r-nfce-dif-ibs-mun')?.value || 0),
+      aliq_cbs: Number($('#r-nfce-aliq-cbs')?.value || 0),
+      aliq_ibs_uf: Number($('#r-nfce-aliq-ibs-uf')?.value || 0),
     };
   }
 
@@ -1096,7 +1106,7 @@ async function loadTributosProduto(it, editar) {
   const u = res.ultima_entrada;
   const s = res.sugestao && !res.sugestao.error ? res.sugestao : null;
   const a = res.atual || {};
-  const val = (k) => (s && s[k] != null && s[k] !== '' ? s[k] : (a[k] != null ? a[k] : ''));
+  const val = (k) => (a[k] != null && a[k] !== '' ? a[k] : '');
   const dis = !editar;
   const ultimaHtml = u
     ? `<div class="trib-ultima">
@@ -1145,27 +1155,55 @@ async function loadTributosProduto(it, editar) {
     showToast('Sugestão aplicada. Grave o produto para atualizar o cadastro.');
   });
   const tn = a.trib_nfe || {};
+  const tc = a.trib_nfce || {};
   const refHost = $('#ref-host');
   if (refHost) {
+    const fmtAliq = (v) => (v == null || v === '' ? '' : v);
     refHost.innerHTML = `
-      <p class="hint">Dados da reforma tributária (classificação) já gravados no cadastro, quando existirem.</p>
+      <h3 class="section-title">Reforma tributária</h3>
+      <p class="hint">Classificação e alíquotas do cadastro (TB_EST_TRIBUTOS / TB_CLASS_TRIB). CBS 0,9% e IBS UF 0,1% são as alíquotas-padrão 2026 quando a classificação existe.</p>
+      <h4 class="section-title">NF-e</h4>
+      <p class="hint" id="r-class-label">${escapeHtml(tn._class_label || '')}</p>
       <div class="form-grid side-by-side">
         <label>ID classificação NFe${inp('r-id-class-trib', tn.id_class_trib || '', dis)}</label>
+        <label>CST class. trib.${inp('r-cst-class', tn.cst_class_trib || '', true)}</label>
+        <label>Alíq. CBS %${inp('r-aliq-cbs', fmtAliq(tn.aliq_cbs), dis)}</label>
+        <label>Alíq. IBS UF %${inp('r-aliq-ibs-uf', fmtAliq(tn.aliq_ibs_uf), dis)}</label>
+        <label>% red. alíq. CBS${inp('r-red-cbs', fmtAliq(tn.percent_red_aliq_cbs), true)}</label>
+        <label>% red. alíq. IBS${inp('r-red-ibs', fmtAliq(tn.percent_red_aliq_ibs), true)}</label>
+        <label>Alíq. efetiva CBS${inp('r-efet-cbs', fmtAliq(tn.aliq_efetiva_cbs), true)}</label>
+        <label>Alíq. efetiva IBS UF${inp('r-efet-ibs-uf', fmtAliq(tn.aliq_efetiva_ibs_uf), true)}</label>
         <label>Diferimento CBS %${inp('r-dif-cbs', tn.diferimento_cbs ?? 0, dis)}</label>
         <label>Diferimento IBS UF %${inp('r-dif-ibs-uf', tn.diferimento_ibs_uf ?? 0, dis)}</label>
         <label>Diferimento IBS mun. %${inp('r-dif-ibs-mun', tn.diferimento_ibs_mun ?? 0, dis)}</label>
       </div>
-      <p class="hint" id="r-class-label"></p>
+      <h4 class="section-title">NFC-e</h4>
+      <p class="hint" id="r-class-label-nfce">${escapeHtml(tc._class_label || '')}</p>
+      <div class="form-grid side-by-side">
+        <label>ID classificação NFC-e${inp('r-id-class-trib-nfce', tc.id_class_trib || '', dis)}</label>
+        <label>Alíq. CBS %${inp('r-nfce-aliq-cbs', fmtAliq(tc.aliq_cbs), dis)}</label>
+        <label>Alíq. IBS UF %${inp('r-nfce-aliq-ibs-uf', fmtAliq(tc.aliq_ibs_uf), dis)}</label>
+        <label>% red. alíq. CBS${inp('r-nfce-red-cbs', fmtAliq(tc.percent_red_aliq_cbs), true)}</label>
+        <label>% red. alíq. IBS${inp('r-nfce-red-ibs', fmtAliq(tc.percent_red_aliq_ibs), true)}</label>
+        <label>Alíq. efetiva CBS${inp('r-nfce-efet-cbs', fmtAliq(tc.aliq_efetiva_cbs), true)}</label>
+        <label>Alíq. efetiva IBS UF${inp('r-nfce-efet-ibs-uf', fmtAliq(tc.aliq_efetiva_ibs_uf), true)}</label>
+        <label>Diferimento CBS %${inp('r-nfce-dif-cbs', tc.diferimento_cbs ?? 0, dis)}</label>
+        <label>Diferimento IBS UF %${inp('r-nfce-dif-ibs-uf', tc.diferimento_ibs_uf ?? 0, dis)}</label>
+        <label>Diferimento IBS mun. %${inp('r-nfce-dif-ibs-mun', tc.diferimento_ibs_mun ?? 0, dis)}</label>
+      </div>
     `;
-    const idClass = Number(tn.id_class_trib);
-    if (idClass) {
-      api(`/importacao/class-trib?id=${idClass}`).then((r) => {
+    const fillClassLabel = (idClass, elId) => {
+      const n = Number(idClass);
+      if (!n) return;
+      api(`/importacao/class-trib?id=${n}`).then((r) => {
         const item = r.itens && r.itens[0];
-        if (item && $('#r-class-label')) {
-          $('#r-class-label').textContent = `${item.codigo || ''} — ${item.descricao || ''}`.trim();
+        if (item && $(elId) && !$(elId).textContent) {
+          $(elId).textContent = `${item.codigo || item.cod_class_trib || ''} — ${item.descricao || item.desc_class_trib || ''}`.trim();
         }
       }).catch(() => {});
-    }
+    };
+    fillClassLabel(tn.id_class_trib, '#r-class-label');
+    fillClassLabel(tc.id_class_trib, '#r-class-label-nfce');
   }
 }
 

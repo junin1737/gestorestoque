@@ -7,6 +7,11 @@ const { round2, calcCustoUnitarioItem, totalMercadoriaItem, validarTotaisNf, val
 const { ensureContaMovtos } = require('./importacao-cancel');
 const { buscarPorCnpj, cadastrarFornecedor, onlyDigits } = require('./importacao-fornecedor');
 
+function usaLoteItem(it) {
+  const flag = String(it?.sistema?.trabalha_lote ?? '').trim().toUpperCase();
+  return flag === 'S';
+}
+
 let nfCompraObsColumnCache = undefined;
 
 async function resolveNfCompraObsColumn(db) {
@@ -410,9 +415,12 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
           CST = COALESCE(?, CST),
           CSOSN = COALESCE(?, CSOSN),
           CST_CFE = COALESCE(?, CST_CFE),
-          CSOSN_CFE = COALESCE(?, CSOSN_CFE)
+          CSOSN_CFE = COALESCE(?, CSOSN_CFE),
+          CONTROLA_LOTE_VENDA = COALESCE(?, CONTROLA_LOTE_VENDA)
         WHERE ID_IDENTIFICADOR = ?`, [
-        cest, barras, referencia, descCmpl, anp, cst, csosn, cstCfe, csosnCfe, idIdent,
+        cest, barras, referencia, descCmpl, anp, cst, csosn, cstCfe, csosnCfe,
+        usaLoteItem({ sistema }) ? 'S' : null,
+        idIdent,
       ]);
     } catch (e) {
       try {
@@ -848,6 +856,7 @@ async function ensureLoteProduto(db, t, {
 }
 
 async function gravarLotesItem(db, appCfg, idNfcItem, idIdent, it) {
+  if (!usaLoteItem(it)) return;
   if (!hasTable('TB_NFC_ITEM_LOTE')) return;
   const lotes = Array.isArray(it.sistema?.lotes) ? it.sistema.lotes : [];
   if (!lotes.length) return;
@@ -901,11 +910,11 @@ async function gravarNfCompra(sessao, {
     if (!it.sistema?.id_identificador && !it.sistema?.criar_novo) {
       throw new Error(`Item ${it.nItem} sem produto vinculado.`);
     }
-    if (it.lote_aba_visitada) {
+    if (usaLoteItem(it)) {
       const lotes = Array.isArray(it.sistema?.lotes) ? it.sistema.lotes : [];
       const okLote = lotes.some((l) => String(l.num_lote || '').trim() && Number(l.qtd_entrada || 0) > 0);
       if (!okLote) {
-        throw new Error(`Item ${it.nItem}: a aba Lote foi aberta — informe número do lote e quantidade.`);
+        throw new Error(`Item ${it.nItem}: trabalha com lote — informe número do lote e quantidade.`);
       }
     }
   }
