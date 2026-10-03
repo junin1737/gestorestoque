@@ -260,6 +260,7 @@ const ImportacaoNfe = (() => {
       $$('#imp-tabs .imp-tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === 'itens'));
     }
     renderNfChrome();
+    if (name === 'consultar') syncChaveCount();
     deps.scrollAppTop?.();
   }
 
@@ -4261,6 +4262,8 @@ const ImportacaoNfe = (() => {
     $('#imp-params-salvar')?.addEventListener('click', () => saveParams());
 
     $('#imp-btn-consultar')?.addEventListener('click', consultarChave);
+    $('#imp-chave')?.addEventListener('input', syncChaveCount);
+    $('#imp-chave')?.addEventListener('paste', () => setTimeout(syncChaveCount, 0));
     $('#imp-chave')?.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === 'Search') {
         e.preventDefault();
@@ -4275,6 +4278,7 @@ const ImportacaoNfe = (() => {
       const demo = '35260821234567890123456789012345678901234567';
       const inp = $('#imp-chave');
       if (inp) inp.value = demo;
+      syncChaveCount();
       consultarChave({ allowDemo: true });
     });
 
@@ -4371,6 +4375,7 @@ const ImportacaoNfe = (() => {
     $('#imp-voltar-inicio')?.addEventListener('click', () => {
       leaveSessaoToHome();
     });
+    syncChaveCount();
   }
 
   function applyScannedChave(code) {
@@ -4383,6 +4388,7 @@ const ImportacaoNfe = (() => {
     if (state.view !== 'consultar') showView('consultar');
     const field = $('#imp-chave');
     if (field) field.value = chave;
+    syncChaveCount();
     consultarChave();
     return true;
   }
@@ -4392,6 +4398,16 @@ const ImportacaoNfe = (() => {
     if (digits.length === 44) return digits;
     const run = digits.match(/\d{44}/);
     return run ? run[0] : (digits.length > 44 ? digits.slice(0, 44) : '');
+  }
+
+  function syncChaveCount() {
+    const el = $('#imp-chave-count');
+    if (!el) return;
+    const n = String($('#imp-chave')?.value || '').replace(/\D/g, '').length;
+    el.textContent = `${n} / 44 dígitos`;
+    el.classList.toggle('is-ok', n === 44);
+    el.classList.toggle('is-short', n > 0 && n < 44);
+    el.classList.toggle('is-over', n > 44);
   }
 
   function applyScannedProduto(code) {

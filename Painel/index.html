@@ -7,8 +7,8 @@
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <title>Gestor Estoque</title>
-  <link rel="stylesheet" href="styles.css?v=178" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=178" />
+  <link rel="stylesheet" href="styles.css?v=179" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=179" />
 </head>
 <body>
   <div id="app">
@@ -264,13 +264,15 @@
               <div class="imp-capture-row">
                 <div class="search-field">
                   <input id="imp-chave" type="text" inputmode="numeric" maxlength="54"
-                    placeholder="Chave de acesso (44 dígitos)" autocomplete="off" />
+                    placeholder="Chave de acesso (44 dígitos)" autocomplete="off"
+                    aria-describedby="imp-chave-count" />
                 </div>
                 <button type="button" id="imp-btn-scan-chave" class="btn icon-cam primary" title="Ler chave" aria-label="Ler chave">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
                 </button>
                 <button type="button" id="imp-btn-consultar" class="btn primary">Consultar</button>
               </div>
+              <p id="imp-chave-count" class="imp-chave-count" aria-live="polite">0 / 44 dígitos</p>
               <div class="imp-actions-inline">
                 <label class="btn" style="cursor:pointer">
                   Anexar XML
@@ -496,8 +498,8 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=178"></script>
-  <script src="importacao-nfe.js?v=178"></script>
-  <script src="app.js?v=178"></script>
+  <script src="vendor/zxing-browser.min.js?v=179"></script>
+  <script src="importacao-nfe.js?v=179"></script>
+  <script src="app.js?v=179"></script>
 </body>
 </html>

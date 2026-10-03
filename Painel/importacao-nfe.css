@@ -416,6 +416,27 @@
   letter-spacing: 0.02em;
 }
 
+.imp-chave-count {
+  margin: 0.4rem 0 0;
+  font-size: var(--fs-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+}
+
+.imp-chave-count.is-short {
+  color: var(--text);
+}
+
+.imp-chave-count.is-ok {
+  color: var(--ok);
+  font-weight: 600;
+}
+
+.imp-chave-count.is-over {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .imp-actions-inline {
   display: flex;
   gap: 0.5rem;
