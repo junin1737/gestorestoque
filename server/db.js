@@ -231,6 +231,24 @@ function activeTargets(appCfg) {
   return list;
 }
 
+/**
+ * Escritas de estoque: só Clipp (TB_*). Em Clipp+ManagePro os triggers
+ * (TR_ENVIA_*, XX_TR_UPDATE_TB_ESTOQUE_2, XX_PR_UPD_NIVEL, XX_TR_INC_LOTE)
+ * alimentam o *_2 — gravar nos dois duplica quantidade e colide na PK.
+ * ManagePro isolado continua em *_2 (não há trigger no Clipp).
+ */
+function writeTargets(appCfg) {
+  const flags = targetsForSistema(appCfg.sistema);
+  if (flags.clipp && hasTable('TB_ESTOQUE')) {
+    return [{ manage: false, tables: stockTables(false) }];
+  }
+  if (flags.manage && hasTable('TB_ESTOQUE_2')) {
+    return [{ manage: true, tables: stockTables(true) }];
+  }
+  if (hasTable('TB_ESTOQUE')) return [{ manage: false, tables: stockTables(false) }];
+  return [];
+}
+
 function detectImageMime(buf) {
   if (!buf || buf.length < 4) return 'image/png';
   if (buf[0] === 0xff && buf[1] === 0xd8) return 'image/jpeg';
@@ -372,6 +390,7 @@ module.exports = {
   refreshTables,
   refreshGenerators,
   activeTargets,
+  writeTargets,
   stockTables,
   targetsForSistema,
   blobToDataUrl,

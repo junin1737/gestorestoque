@@ -1,6 +1,6 @@
 'use strict';
 
-const { withDb, query, activeTargets, hasTable, columnExists } = require('./db');
+const { withDb, query, writeTargets, hasTable, columnExists } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
 const { round2, calcCustoUnitarioItem, totalMercadoriaItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
@@ -131,7 +131,7 @@ async function nextId(db, generatorName, tableName, idColumn) {
 }
 
 async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
-  const targets = activeTargets(appCfg);
+  const targets = writeTargets(appCfg);
   if (!targets.length) throw new Error('Tabelas de estoque não encontradas.');
   const tPrimary = targets[0].tables;
   const idEstoque = await nextId(db, tPrimary.genEstoque, tPrimary.estoque, 'ID_ESTOQUE');
@@ -264,7 +264,7 @@ async function zerarNegativoAntesTrigger(db, appCfg, {
 }) {
   const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
   if (!zerarNeg) return;
-  const targets = activeTargets(appCfg).filter((t) => !t.manage);
+  const targets = writeTargets(appCfg);
   const agora = localNow();
   for (const target of targets) {
     const t = target.tables;
@@ -293,14 +293,12 @@ async function entradaEstoque(db, appCfg, {
   /** false = só atualiza QTD_ATUAL (entrada por NF compra não deve ir em TB_EST_SALDO_ALTERADO). */
   registrarAlteracao = true,
 }) {
-  const targets = activeTargets(appCfg);
+  const targets = writeTargets(appCfg);
   const agora = localNow();
   const obs = `Entrada NF ${nfLabel} - ${usuario}`.slice(0, 200);
   const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
 
   for (const target of targets) {
-    // Com EST_BX='S' o trigger do Clipp já atualiza TB_ESTOQUE / TB_EST_SALDO_ALTERADO.
-    // Evita lançar a mesma quantidade duas vezes.
     if (skipClipp && !target.manage) continue;
     const t = target.tables;
     const prodRows = await query(db, `
@@ -321,13 +319,17 @@ async function entradaEstoque(db, appCfg, {
       qtdAtual = 0;
       await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = 0 WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
     }
-    const nova = qtdAtual + Number(qtd || 0);
-    await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?`, [nova, idIdentificador]);
+    const delta = Number(qtd || 0);
+    await query(
+      db,
+      `UPDATE ${t.produto} SET QTD_ATUAL = COALESCE(QTD_ATUAL, 0) + ? WHERE ID_IDENTIFICADOR = ?`,
+      [delta, idIdentificador]
+    );
     if (registrarAlteracao) {
       await insertSaldoAlterado(db, t, {
         idIdentificador,
         saldoAntigo: qtdAtual,
-        saldoNovo: nova,
+        saldoNovo: qtdAtual + delta,
         prcMedio: prcMedio || prcCusto || 0,
         agora,
         idFuncionario,
@@ -384,7 +386,7 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
     ? (String(sistema.csosn_cfe || '').trim().slice(0, 3) || null)
     : null;
 
-  const targets = activeTargets(appCfg);
+  const targets = writeTargets(appCfg);
   for (const target of targets) {
     const t = target.tables;
 
@@ -861,7 +863,7 @@ async function gravarLotesItem(db, appCfg, idNfcItem, idIdent, it) {
   const lotes = Array.isArray(it.sistema?.lotes) ? it.sistema.lotes : [];
   if (!lotes.length) return;
   const conversor = Number(it.sistema?.conversor ?? 1) || 1;
-  const targets = activeTargets(appCfg);
+  const targets = writeTargets(appCfg);
   for (const lote of lotes) {
     const num = String(lote.num_lote || '').trim();
     if (!num) continue;
@@ -950,6 +952,11 @@ async function gravarNfCompra(sessao, {
   if (Number(sessao.editar_id_nfcompra)) {
     const idNf = Number(sessao.editar_id_nfcompra);
     return withDb(async (db, appCfg) => {
+      const nfAtual = await query(db, `
+        SELECT FIRST 1 STATUS FROM TB_NFCOMPRA WHERE ID_NFCOMPRA = ?`, [idNf]);
+      if (String(nfAtual[0]?.STATUS || '').trim().toUpperCase() === 'C') {
+        throw new Error('Esta NF está cancelada e não pode ser editada.');
+      }
       const lock = await nfFinanceiroBloqueado(db, idNf);
       const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
         ? fin.parcelas
@@ -983,7 +990,9 @@ async function gravarNfCompra(sessao, {
       try {
         const dtEntrada = toDateSql(sessao.dt_entrada);
         if (dtEntrada) {
-          await query(db, `UPDATE TB_NFCOMPRA SET DT_ENTRADA = ? WHERE ID_NFCOMPRA = ?`, [
+          await query(db, `
+            UPDATE TB_NFCOMPRA SET DT_ENTRADA = ?
+            WHERE ID_NFCOMPRA = ? AND TRIM(STATUS) <> 'C'`, [
             dtEntrada, idNf,
           ]);
         }

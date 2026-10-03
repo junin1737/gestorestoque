@@ -17,6 +17,7 @@ const {
   detach,
   ensureSchema,
   activeTargets,
+  writeTargets,
   blobToDataUrl,
   hasTable,
   refreshTables,
@@ -602,7 +603,7 @@ router.post('/estoque', async (req, res) => {
         const dup = await findProdutoPorBarras(db, appCfg, codBarras);
         if (dup) throw new Error(mensagemBarrasDuplicado(dup));
       }
-      const targets = activeTargets(appCfg);
+      const targets = writeTargets(appCfg);
       // IDs separados: em grade vários identificadores compartilham o mesmo ID_ESTOQUE
       const tPrimary = targets[0].tables;
       const idEstoque = await nextTableId(db, tPrimary.genEstoque, tPrimary.estoque, 'ID_ESTOQUE');
@@ -682,7 +683,7 @@ router.post('/grupos', async (req, res) => {
     const descricao = String((req.body && req.body.descricao) || '').trim();
     if (!descricao) return res.json({ ok: false, error: 'Informe a descrição do grupo.' });
     const grupo = await withDb(async (db, appCfg) => {
-      const targets = activeTargets(appCfg);
+      const targets = writeTargets(appCfg);
       let created = null;
       for (const target of targets) {
         const t = target.tables;
@@ -713,7 +714,7 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
         const dup = await findProdutoPorBarras(db, appCfg, barra, id);
         if (dup) throw new Error(mensagemBarrasDuplicado(dup));
       }
-      const targets = activeTargets(appCfg);
+      const targets = writeTargets(appCfg);
       let updated = null;
       let snapshotAntes = null;
       let snapshotDepois = null;
@@ -810,10 +811,18 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
           prodParams.push(body.controla_lote ? 'S' : 'N');
         }
         const novaQtd = body.qtd_atual !== undefined ? Number(body.qtd_atual) : null;
-        if (novaQtd !== null) { prodSets.push('QTD_ATUAL = ?'); prodParams.push(novaQtd); }
         if (prodSets.length) {
           prodParams.push(id);
           await query(db, `UPDATE ${t.produto} SET ${prodSets.join(', ')} WHERE ID_IDENTIFICADOR = ?`, prodParams);
+        }
+
+        if (novaQtd !== null && novaQtd !== qtdAntiga) {
+          const delta = novaQtd - qtdAntiga;
+          await query(
+            db,
+            `UPDATE ${t.produto} SET QTD_ATUAL = COALESCE(QTD_ATUAL, 0) + ? WHERE ID_IDENTIFICADOR = ?`,
+            [delta, id]
+          );
         }
 
         if (novaQtd !== null && novaQtd !== qtdAntiga && hasTable(t.saldo)) {

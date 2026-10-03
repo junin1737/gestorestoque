@@ -1,6 +1,6 @@
 'use strict';
 
-const { withDb, query, activeTargets, hasTable } = require('./db');
+const { withDb, query, writeTargets } = require('./db');
 
 function localNow() {
   const d = new Date();
@@ -14,16 +14,6 @@ function localNow() {
     dataSql: `${y}-${m}-${day}`,
     horaSql: `${hh}:${mm}:${ss}`,
   };
-}
-
-async function nextSaldoId(db, genName, tableName) {
-  try {
-    const gen = await query(db, `SELECT GEN_ID(${genName}, 1) AS ID FROM RDB$DATABASE`);
-    return Number(gen[0].ID);
-  } catch {
-    const max = await query(db, `SELECT COALESCE(MAX(ID),0)+1 AS ID FROM ${tableName}`);
-    return Number(max[0].ID);
-  }
 }
 
 async function nextMovtoId(db) {
@@ -183,19 +173,18 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
         SELECT ID_NFCITEM, ID_IDENTIFICADOR, NUM_ITEM, QTD_ITEM, UNI_MEDIDA, EST_BX
         FROM TB_NFC_ITEM WHERE ID_NFCOMPRA = ?`, [id]);
 
-      const targets = activeTargets(appCfg);
-      const agora = localNow();
-      const obs = `Estorno cancelamento NF ${nf.NF_NUMERO}/${String(nf.NF_SERIE || '').trim()} - ${usuario}`;
+      const targets = writeTargets(appCfg);
 
       for (const it of itens) {
         const idIdent = Number(it.ID_IDENTIFICADOR);
         const qtdItem = Number(it.QTD_ITEM || 0);
         const estBx = String(it.EST_BX || '').trim().toUpperCase();
         // Só estorna estoque dos itens que entraram (EST_BX='S'); o trigger Clipp
-        // não desfaz o cancelamento — fazemos o estorno manual aqui.
+        // não desfaz o cancelamento — fazemos o estorno em QTD_ATUAL. O trigger
+        // XX_TR_ABX_EST_CANCNF replica o _2 ao gravar STATUS='C'. Sem INSERT
+        // em TB_EST_SALDO_ALTERADO: a movimentação continua "NF Compra".
         if (!idIdent || !qtdItem || estBx !== 'S') continue;
 
-        // Entrada no Clipp = QTD_ITEM × CONVERSOR(UNI_MEDIDA); espelhar no estorno.
         let conv = 1;
         const uni = String(it.UNI_MEDIDA || '').trim();
         if (uni) {
@@ -210,36 +199,12 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
 
         for (const target of targets) {
           const t = target.tables;
-          const prodRows = await query(db, `
-            SELECT FIRST 1 QTD_ATUAL, PRC_MEDIO FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdent]);
-          if (!prodRows[0]) continue;
-          const qtdAtual = Number(prodRows[0].QTD_ATUAL || 0);
-          const prcMedio = Number(prodRows[0].PRC_MEDIO || 0);
-          const nova = qtdAtual - qtd;
-          await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?`, [nova, idIdent]);
-
-          if (hasTable(t.saldo)) {
-            const nextId = await nextSaldoId(db, t.genSaldo, t.saldo);
-            try {
-              await query(db, `
-                INSERT INTO ${t.saldo}
-                  (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO, OBSERVACAO)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`, [
-                nextId, agora.dataSql, idIdent, qtdAtual, nova, prcMedio, agora.horaSql, idFuncionario || 0, obs.slice(0, 200),
-              ]);
-            } catch (e) {
-              if (String(e.message || '').includes('OBSERVACAO')) {
-                await query(db, `
-                  INSERT INTO ${t.saldo}
-                    (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO)
-                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [
-                  nextId, agora.dataSql, idIdent, qtdAtual, nova, prcMedio, agora.horaSql, idFuncionario || 0,
-                ]);
-              } else {
-                console.warn('Saldo cancel NF:', e.message);
-              }
-            }
-          }
+          await query(
+            db,
+            `UPDATE ${t.produto} SET QTD_ATUAL = COALESCE(QTD_ATUAL, 0) - ?
+             WHERE ID_IDENTIFICADOR = ?`,
+            [qtd, idIdent]
+          );
         }
       }
 
@@ -264,7 +229,9 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
         );
       }
 
-      await query(db, `UPDATE TB_NFCOMPRA SET STATUS = 'C' WHERE ID_NFCOMPRA = ?`, [id]);
+      await query(db, `
+        UPDATE TB_NFCOMPRA SET STATUS = 'C'
+        WHERE ID_NFCOMPRA = ? AND TRIM(STATUS) <> 'C'`, [id]);
 
       const aindaAbertas = await query(db, `
         SELECT COUNT(*) AS QTD
