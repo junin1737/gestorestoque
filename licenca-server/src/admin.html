@@ -1,0 +1,470 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Licenças · Gestor Estoque</title>
+<style>
+  :root {
+    --bg: #f3f5f9; --card: #fff; --text: #14213d; --muted: #6b7a90; --line: #e2e7ef;
+    --brand: #0b1b33; --accent: #0f9d8a; --ok: #12805c; --ok-bg: #e3f6ee; --warn: #9a6400; --warn-bg: #fff3d6;
+    --danger: #b42318; --danger-bg: #fde8e6; --radius: 12px;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
+  button, input, select, textarea { font: inherit; }
+  [hidden] { display: none !important; }
+  .btn { border: 0; border-radius: 9px; padding: .55rem .9rem; cursor: pointer; font-weight: 600; background: var(--line); color: var(--text); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.primary { background: var(--brand); color: #fff; }
+  .btn.ok { background: var(--ok); color: #fff; }
+  .btn.danger { background: var(--danger); color: #fff; }
+  .btn.ghost { background: transparent; border: 1px solid var(--line); }
+  .btn.sm { padding: .35rem .6rem; font-size: 12.5px; }
+  input, select, textarea { width: 100%; padding: .55rem .7rem; border: 1px solid var(--line); border-radius: 9px; background: #fff; color: var(--text); }
+  textarea { resize: vertical; min-height: 64px; }
+  label { display: block; font-size: 12.5px; color: var(--muted); font-weight: 600; margin-bottom: .7rem; }
+  label > input, label > select, label > textarea { margin-top: .3rem; }
+
+  #login { min-height: 100vh; display: grid; place-items: center; padding: 1rem; }
+  .login-card { background: var(--card); padding: 2rem; border-radius: var(--radius); width: 100%; max-width: 360px; box-shadow: 0 10px 30px rgba(11,27,51,.08); }
+  .login-card h1 { margin: 0 0 .25rem; font-size: 20px; }
+  .login-card p { margin: 0 0 1.2rem; color: var(--muted); }
+  .erro { color: var(--danger); font-size: 13px; min-height: 1.2em; margin: .2rem 0 .6rem; }
+
+  header.top { background: var(--brand); color: #fff; padding: .9rem 1.2rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+  header.top h1 { font-size: 17px; margin: 0; flex: 1; }
+  header.top .btn { background: rgba(255,255,255,.12); color: #fff; }
+  main { max-width: 1200px; margin: 0 auto; padding: 1rem; }
+  .toolbar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: .8rem; }
+  .toolbar input { flex: 1; min-width: 200px; }
+  .tabs { display: flex; gap: .35rem; flex-wrap: wrap; margin-bottom: .8rem; }
+  .tab { border: 1px solid var(--line); background: var(--card); border-radius: 999px; padding: .35rem .8rem; cursor: pointer; font-weight: 600; color: var(--muted); }
+  .tab.active { background: var(--brand); color: #fff; border-color: var(--brand); }
+  .tab .n { display: inline-block; min-width: 1.4em; text-align: center; margin-left: .3rem; padding: 0 .35rem; border-radius: 999px; background: rgba(0,0,0,.08); font-size: 12px; }
+  .tab.active .n { background: rgba(255,255,255,.2); }
+  .tab.pend .n { background: var(--warn); color: #fff; }
+
+  .lista { background: var(--card); border-radius: var(--radius); overflow: hidden; border: 1px solid var(--line); }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .03em; padding: .65rem .8rem; border-bottom: 1px solid var(--line); background: #fafbfd; }
+  td { padding: .65rem .8rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:last-child td { border-bottom: 0; }
+  tr.row { cursor: pointer; }
+  tr.row:hover td { background: #f8fafc; }
+  .nome { font-weight: 700; }
+  .sub { color: var(--muted); font-size: 12.5px; }
+  .acoes { white-space: nowrap; text-align: right; }
+  .acoes .btn + .btn { margin-left: .3rem; }
+  .vazio { padding: 2rem; text-align: center; color: var(--muted); }
+
+  .badge { display: inline-block; padding: .2rem .55rem; border-radius: 999px; font-size: 12px; font-weight: 700; }
+  .b-liberado { background: var(--ok-bg); color: var(--ok); }
+  .b-pendente { background: var(--warn-bg); color: var(--warn); }
+  .b-bloqueado, .b-vencido { background: var(--danger-bg); color: var(--danger); }
+
+  dialog { border: 0; border-radius: var(--radius); padding: 0; width: min(760px, 96vw); max-height: 92vh; box-shadow: 0 20px 60px rgba(11,27,51,.25); }
+  dialog::backdrop { background: rgba(11,27,51,.45); }
+  .dlg-head { padding: 1rem 1.2rem; border-bottom: 1px solid var(--line); display: flex; gap: .8rem; align-items: flex-start; }
+  .dlg-head h2 { margin: 0; font-size: 17px; flex: 1; }
+  .dlg-body { padding: 1rem 1.2rem; overflow: auto; max-height: calc(92vh - 130px); }
+  .dlg-foot { padding: .8rem 1.2rem; border-top: 1px solid var(--line); display: flex; gap: .5rem; justify-content: flex-end; flex-wrap: wrap; }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .9rem; }
+  h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 1.2rem 0 .5rem; }
+  .mini td, .mini th { padding: .45rem .55rem; font-size: 12.5px; }
+  .mini { border: 1px solid var(--line); border-radius: 9px; overflow: hidden; }
+  .codigo { width: 100%; font-family: ui-monospace, Consolas, monospace; font-size: 11.5px; min-height: 90px; word-break: break-all; }
+  .linha { display: flex; gap: .5rem; align-items: flex-end; flex-wrap: wrap; }
+  .linha label { flex: 1; min-width: 140px; margin-bottom: 0; }
+  .toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: var(--brand); color: #fff; padding: .6rem 1rem; border-radius: 9px; font-weight: 600; box-shadow: 0 8px 20px rgba(0,0,0,.2); z-index: 50; }
+  .toast.erro { background: var(--danger); }
+  footer { text-align: center; color: var(--muted); font-size: 12px; padding: 1.5rem 0; }
+
+  @media (max-width: 760px) {
+    .col-hide { display: none; }
+    .grid2 { grid-template-columns: 1fr; }
+    td, th { padding: .55rem; }
+  }
+</style>
+</head>
+<body>
+
+<section id="login">
+  <form class="login-card" id="form-login">
+    <h1>Licenças do Gestor Estoque</h1>
+    <p>MT Automações — acesso restrito</p>
+    <label>Senha<input type="password" id="login-senha" autocomplete="current-password" required autofocus /></label>
+    <div class="erro" id="login-erro"></div>
+    <button class="btn primary" style="width:100%" type="submit">Entrar</button>
+  </form>
+</section>
+
+<section id="app" hidden>
+  <header class="top">
+    <h1>Licenças · Gestor Estoque</h1>
+    <button class="btn sm" id="btn-novo">+ Cadastrar cliente</button>
+    <button class="btn sm" id="btn-sair">Sair</button>
+  </header>
+  <main>
+    <div class="toolbar">
+      <input id="busca" type="search" placeholder="Buscar por CNPJ, nome, máquina ou NSE…" />
+      <button class="btn ghost" id="btn-atualizar">Atualizar</button>
+    </div>
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-status="">Todos <span class="n" data-n="todos">0</span></button>
+      <button class="tab pend" data-status="pendente">Pendentes <span class="n" data-n="pendente">0</span></button>
+      <button class="tab" data-status="liberado">Liberados <span class="n" data-n="liberado">0</span></button>
+      <button class="tab" data-status="bloqueado">Bloqueados <span class="n" data-n="bloqueado">0</span></button>
+    </div>
+    <div class="lista">
+      <table>
+        <thead>
+          <tr>
+            <th>Situação</th>
+            <th>Cliente</th>
+            <th class="col-hide">Máquina / versão</th>
+            <th class="col-hide">Último contato</th>
+            <th class="col-hide">Pago até</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="vazio" id="vazio" hidden>Nenhum cliente encontrado.</div>
+    </div>
+    <footer>MT Automações (34) 3674-1937</footer>
+  </main>
+</section>
+
+<dialog id="dlg-cliente">
+  <div class="dlg-head">
+    <div style="flex:1">
+      <h2 id="d-titulo">Cliente</h2>
+      <div class="sub" id="d-sub"></div>
+    </div>
+    <span class="badge" id="d-badge"></span>
+  </div>
+  <div class="dlg-body">
+    <div class="grid2">
+      <label>Situação
+        <select id="d-status">
+          <option value="liberado">Liberado</option>
+          <option value="bloqueado">Bloqueado</option>
+          <option value="pendente">Pendente</option>
+        </select>
+      </label>
+      <label>Pago até (vazio = sem vencimento)<input type="date" id="d-pago" /></label>
+      <label>Razão social<input id="d-razao" maxlength="120" /></label>
+      <label>Nome fantasia<input id="d-fantasia" maxlength="120" /></label>
+    </div>
+    <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
+    <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
+
+    <h3>Instalações</h3>
+    <div class="mini"><table>
+      <thead><tr><th>NSE Clipp</th><th>Máquina</th><th>Gestor</th><th class="col-hide">Clipp</th><th>Último contato</th></tr></thead>
+      <tbody id="d-inst"></tbody>
+    </table></div>
+
+    <h3>Licença offline (cliente sem internet)</h3>
+    <div class="linha">
+      <label>Dias<input type="number" id="d-off-dias" min="1" max="365" value="30" /></label>
+      <label>NSE (vazio = qualquer instalação)<input id="d-off-nse" /></label>
+      <button class="btn ghost" id="d-off-gerar" type="button">Gerar código</button>
+    </div>
+    <div id="d-off-box" hidden style="margin-top:.6rem">
+      <textarea class="codigo" id="d-off-codigo" readonly></textarea>
+      <div class="sub" id="d-off-info"></div>
+      <button class="btn sm ghost" id="d-off-copiar" type="button" style="margin-top:.4rem">Copiar código</button>
+    </div>
+
+    <h3>Histórico</h3>
+    <div class="mini"><table>
+      <thead><tr><th>Quando</th><th>Evento</th><th>Detalhe</th></tr></thead>
+      <tbody id="d-ev"></tbody>
+    </table></div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn danger sm" id="d-excluir" type="button" style="margin-right:auto">Excluir</button>
+    <button class="btn ghost" id="d-fechar" type="button">Fechar</button>
+    <button class="btn primary" id="d-salvar" type="button">Salvar</button>
+  </div>
+</dialog>
+
+<dialog id="dlg-novo">
+  <form method="dialog" id="form-novo">
+    <div class="dlg-head"><h2>Cadastrar cliente</h2></div>
+    <div class="dlg-body">
+      <p class="sub" style="margin-top:0">Use para liberar um cliente antes da primeira conexão do Gestor. Clientes que instalarem sem cadastro entram como <b>pendentes</b>.</p>
+      <label>CNPJ / CPF<input id="n-cnpj" required inputmode="numeric" /></label>
+      <div class="grid2">
+        <label>Razão social<input id="n-razao" maxlength="120" /></label>
+        <label>Nome fantasia<input id="n-fantasia" maxlength="120" /></label>
+        <label>Situação
+          <select id="n-status">
+            <option value="liberado">Liberado</option>
+            <option value="bloqueado">Bloqueado</option>
+          </select>
+        </label>
+        <label>Pago até<input type="date" id="n-pago" /></label>
+      </div>
+      <label>Observação interna<textarea id="n-obs"></textarea></label>
+      <div class="erro" id="n-erro"></div>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn ghost" value="cancel" formnovalidate>Cancelar</button>
+      <button class="btn primary" id="n-salvar" value="ok">Cadastrar</button>
+    </div>
+  </form>
+</dialog>
+
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const st = { token: localStorage.getItem('mt_licenca_token') || '', status: '', q: '', atual: null };
+const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloqueado', vencido: 'Vencido' };
+const EVENTO = {
+  novo_cliente: 'Primeira conexão', nova_instalacao: 'Nova instalação', versao: 'Atualizou versão',
+  status: 'Situação alterada', edicao: 'Dados alterados', licenca_offline: 'Licença offline gerada', cadastro_manual: 'Cadastro manual',
+};
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function fmtCnpj(c) {
+  const d = String(c || '');
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  if (d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+  return d;
+}
+function fmtData(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return isNaN(d) ? '—' : d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+function fmtDia(ymd) {
+  if (!ymd) return '—';
+  const [a, m, d] = ymd.split('-');
+  return `${d}/${m}/${a}`;
+}
+function relativo(iso) {
+  if (!iso) return 'nunca';
+  const s = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (s < 90) return 'agora';
+  if (s < 3600) return `há ${Math.round(s / 60)} min`;
+  if (s < 86400) return `há ${Math.round(s / 3600)} h`;
+  return `há ${Math.round(s / 86400)} dia(s)`;
+}
+function toast(msg, erro) {
+  const el = document.createElement('div');
+  el.className = `toast${erro ? ' erro' : ''}`;
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+
+async function api(path, { method = 'GET', body } = {}) {
+  let res;
+  try {
+    res = await fetch(`/api/admin${path}`, {
+      method,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${st.token}` },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    return { ok: false, error: 'Sem conexão com o servidor.' };
+  }
+  const data = await res.json().catch(() => ({ ok: false, error: `Erro ${res.status}` }));
+  if (data.code === 'AUTH') sair();
+  return data;
+}
+
+function mostrarApp(logado) {
+  $('#login').hidden = logado;
+  $('#app').hidden = !logado;
+  if (logado) carregar();
+}
+function sair() {
+  st.token = '';
+  localStorage.removeItem('mt_licenca_token');
+  mostrarApp(false);
+}
+
+$('#form-login').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('#login-erro').textContent = '';
+  const r = await api('/login', { method: 'POST', body: { senha: $('#login-senha').value } });
+  if (!r.ok) { $('#login-erro').textContent = r.error || 'Falha no login.'; return; }
+  st.token = r.token;
+  localStorage.setItem('mt_licenca_token', r.token);
+  $('#login-senha').value = '';
+  mostrarApp(true);
+});
+$('#btn-sair').addEventListener('click', sair);
+
+async function carregar() {
+  const qs = new URLSearchParams();
+  if (st.status) qs.set('status', st.status);
+  if (st.q) qs.set('q', st.q);
+  const r = await api(`/clientes?${qs}`);
+  if (!r.ok) { toast(r.error || 'Falha ao carregar.', true); return; }
+  const t = r.totais || {};
+  $$('[data-n]').forEach((el) => {
+    const k = el.dataset.n;
+    el.textContent = k === 'todos' ? Object.values(t).reduce((a, b) => a + b, 0) : (t[k] || 0);
+  });
+  const tb = $('#tbody');
+  tb.innerHTML = r.clientes.map((c) => `
+    <tr class="row" data-cnpj="${esc(c.cnpj)}">
+      <td><span class="badge b-${esc(c.situacao)}">${ROTULO[c.situacao] || esc(c.situacao)}</span></td>
+      <td><div class="nome">${esc(c.fantasia || c.razao || 'Sem nome')}</div><div class="sub">${fmtCnpj(c.cnpj)}${c.razao && c.fantasia ? ` · ${esc(c.razao)}` : ''}</div></td>
+      <td class="col-hide"><div>${esc(c.maquina || '—')}</div><div class="sub">${c.versao_gestor ? `v${esc(c.versao_gestor)}` : ''}${c.instalacoes > 1 ? ` · ${c.instalacoes} instalações` : ''}</div></td>
+      <td class="col-hide"><div>${relativo(c.ultimo_contato)}</div><div class="sub">${fmtData(c.ultimo_contato)}</div></td>
+      <td class="col-hide">${fmtDia(c.pago_ate)}</td>
+      <td class="acoes">
+        ${c.status !== 'liberado' ? `<button class="btn ok sm" data-acao="liberado">Liberar</button>` : ''}
+        ${c.status !== 'bloqueado' ? `<button class="btn danger sm" data-acao="bloqueado">Bloquear</button>` : ''}
+      </td>
+    </tr>`).join('');
+  $('#vazio').hidden = r.clientes.length > 0;
+}
+
+$('#tbody').addEventListener('click', async (e) => {
+  const tr = e.target.closest('tr[data-cnpj]');
+  if (!tr) return;
+  const btn = e.target.closest('button[data-acao]');
+  if (btn) {
+    e.stopPropagation();
+    const status = btn.dataset.acao;
+    const nome = tr.querySelector('.nome').textContent;
+    if (status === 'bloqueado' && !confirm(`Bloquear ${nome}? O Gestor deste cliente para em até 30 minutos.`)) return;
+    btn.disabled = true;
+    const r = await api(`/clientes/${tr.dataset.cnpj}`, { method: 'PUT', body: { status } });
+    if (!r.ok) toast(r.error || 'Falha.', true);
+    else toast(status === 'liberado' ? `${nome} liberado.` : `${nome} bloqueado.`);
+    carregar();
+    return;
+  }
+  abrirCliente(tr.dataset.cnpj);
+});
+
+$('#tabs').addEventListener('click', (e) => {
+  const tab = e.target.closest('.tab');
+  if (!tab) return;
+  $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
+  st.status = tab.dataset.status;
+  carregar();
+});
+let tBusca;
+$('#busca').addEventListener('input', (e) => {
+  clearTimeout(tBusca);
+  tBusca = setTimeout(() => { st.q = e.target.value.trim(); carregar(); }, 300);
+});
+$('#btn-atualizar').addEventListener('click', carregar);
+
+function preencherCliente(r) {
+  const c = r.cliente;
+  st.atual = c.cnpj;
+  $('#d-titulo').textContent = c.fantasia || c.razao || 'Sem nome';
+  $('#d-sub').textContent = `${fmtCnpj(c.cnpj)} · cadastrado ${fmtData(c.criado_em)} · último contato ${fmtData(c.ultimo_contato)}`;
+  $('#d-badge').className = `badge b-${c.situacao}`;
+  $('#d-badge').textContent = ROTULO[c.situacao] || c.situacao;
+  $('#d-status').value = c.status;
+  $('#d-pago').value = c.pago_ate || '';
+  $('#d-razao').value = c.razao || '';
+  $('#d-fantasia').value = c.fantasia || '';
+  $('#d-mensagem').value = c.mensagem || '';
+  $('#d-obs').value = c.observacao || '';
+  $('#d-inst').innerHTML = r.instalacoes.length
+    ? r.instalacoes.map((i) => `<tr><td>${esc(i.nse || '—')}</td><td>${esc(i.maquina || '—')}</td><td>${esc(i.versao_gestor || '—')}</td><td class="col-hide">${esc(i.versao_clipp || '—')}</td><td>${fmtData(i.ultimo_contato)}</td></tr>`).join('')
+    : '<tr><td colspan="5" class="sub">Ainda não conectou.</td></tr>';
+  $('#d-ev').innerHTML = r.eventos.length
+    ? r.eventos.map((ev) => `<tr><td>${fmtData(ev.criado_em)}</td><td>${esc(EVENTO[ev.tipo] || ev.tipo)}</td><td>${esc(ev.detalhe || '')}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="sub">Sem eventos.</td></tr>';
+}
+
+async function abrirCliente(cnpj) {
+  const r = await api(`/clientes/${cnpj}`);
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  $('#d-off-box').hidden = true;
+  $('#d-off-nse').value = '';
+  preencherCliente(r);
+  if (!$('#dlg-cliente').open) $('#dlg-cliente').showModal();
+}
+
+$('#d-fechar').addEventListener('click', () => $('#dlg-cliente').close());
+$('#d-salvar').addEventListener('click', async () => {
+  const body = {
+    status: $('#d-status').value,
+    pago_ate: $('#d-pago').value || null,
+    razao: $('#d-razao').value,
+    fantasia: $('#d-fantasia').value,
+    mensagem: $('#d-mensagem').value,
+    observacao: $('#d-obs').value,
+  };
+  const r = await api(`/clientes/${st.atual}`, { method: 'PUT', body });
+  if (!r.ok) { toast(r.error || 'Falha ao salvar.', true); return; }
+  preencherCliente(r);
+  toast('Salvo.');
+  carregar();
+});
+$('#d-excluir').addEventListener('click', async () => {
+  if (!confirm('Excluir este cliente e todo o histórico? Se o Gestor dele conectar de novo, volta como pendente (bloqueado).')) return;
+  const r = await api(`/clientes/${st.atual}`, { method: 'DELETE' });
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  $('#dlg-cliente').close();
+  toast('Cliente excluído.');
+  carregar();
+});
+$('#d-off-gerar').addEventListener('click', async () => {
+  const r = await api(`/clientes/${st.atual}/licenca-offline`, {
+    method: 'POST',
+    body: { dias: Number($('#d-off-dias').value) || 30, nse: $('#d-off-nse').value.trim() },
+  });
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  $('#d-off-codigo').value = r.codigo;
+  $('#d-off-info').textContent = `Válido até ${fmtData(r.valido_ate)}. No PC servidor do cliente: Gestor → Configuração → Sistema → Licença → colar código.`;
+  $('#d-off-box').hidden = false;
+  abrirCliente(st.atual);
+});
+$('#d-off-copiar').addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText($('#d-off-codigo').value);
+    toast('Código copiado.');
+  } catch {
+    $('#d-off-codigo').select();
+  }
+});
+
+$('#btn-novo').addEventListener('click', () => {
+  $('#form-novo').reset();
+  $('#n-erro').textContent = '';
+  $('#dlg-novo').showModal();
+});
+$('#form-novo').addEventListener('submit', async (e) => {
+  if (e.submitter && e.submitter.value === 'cancel') return;
+  e.preventDefault();
+  const r = await api('/clientes', {
+    method: 'POST',
+    body: {
+      cnpj: $('#n-cnpj').value,
+      razao: $('#n-razao').value,
+      fantasia: $('#n-fantasia').value,
+      status: $('#n-status').value,
+      pago_ate: $('#n-pago').value || null,
+      observacao: $('#n-obs').value,
+    },
+  });
+  if (!r.ok) { $('#n-erro').textContent = r.error || 'Falha.'; return; }
+  $('#dlg-novo').close();
+  toast('Cliente cadastrado.');
+  carregar();
+});
+
+setInterval(() => { if (st.token && !document.hidden && !$('#dlg-cliente').open) carregar(); }, 60000);
+mostrarApp(!!st.token);
+</script>
+</body>
+</html>

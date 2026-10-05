@@ -450,9 +450,98 @@ $('#btn-verificar-update')?.addEventListener('click', async () => {
   }
 });
 
+const LIC_TITULOS = {
+  liberado: 'Liberada',
+  desativado: 'Controle de licença desativado nesta versão',
+  verificando: 'Verificando…',
+  pendente: 'Aguardando liberação da MT Automações',
+  bloqueado: 'Bloqueada',
+  vencido: 'Vencida',
+  expirado: 'Não validada (sem contato com o servidor de licenças)',
+  relogio: 'Data/hora do computador incorreta',
+  outro_cnpj: 'Licença de outro CNPJ',
+  sem_licenca: 'Não validada',
+};
+
+function fmtDataHora(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR');
+}
+
+function renderLicenca(l) {
+  if (!l) return;
+  const titulo = LIC_TITULOS[l.status] || l.status;
+  const st = $('#lic-status');
+  if (st) {
+    st.textContent = titulo;
+    st.style.color = l.liberado ? 'var(--ok)' : 'var(--danger)';
+  }
+  const cnpj = String(l.cnpj || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  const partes = [];
+  if (cnpj) partes.push(`CNPJ ${cnpj}`);
+  if (l.nse) partes.push(`NSE ${l.nse}`);
+  partes.push(`último contato ${fmtDataHora(l.ultimo_contato)}`);
+  if (l.liberado && l.valido_ate) partes.push(`válida até ${fmtDataHora(l.valido_ate)}${l.tipo === 'offline' ? ' (código offline)' : ''}`);
+  if (l.mensagem && !l.liberado) partes.push(l.mensagem);
+  else if (l.ultimo_erro) partes.push(`Última falha: ${l.ultimo_erro}`);
+  if ($('#lic-detalhe')) $('#lic-detalhe').textContent = partes.join(' · ');
+
+  const alerta = $('#lic-alerta');
+  if (alerta) {
+    alerta.hidden = !!l.liberado || l.status === 'verificando';
+    $('#lic-alerta-titulo').textContent = `Licença: ${titulo}`;
+    $('#lic-alerta-msg').textContent = l.mensagem || '';
+  }
+}
+
+function showLicMsg(text, ok) {
+  const el = $('#lic-msg');
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.style.color = ok === false ? 'var(--danger)' : ok === true ? 'var(--ok)' : '';
+}
+
+async function refreshLicenca() {
+  const res = await api('/licenca');
+  if (res.ok) renderLicenca(res.licenca);
+}
+
+$('#btn-lic-verificar')?.addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  showLicMsg('Consultando servidor de licenças…');
+  const res = await api('/licenca/verificar', { method: 'POST', body: {} });
+  e.target.disabled = false;
+  if (res.ok) {
+    renderLicenca(res.licenca);
+    showLicMsg(res.licenca.liberado ? 'Licença válida.' : (res.licenca.ultimo_erro || res.licenca.mensagem || ''), !!res.licenca.liberado);
+  } else {
+    showLicMsg(res.error || 'Falha ao verificar.', false);
+  }
+});
+
+$('#btn-lic-aplicar')?.addEventListener('click', async () => {
+  const codigo = $('#lic-codigo').value.trim();
+  if (!codigo) {
+    showLicMsg('Cole o código recebido da MT Automações.', false);
+    return;
+  }
+  const res = await api('/licenca/aplicar', { method: 'POST', body: { codigo } });
+  if (res.ok) {
+    $('#lic-codigo').value = '';
+    renderLicenca(res.licenca);
+    showLicMsg(res.licenca.liberado ? 'Código aplicado. Licença liberada.' : (res.licenca.mensagem || 'Código aplicado.'), !!res.licenca.liberado);
+  } else {
+    showLicMsg(res.error || 'Código inválido.', false);
+  }
+});
+
 (async function boot() {
   await refreshNetwork();
   await loadBanco();
   await loadSobre();
+  await refreshLicenca();
   setInterval(refreshNetwork, 15000);
+  setInterval(refreshLicenca, 30000);
 })();

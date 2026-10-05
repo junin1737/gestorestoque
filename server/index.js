@@ -6,6 +6,7 @@ const routes = require('./routes');
 const { PORT } = require('./config');
 const { ensureFirebirdClientPath } = require('./nativePath');
 const { somenteServidorLocal } = require('./origem');
+const licenca = require('./licenca');
 
 ensureFirebirdClientPath();
 
@@ -29,7 +30,7 @@ app.use(express.static(path.join(__dirname, '..', 'Painel'), {
     }
   },
 }));
-app.use('/api', routes);
+app.use('/api', licenca.guardLicenca, routes);
 
 app.get('*', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
@@ -62,6 +63,7 @@ function printListenInfo() {
 
 const server = app.listen(PORT, '0.0.0.0', () => {
   printListenInfo();
+  licenca.iniciar();
 });
 
 server.on('error', (err) => {

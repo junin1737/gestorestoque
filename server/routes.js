@@ -36,6 +36,7 @@ const {
 } = require('./audit');
 const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora } = require('./datetime');
 const { resolveOrigem, somenteServidorLocal, isServidorLocal } = require('./origem');
+const licenca = require('./licenca');
 
 const router = express.Router();
 
@@ -102,6 +103,22 @@ router.post('/shutdown', (req, res) => {
   if (!isServidorLocal(req)) return res.status(403).json({ ok: false, error: 'Somente no servidor local.' });
   res.json({ ok: true });
   setTimeout(() => process.exit(0), 300);
+});
+
+router.get('/licenca', (_req, res) => {
+  res.json({ ok: true, licenca: licenca.situacao() });
+});
+
+router.post('/licenca/verificar', async (_req, res) => {
+  res.json({ ok: true, licenca: await licenca.verificarAgora() });
+});
+
+router.post('/licenca/aplicar', somenteServidorLocal, async (req, res) => {
+  try {
+    res.json({ ok: true, licenca: await licenca.aplicarCodigoOffline(req.body?.codigo) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
 });
 
 router.get('/config', (req, res) => {
@@ -173,6 +190,7 @@ router.post('/connect', somenteServidorLocal, async (req, res) => {
       );
       const e = emitenteRows[0] || {};
       const logo = await blobToDataUrl(e.LOGO);
+      licenca.verificarAgora().catch(() => {});
       res.json({
         ok: true,
         fbVersion,

@@ -11,3 +11,7 @@ android-app/build/
 android-app/scripts/.cache/
 *.apk
 *.apk.idsig
+licenca-server/.keys/
+licenca-server/.dev.vars
+licenca-server/.wrangler/
+licenca-server/node_modules/

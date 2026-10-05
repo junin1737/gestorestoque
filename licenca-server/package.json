@@ -1,0 +1,14 @@
+{
+  "name": "gestor-licenca",
+  "private": true,
+  "description": "Servidor de licenças do Gestor Estoque (Cloudflare Worker + D1)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "migrar:local": "wrangler d1 migrations apply gestor-licenca --local",
+    "migrar": "wrangler d1 migrations apply gestor-licenca --remote"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  }
+}

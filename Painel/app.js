@@ -160,10 +160,70 @@ async function api(path, options = {}) {
     const error = 'Serviço do painel offline. Execute iniciar.bat ou npm start e abra http://127.0.0.1:5077';
     return { ok: false, offline: true, error };
   }
+  let data;
   try {
-    return await res.json();
+    data = await res.json();
   } catch {
     return { ok: false, error: `Resposta inválida da API (${res.status})` };
+  }
+  if (data && data.code === 'LICENCA_BLOQUEADA') mostrarBloqueioLicenca(data.licenca);
+  return data;
+}
+
+let licencaPoll = null;
+
+function mostrarBloqueioLicenca(lic) {
+  const l = lic || {};
+  let el = $('#licenca-bloqueio');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'licenca-bloqueio';
+    el.className = 'licenca-bloqueio';
+    el.innerHTML = `
+      <div class="licenca-card">
+        <div class="licenca-ico" aria-hidden="true">🔒</div>
+        <h2 id="lic-titulo"></h2>
+        <p id="lic-msg"></p>
+        <p class="hint" id="lic-info"></p>
+        <button type="button" class="btn primary" id="lic-verificar">Verificar novamente</button>
+        <p class="hint">MT Automações (34) 3674-1937</p>
+      </div>`;
+    document.body.appendChild(el);
+    el.querySelector('#lic-verificar').addEventListener('click', async (ev) => {
+      ev.target.disabled = true;
+      ev.target.textContent = 'Verificando…';
+      const r = await api('/licenca/verificar', { method: 'POST', body: {} });
+      ev.target.disabled = false;
+      ev.target.textContent = 'Verificar novamente';
+      if (r.ok && r.licenca?.liberado) location.reload();
+      else if (r.licenca) mostrarBloqueioLicenca(r.licenca);
+    });
+  }
+  const titulos = {
+    verificando: 'Verificando licença…',
+    pendente: 'Aguardando liberação',
+    bloqueado: 'Acesso bloqueado',
+    vencido: 'Licença vencida',
+    expirado: 'Licença não validada',
+    relogio: 'Data/hora incorreta',
+  };
+  el.querySelector('#lic-titulo').textContent = titulos[l.status] || 'Licença não validada';
+  el.querySelector('#lic-msg').textContent = l.mensagem || 'Não foi possível validar a licença deste computador.';
+  const cnpj = String(l.cnpj || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  el.querySelector('#lic-info').textContent = cnpj ? `CNPJ ${cnpj}` : '';
+  el.hidden = false;
+  if (l.status === 'verificando' && !licencaPoll) {
+    licencaPoll = setInterval(async () => {
+      const r = await api('/licenca');
+      if (r.licenca?.liberado) {
+        clearInterval(licencaPoll);
+        location.reload();
+      } else if (r.licenca && r.licenca.status !== 'verificando') {
+        clearInterval(licencaPoll);
+        licencaPoll = null;
+        mostrarBloqueioLicenca(r.licenca);
+      }
+    }, 3000);
   }
 }
 
@@ -436,6 +496,9 @@ async function bootstrap() {
   document.body.classList.toggle('gestor-demo', !!cfgRes.demo);
   applyTheme(state.config.tema);
   if ($('#tema-rapido')) $('#tema-rapido').value = state.config.tema || 'claro';
+
+  const lic = await api('/licenca');
+  if (lic.ok && lic.licenca && !lic.licenca.liberado) mostrarBloqueioLicenca(lic.licenca);
 
   const conn = await api('/emitente');
   if (conn.ok) {

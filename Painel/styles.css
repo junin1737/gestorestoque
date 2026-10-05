@@ -1512,3 +1512,22 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   .login-card { box-shadow: 0 12px 40px rgba(15,30,55,0.12); }
   .dash-card { justify-items: start; text-align: left; }
 }
+
+/* Bloqueio de licença */
+.licenca-bloqueio {
+  position: fixed; inset: 0; z-index: 10000;
+  display: grid; place-items: center; padding: 1.25rem;
+  background: rgba(11, 27, 51, 0.82);
+  backdrop-filter: blur(3px);
+}
+.licenca-bloqueio[hidden] { display: none; }
+.licenca-card {
+  width: 100%; max-width: 420px; text-align: center;
+  background: var(--bg-elev); color: var(--text);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  padding: 2rem 1.5rem 1.25rem;
+}
+.licenca-card .licenca-ico { font-size: 2.4rem; line-height: 1; margin-bottom: .6rem; }
+.licenca-card h2 { margin: 0 0 .6rem; font-size: var(--fs-xl); }
+.licenca-card p { margin: 0 0 .9rem; }
+.licenca-card .btn { width: 100%; margin: .2rem 0 .9rem; }

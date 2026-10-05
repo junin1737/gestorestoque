@@ -38,6 +38,10 @@
 
       <!-- ═══ CONEXÃO ═══ -->
       <section id="panel-conexao" class="svc-panel">
+        <div id="lic-alerta" class="emitente-card" hidden style="border-left:4px solid var(--danger);margin-bottom:1rem">
+          <strong id="lic-alerta-titulo">Licença bloqueada</strong>
+          <span id="lic-alerta-msg"></span>
+        </div>
         <div class="svc-cards-2">
           <div class="svc-card">
             <h2 class="svc-card-title">Endereço de acesso</h2>
@@ -198,6 +202,22 @@
             <li><a href="https://www.instagram.com/mtautomacoes" target="_blank" rel="noopener">instagram.com/mtautomacoes</a></li>
             <li>Versão instalada: <strong id="svc-versao">—</strong></li>
           </ul>
+
+          <div class="sobre-box">
+            <h3>Licença</h3>
+            <p class="hint"><strong id="lic-status">—</strong></p>
+            <p class="hint" id="lic-detalhe"></p>
+            <div class="banco-actions left">
+              <button type="button" id="btn-lic-verificar" class="btn-teal">Verificar agora</button>
+            </div>
+            <label style="margin-top:.8rem">Código de licença offline (fornecido pela MT Automações)
+              <textarea id="lic-codigo" rows="3" placeholder="MTL1...." style="width:100%;font-family:Consolas,monospace;font-size:12px"></textarea>
+            </label>
+            <div class="banco-actions left">
+              <button type="button" id="btn-lic-aplicar" class="btn-outline">Aplicar código</button>
+            </div>
+            <p class="hint msg-line" id="lic-msg" hidden></p>
+          </div>
 
           <div class="sobre-box">
             <h3>Inicialização</h3>
