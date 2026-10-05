@@ -224,7 +224,7 @@
   <form method="dialog" id="form-sup">
     <div class="dlg-head"><h2>Senha padrão do supervisor</h2></div>
     <div class="dlg-body">
-      <p class="sub" style="margin-top:0">Vale para todos os clientes que não têm senha própria. Ela substitui a antiga 1020 e chega aos Gestores em até 30 minutos (ou no próximo "Verificar novamente"). Mínimo de 8 caracteres, com letras e números. A senha é transformada em hash neste navegador — o servidor nunca recebe a senha em texto.</p>
+      <p class="sub" style="margin-top:0">Vale para todos os clientes que não têm senha própria. Ela substitui a antiga 1020 e chega aos Gestores em até 2 minutos (ou no próximo "Verificar novamente"). Mínimo de 8 caracteres, com letras e números. A senha é transformada em hash neste navegador — o servidor nunca recebe a senha em texto.</p>
       <div id="s-info" class="sub" style="margin-bottom:.7rem"></div>
       <label>Nova senha<input type="password" id="s-1" autocomplete="new-password" required /></label>
       <label>Repita a senha<input type="password" id="s-2" autocomplete="new-password" required /></label>
@@ -460,12 +460,12 @@ $('#tbody').addEventListener('click', async (e) => {
     const solic = tr.classList.contains('solicitacao');
     if (status === 'bloqueado' && !confirm(solic
       ? `Recusar o cadastro de ${nome}? O Gestor continua bloqueado.`
-      : `Bloquear ${nome}? O Gestor deste cliente para em até 30 minutos.`)) return;
+      : `Bloquear ${nome}? O Gestor deste cliente para em até 2 minutos.`)) return;
     btn.disabled = true;
     const r = await api(rotaCliente({ cnpj: tr.dataset.cnpj, app: tr.dataset.app }), { method: 'PUT', body: { status } });
     if (!r.ok) toast(r.error || 'Falha.', true);
     else if (solic) toast(status === 'liberado' ? `${nome} aprovado. O Gestor libera em até 1 minuto.` : `Cadastro de ${nome} recusado.`);
-    else toast(status === 'liberado' ? `${nome} liberado.` : `${nome} bloqueado.`);
+    else toast(status === 'liberado' ? `${nome} liberado. O Gestor libera em até 1 minuto.` : `${nome} bloqueado. O Gestor para em até 2 minutos.`);
     carregar();
     return;
   }

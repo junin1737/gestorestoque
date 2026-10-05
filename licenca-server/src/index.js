@@ -32,6 +32,13 @@ function texto(v, max = 200) {
   return s ? s.slice(0, max) : null;
 }
 
+/** Gestor consulta a cada 2 min; "último contato" só é regravado depois disso (poupa escritas no D1). */
+const GRAVAR_CONTATO_MS = 10 * 60 * 1000;
+function contatoAntigo(iso) {
+  const t = new Date(iso || 0).getTime();
+  return !Number.isFinite(t) || Date.now() - t > GRAVAR_CONTATO_MS;
+}
+
 function nomeApp(v) {
   const s = String(v ?? '').trim();
   return APP_RE.test(s) ? s : null;
@@ -153,23 +160,38 @@ async function check(request, env) {
       `${texto(body.fantasia, 120) || ''} — NSE ${nse || '—'} — ${texto(body.maquina, 80) || ''}`);
     cli = await buscarCliente(env, cnpj, app);
   } else {
-    await env.DB.prepare(
-      `UPDATE clientes SET ultimo_contato = ?,
-         razao = COALESCE(?, razao), fantasia = COALESCE(?, fantasia)
-       WHERE cnpj = ? AND aplicacao = ?`
-    ).bind(agora, texto(body.razao, 120), texto(body.fantasia, 120), cnpj, app).run();
+    const razao = texto(body.razao, 120);
+    const fantasia = texto(body.fantasia, 120);
+    if (contatoAntigo(cli.ultimo_contato) || (razao && razao !== cli.razao) || (fantasia && fantasia !== cli.fantasia)) {
+      await env.DB.prepare(
+        `UPDATE clientes SET ultimo_contato = ?,
+           razao = COALESCE(?, razao), fantasia = COALESCE(?, fantasia)
+         WHERE cnpj = ? AND aplicacao = ?`
+      ).bind(agora, razao, fantasia, cnpj, app).run();
+    }
   }
 
-  const inst = await env.DB.prepare('SELECT versao_gestor FROM instalacoes WHERE cnpj = ? AND aplicacao = ? AND nse = ?')
+  const inst = await env.DB.prepare('SELECT * FROM instalacoes WHERE cnpj = ? AND aplicacao = ? AND nse = ?')
     .bind(cnpj, app, nse).first();
   const versao = texto(body.versao_gestor, 20);
-  await env.DB.prepare(
-    `INSERT INTO instalacoes (cnpj, aplicacao, nse, maquina, versao_gestor, versao_clipp, sistema, ip, primeiro_contato, ultimo_contato)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (cnpj, aplicacao, nse) DO UPDATE SET
-       maquina = excluded.maquina, versao_gestor = excluded.versao_gestor, versao_clipp = excluded.versao_clipp,
-       sistema = excluded.sistema, ip = excluded.ip, ultimo_contato = excluded.ultimo_contato`
-  ).bind(cnpj, app, nse, texto(body.maquina, 80), versao, texto(body.versao_clipp, 20), texto(body.sistema, 20), ip, agora, agora).run();
+  const dadosInst = {
+    maquina: texto(body.maquina, 80),
+    versao_gestor: versao,
+    versao_clipp: texto(body.versao_clipp, 20),
+    sistema: texto(body.sistema, 20),
+    ip,
+  };
+  const mudouInst = !inst || contatoAntigo(inst.ultimo_contato)
+    || Object.keys(dadosInst).some((k) => (dadosInst[k] ?? null) !== (inst[k] ?? null));
+  if (mudouInst) {
+    await env.DB.prepare(
+      `INSERT INTO instalacoes (cnpj, aplicacao, nse, maquina, versao_gestor, versao_clipp, sistema, ip, primeiro_contato, ultimo_contato)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT (cnpj, aplicacao, nse) DO UPDATE SET
+         maquina = excluded.maquina, versao_gestor = excluded.versao_gestor, versao_clipp = excluded.versao_clipp,
+         sistema = excluded.sistema, ip = excluded.ip, ultimo_contato = excluded.ultimo_contato`
+    ).bind(cnpj, app, nse, dadosInst.maquina, versao, dadosInst.versao_clipp, dadosInst.sistema, ip, agora, agora).run();
+  }
   if (!inst) {
     await registrarEvento(env, cnpj, app, 'nova_instalacao', `NSE ${nse || '—'} · ${texto(body.maquina, 80) || ''} · v${versao || '?'}`);
   } else if (inst.versao_gestor && versao && inst.versao_gestor !== versao) {
