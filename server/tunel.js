@@ -5,8 +5,10 @@
  * que o origem.js reconhece como remoto — nada que chega pela internet conta como computador servidor.
  */
 const crypto = require('crypto');
+const dns = require('dns');
 const fs = require('fs');
 const http = require('http');
+const https = require('https');
 const path = require('path');
 const WebSocket = require('ws');
 const { getAppDataDir } = require('./config');
@@ -113,6 +115,56 @@ function encerrarConexao() {
   estado.desde = null;
 }
 
+const resolverPublico = new dns.Resolver({ timeout: 4000, tries: 1 });
+resolverPublico.setServers(['1.1.1.1', '8.8.8.8']);
+
+/** DNS-over-HTTPS na Cloudflare (pelo IP): funciona mesmo com a porta 53 bloqueada para fora. */
+function resolverDoh(host) {
+  return new Promise((resolve, reject) => {
+    const req = https.get({
+      host: '1.1.1.1',
+      path: `/dns-query?name=${encodeURIComponent(host)}&type=A`,
+      headers: { Accept: 'application/dns-json' },
+      timeout: 5000,
+    }, (res) => {
+      let txt = '';
+      res.setEncoding('utf8');
+      res.on('data', (c) => { txt += c; });
+      res.on('end', () => {
+        try {
+          const ips = (JSON.parse(txt).Answer || []).filter((a) => a.type === 1).map((a) => a.data);
+          if (ips.length) resolve(ips);
+          else reject(new Error('sem resposta DoH'));
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    req.on('timeout', () => req.destroy(new Error('timeout DoH')));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * DNS do Windows/roteador primeiro; se não achar (cache negativo, DNS do provedor instável),
+ * resolve o servidor online pelo 1.1.1.1/8.8.8.8 e, por último, por HTTPS.
+ */
+function lookupResiliente(host, opts, cb) {
+  if (typeof opts === 'function') { cb = opts; opts = {}; }
+  const o = typeof opts === 'number' ? { family: opts } : (opts || {});
+  dns.lookup(host, o, (err, address, family) => {
+    if (!err) return cb(null, address, family);
+    const entregar = (ips) => {
+      if (o.all) return cb(null, ips.map((ip) => ({ address: ip, family: 4 })));
+      return cb(null, ips[0], 4);
+    };
+    resolverPublico.resolve4(host, (err2, ips) => {
+      if (!err2 && ips && ips.length) return entregar(ips);
+      resolverDoh(host).then(entregar, () => cb(err));
+    });
+  });
+}
+
 function enviar(obj) {
   if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
 }
@@ -133,6 +185,7 @@ function conectar() {
       'X-Licenca': Buffer.from(JSON.stringify(lic), 'utf8').toString('base64'),
     },
     handshakeTimeout: 15000,
+    lookup: lookupResiliente,
     maxPayload: 2 * 1024 * 1024,
     perMessageDeflate: false,
   });

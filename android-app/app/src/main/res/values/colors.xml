@@ -7,4 +7,5 @@
     <color name="muted">#5A6577</color>
     <color name="input_stroke">#C9D2DE</color>
     <color name="ic_launcher_background">#1E3A5F</color>
+    <color name="ic_launcher_app_background">#FFFFFF</color>
 </resources>
