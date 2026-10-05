@@ -11,6 +11,10 @@ const LICENCA_URL = (process.env.GESTOR_LICENCA_URL || URL_PADRAO).replace(/\/+$
 const ATIVO = !!LICENCA_URL;
 const INTERVALO_MS = 30 * 60 * 1000;
 const RETENTATIVA_MS = 5 * 60 * 1000;
+/** Cadastro aguardando aprovação/bloqueado: consulta mais seguido para liberar logo após aprovar no painel. */
+const AGUARDANDO_MS = 60 * 1000;
+/** Sem base conectada ainda (primeira abertura): tenta de novo em pouco tempo. */
+const SEM_BASE_MS = 30 * 1000;
 const TIMEOUT_MS = 10000;
 /** Tolerância para relógio do Windows voltado para trás antes de considerar burla. */
 const FOLGA_RELOGIO_MS = 2 * 60 * 60 * 1000;
@@ -134,8 +138,14 @@ async function verificarAgora() {
   verificando = (async () => {
     const st = carregarEstado();
     st.ultima_tentativa = new Date().toISOString();
+    let semBase = false;
     try {
-      identidade = await lerIdentidade();
+      try {
+        identidade = await lerIdentidade();
+      } catch (e) {
+        semBase = true;
+        throw e;
+      }
       if (!identidade.cnpj) throw new Error('CNPJ do emitente (TB_EMITENTE) não encontrado na base.');
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
@@ -157,6 +167,7 @@ async function verificarAgora() {
       const data = await res.json().catch(() => ({}));
       if (!data.ok || !data.licenca) throw new Error(data.error || `Servidor de licenças respondeu ${res.status}.`);
       aplicarLicenca(data.licenca, { origem: 'online' });
+      st.solicitado_em = data.solicitado_em || null;
       st.ultimo_contato = new Date().toISOString();
       st.ultimo_erro = null;
     } catch (err) {
@@ -165,7 +176,11 @@ async function verificarAgora() {
       st.ultimo_visto = Math.max(Number(st.ultimo_visto || 0), agoraCorrigido());
       salvarEstado();
       verificando = null;
-      agendar(st.ultimo_erro ? RETENTATIVA_MS : INTERVALO_MS);
+      let proxima = INTERVALO_MS;
+      if (semBase) proxima = SEM_BASE_MS;
+      else if (st.ultimo_erro) proxima = RETENTATIVA_MS;
+      else if (!situacao().liberado) proxima = AGUARDANDO_MS;
+      agendar(proxima);
     }
     return situacao();
   })();
@@ -223,6 +238,15 @@ function situacao() {
   if (identidade?.cnpj && dados.cnpj !== identidade.cnpj) {
     return { ...out, liberado: false, status: 'outro_cnpj', mensagem: `A licença guardada é de outro CNPJ. Verificando a base atual… Se persistir, contate a ${CONTATO}.` };
   }
+  if (dados.status === 'pendente') {
+    return {
+      ...out,
+      liberado: false,
+      status: 'pendente',
+      solicitado_em: st.solicitado_em || null,
+      mensagem: `Cadastro solicitado${st.solicitado_em ? ` em ${fmtData(st.solicitado_em)}` : ''}. Aguardando aprovação da ${CONTATO}. Assim que for aprovado, o sistema libera sozinho em até 1 minuto.`,
+    };
+  }
   if (dados.status !== 'liberado') {
     return { ...out, liberado: false, status: dados.status, mensagem: dados.mensagem || `Acesso bloqueado. Contate a ${CONTATO}.` };
   }
@@ -254,6 +278,43 @@ async function aplicarCodigoOffline(codigo) {
   identidade = await lerIdentidade();
   aplicarLicenca(lic, { origem: 'offline' });
   return situacao();
+}
+
+/**
+ * Hash PBKDF2 da senha do supervisor vindo da licença assinada (padrão do painel ou própria do cliente).
+ * null = painel ainda sem senha definida (ou controle de licença desligado): vale a senha legada.
+ */
+function hashSupervisor() {
+  if (!ATIVO) return null;
+  try {
+    const st = carregarEstado();
+    const dados = st.licenca ? abrirLicenca(st.licenca) : null;
+    const sup = dados?.sup;
+    if (sup && sup.alg === 'pbkdf2-sha256' && sup.salt && sup.hash && Number(sup.iter) > 0) return sup;
+  } catch { /* licença inválida: sem hash */ }
+  return null;
+}
+
+/** Identifica a versão da senha do supervisor (invalida sessões quando o hash muda). */
+function versaoSupervisor() {
+  const sup = hashSupervisor();
+  return sup ? crypto.createHash('sha256').update(`${sup.salt}:${sup.hash}`).digest('hex').slice(0, 16) : 'legado';
+}
+
+async function conferirSenhaSupervisor(senha, senhaLegada) {
+  const sup = hashSupervisor();
+  const informada = String(senha || '');
+  if (!sup) {
+    const a = Buffer.from(informada);
+    const b = Buffer.from(String(senhaLegada || ''));
+    return a.length === b.length && b.length > 0 && crypto.timingSafeEqual(a, b);
+  }
+  const esperado = Buffer.from(sup.hash, 'base64');
+  const calc = await new Promise((resolve, reject) => {
+    crypto.pbkdf2(informada, Buffer.from(sup.salt, 'base64'), Number(sup.iter), esperado.length, 'sha256',
+      (err, out) => (err ? reject(err) : resolve(out)));
+  });
+  return calc.length === esperado.length && crypto.timingSafeEqual(calc, esperado);
 }
 
 /** Rotas liberadas mesmo com licença bloqueada (tela de login/bloqueio e tela de serviço). */
@@ -291,4 +352,7 @@ module.exports = {
   situacao,
   aplicarCodigoOffline,
   guardLicenca,
+  hashSupervisor,
+  versaoSupervisor,
+  conferirSenhaSupervisor,
 };

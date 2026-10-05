@@ -454,7 +454,7 @@ const LIC_TITULOS = {
   liberado: 'Liberada',
   desativado: 'Controle de licença desativado nesta versão',
   verificando: 'Verificando…',
-  pendente: 'Aguardando liberação da MT Automações',
+  pendente: 'Cadastro solicitado — aguardando aprovação da MT Automações',
   bloqueado: 'Bloqueada',
   vencido: 'Vencida',
   expirado: 'Não validada (sem contato com o servidor de licenças)',
@@ -475,7 +475,7 @@ function renderLicenca(l) {
   const st = $('#lic-status');
   if (st) {
     st.textContent = titulo;
-    st.style.color = l.liberado ? 'var(--ok)' : 'var(--danger)';
+    st.style.color = l.liberado ? 'var(--ok)' : (l.status === 'pendente' ? 'var(--warn, #9a6400)' : 'var(--danger)');
   }
   const cnpj = String(l.cnpj || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
   const partes = [];

@@ -26,6 +26,28 @@ const { sugerirFinanceiroFromXml } = require('./importacao-financeiro');
 
 const STORE_FILE = path.join(getAppDataDir(), 'importacao-sessoes.json');
 
+function fmtDoc(d) {
+  const s = String(d || '');
+  if (s.length === 14) return s.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  if (s.length === 11) return s.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+  return s;
+}
+
+/** NF-e de outra empresa nunca entra nesta base: destinatário do XML tem de ser o emitente (TB_EMITENTE). */
+async function conferirDestinatario(xml) {
+  const dest = String(xml?.dest?.CNPJ || xml?.dest?.CPF || '').replace(/\D/g, '');
+  if (!dest) return null;
+  const { withDb, query } = require('./db');
+  const rows = await withDb((db) => query(db, 'SELECT FIRST 1 CNPJ FROM TB_EMITENTE'));
+  const emit = String(rows[0]?.CNPJ || '').replace(/\D/g, '');
+  if (!emit || emit === dest) return null;
+  return {
+    ok: false,
+    code: 'OUTRO_DESTINATARIO',
+    error: `Esta NF-e foi emitida para o CNPJ ${fmtDoc(dest)}, e esta base é da empresa de CNPJ ${fmtDoc(emit)}. A nota não pode ser lançada nesta empresa.`,
+  };
+}
+
 async function buildFinanceiroInicial(xml) {
   try {
     const sug = await sugerirFinanceiroFromXml(xml);
@@ -715,9 +737,30 @@ async function createSessao(opts = {}) {
   });
 
   const editarId = typeof opts === 'object' ? Number(opts.editarIdNfcompra || 0) : 0;
+  const usuario = typeof opts === 'object' ? String(opts.usuario || '').trim() : '';
+
+  if (fonte !== 'demo') {
+    const outro = await conferirDestinatario(xml);
+    if (outro) return outro;
+  }
 
   const store = loadStore();
   const chave = xml.chave || String(chaveIn || '').replace(/\D/g, '');
+
+  // Mesma nota já em conferência (outro aparelho/usuário): continua a mesma, sem apagar o trabalho feito.
+  const emAndamento = !editarId && chave && store.sessoes.find((s) => s.chave === chave && s.status === 'em_conferencia');
+  if (emAndamento) {
+    const quem = emAndamento.usuario ? ` por ${emAndamento.usuario}` : '';
+    const quando = emAndamento.createdAt ? ` em ${new Date(emAndamento.createdAt).toLocaleString('pt-BR')}` : '';
+    const conferidos = (emAndamento.itens || []).filter((i) => i.conferido).length;
+    return {
+      ok: true,
+      sessao: mapSessaoForClient(emAndamento),
+      fonte: emAndamento.fonte || fonte,
+      sefazErro: null,
+      aviso: `Esta nota já estava em conferência (iniciada${quem}${quando}, ${conferidos} item(ns) conferido(s)). Você continuou a mesma conferência.`,
+    };
+  }
 
   // Sessão JSON "confirmada" não pode bloquear se a NF já foi cancelada no Clipp
   const dupConfirmada = !editarId && store.sessoes.find((s) => s.chave === chave && s.status === 'confirmada');
@@ -781,6 +824,7 @@ async function createSessao(opts = {}) {
     status: 'em_conferencia',
     createdAt: now,
     updatedAt: now,
+    usuario: usuario || undefined,
     manual: false,
     fonte,
     sefazErro: sefazErro || null,
@@ -1137,16 +1181,33 @@ async function sugerirFinanceiroSessao(sessaoId) {
 
 /** Evita gravar a mesma NF duas vezes (dois aparelhos clicando em finalizar ao mesmo tempo). */
 const confirmandoIds = new Set();
+/** Mesma NF em conferências diferentes (ex.: XML importado no balcão e no celular): uma grava por vez. */
+const gravandoNotas = new Map();
+
+function chaveDaNota(s) {
+  if (!s) return '';
+  const ch = String(s.chave || '').replace(/\D/g, '');
+  if (ch.length === 44) return ch;
+  const ide = s.xml?.ide || s.cabecalho || {};
+  if (!ide.nNF) return '';
+  return `${s.fornecedor?.id_fornec || ''}:${String(ide.nNF).trim()}:${String(ide.serie || '').trim()}`;
+}
 
 async function confirmarSessao(sessaoId, opts = {}) {
   if (confirmandoIds.has(sessaoId)) {
     return { ok: false, error: 'Esta nota já está sendo gravada em outro aparelho. Aguarde.' };
   }
+  const chaveNota = chaveDaNota(loadStore().sessoes.find((x) => x.id === sessaoId));
+  if (chaveNota && gravandoNotas.has(chaveNota)) {
+    return { ok: false, error: `Esta nota já está sendo gravada por ${gravandoNotas.get(chaveNota)}. Aguarde.` };
+  }
   confirmandoIds.add(sessaoId);
+  if (chaveNota) gravandoNotas.set(chaveNota, opts.usuario || 'outro usuário');
   try {
     return await confirmarSessaoInterno(sessaoId, opts);
   } finally {
     confirmandoIds.delete(sessaoId);
+    if (chaveNota) gravandoNotas.delete(chaveNota);
   }
 }
 
@@ -1164,6 +1225,10 @@ async function confirmarSessaoInterno(sessaoId, opts = {}) {
   }
   if (!s.fornecedor?.id_fornec) {
     return { ok: false, error: 'Fornecedor não vinculado. Vincule ou cadastre o emitente da NF-e.' };
+  }
+  if (!s.manual && s.fonte !== 'demo') {
+    const outro = await conferirDestinatario(s.xml);
+    if (outro) return outro;
   }
 
   if (!Number(s.editar_id_nfcompra)) {

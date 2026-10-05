@@ -7,6 +7,8 @@ const { PORT } = require('./config');
 const { ensureFirebirdClientPath } = require('./nativePath');
 const { somenteServidorLocal } = require('./origem');
 const licenca = require('./licenca');
+const auth = require('./auth');
+const idempotencia = require('./idempotencia');
 
 ensureFirebirdClientPath();
 
@@ -17,6 +19,13 @@ try {
 }
 
 const app = express();
+app.disable('x-powered-by');
+app.use((_req, res, next) => {
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
 app.use(['/servico.html', '/servico.js', '/servico.css'], somenteServidorLocal);
 app.use(express.static(path.join(__dirname, '..', 'Painel'), {
@@ -30,7 +39,7 @@ app.use(express.static(path.join(__dirname, '..', 'Painel'), {
     }
   },
 }));
-app.use('/api', licenca.guardLicenca, routes);
+app.use('/api', licenca.guardLicenca, auth.exigirSessao, idempotencia.middleware, routes);
 
 app.get('*', (_req, res) => {
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');

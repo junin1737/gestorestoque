@@ -3,8 +3,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { gerarHashSenha } = require('./senha');
 
-const SUPERVISOR_SENHA = '1020';
+/** Só vale enquanto o painel de licenças não definir a senha do supervisor (ou com licença desligada). */
+const SUPERVISOR_SENHA_LEGADA = '1020';
 const PORT = Number(process.env.GESTOR_PORT) || 5077;
 
 const MODULOS = {
@@ -117,12 +119,31 @@ function defaultUsersConfig() {
       {
         id: 0,
         nome: 'SUPERVISOR',
-        senha: SUPERVISOR_SENHA,
         supervisor: true,
         permissoes: fullPermissoes(),
       },
     ],
   };
+}
+
+/** Converte senhas antigas em texto para hash scrypt (uma vez) e remove a do supervisor. */
+function migrarSenhas(cfg) {
+  let mudou = false;
+  for (const u of cfg.usuarios || []) {
+    if (u.supervisor) {
+      if ('senha' in u) { delete u.senha; mudou = true; }
+      continue;
+    }
+    if (typeof u.senha === 'string') {
+      if (u.senha.length && !u.senhaHash) {
+        u.senhaHash = gerarHashSenha(u.senha);
+        u.senhaVer = Number(u.senhaVer || 0) + 1;
+      }
+      delete u.senha;
+      mudou = true;
+    }
+  }
+  return mudou;
 }
 
 function loadUsersConfig(appCfg) {
@@ -137,6 +158,7 @@ function loadUsersConfig(appCfg) {
     } catch {
       cfg = defaultUsersConfig();
     }
+    if (migrarSenhas(cfg)) saveUsersConfig(appCfg, cfg);
   }
   cfg.usuarios = (cfg.usuarios || []).map((u) => {
     if (u.supervisor) {
@@ -144,7 +166,6 @@ function loadUsersConfig(appCfg) {
         ...u,
         id: 0,
         nome: u.nome || 'SUPERVISOR',
-        senha: SUPERVISOR_SENHA,
         permissoes: fullPermissoes(),
       };
     }
@@ -157,7 +178,11 @@ function loadUsersConfig(appCfg) {
 }
 
 function saveUsersConfig(appCfg, cfg) {
-  fs.writeFileSync(getUsersPath(appCfg), JSON.stringify(cfg, null, 2), 'utf8');
+  migrarSenhas(cfg);
+  const p = getUsersPath(appCfg);
+  const tmp = `${p}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
+  fs.renameSync(tmp, p);
 }
 
 function addModulo(key, definition) {
@@ -168,9 +193,10 @@ function addModulo(key, definition) {
 
 module.exports = {
   PORT,
-  SUPERVISOR_SENHA,
+  SUPERVISOR_SENHA_LEGADA,
   MODULOS,
   getAppDataDir,
+  getUsersPath,
   loadAppConfig,
   saveAppConfig,
   loadUsersConfig,

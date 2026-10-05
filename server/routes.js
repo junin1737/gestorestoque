@@ -5,7 +5,6 @@ const {
   saveAppConfig,
   loadUsersConfig,
   saveUsersConfig,
-  SUPERVISOR_SENHA,
   MODULOS,
   ensureModulos,
   fullPermissoes,
@@ -37,8 +36,11 @@ const {
 const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora } = require('./datetime');
 const { resolveOrigem, somenteServidorLocal, isServidorLocal } = require('./origem');
 const licenca = require('./licenca');
+const auth = require('./auth');
+const { gerarHashSenha } = require('./senha');
 
 const router = express.Router();
+const { exigirModulo } = auth;
 
 /** NF-e de demonstração (mock) só para treinamento — nunca em base de cliente por padrão. */
 const DEMO_ATIVO = process.env.GESTOR_DEMO === '1';
@@ -49,8 +51,13 @@ function publicUser(u) {
     nome: u.nome,
     supervisor: !!u.supervisor,
     permissoes: u.permissoes,
-    temSenha: u.supervisor ? true : !!(u.senha && String(u.senha).length),
+    temSenha: u.supervisor ? true : !!u.senhaHash,
   };
+}
+
+/** Lista da tela de login: sem permissões. */
+function usuarioLogin(u) {
+  return { id: u.id, nome: u.nome, supervisor: !!u.supervisor, temSenha: u.supervisor ? true : !!u.senhaHash };
 }
 
 router.get('/health', (_req, res) => {
@@ -250,7 +257,6 @@ router.get('/funcionarios', async (_req, res) => {
         usersCfg.usuarios.push({
           id,
           nome,
-          senha: id === 0 ? SUPERVISOR_SENHA : '',
           supervisor: id === 0,
           permissoes: id === 0 ? fullPermissoes() : ensureModulos({}),
         });
@@ -267,74 +273,53 @@ router.get('/funcionarios', async (_req, res) => {
 
     const list = loadUsersConfig(appCfg).usuarios
       .filter((u) => u.supervisor || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id)))
-      .map(publicUser);
+      .map(usuarioLogin);
 
     res.json({ ok: true, funcionarios: list });
   } catch (err) {
     const appCfg = loadAppConfig();
-    const list = loadUsersConfig(appCfg).usuarios.map(publicUser);
+    const list = loadUsersConfig(appCfg).usuarios.map(usuarioLogin);
     res.json({ ok: false, error: err.message, funcionarios: list });
   }
 });
 
-router.post('/login', (req, res) => {
-  const appCfg = loadAppConfig();
-  const cfg = loadUsersConfig(appCfg);
-  const id = Number(req.body && req.body.id);
-  const senha = String((req.body && req.body.senha) || '');
-  const user = cfg.usuarios.find((u) => Number(u.id) === id);
-  if (!user) return res.json({ ok: false, error: 'Usuário não encontrado.' });
-  const expected = user.supervisor ? SUPERVISOR_SENHA : String(user.senha || '');
-  if (!expected) return res.json({ ok: false, error: 'Defina a senha deste usuário em Usuários.' });
-  if (expected !== senha) return res.json({ ok: false, error: 'Senha incorreta.' });
-  res.json({
-    ok: true,
-    usuario: publicUser(user.supervisor ? { ...user, senha: SUPERVISOR_SENHA, permissoes: fullPermissoes() } : user),
-  });
-});
+router.post('/login', auth.login);
+router.post('/logout', auth.logout);
+router.get('/sessao', auth.sessao);
 
-router.get('/usuarios', (req, res) => {
+router.get('/usuarios', exigirModulo('usuarios'), (req, res) => {
   const appCfg = loadAppConfig();
   const cfg = loadUsersConfig(appCfg);
   res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser), modulos: MODULOS });
 });
 
-router.post('/usuarios', (req, res) => {
+router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
   const appCfg = loadAppConfig();
   const cfg = loadUsersConfig(appCfg);
   const { supervisorSenha, usuarios } = req.body || {};
-  if (String(supervisorSenha || '') !== SUPERVISOR_SENHA) {
+  const supervisor = cfg.usuarios.find((u) => u.supervisor);
+  if (!supervisor || !(await auth.conferirSenhaUsuario(supervisor, supervisorSenha))) {
     return res.json({ ok: false, error: 'Senha de supervisor inválida.' });
   }
   const currentById = new Map(cfg.usuarios.map((u) => [Number(u.id), u]));
-  cfg.usuarios = (usuarios || []).map((u) => {
-    const prev = currentById.get(Number(u.id));
-    if (u.supervisor) {
-      return {
-        id: 0,
-        nome: u.nome || 'SUPERVISOR',
-        senha: SUPERVISOR_SENHA,
-        supervisor: true,
-        permissoes: fullPermissoes(),
-      };
-    }
-    const senhaNova = u.senha !== undefined && u.senha !== '' ? String(u.senha) : (prev ? prev.senha : '');
-    return {
-      id: Number(u.id),
-      nome: String(u.nome || '').trim(),
-      senha: senhaNova,
-      supervisor: false,
+  const enviados = new Map((Array.isArray(usuarios) ? usuarios : []).map((u) => [Number(u.id), u]));
+  // Só altera usuários já existentes (vindos do TB_FUNCIONARIO); a lista não cria nem apaga ninguém.
+  cfg.usuarios = cfg.usuarios.map((prev) => {
+    if (prev.supervisor) return { id: 0, nome: prev.nome || 'SUPERVISOR', supervisor: true, permissoes: fullPermissoes() };
+    const u = enviados.get(Number(prev.id));
+    if (!u) return prev;
+    const next = {
+      ...prev,
       permissoes: ensureModulos(u.permissoes),
     };
+    if (u.senha !== undefined && u.senha !== null && String(u.senha) !== '') {
+      next.senhaHash = gerarHashSenha(String(u.senha));
+      next.senhaVer = Number(prev.senhaVer || 0) + 1;
+    }
+    return next;
   });
-  if (!cfg.usuarios.some((u) => u.supervisor)) {
-    cfg.usuarios.unshift({
-      id: 0,
-      nome: 'SUPERVISOR',
-      senha: SUPERVISOR_SENHA,
-      supervisor: true,
-      permissoes: fullPermissoes(),
-    });
+  if (!currentById.has(0)) {
+    cfg.usuarios.unshift({ id: 0, nome: 'SUPERVISOR', supervisor: true, permissoes: fullPermissoes() });
   }
   saveUsersConfig(appCfg, cfg);
   res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser) });
@@ -400,7 +385,23 @@ function mensagemBarrasDuplicado(item) {
 
 const nextTableId = nextGenId;
 
-router.get('/estoque', async (req, res) => {
+const LER_ESTOQUE = exigirModulo('estoque', 'importacao', 'alteracoes');
+
+/** Usuário sem preço "Total" não recebe o custo (nem na resposta da API). */
+function ocultarCusto(req, item) {
+  if (!item || auth.podeVerCusto(req.usuario)) return item;
+  return { ...item, prc_custo: null };
+}
+
+/** Fila única: cadastros simultâneos (balcão + celular) não passam juntos pela checagem de código de barras. */
+let filaCadastro = Promise.resolve();
+function naFilaDeCadastro(fn) {
+  const run = filaCadastro.then(fn, fn);
+  filaCadastro = run.catch(() => {});
+  return run;
+}
+
+router.get('/estoque', LER_ESTOQUE, async (req, res) => {
   try {
     const busca = String(req.query.q || '').trim();
     const statusFiltro = String(req.query.status || 'A').trim().toUpperCase();
@@ -461,13 +462,13 @@ router.get('/estoque', async (req, res) => {
       const rows = await query(db, sql, params);
       return rows.map(mapProdutoRow);
     });
-    res.json({ ok: true, itens: data });
+    res.json({ ok: true, itens: data.map((it) => ocultarCusto(req, it)) });
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }
 });
 
-router.get('/estoque/codigo-barras', async (req, res) => {
+router.get('/estoque/codigo-barras', LER_ESTOQUE, async (req, res) => {
   const code = String(req.query.code || '').trim();
   if (!code) return res.json({ ok: true, item: null });
   try {
@@ -478,7 +479,7 @@ router.get('/estoque/codigo-barras', async (req, res) => {
   }
 });
 
-router.get('/estoque/:idIdentificador/tributacao', async (req, res) => {
+router.get('/estoque/:idIdentificador/tributacao', LER_ESTOQUE, async (req, res) => {
   try {
     const notasMod = require('./importacao-notas');
     const data = await notasMod.getSugestaoTributoEstoque(req.params.idIdentificador);
@@ -534,7 +535,7 @@ async function ultimaAlteracaoQtd(db, t, idIdentificador) {
   };
 }
 
-router.get('/estoque/:idIdentificador', async (req, res) => {
+router.get('/estoque/:idIdentificador', LER_ESTOQUE, async (req, res) => {
   try {
     const id = Number(req.params.idIdentificador);
     const data = await withDb(async (db, appCfg) => {
@@ -608,13 +609,13 @@ router.get('/estoque/:idIdentificador', async (req, res) => {
       return item;
     });
     if (!data) return res.json({ ok: false, error: 'Produto não encontrado.' });
-    res.json({ ok: true, item: data });
+    res.json({ ok: true, item: ocultarCusto(req, data) });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
 });
 
-router.get('/grupos', async (_req, res) => {
+router.get('/grupos', LER_ESTOQUE, async (_req, res) => {
   try {
     const data = await withDb(async (db, appCfg) => {
       const t = activeTargets(appCfg)[0].tables;
@@ -627,7 +628,7 @@ router.get('/grupos', async (_req, res) => {
   }
 });
 
-router.get('/unidades', async (_req, res) => {
+router.get('/unidades', LER_ESTOQUE, async (_req, res) => {
   try {
     const data = await withDb(async (db) => {
       const rows = await query(
@@ -648,24 +649,25 @@ router.get('/unidades', async (_req, res) => {
   }
 });
 
-router.post('/estoque', async (req, res) => {
+router.post('/estoque', exigirModulo('estoque', 'importacao'), async (req, res) => {
   try {
     const body = req.body || {};
     const descricao = String(body.descricao || '').trim().slice(0, 120);
     if (!descricao) return res.json({ ok: false, error: 'Informe a descrição do produto.' });
     const uni = String(body.uni_medida || 'UN').trim().slice(0, 3) || 'UN';
     const prcVenda = Number(body.prc_venda != null ? body.prc_venda : 0.01) || 0.01;
-    const prcCusto = body.prc_custo != null && body.prc_custo !== '' ? Number(body.prc_custo) : null;
+    const prcCusto = auth.podeVerCusto(req.usuario) && body.prc_custo != null && body.prc_custo !== ''
+      ? Number(body.prc_custo) : null;
     const qtd = Number(body.qtd_atual != null ? body.qtd_atual : 0) || 0;
     const idGrupo = body.id_grupo === '' || body.id_grupo == null ? null : Number(body.id_grupo);
     const codBarras = String(body.cod_barras || '').trim().slice(0, 18);
     const referencia = String(body.referencia || '').trim().slice(0, 18);
     const descCmpl = String(body.desc_cmpl || '').trim().slice(0, 30);
     const gradeSerie = String(body.grade_serie || 'N').trim().toUpperCase() || 'N';
-    const usuarioNome = String(body.usuarioNome || 'usuário').trim();
-    const idFuncionario = Number(body.idFuncionario || 0);
+    const usuarioNome = req.usuario.nome;
+    const idFuncionario = req.usuario.id;
 
-    const created = await withDb(async (db, appCfg) => {
+    const created = await naFilaDeCadastro(() => withDb(async (db, appCfg) => {
       if (codBarras) {
         const dup = await findProdutoPorBarras(db, appCfg, codBarras);
         if (dup) throw new Error(mensagemBarrasDuplicado(dup));
@@ -737,7 +739,7 @@ router.post('/estoque', async (req, res) => {
         }
       }
       return first;
-    });
+    }));
 
     res.json({ ok: true, item: created });
   } catch (err) {
@@ -745,7 +747,7 @@ router.post('/estoque', async (req, res) => {
   }
 });
 
-router.post('/grupos', async (req, res) => {
+router.post('/grupos', exigirModulo('estoque', 'importacao'), async (req, res) => {
   try {
     const descricao = String((req.body && req.body.descricao) || '').trim();
     if (!descricao) return res.json({ ok: false, error: 'Informe a descrição do grupo.' });
@@ -769,15 +771,171 @@ router.post('/grupos', async (req, res) => {
   }
 });
 
-router.put('/estoque/:idIdentificador', async (req, res) => {
+const txtCampo = (v) => {
+  const s = v == null ? '' : String(v).trim();
+  return s === '' ? null : s;
+};
+const numCampo = (v) => (v == null || v === '' || !Number.isFinite(Number(v)) ? null : Number(v));
+const intCampo = (v) => (v == null || v === '' ? null : Number(v));
+const digCampo = (v) => txtCampo(String(v ?? '').replace(/\D/g, ''));
+
+/** Campos editáveis da ficha: coluna atual, normalização e permissão exigida. */
+const CAMPOS_EDICAO = [
+  { k: 'descricao', rotulo: 'Descrição', col: 'DESCRICAO', norm: txtCampo, perm: 'ficha' },
+  { k: 'id_grupo', rotulo: 'Grupo', col: 'ID_GRUPO', norm: intCampo, perm: 'ficha' },
+  { k: 'uni_medida', rotulo: 'Unidade', col: 'UNI_MEDIDA', norm: txtCampo, perm: 'ficha' },
+  { k: 'cod_barras', rotulo: 'Código de barras', col: 'COD_BARRA', norm: txtCampo, perm: 'ficha' },
+  { k: 'referencia', rotulo: 'Referência', col: 'REFERENCIA', norm: txtCampo, perm: 'ficha' },
+  { k: 'desc_cmpl', rotulo: 'Descrição complementar', col: 'DESC_CMPL', norm: txtCampo, perm: 'ficha' },
+  { k: 'grade_serie', rotulo: 'Grade/série', col: 'GRADE_SERIE', norm: (v) => txtCampo(v)?.toUpperCase() || 'N', perm: 'ficha' },
+  { k: 'status', rotulo: 'Situação', col: 'STATUS', norm: (v) => (String(v ?? '').trim().toUpperCase() === 'I' ? 'I' : 'A'), perm: 'ficha' },
+  { k: 'id_nivel1', rotulo: 'Cor', col: 'ID_NIVEL1', norm: intCampo, perm: 'ficha' },
+  { k: 'id_nivel2', rotulo: 'Tamanho', col: 'ID_NIVEL2', norm: intCampo, perm: 'ficha' },
+  { k: 'controla_lote', rotulo: 'Controla lote', col: 'CONTROLA_LOTE_VENDA', norm: (v) => (v === true || String(v ?? '').trim().toUpperCase() === 'S' ? 'S' : 'N'), perm: 'ficha' },
+  { k: 'prc_venda', rotulo: 'Preço de venda', col: 'PRC_VENDA', norm: numCampo, perm: 'venda' },
+  { k: 'prc_custo', rotulo: 'Preço de custo', col: 'PRC_CUSTO', norm: numCampo, perm: 'custo' },
+  { k: 'cfop', rotulo: 'CFOP', col: 'CFOP', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'cfop_nf', rotulo: 'CFOP NF', col: 'CFOP_NF', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'cst_pis', rotulo: 'CST PIS', col: 'CST_PIS', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'cst_cofins', rotulo: 'CST COFINS', col: 'CST_COFINS', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'pis', rotulo: 'PIS', col: 'PIS', norm: (v) => numCampo(v) ?? 0, perm: 'ficha', fiscal: true },
+  { k: 'cofins', rotulo: 'COFINS', col: 'COFINS', norm: (v) => numCampo(v) ?? 0, perm: 'ficha', fiscal: true },
+  { k: 'id_cti', rotulo: 'CTI', col: 'ID_CTI', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'id_cti_cfe', rotulo: 'CTI CF-e', col: 'ID_CTI_CFE', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'cst', rotulo: 'CST', col: 'CST', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'csosn', rotulo: 'CSOSN', col: 'CSOSN', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'cst_cfe', rotulo: 'CST CF-e', col: 'CST_CFE', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'csosn_cfe', rotulo: 'CSOSN CF-e', col: 'CSOSN_CFE', norm: txtCampo, perm: 'ficha', fiscal: true },
+  { k: 'ncm', rotulo: 'NCM', col: 'COD_NCM', norm: digCampo, perm: 'ficha', fiscal: true },
+  { k: 'cest', rotulo: 'CEST', col: 'COD_CEST', norm: digCampo, perm: 'ficha', fiscal: true },
+];
+
+function mesmoValor(a, b) {
+  if (a === b) return true;
+  if (typeof a === 'number' && typeof b === 'number') return Math.abs(a - b) < 1e-6;
+  return a != null && b != null && String(a) === String(b);
+}
+
+function erroConflito(conflitos) {
+  const err = new Error(conflitos.length === 1
+    ? `O campo ${conflitos[0].rotulo} foi alterado por outra pessoa enquanto a tela estava aberta.`
+    : 'Outra pessoa alterou este produto enquanto a tela estava aberta.');
+  err.code = 'CONFLITO';
+  err.conflitos = conflitos;
+  return err;
+}
+
+/**
+ * Mantém só o que realmente muda e o usuário pode alterar. Campo igual ao do banco é ignorado
+ * (sem exigir permissão). Se `antes` (valor que estava na tela) difere do banco, é conflito:
+ * outra pessoa alterou o mesmo campo — devolve para o usuário decidir (forcar=true sobrescreve).
+ */
+async function prepararEdicao(db, appCfg, id, bruto, usuario) {
+  const t = writeTargets(appCfg)[0].tables;
+  const rows = await query(
+    db,
+    `SELECT E.DESCRICAO, E.ID_GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO, E.GRADE_SERIE, E.STATUS,
+            P.QTD_ATUAL, P.COD_BARRA, P.REFERENCIA, P.DESC_CMPL, P.CONTROLA_LOTE_VENDA, P.ID_NIVEL1, P.ID_NIVEL2
+     FROM ${t.estoque} E
+     JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
+     JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+     WHERE I.ID_IDENTIFICADOR = ?`,
+    [id]
+  );
+  if (!rows.length) throw new Error('Produto não encontrado.');
+  const atual = { ...rows[0] };
+  let fiscalOk = true;
+  try {
+    const f = await query(
+      db,
+      `SELECT E.CFOP, E.CFOP_NF, E.CST_PIS, E.CST_COFINS, E.PIS, E.COFINS, E.ID_CTI, E.ID_CTI_CFE,
+              P.CST, P.CSOSN, P.CST_CFE, P.CSOSN_CFE, P.COD_NCM, P.COD_CEST
+       FROM ${t.estoque} E
+       JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
+       JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+       WHERE I.ID_IDENTIFICADOR = ?`,
+      [id]
+    );
+    Object.assign(atual, f[0] || {});
+  } catch {
+    fiscalOk = false;
+  }
+
+  const nivelFicha = auth.nivel(usuario, 'estoque', 'ficha');
+  const nivelPreco = auth.nivel(usuario, 'estoque', 'precos');
+  const nivelQtd = auth.nivel(usuario, 'estoque', 'quantidades');
+  const pode = {
+    ficha: nivelFicha === 'editar' || nivelFicha === 'total',
+    venda: nivelPreco === 'editar' || nivelPreco === 'total',
+    custo: nivelPreco === 'total',
+    qtd: nivelQtd === 'editar' || nivelQtd === 'total',
+  };
+  const antes = bruto.antes && typeof bruto.antes === 'object' ? bruto.antes : {};
+  const forcar = bruto.forcar === true;
+  const out = { origem: bruto.origem, obs_qtd: bruto.obs_qtd };
+  const semPermissao = [];
+  const conflitos = [];
+
+  for (const c of CAMPOS_EDICAO) {
+    if (bruto[c.k] === undefined) continue;
+    if (c.fiscal && !fiscalOk) {
+      if (pode.ficha) out[c.k] = bruto[c.k];
+      continue;
+    }
+    const novo = c.norm(bruto[c.k]);
+    const noBanco = c.norm(atual[c.col]);
+    if (mesmoValor(novo, noBanco)) continue;
+    if (!pode[c.perm]) {
+      semPermissao.push(c.rotulo);
+      continue;
+    }
+    if (!forcar && Object.prototype.hasOwnProperty.call(antes, c.k)) {
+      const visto = c.norm(antes[c.k]);
+      if (!mesmoValor(visto, noBanco)) {
+        conflitos.push({ campo: c.k, rotulo: c.rotulo, visto, atual: noBanco, novo });
+      }
+    }
+    out[c.k] = bruto[c.k];
+  }
+  if ((bruto.trib_nfe || bruto.trib_nfce) && pode.ficha) {
+    out.trib_nfe = bruto.trib_nfe;
+    out.trib_nfce = bruto.trib_nfce;
+  }
+
+  const qtdBanco = Number(atual.QTD_ATUAL || 0);
+  const delta = numCampo(bruto.qtd_delta);
+  const abs = numCampo(bruto.qtd_atual);
+  if ((delta != null && delta !== 0) || (abs != null && !mesmoValor(abs, qtdBanco))) {
+    if (!pode.qtd) semPermissao.push('Quantidade');
+    else if (delta != null && delta !== 0) out.qtd_delta = delta;
+    else {
+      const vista = numCampo(bruto.qtd_vista);
+      if (!forcar && vista != null && !mesmoValor(vista, qtdBanco)) {
+        conflitos.push({ campo: 'qtd_atual', rotulo: 'Quantidade', visto: vista, atual: qtdBanco, novo: abs });
+      }
+      out.qtd_atual = abs;
+    }
+  }
+
+  if (semPermissao.length) {
+    const err = new Error(`Sem permissão para alterar: ${semPermissao.join(', ')}.`);
+    err.code = 'SEM_PERMISSAO';
+    throw err;
+  }
+  if (conflitos.length) throw erroConflito(conflitos);
+  return out;
+}
+
+router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), async (req, res) => {
   try {
     const id = Number(req.params.idIdentificador);
-    const body = req.body || {};
-    const usuarioNome = String(body.usuarioNome || 'usuário').trim();
-    const idFuncionario = Number(body.idFuncionario || 0);
-    const origem = await resolveOrigem(req, body);
-    const obsQtdExtra = String(body.obs_qtd || '').trim().slice(0, 120);
+    const bruto = req.body || {};
+    const usuarioNome = req.usuario.nome;
+    const idFuncionario = req.usuario.id;
+    const origem = await resolveOrigem(req, bruto);
+    const obsQtdExtra = String(bruto.obs_qtd || '').trim().slice(0, 120);
     const result = await withDb(async (db, appCfg) => {
+      const body = await prepararEdicao(db, appCfg, id, bruto, req.usuario);
       const barra = body.cod_barras !== undefined ? String(body.cod_barras || '').trim() : '';
       if (barra) {
         const dup = await findProdutoPorBarras(db, appCfg, barra, id);
@@ -858,9 +1016,9 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
 
         const prodSets = [];
         const prodParams = [];
-        if (body.cod_barras !== undefined) { prodSets.push('COD_BARRA = ?'); prodParams.push(String(body.cod_barras).slice(0, 18)); }
-        if (body.referencia !== undefined) { prodSets.push('REFERENCIA = ?'); prodParams.push(String(body.referencia).slice(0, 18)); }
-        if (body.desc_cmpl !== undefined) { prodSets.push('DESC_CMPL = ?'); prodParams.push(String(body.desc_cmpl).slice(0, 30)); }
+        if (body.cod_barras !== undefined) { prodSets.push('COD_BARRA = ?'); prodParams.push(String(body.cod_barras).trim().slice(0, 18) || null); }
+        if (body.referencia !== undefined) { prodSets.push('REFERENCIA = ?'); prodParams.push(String(body.referencia).trim().slice(0, 18) || null); }
+        if (body.desc_cmpl !== undefined) { prodSets.push('DESC_CMPL = ?'); prodParams.push(String(body.desc_cmpl).trim().slice(0, 30) || null); }
         if (body.cst !== undefined) { prodSets.push('CST = ?'); prodParams.push(String(body.cst || '').trim() || null); }
         if (body.csosn !== undefined) { prodSets.push('CSOSN = ?'); prodParams.push(String(body.csosn || '').trim() || null); }
         if (body.cst_cfe !== undefined) { prodSets.push('CST_CFE = ?'); prodParams.push(String(body.cst_cfe || '').trim() || null); }
@@ -1001,7 +1159,12 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
     if (!result) return res.json({ ok: false, error: 'Produto não encontrado nas tabelas do modo configurado.' });
     res.json({ ok: true, item: result });
   } catch (err) {
-    res.json({ ok: false, error: err.message });
+    res.json({
+      ok: false,
+      error: err.message,
+      ...(err.code ? { code: err.code } : {}),
+      ...(err.conflitos ? { conflitos: err.conflitos } : {}),
+    });
   }
 });
 
@@ -1057,10 +1220,10 @@ function mapGestorAlteracao(r) {
   };
 }
 
-router.get('/alteracoes', async (req, res) => {
+router.get('/alteracoes', exigirModulo('alteracoes'), async (req, res) => {
   try {
-    const idUsuario = Number(req.query.idUsuario || 0);
-    const supervisor = String(req.query.supervisor || '') === '1' || String(req.query.supervisor || '') === 'true';
+    const idUsuario = req.usuario.id;
+    const supervisor = !!req.usuario.supervisor;
     const todos = supervisor && (String(req.query.todos || '') === '1' || String(req.query.todos || '') === 'true');
     const dias = Math.min(365, Math.max(1, Number(req.query.dias) || 30));
     const busca = String(req.query.q || '').trim();
@@ -1215,7 +1378,7 @@ router.get('/alteracoes', async (req, res) => {
   }
 });
 
-router.get('/niveis', async (_req, res) => {
+router.get('/niveis', LER_ESTOQUE, async (_req, res) => {
   try {
     const data = await withDb(async (db, appCfg) => {
       const t = activeTargets(appCfg)[0].tables;
@@ -1236,23 +1399,9 @@ const importacaoFornecedor = require('./importacao-fornecedor');
 const importacaoParams = require('./importacao-params');
 const importacaoNotas = require('./importacao-notas');
 
-function importacaoSupervisorOk(req) {
-  const q = req.query?.supervisor;
-  const b = req.body?.supervisor;
-  return q === '1' || q === 'true' || q === true || b === true || b === '1' || b === 'true';
-}
-
 function guardImportacaoSupervisor(req, res) {
-  if (importacaoSupervisorOk(req)) return true;
-  const uid = Number(req.query?.usuarioId ?? req.body?.usuarioId);
-  if (Number.isFinite(uid)) {
-    try {
-      const users = loadUsersConfig(loadAppConfig());
-      const u = (users.usuarios || []).find((x) => Number(x.id) === uid);
-      if (u?.supervisor || u?.permissoes?.importacao?.acesso) return true;
-    } catch { /* ignore */ }
-  }
-  res.json({ ok: false, error: 'Sem permissão para notas de entrada.' });
+  if (auth.temAcesso(req.usuario, 'importacao')) return true;
+  res.status(403).json({ ok: false, code: 'SEM_PERMISSAO', error: 'Sem permissão para notas de entrada.' });
   return false;
 }
 
@@ -1590,8 +1739,10 @@ router.post('/importacao/sessoes', async (req, res) => {
       xmlText: body.xmlText || body.xml || null,
       xmlPath: body.xmlPath || null,
       allowDemo: DEMO_ATIVO && (!!body.allowDemo || !!body.demo),
+      usuario: req.usuario.nome,
     });
     if (!out.ok) return res.json(out);
+    if (out.aviso) return res.json(out);
     const forn = await importacaoFornecedor.resolverNaImportacao(out.sessao.xml);
     importacaoStaging.setFornecedor(out.sessao.id, forn);
     const sessao = await importacaoStaging.aplicarVinculosSessao(out.sessao.id);
@@ -1643,18 +1794,8 @@ router.post('/importacao/sessoes/:id/cancelar', (req, res) => {
 });
 
 router.get('/importacao/notas/:idNfcompra/resumo', async (req, res) => {
-  const okImp = importacaoSupervisorOk(req);
-  let okAlt = false;
-  if (!okImp) {
-    const uid = Number(req.query?.usuarioId ?? req.body?.usuarioId);
-    try {
-      const users = loadUsersConfig(loadAppConfig());
-      const u = (users.usuarios || []).find((x) => Number(x.id) === uid);
-      okAlt = !!(u?.supervisor || u?.permissoes?.importacao?.acesso || u?.permissoes?.alteracoes?.acesso);
-    } catch { /* ignore */ }
-  }
-  if (!okImp && !okAlt) {
-    res.json({ ok: false, error: 'Sem permissão para ver o resumo da nota.' });
+  if (!auth.temAcesso(req.usuario, 'importacao', 'alteracoes')) {
+    res.status(403).json({ ok: false, code: 'SEM_PERMISSAO', error: 'Sem permissão para ver o resumo da nota.' });
     return;
   }
   try {
@@ -1721,8 +1862,8 @@ router.post('/importacao/notas/:idNfcompra/cancelar', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const result = await importacaoCancel.cancelarNfCompra(req.params.idNfcompra, {
-      usuario: req.body?.usuarioNome || 'Supervisor',
-      idFuncionario: Number(req.body?.idFuncionario || 0),
+      usuario: req.usuario.nome,
+      idFuncionario: req.usuario.id,
     });
     importacaoStaging.marcarSessoesCanceladasPorNf({
       idNfcompra: result.id_nfcompra,
@@ -1919,8 +2060,8 @@ router.post('/importacao/sessoes/:id/confirmar', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const out = await importacaoStaging.confirmarSessao(req.params.id, {
-      usuario: req.body?.usuarioNome || 'Supervisor',
-      idFuncionario: Number(req.body?.idFuncionario || 0),
+      usuario: req.usuario.nome,
+      idFuncionario: req.usuario.id,
     });
     res.json(out);
   } catch (err) {

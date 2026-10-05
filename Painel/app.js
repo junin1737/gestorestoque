@@ -148,17 +148,40 @@ function showPrompt({ message, password = false, defaultValue = '' } = {}) {
 
 window.alert = (message) => showMsg(message);
 
+function novaChaveIdempotencia() {
+  const b = new Uint8Array(16);
+  crypto.getRandomValues(b);
+  return Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+}
+
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function api(path, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const grava = method !== 'GET' && method !== 'HEAD';
+  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  if (state.usuario) headers['X-Gestor-Usuario'] = String(state.usuario.id);
+  // Mesma chave nas repetições: se a resposta se perdeu na rede, o servidor não grava duas vezes.
+  if (grava) headers['Idempotency-Key'] = novaChaveIdempotencia();
+  const init = {
+    ...options,
+    headers,
+    credentials: 'same-origin',
+    body: options.body != null ? JSON.stringify(options.body) : undefined,
+  };
   let res;
-  try {
-    res = await fetch(`/api${path}`, {
-      headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-      ...options,
-      body: options.body != null ? JSON.stringify(options.body) : undefined,
-    });
-  } catch (err) {
-    const error = 'Serviço do painel offline. Execute iniciar.bat ou npm start e abra http://127.0.0.1:5077';
-    return { ok: false, offline: true, error };
+  for (let tentativa = 0; ; tentativa += 1) {
+    try {
+      res = await fetch(`/api${path}`, init);
+      break;
+    } catch (err) {
+      if (grava && tentativa < 2) {
+        await esperar(1500);
+        continue;
+      }
+      const error = 'Serviço do painel offline. Execute iniciar.bat ou npm start e abra http://127.0.0.1:5077';
+      return { ok: false, offline: true, error };
+    }
   }
   let data;
   try {
@@ -167,6 +190,9 @@ async function api(path, options = {}) {
     return { ok: false, error: `Resposta inválida da API (${res.status})` };
   }
   if (data && data.code === 'LICENCA_BLOQUEADA') mostrarBloqueioLicenca(data.licenca);
+  if (res.status === 401 && (data?.code === 'AUTH' || data?.code === 'SESSAO_TROCADA') && state.usuario) {
+    sessaoEncerrada(data.error);
+  }
   return data;
 }
 
@@ -201,7 +227,7 @@ function mostrarBloqueioLicenca(lic) {
   }
   const titulos = {
     verificando: 'Verificando licença…',
-    pendente: 'Aguardando liberação',
+    pendente: 'Cadastro solicitado',
     bloqueado: 'Acesso bloqueado',
     vencido: 'Licença vencida',
     expirado: 'Licença não validada',
@@ -212,18 +238,21 @@ function mostrarBloqueioLicenca(lic) {
   const cnpj = String(l.cnpj || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
   el.querySelector('#lic-info').textContent = cnpj ? `CNPJ ${cnpj}` : '';
   el.hidden = false;
-  if (l.status === 'verificando' && !licencaPoll) {
+  // Aguardando aprovação: o serviço reconsulta a cada minuto; a tela libera sozinha quando aprovar.
+  const aguardando = l.status === 'verificando' || l.status === 'pendente';
+  if (aguardando && !licencaPoll) {
+    const statusInicial = l.status;
     licencaPoll = setInterval(async () => {
       const r = await api('/licenca');
       if (r.licenca?.liberado) {
         clearInterval(licencaPoll);
         location.reload();
-      } else if (r.licenca && r.licenca.status !== 'verificando') {
+      } else if (r.licenca && r.licenca.status !== statusInicial) {
         clearInterval(licencaPoll);
         licencaPoll = null;
         mostrarBloqueioLicenca(r.licenca);
       }
-    }, 3000);
+    }, statusInicial === 'pendente' ? 15000 : 3000);
   }
 }
 
@@ -506,6 +535,11 @@ async function bootstrap() {
     setEmitenteUI(conn.emitente);
     applyTheme(state.config.tema, conn.emitente?.logo);
     await loadFuncionarios();
+    const sess = await api('/sessao');
+    if (sess.ok && sess.usuario) {
+      state.usuario = sess.usuario;
+      enterApp();
+    }
   } else {
     setServiceStatus(true, `Painel online, base offline: ${conn.error || 'falha Firebird'}`);
     setEmitenteUI({ nome_fanta: 'Gestor Estoque', logo: null });
@@ -554,6 +588,7 @@ $('#form-login').addEventListener('submit', async (e) => {
   $('#login-erro').hidden = true;
   const id = Number($('#login-usuario').value);
   const senha = $('#login-senha').value;
+  state.usuario = null;
   const res = await api('/login', { method: 'POST', body: { id, senha } });
   if (!res.ok) {
     $('#login-erro').hidden = false;
@@ -612,6 +647,20 @@ function enterApp() {
 }
 
 function trocarUsuario() {
+  api('/logout', { method: 'POST', body: {} });
+  voltarAoLogin();
+}
+
+/** Sessão expirou, foi trocada em outra aba ou a senha mudou: volta ao login com o motivo. */
+function sessaoEncerrada(motivo) {
+  voltarAoLogin();
+  if (motivo) {
+    $('#login-erro').hidden = false;
+    $('#login-erro').textContent = motivo;
+  }
+}
+
+function voltarAoLogin() {
   stopScanner();
   state.usuario = null;
   state.selecionado = null;
@@ -1071,6 +1120,31 @@ $('#btn-cancelar-produto').addEventListener('click', () => {
 
 $('#btn-novo-produto')?.addEventListener('click', () => abrirNovoProduto());
 
+const CAMPOS_COM_CONFERENCIA = [
+  'descricao', 'id_grupo', 'uni_medida', 'cod_barras', 'referencia', 'desc_cmpl',
+  'status', 'id_nivel1', 'id_nivel2', 'prc_venda', 'prc_custo',
+];
+
+function valorConflito(campo, v) {
+  if (v == null || v === '') return '(vazio)';
+  if (campo === 'prc_venda' || campo === 'prc_custo') return fmtMoney(v);
+  if (campo === 'qtd_atual') return fmtNum(v);
+  if (campo === 'status') return v === 'I' ? 'Inativo' : 'Ativo';
+  if (campo === 'id_grupo') return state.grupos?.find((g) => g.id_grupo === Number(v))?.descricao || `#${v}`;
+  return String(v);
+}
+
+/** Outra pessoa alterou o mesmo campo: mostra o que mudou e pergunta se grava o valor deste usuário. */
+function confirmarConflito(res) {
+  const linhas = (res.conflitos || []).map((c) => (
+    `• ${c.rotulo}: estava ${valorConflito(c.campo, c.visto)} quando você abriu, agora está ${valorConflito(c.campo, c.atual)}. Você quer gravar ${valorConflito(c.campo, c.novo)}.`
+  ));
+  return showConfirm(
+    `${res.error}\n\n${linhas.join('\n')}\n\nGravar mesmo assim (substitui a alteração da outra pessoa) ou recarregar o produto com os valores atuais?`,
+    { okLabel: 'Gravar o meu', cancelLabel: 'Recarregar' }
+  );
+}
+
 $('#btn-salvar-produto').addEventListener('click', async () => {
   const it = state.selecionado;
   if (!it) return;
@@ -1080,10 +1154,7 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   const editarFicha = can('estoque', 'acesso') && (state.usuario.supervisor || ['editar', 'total'].includes(state.usuario.permissoes?.estoque?.ficha) || state.isNovo);
   const editarQtd = can('estoque', 'acesso') && (state.usuario.supervisor || ['editar', 'total'].includes(state.usuario.permissoes?.estoque?.quantidades) || state.isNovo);
 
-  const body = {
-    usuarioNome: state.usuario.nome,
-    idFuncionario: state.usuario.id,
-  };
+  const body = {};
 
   if (editarFicha) {
     if ($('#f-descricao')) body.descricao = $('#f-descricao').value;
@@ -1105,13 +1176,15 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
     const nova = parseBrMoney($('#q-nova').value);
     const base = Number(it.qtd_atual || 0);
     if (Number.isFinite(nova) && Math.abs(nova - base) > 1e-9) {
-      if (state.qtdModo === 'absoluto') body.qtd_atual = nova;
-      else body.qtd_delta = Number((nova - base).toFixed(6));
+      if (state.qtdModo === 'absoluto') {
+        body.qtd_atual = nova;
+        body.qtd_vista = base;
+      } else body.qtd_delta = Number((nova - base).toFixed(6));
       const obsQtd = String($('#q-obs')?.value || '').trim();
       if (obsQtd) body.obs_qtd = obsQtd;
     }
   }
-  if ($('#t-cfop')) {
+  if ($('#t-cfop') && editarFicha) {
     body.cfop = $('#t-cfop').value;
     body.cfop_nf = $('#t-cfop-nf')?.value || '';
     body.csosn = $('#t-csosn')?.value || '';
@@ -1127,7 +1200,7 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
     body.ncm = $('#t-ncm')?.value || '';
     body.cest = $('#t-cest')?.value || '';
   }
-  if ($('#r-id-class-trib') || $('#r-id-class-trib-nfce')) {
+  if (($('#r-id-class-trib') || $('#r-id-class-trib-nfce')) && editarFicha) {
     body.trib_nfe = {
       id_class_trib: $('#r-id-class-trib')?.value || null,
       diferimento_cbs: Number($('#r-dif-cbs')?.value || 0),
@@ -1154,7 +1227,19 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   if (state.isNovo) {
     res = await api('/estoque', { method: 'POST', body });
   } else {
+    // Valores que estavam na tela ao abrir: o servidor recusa se outra pessoa mudou o mesmo campo nesse meio tempo.
+    body.antes = {};
+    for (const k of CAMPOS_COM_CONFERENCIA) {
+      if (body[k] !== undefined && it[k] !== undefined && !(k === 'prc_custo' && it[k] == null)) body.antes[k] = it[k];
+    }
     res = await api(`/estoque/${it.id_identificador}`, { method: 'PUT', body });
+    if (!res.ok && res.code === 'CONFLITO') {
+      if (!(await confirmarConflito(res))) {
+        await openProduto(Number(it.id_identificador));
+        return;
+      }
+      res = await api(`/estoque/${it.id_identificador}`, { method: 'PUT', body: { ...body, forcar: true } });
+    }
   }
   if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
   showToast(state.isNovo ? 'Produto cadastrado com sucesso.' : 'Dados alterados com sucesso.');
@@ -1540,11 +1625,7 @@ function renderDetalhe() {
     if (!ok) return;
     const res = await api(`/estoque/${it.id_identificador}`, {
       method: 'PUT',
-      body: {
-        status: proximo,
-        usuarioNome: state.usuario.nome,
-        idFuncionario: state.usuario.id,
-      },
+      body: { status: proximo },
     });
     if (!res.ok) return showMsg(res.error || 'Erro ao alterar status');
     it.status = proximo;
@@ -1586,7 +1667,7 @@ function renderUsuarios() {
     <div class="user-card" data-idx="${idx}">
       <div class="grid-2">
         <label>Nome<input value="${escapeAttr(u.nome)}" disabled /></label>
-        <label>Nova senha<input type="password" data-field="senha" placeholder="${u.supervisor ? 'Fixa: 1020' : (u.temSenha ? '••••••' : 'Definir senha')}" ${u.supervisor ? 'disabled' : ''} /></label>
+        <label>Nova senha<input type="password" data-field="senha" placeholder="${u.supervisor ? 'Definida pela MT Automações' : (u.temSenha ? '••••••' : 'Definir senha')}" ${u.supervisor ? 'disabled' : ''} /></label>
       </div>
       <div class="perm-grid">
         <label>Acesso Estoque
@@ -1749,8 +1830,6 @@ async function loadAlteracoes() {
   const todos = state.usuario?.supervisor && $('#alt-escopo')?.value === 'todos';
   const tipo = state.alteracoesTipo || 'todos';
   const params = new URLSearchParams({
-    idUsuario: String(state.usuario?.id ?? 0),
-    supervisor: state.usuario?.supervisor ? '1' : '0',
     todos: todos ? '1' : '0',
     dias: String(dias),
     tipo,
@@ -1779,8 +1858,7 @@ function tipoAlteracaoLabel(tipo) {
 async function abrirResumoNotaLancada(idNf) {
   const id = Number(idNf);
   if (!id) return;
-  const qs = `supervisor=${state.usuario?.supervisor ? '1' : '0'}&usuarioId=${encodeURIComponent(state.usuario?.id ?? 0)}`;
-  const res = await api(`/importacao/notas/${id}/resumo?${qs}`);
+  const res = await api(`/importacao/notas/${id}/resumo`);
   if (!res.ok || !res.nota) {
     showMsg(res.error || 'Não foi possível carregar o resumo da nota.');
     return;

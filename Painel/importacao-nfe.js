@@ -97,20 +97,8 @@ const ImportacaoNfe = (() => {
   function $(sel, el = document) { return el.querySelector(sel); }
   function $$(sel, el = document) { return [...el.querySelectorAll(sel)]; }
 
-  async function api(path, options = {}) {
-    const supervisor = deps.isSupervisor?.() ? '1' : '0';
-    const usuarioId = deps.getUsuario?.()?.id;
-    const method = (options.method || 'GET').toUpperCase();
-    let url = path;
-    const extra = `supervisor=${supervisor}${usuarioId != null ? `&usuarioId=${encodeURIComponent(usuarioId)}` : ''}`;
-    if (method === 'GET' || method === 'DELETE') {
-      url += (path.includes('?') ? '&' : '?') + extra;
-    } else if (options.body && typeof options.body === 'object') {
-      options = { ...options, body: { ...options.body, supervisor: supervisor === '1', usuarioId } };
-    } else if (method === 'POST' || method === 'PUT') {
-      options = { ...options, body: { ...(options.body || {}), supervisor: supervisor === '1', usuarioId } };
-    }
-    return deps.api(url, options);
+  function api(path, options = {}) {
+    return deps.api(path, options);
   }
 
   function esc(s) {
@@ -930,8 +918,7 @@ const ImportacaoNfe = (() => {
       deps.showMsg?.('Nenhuma nota aberta para visualizar.');
       return;
     }
-    const supervisor = deps.isSupervisor?.() ? '1' : '0';
-    const url = `/api/importacao/sessoes/${encodeURIComponent(id)}/danfe?supervisor=${supervisor}`;
+    const url = `/api/importacao/sessoes/${encodeURIComponent(id)}/danfe`;
     bindDanfeDialog();
     const dlg = $('#dlg-danfe');
     const frame = $('#dlg-danfe-frame');
@@ -949,8 +936,7 @@ const ImportacaoNfe = (() => {
       deps.showMsg?.('Nota inválida.');
       return;
     }
-    const supervisor = deps.isSupervisor?.() ? '1' : '0';
-    const url = `/api/importacao/notas/${encodeURIComponent(idNf)}/danfe?supervisor=${supervisor}`;
+    const url = `/api/importacao/notas/${encodeURIComponent(idNf)}/danfe`;
     bindDanfeDialog();
     const dlg = $('#dlg-danfe');
     const frame = $('#dlg-danfe-frame');
@@ -3795,7 +3781,9 @@ const ImportacaoNfe = (() => {
     showView('sessao');
     const qtd = res.sessao?.itens?.length || 0;
     const nNf = res.sessao?.xml?.ide?.nNF || '';
-    if (res.fonte === 'sefaz') {
+    if (res.aviso) {
+      deps.showMsg?.(res.aviso);
+    } else if (res.fonte === 'sefaz') {
       deps.showToast?.(`NF ${nNf} consultada na SEFAZ (${qtd} itens)`);
     } else if (res.fonte === 'xml') {
       deps.showToast?.(`NF ${nNf} carregada do XML (${qtd} itens)`);
@@ -4352,10 +4340,7 @@ const ImportacaoNfe = (() => {
       try {
         const res = await api(`/importacao/sessoes/${state.sessao.id}/confirmar`, {
           method: 'POST',
-          body: {
-            usuarioNome: deps.getUsuario?.()?.nome || 'Supervisor',
-            idFuncionario: deps.getUsuario?.()?.id || 0,
-          },
+          body: {},
         });
         if (res.ok) {
           deps.showMsg?.(res.message || 'Entrada confirmada (protótipo)');

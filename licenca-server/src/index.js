@@ -83,6 +83,30 @@ function situacaoCliente(cli, agora = new Date()) {
   return { status: 'liberado', mensagem: cli.mensagem || null };
 }
 
+/** Valida o hash gerado pelo painel: { alg, iter, salt, hash } (base64). */
+function supHashValido(v) {
+  if (!v || typeof v !== 'object') return null;
+  const iter = Number(v.iter);
+  const b64ok = (s, min, max) => typeof s === 'string' && /^[A-Za-z0-9+/]+=*$/.test(s) && s.length >= min && s.length <= max;
+  if (v.alg !== 'pbkdf2-sha256' || !Number.isInteger(iter) || iter < 100000 || iter > 2000000) return null;
+  if (!b64ok(v.salt, 20, 64) || !b64ok(v.hash, 40, 64)) return null;
+  return { alg: v.alg, iter, salt: v.salt, hash: v.hash };
+}
+
+async function lerConfig(env, chave) {
+  const r = await env.DB.prepare('SELECT valor, atualizado_em FROM config WHERE chave = ?').bind(chave).first();
+  return r || null;
+}
+
+async function supDoCliente(env, cli) {
+  if (cli?.sup_hash) {
+    try { return supHashValido(JSON.parse(cli.sup_hash)); } catch { /* cai na padrão */ }
+  }
+  const padrao = await lerConfig(env, 'sup_padrao');
+  if (!padrao?.valor) return null;
+  try { return supHashValido(JSON.parse(padrao.valor)); } catch { return null; }
+}
+
 async function registrarEvento(env, cnpj, tipo, detalhe) {
   await env.DB.prepare('INSERT INTO eventos (cnpj, tipo, detalhe, criado_em) VALUES (?, ?, ?, ?)')
     .bind(cnpj, tipo, detalhe ? String(detalhe).slice(0, 500) : null, agoraIso())
@@ -152,8 +176,9 @@ async function check(request, env) {
     pago_ate: cli.pago_ate || null,
     emitido_em: emitido.toISOString(),
     valido_ate: validoAte.toISOString(),
+    sup: sit.status === 'liberado' ? await supDoCliente(env, cli) : null,
   });
-  return json({ ok: true, licenca });
+  return json({ ok: true, licenca, solicitado_em: cli.status === 'pendente' ? cli.criado_em : null });
 }
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
@@ -230,9 +255,15 @@ async function listarClientes(url, env) {
   const agora = new Date();
   return json({
     ok: true,
-    clientes: results.map((c) => ({ ...c, situacao: situacaoCliente(c, agora).status })),
+    clientes: results.map((c) => clientePublico(c, agora)),
     totais: Object.fromEntries(totais.results.map((r) => [r.status, r.n])),
   });
+}
+
+/** Nunca devolve o hash da senha do supervisor ao painel. */
+function clientePublico(c, agora = new Date()) {
+  const { sup_hash: supHash, ...resto } = c;
+  return { ...resto, sup_propria: !!supHash, situacao: situacaoCliente(c, agora).status };
 }
 
 async function detalheCliente(cnpj, env) {
@@ -242,10 +273,46 @@ async function detalheCliente(cnpj, env) {
   const ev = await env.DB.prepare('SELECT * FROM eventos WHERE cnpj = ? ORDER BY id DESC LIMIT 100').bind(cnpj).all();
   return json({
     ok: true,
-    cliente: { ...cli, situacao: situacaoCliente(cli).status },
+    cliente: clientePublico(cli),
     instalacoes: inst.results,
     eventos: ev.results,
   });
+}
+
+async function obterConfig(env) {
+  const padrao = await lerConfig(env, 'sup_padrao');
+  return json({ ok: true, sup_padrao: { definida: !!padrao?.valor, atualizado_em: padrao?.atualizado_em || null } });
+}
+
+async function definirSupPadrao(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const sup = supHashValido(body.sup);
+  if (!sup) return json({ ok: false, error: 'Hash da senha inválido.' }, 400);
+  const agora = agoraIso();
+  await env.DB.prepare(
+    `INSERT INTO config (chave, valor, atualizado_em) VALUES ('sup_padrao', ?, ?)
+     ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor, atualizado_em = excluded.atualizado_em`
+  ).bind(JSON.stringify(sup), agora).run();
+  await registrarEvento(env, '*', 'senha_supervisor', 'Senha padrão do supervisor alterada');
+  return obterConfig(env);
+}
+
+/** body.sup = hash novo | null (volta a usar a senha padrão). */
+async function definirSupCliente(cnpj, request, env) {
+  const cli = await env.DB.prepare('SELECT cnpj FROM clientes WHERE cnpj = ?').bind(cnpj).first();
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  const body = await request.json().catch(() => ({}));
+  let valor = null;
+  if (body.sup !== null) {
+    const sup = supHashValido(body.sup);
+    if (!sup) return json({ ok: false, error: 'Hash da senha inválido.' }, 400);
+    valor = JSON.stringify(sup);
+  }
+  const agora = agoraIso();
+  await env.DB.prepare('UPDATE clientes SET sup_hash = ?, sup_atualizado_em = ?, atualizado_em = ? WHERE cnpj = ?')
+    .bind(valor, agora, agora, cnpj).run();
+  await registrarEvento(env, cnpj, 'senha_supervisor', valor ? 'Senha própria do supervisor definida' : 'Voltou a usar a senha padrão');
+  return detalheCliente(cnpj, env);
 }
 
 function camposEditaveis(body) {
@@ -340,6 +407,7 @@ async function licencaOffline(cnpj, request, env) {
     pago_ate: cli.pago_ate || null,
     emitido_em: emitido.toISOString(),
     valido_ate: validoAte.toISOString(),
+    sup: await supDoCliente(env, cli),
   });
   await registrarEvento(env, cnpj, 'licenca_offline', `${dias} dia(s)${nse ? ` · NSE ${nse}` : ''}`);
   const codigo = `MTL1.${b64url(enc.encode(JSON.stringify(licenca)))}`;
@@ -350,14 +418,17 @@ async function rotaAdmin(request, env, url) {
   if (url.pathname === '/api/admin/login' && request.method === 'POST') return login(request, env);
   if (!(await tokenValido(env, request))) return json({ ok: false, error: 'Sessão expirada. Entre novamente.', code: 'AUTH' }, 401);
 
+  if (url.pathname === '/api/admin/config' && request.method === 'GET') return obterConfig(env);
+  if (url.pathname === '/api/admin/config/supervisor' && request.method === 'PUT') return definirSupPadrao(request, env);
   if (url.pathname === '/api/admin/clientes') {
     if (request.method === 'GET') return listarClientes(url, env);
     if (request.method === 'POST') return criarCliente(request, env);
   }
-  const m = url.pathname.match(/^\/api\/admin\/clientes\/(\d{11,14})(\/licenca-offline)?$/);
+  const m = url.pathname.match(/^\/api\/admin\/clientes\/(\d{11,14})(\/licenca-offline|\/supervisor)?$/);
   if (m) {
     const cnpj = m[1];
-    if (m[2] && request.method === 'POST') return licencaOffline(cnpj, request, env);
+    if (m[2] === '/licenca-offline' && request.method === 'POST') return licencaOffline(cnpj, request, env);
+    if (m[2] === '/supervisor' && request.method === 'PUT') return definirSupCliente(cnpj, request, env);
     if (!m[2] && request.method === 'GET') return detalheCliente(cnpj, env);
     if (!m[2] && request.method === 'PUT') return atualizarCliente(cnpj, request, env);
     if (!m[2] && request.method === 'DELETE') return excluirCliente(cnpj, env);

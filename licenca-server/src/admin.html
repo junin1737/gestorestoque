@@ -80,6 +80,11 @@
   .toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); background: var(--brand); color: #fff; padding: .6rem 1rem; border-radius: 9px; font-weight: 600; box-shadow: 0 8px 20px rgba(0,0,0,.2); z-index: 50; }
   .toast.erro { background: var(--danger); }
   footer { text-align: center; color: var(--muted); font-size: 12px; padding: 1.5rem 0; }
+  .aviso { background: var(--warn-bg); color: var(--warn); border-radius: var(--radius); padding: .7rem 1rem; margin-bottom: .8rem; font-weight: 600; display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; }
+  .aviso span { flex: 1; }
+  .sup-box { border: 1px solid var(--line); border-radius: 9px; padding: .7rem .8rem; }
+  .sup-box .linha { margin-top: .5rem; }
+  tr.solicitacao td { background: #fffaf0; }
 
   @media (max-width: 760px) {
     .col-hide { display: none; }
@@ -103,17 +108,26 @@
 <section id="app" hidden>
   <header class="top">
     <h1>Licenças · Gestor Estoque</h1>
+    <button class="btn sm" id="btn-sup">Senha do supervisor</button>
     <button class="btn sm" id="btn-novo">+ Cadastrar cliente</button>
     <button class="btn sm" id="btn-sair">Sair</button>
   </header>
   <main>
+    <div class="aviso" id="aviso-sup" hidden>
+      <span>A senha padrão do supervisor ainda não foi definida. Enquanto isso, os Gestores continuam aceitando a senha antiga (1020).</span>
+      <button class="btn sm primary" id="aviso-sup-btn" type="button">Definir agora</button>
+    </div>
+    <div class="aviso" id="aviso-solic" hidden>
+      <span id="aviso-solic-txt"></span>
+      <button class="btn sm primary" id="aviso-solic-btn" type="button">Ver solicitações</button>
+    </div>
     <div class="toolbar">
       <input id="busca" type="search" placeholder="Buscar por CNPJ, nome, máquina ou NSE…" />
       <button class="btn ghost" id="btn-atualizar">Atualizar</button>
     </div>
     <div class="tabs" id="tabs">
       <button class="tab active" data-status="">Todos <span class="n" data-n="todos">0</span></button>
-      <button class="tab pend" data-status="pendente">Pendentes <span class="n" data-n="pendente">0</span></button>
+      <button class="tab pend" data-status="pendente">Solicitações <span class="n" data-n="pendente">0</span></button>
       <button class="tab" data-status="liberado">Liberados <span class="n" data-n="liberado">0</span></button>
       <button class="tab" data-status="bloqueado">Bloqueados <span class="n" data-n="bloqueado">0</span></button>
     </div>
@@ -161,6 +175,17 @@
     <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
     <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
 
+    <h3>Senha do supervisor</h3>
+    <div class="sup-box">
+      <div id="d-sup-info" class="sub"></div>
+      <div class="linha">
+        <label>Nova senha própria deste cliente<input type="password" id="d-sup-1" autocomplete="new-password" /></label>
+        <label>Repita a senha<input type="password" id="d-sup-2" autocomplete="new-password" /></label>
+        <button class="btn ghost" id="d-sup-salvar" type="button">Definir</button>
+        <button class="btn ghost" id="d-sup-padrao" type="button">Usar a padrão</button>
+      </div>
+    </div>
+
     <h3>Instalações</h3>
     <div class="mini"><table>
       <thead><tr><th>NSE Clipp</th><th>Máquina</th><th>Gestor</th><th class="col-hide">Clipp</th><th>Último contato</th></tr></thead>
@@ -190,6 +215,23 @@
     <button class="btn ghost" id="d-fechar" type="button">Fechar</button>
     <button class="btn primary" id="d-salvar" type="button">Salvar</button>
   </div>
+</dialog>
+
+<dialog id="dlg-sup">
+  <form method="dialog" id="form-sup">
+    <div class="dlg-head"><h2>Senha padrão do supervisor</h2></div>
+    <div class="dlg-body">
+      <p class="sub" style="margin-top:0">Vale para todos os clientes que não têm senha própria. Ela substitui a antiga 1020 e chega aos Gestores em até 30 minutos (ou no próximo "Verificar novamente"). Mínimo de 8 caracteres, com letras e números. A senha é transformada em hash neste navegador — o servidor nunca recebe a senha em texto.</p>
+      <div id="s-info" class="sub" style="margin-bottom:.7rem"></div>
+      <label>Nova senha<input type="password" id="s-1" autocomplete="new-password" required /></label>
+      <label>Repita a senha<input type="password" id="s-2" autocomplete="new-password" required /></label>
+      <div class="erro" id="s-erro"></div>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn ghost" value="cancel" formnovalidate>Cancelar</button>
+      <button class="btn primary" value="ok">Salvar senha</button>
+    </div>
+  </form>
 </dialog>
 
 <dialog id="dlg-novo">
@@ -226,9 +268,26 @@ const $$ = (s) => [...document.querySelectorAll(s)];
 const st = { token: localStorage.getItem('mt_licenca_token') || '', status: '', q: '', atual: null };
 const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloqueado', vencido: 'Vencido' };
 const EVENTO = {
-  novo_cliente: 'Primeira conexão', nova_instalacao: 'Nova instalação', versao: 'Atualizou versão',
+  novo_cliente: 'Solicitou cadastro', nova_instalacao: 'Nova instalação', versao: 'Atualizou versão',
   status: 'Situação alterada', edicao: 'Dados alterados', licenca_offline: 'Licença offline gerada', cadastro_manual: 'Cadastro manual',
+  senha_supervisor: 'Senha do supervisor',
 };
+const SUP_ITER = 400000;
+
+function senhaFraca(s) {
+  if (s.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.';
+  if (!/[A-Za-z]/.test(s) || !/\d/.test(s)) return 'Use letras e números.';
+  return '';
+}
+
+/** PBKDF2-SHA256 calculado aqui; o Gestor confere a senha com o mesmo algoritmo. */
+async function hashSupervisor(senha) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const chave = await crypto.subtle.importKey('raw', new TextEncoder().encode(senha), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: SUP_ITER }, chave, 256);
+  const b64 = (u8) => btoa(String.fromCharCode(...u8));
+  return { alg: 'pbkdf2-sha256', iter: SUP_ITER, salt: b64(salt), hash: b64(new Uint8Array(bits)) };
+}
 
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -284,7 +343,7 @@ async function api(path, { method = 'GET', body } = {}) {
 function mostrarApp(logado) {
   $('#login').hidden = logado;
   $('#app').hidden = !logado;
-  if (logado) carregar();
+  if (logado) { carregarConfig(); carregar(); }
 }
 function sair() {
   st.token = '';
@@ -315,21 +374,65 @@ async function carregar() {
     const k = el.dataset.n;
     el.textContent = k === 'todos' ? Object.values(t).reduce((a, b) => a + b, 0) : (t[k] || 0);
   });
+  const nSolic = t.pendente || 0;
+  document.title = `${nSolic ? `(${nSolic}) ` : ''}Licenças · Gestor Estoque`;
+  $('#aviso-solic').hidden = !nSolic || st.status === 'pendente';
+  $('#aviso-solic-txt').textContent = nSolic === 1
+    ? '1 solicitação de cadastro aguardando sua aprovação.'
+    : `${nSolic} solicitações de cadastro aguardando sua aprovação.`;
   const tb = $('#tbody');
-  tb.innerHTML = r.clientes.map((c) => `
-    <tr class="row" data-cnpj="${esc(c.cnpj)}">
-      <td><span class="badge b-${esc(c.situacao)}">${ROTULO[c.situacao] || esc(c.situacao)}</span></td>
-      <td><div class="nome">${esc(c.fantasia || c.razao || 'Sem nome')}</div><div class="sub">${fmtCnpj(c.cnpj)}${c.razao && c.fantasia ? ` · ${esc(c.razao)}` : ''}</div></td>
+  tb.innerHTML = r.clientes.map((c) => {
+    const solic = c.status === 'pendente';
+    return `
+    <tr class="row${solic ? ' solicitacao' : ''}" data-cnpj="${esc(c.cnpj)}">
+      <td><span class="badge b-${esc(c.situacao)}">${solic ? 'Solicitação' : (ROTULO[c.situacao] || esc(c.situacao))}</span></td>
+      <td><div class="nome">${esc(c.fantasia || c.razao || 'Sem nome')}</div><div class="sub">${fmtCnpj(c.cnpj)}${c.razao && c.fantasia ? ` · ${esc(c.razao)}` : ''}${solic ? ` · solicitado ${fmtData(c.criado_em)}` : ''}</div></td>
       <td class="col-hide"><div>${esc(c.maquina || '—')}</div><div class="sub">${c.versao_gestor ? `v${esc(c.versao_gestor)}` : ''}${c.instalacoes > 1 ? ` · ${c.instalacoes} instalações` : ''}</div></td>
       <td class="col-hide"><div>${relativo(c.ultimo_contato)}</div><div class="sub">${fmtData(c.ultimo_contato)}</div></td>
       <td class="col-hide">${fmtDia(c.pago_ate)}</td>
       <td class="acoes">
-        ${c.status !== 'liberado' ? `<button class="btn ok sm" data-acao="liberado">Liberar</button>` : ''}
-        ${c.status !== 'bloqueado' ? `<button class="btn danger sm" data-acao="bloqueado">Bloquear</button>` : ''}
+        ${solic
+          ? `<button class="btn ok sm" data-acao="liberado">Aprovar</button><button class="btn danger sm" data-acao="bloqueado">Recusar</button>`
+          : `${c.status !== 'liberado' ? `<button class="btn ok sm" data-acao="liberado">Liberar</button>` : ''}
+             ${c.status !== 'bloqueado' ? `<button class="btn danger sm" data-acao="bloqueado">Bloquear</button>` : ''}`}
       </td>
-    </tr>`).join('');
+    </tr>`;
+  }).join('');
   $('#vazio').hidden = r.clientes.length > 0;
 }
+
+async function carregarConfig() {
+  const r = await api('/config');
+  if (!r.ok) return;
+  st.supPadrao = r.sup_padrao;
+  $('#aviso-sup').hidden = !!r.sup_padrao?.definida;
+}
+
+function abrirSupPadrao() {
+  $('#form-sup').reset();
+  $('#s-erro').textContent = '';
+  $('#s-info').textContent = st.supPadrao?.definida
+    ? `Senha atual definida em ${fmtData(st.supPadrao.atualizado_em)}.`
+    : 'Ainda não definida.';
+  $('#dlg-sup').showModal();
+}
+$('#btn-sup').addEventListener('click', abrirSupPadrao);
+$('#aviso-sup-btn').addEventListener('click', abrirSupPadrao);
+$('#aviso-solic-btn').addEventListener('click', () => $('.tab[data-status="pendente"]').click());
+$('#form-sup').addEventListener('submit', async (e) => {
+  if (e.submitter && e.submitter.value === 'cancel') return;
+  e.preventDefault();
+  const s1 = $('#s-1').value;
+  const fraca = senhaFraca(s1);
+  if (fraca) { $('#s-erro').textContent = fraca; return; }
+  if (s1 !== $('#s-2').value) { $('#s-erro').textContent = 'As senhas não conferem.'; return; }
+  const r = await api('/config/supervisor', { method: 'PUT', body: { sup: await hashSupervisor(s1) } });
+  if (!r.ok) { $('#s-erro').textContent = r.error || 'Falha ao salvar.'; return; }
+  st.supPadrao = r.sup_padrao;
+  $('#aviso-sup').hidden = true;
+  $('#dlg-sup').close();
+  toast('Senha padrão do supervisor salva.');
+});
 
 $('#tbody').addEventListener('click', async (e) => {
   const tr = e.target.closest('tr[data-cnpj]');
@@ -339,10 +442,14 @@ $('#tbody').addEventListener('click', async (e) => {
     e.stopPropagation();
     const status = btn.dataset.acao;
     const nome = tr.querySelector('.nome').textContent;
-    if (status === 'bloqueado' && !confirm(`Bloquear ${nome}? O Gestor deste cliente para em até 30 minutos.`)) return;
+    const solic = tr.classList.contains('solicitacao');
+    if (status === 'bloqueado' && !confirm(solic
+      ? `Recusar o cadastro de ${nome}? O Gestor continua bloqueado.`
+      : `Bloquear ${nome}? O Gestor deste cliente para em até 30 minutos.`)) return;
     btn.disabled = true;
     const r = await api(`/clientes/${tr.dataset.cnpj}`, { method: 'PUT', body: { status } });
     if (!r.ok) toast(r.error || 'Falha.', true);
+    else if (solic) toast(status === 'liberado' ? `${nome} aprovado. O Gestor libera em até 1 minuto.` : `Cadastro de ${nome} recusado.`);
     else toast(status === 'liberado' ? `${nome} liberado.` : `${nome} bloqueado.`);
     carregar();
     return;
@@ -377,6 +484,12 @@ function preencherCliente(r) {
   $('#d-fantasia').value = c.fantasia || '';
   $('#d-mensagem').value = c.mensagem || '';
   $('#d-obs').value = c.observacao || '';
+  $('#d-sup-1').value = '';
+  $('#d-sup-2').value = '';
+  $('#d-sup-padrao').hidden = !c.sup_propria;
+  $('#d-sup-info').textContent = c.sup_propria
+    ? `Usa senha própria (definida em ${fmtData(c.sup_atualizado_em)}).`
+    : (st.supPadrao?.definida ? 'Usa a senha padrão.' : 'Usa a senha padrão — que ainda não foi definida (Gestor aceita 1020).');
   $('#d-inst').innerHTML = r.instalacoes.length
     ? r.instalacoes.map((i) => `<tr><td>${esc(i.nse || '—')}</td><td>${esc(i.maquina || '—')}</td><td>${esc(i.versao_gestor || '—')}</td><td class="col-hide">${esc(i.versao_clipp || '—')}</td><td>${fmtData(i.ultimo_contato)}</td></tr>`).join('')
     : '<tr><td colspan="5" class="sub">Ainda não conectou.</td></tr>';
@@ -409,6 +522,23 @@ $('#d-salvar').addEventListener('click', async () => {
   preencherCliente(r);
   toast('Salvo.');
   carregar();
+});
+$('#d-sup-salvar').addEventListener('click', async () => {
+  const s1 = $('#d-sup-1').value;
+  const fraca = senhaFraca(s1);
+  if (fraca) { toast(fraca, true); return; }
+  if (s1 !== $('#d-sup-2').value) { toast('As senhas não conferem.', true); return; }
+  const r = await api(`/clientes/${st.atual}/supervisor`, { method: 'PUT', body: { sup: await hashSupervisor(s1) } });
+  if (!r.ok) { toast(r.error || 'Falha ao salvar.', true); return; }
+  preencherCliente(r);
+  toast('Senha do supervisor deste cliente salva.');
+});
+$('#d-sup-padrao').addEventListener('click', async () => {
+  if (!confirm('Este cliente volta a usar a senha padrão do supervisor?')) return;
+  const r = await api(`/clientes/${st.atual}/supervisor`, { method: 'PUT', body: { sup: null } });
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  preencherCliente(r);
+  toast('Cliente voltou a usar a senha padrão.');
 });
 $('#d-excluir').addEventListener('click', async () => {
   if (!confirm('Excluir este cliente e todo o histórico? Se o Gestor dele conectar de novo, volta como pendente (bloqueado).')) return;
