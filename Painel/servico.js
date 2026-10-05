@@ -469,15 +469,57 @@ function fmtDataHora(iso) {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR');
 }
 
+function fmtCnpj(v) {
+  return String(v || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+}
+
+/** Status para o qual o usuário fechou a janela de registro (não reabre até mudar). */
+let licModalFechadoEm = null;
+let licModalStatus = null;
+
+function renderLicModal(l) {
+  const modal = $('#lic-modal');
+  if (!modal) return;
+  const precisa = !l.liberado && l.status !== 'verificando' && l.status !== 'desativado';
+  if (!precisa) {
+    modal.hidden = true;
+    licModalFechadoEm = null;
+    return;
+  }
+  if (modal.hidden && licModalFechadoEm === l.status) return;
+
+  let titulo = `Licença: ${LIC_TITULOS[l.status] || l.status}`;
+  let msg = l.mensagem || '';
+  if (l.status === 'pendente') {
+    titulo = 'Registro solicitado';
+    msg = `Este computador ainda não está liberado. A solicitação de registro foi enviada à MT Automações`
+      + `${l.solicitado_em ? ` em ${fmtDataHora(l.solicitado_em)}` : ''} com os dados abaixo. `
+      + 'Assim que for aprovada, o sistema libera sozinho em até 1 minuto.';
+  } else if (l.status === 'sem_licenca') {
+    titulo = 'Registro necessário';
+  }
+  $('#lic-modal-titulo').textContent = titulo;
+  $('#lic-modal-msg').textContent = msg;
+  $('#lic-modal-app').textContent = l.aplicacao || 'GestorEstoque';
+  $('#lic-modal-empresa').textContent = l.fantasia || '—';
+  $('#lic-modal-cnpj').textContent = fmtCnpj(l.cnpj) || '—';
+  $('#lic-modal-nse').textContent = l.nse || '—';
+  $('#lic-modal-maquina').textContent = l.maquina || '—';
+  modal.querySelector('.lic-modal-card').classList.toggle('pendente', l.status === 'pendente');
+  licModalStatus = l.status;
+  modal.hidden = false;
+}
+
 function renderLicenca(l) {
   if (!l) return;
+  renderLicModal(l);
   const titulo = LIC_TITULOS[l.status] || l.status;
   const st = $('#lic-status');
   if (st) {
     st.textContent = titulo;
     st.style.color = l.liberado ? 'var(--ok)' : (l.status === 'pendente' ? 'var(--warn, #9a6400)' : 'var(--danger)');
   }
-  const cnpj = String(l.cnpj || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  const cnpj = fmtCnpj(l.cnpj);
   const partes = [];
   if (cnpj) partes.push(`CNPJ ${cnpj}`);
   if (l.nse) partes.push(`NSE ${l.nse}`);
@@ -506,7 +548,45 @@ function showLicMsg(text, ok) {
 async function refreshLicenca() {
   const res = await api('/licenca');
   if (res.ok) renderLicenca(res.licenca);
+  return res.ok ? res.licenca : null;
 }
+
+function showLicModalStatus(text, ok) {
+  const el = $('#lic-modal-status');
+  if (!el) return;
+  el.hidden = !text;
+  el.textContent = text || '';
+  el.style.color = ok === false ? 'var(--danger)' : ok === true ? 'var(--ok)' : '';
+}
+
+function fecharLicModal() {
+  $('#lic-modal').hidden = true;
+  licModalFechadoEm = licModalStatus;
+  showLicModalStatus('');
+}
+
+$('#lic-modal-fechar')?.addEventListener('click', fecharLicModal);
+
+$('#lic-modal-codigo')?.addEventListener('click', () => {
+  fecharLicModal();
+  setPanel('config');
+  setConfigTab('sistema');
+  $('#lic-codigo')?.focus();
+});
+
+$('#lic-modal-verificar')?.addEventListener('click', async (e) => {
+  e.target.disabled = true;
+  showLicModalStatus('Consultando servidor de licenças…');
+  const res = await api('/licenca/verificar', { method: 'POST', body: {} });
+  e.target.disabled = false;
+  if (!res.ok) {
+    showLicModalStatus(res.error || 'Falha ao verificar.', false);
+    return;
+  }
+  renderLicenca(res.licenca);
+  if (res.licenca.liberado) showLicModalStatus('');
+  else showLicModalStatus(res.licenca.ultimo_erro ? `Falha: ${res.licenca.ultimo_erro}` : 'Ainda aguardando aprovação.', false);
+});
 
 $('#btn-lic-verificar')?.addEventListener('click', async (e) => {
   e.target.disabled = true;
@@ -541,7 +621,12 @@ $('#btn-lic-aplicar')?.addEventListener('click', async () => {
   await refreshNetwork();
   await loadBanco();
   await loadSobre();
-  await refreshLicenca();
+  // Primeira consulta ao servidor de licenças roda logo após abrir: acompanha de perto até ter resposta.
+  for (let i = 0; i < 15; i++) {
+    const l = await refreshLicenca();
+    if (l && l.status !== 'verificando') break;
+    await new Promise((r) => setTimeout(r, 2000));
+  }
   setInterval(refreshNetwork, 15000);
   setInterval(refreshLicenca, 30000);
 })();

@@ -19,6 +19,8 @@ const TIMEOUT_MS = 10000;
 /** Tolerância para relógio do Windows voltado para trás antes de considerar burla. */
 const FOLGA_RELOGIO_MS = 2 * 60 * 60 * 1000;
 const CONTATO = 'MT Automações — (34) 3674-1937';
+/** Nome da aplicação no painel de licenças (o mesmo painel atende outras aplicações). */
+const APLICACAO = 'GestorEstoque';
 
 // Par da LICENCA_PRIVATE_KEY do servidor de licenças (licenca-server/.keys).
 const CHAVE_PUBLICA = crypto.createPublicKey(`-----BEGIN PUBLIC KEY-----
@@ -72,6 +74,7 @@ function abrirLicenca(lic) {
   if (dados.v !== 1 || !dados.cnpj || !dados.status || !dados.valido_ate || !dados.emitido_em) {
     throw new Error('Licença incompleta.');
   }
+  if (dados.app && dados.app !== APLICACAO) throw new Error(`Esta licença é da aplicação ${dados.app}, não do ${APLICACAO}.`);
   return dados;
 }
 
@@ -156,6 +159,7 @@ async function verificarAgora() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             ...identidade,
+            aplicacao: APLICACAO,
             maquina: os.hostname(),
             versao_gestor: versaoGestor(),
           }),
@@ -203,6 +207,9 @@ function situacao() {
   if (!ATIVO) return { liberado: true, status: 'desativado', mensagem: null, contato: CONTATO };
   const st = carregarEstado();
   const base = {
+    aplicacao: APLICACAO,
+    maquina: os.hostname(),
+    fantasia: identidade?.fantasia || identidade?.razao || null,
     cnpj: identidade?.cnpj || null,
     nse: identidade?.nse || null,
     ultimo_contato: st.ultimo_contato || null,
@@ -224,7 +231,7 @@ function situacao() {
       status: nunca ? 'verificando' : 'sem_licenca',
       mensagem: nunca
         ? 'Verificando licença…'
-        : `Não foi possível validar a licença${st.ultimo_erro ? ` (${st.ultimo_erro})` : ''}. Confira a internet do computador servidor ou contate a ${CONTATO}.`,
+        : `Não foi possível registrar este computador no servidor de licenças${st.ultimo_erro ? ` (${st.ultimo_erro})` : ''}. Confira a internet do computador servidor e clique em Verificar agora, ou solicite o registro à ${CONTATO}.`,
     };
   }
   const out = {
@@ -347,6 +354,7 @@ function iniciar() {
 
 module.exports = {
   LICENCA_URL,
+  APLICACAO,
   iniciar,
   verificarAgora,
   situacao,

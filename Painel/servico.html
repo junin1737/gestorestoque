@@ -237,6 +237,26 @@
       </section>
     </main>
   </div>
+
+  <div id="lic-modal" class="lic-modal" hidden role="dialog" aria-modal="true" aria-labelledby="lic-modal-titulo">
+    <div class="lic-modal-card">
+      <h2 id="lic-modal-titulo">Registro necessário</h2>
+      <p id="lic-modal-msg"></p>
+      <dl class="lic-modal-dados">
+        <dt>Aplicação</dt><dd id="lic-modal-app">—</dd>
+        <dt>Empresa</dt><dd id="lic-modal-empresa">—</dd>
+        <dt>CNPJ</dt><dd id="lic-modal-cnpj">—</dd>
+        <dt>NSE Clipp</dt><dd id="lic-modal-nse">—</dd>
+        <dt>Computador</dt><dd id="lic-modal-maquina">—</dd>
+      </dl>
+      <p class="hint msg-line" id="lic-modal-status" hidden></p>
+      <div class="banco-actions">
+        <button type="button" id="lic-modal-codigo" class="btn-outline">Tenho um código offline</button>
+        <button type="button" id="lic-modal-fechar" class="btn-outline">Fechar</button>
+        <button type="button" id="lic-modal-verificar" class="btn-teal">Verificar agora</button>
+      </div>
+    </div>
+  </div>
   <script src="servico.js"></script>
 </body>
 </html>

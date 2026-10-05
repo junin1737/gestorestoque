@@ -5,6 +5,10 @@ const SESSAO_HORAS = 12;
 const STATUS_VALIDOS = ['pendente', 'liberado', 'bloqueado'];
 const MSG_PENDENTE = 'Cadastro recebido. Aguardando liberação da MT Automações — (34) 3674-1937.';
 const MSG_BLOQUEADO = 'Acesso bloqueado. Entre em contato com a MT Automações — (34) 3674-1937.';
+/** Gestor até 1.2.59 não envia o nome da aplicação. */
+const APP_PADRAO = 'GestorEstoque';
+const APP_RE = /^[A-Za-z][A-Za-z0-9_.-]{1,39}$/;
+const APP_ROTA = '[A-Za-z][A-Za-z0-9_.-]{1,39}';
 
 const enc = new TextEncoder();
 
@@ -26,6 +30,11 @@ function soDigitos(v) {
 function texto(v, max = 200) {
   const s = String(v ?? '').trim();
   return s ? s.slice(0, max) : null;
+}
+
+function nomeApp(v) {
+  const s = String(v ?? '').trim();
+  return APP_RE.test(s) ? s : null;
 }
 
 function dataValida(v) {
@@ -107,10 +116,14 @@ async function supDoCliente(env, cli) {
   try { return supHashValido(JSON.parse(padrao.valor)); } catch { return null; }
 }
 
-async function registrarEvento(env, cnpj, tipo, detalhe) {
-  await env.DB.prepare('INSERT INTO eventos (cnpj, tipo, detalhe, criado_em) VALUES (?, ?, ?, ?)')
-    .bind(cnpj, tipo, detalhe ? String(detalhe).slice(0, 500) : null, agoraIso())
+async function registrarEvento(env, cnpj, app, tipo, detalhe) {
+  await env.DB.prepare('INSERT INTO eventos (cnpj, aplicacao, tipo, detalhe, criado_em) VALUES (?, ?, ?, ?, ?)')
+    .bind(cnpj, app, tipo, detalhe ? String(detalhe).slice(0, 500) : null, agoraIso())
     .run();
+}
+
+function buscarCliente(env, cnpj, app) {
+  return env.DB.prepare('SELECT * FROM clientes WHERE cnpj = ? AND aplicacao = ?').bind(cnpj, app).first();
 }
 
 // ─── Rota pública: consulta do Gestor ─────────────────────────────────────────
@@ -124,40 +137,43 @@ async function check(request, env) {
   }
   const cnpj = soDigitos(body.cnpj);
   if (cnpj.length !== 14 && cnpj.length !== 11) return json({ ok: false, error: 'CNPJ/CPF inválido.' }, 400);
+  const app = body.aplicacao === undefined ? APP_PADRAO : nomeApp(body.aplicacao);
+  if (!app) return json({ ok: false, error: 'Nome da aplicação inválido.' }, 400);
   const nse = texto(body.nse, 40) || '';
   const agora = agoraIso();
   const ip = request.headers.get('CF-Connecting-IP') || '';
 
-  let cli = await env.DB.prepare('SELECT * FROM clientes WHERE cnpj = ?').bind(cnpj).first();
+  let cli = await buscarCliente(env, cnpj, app);
   if (!cli) {
     await env.DB.prepare(
-      `INSERT INTO clientes (cnpj, razao, fantasia, status, criado_em, atualizado_em, ultimo_contato)
-       VALUES (?, ?, ?, 'pendente', ?, ?, ?)`
-    ).bind(cnpj, texto(body.razao, 120), texto(body.fantasia, 120), agora, agora, agora).run();
-    await registrarEvento(env, cnpj, 'novo_cliente', `${texto(body.fantasia, 120) || ''} — ${texto(body.maquina, 80) || ''}`);
-    cli = await env.DB.prepare('SELECT * FROM clientes WHERE cnpj = ?').bind(cnpj).first();
+      `INSERT INTO clientes (cnpj, aplicacao, razao, fantasia, status, criado_em, atualizado_em, ultimo_contato)
+       VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?)`
+    ).bind(cnpj, app, texto(body.razao, 120), texto(body.fantasia, 120), agora, agora, agora).run();
+    await registrarEvento(env, cnpj, app, 'novo_cliente',
+      `${texto(body.fantasia, 120) || ''} — NSE ${nse || '—'} — ${texto(body.maquina, 80) || ''}`);
+    cli = await buscarCliente(env, cnpj, app);
   } else {
     await env.DB.prepare(
       `UPDATE clientes SET ultimo_contato = ?,
          razao = COALESCE(?, razao), fantasia = COALESCE(?, fantasia)
-       WHERE cnpj = ?`
-    ).bind(agora, texto(body.razao, 120), texto(body.fantasia, 120), cnpj).run();
+       WHERE cnpj = ? AND aplicacao = ?`
+    ).bind(agora, texto(body.razao, 120), texto(body.fantasia, 120), cnpj, app).run();
   }
 
-  const inst = await env.DB.prepare('SELECT versao_gestor FROM instalacoes WHERE cnpj = ? AND nse = ?')
-    .bind(cnpj, nse).first();
+  const inst = await env.DB.prepare('SELECT versao_gestor FROM instalacoes WHERE cnpj = ? AND aplicacao = ? AND nse = ?')
+    .bind(cnpj, app, nse).first();
   const versao = texto(body.versao_gestor, 20);
   await env.DB.prepare(
-    `INSERT INTO instalacoes (cnpj, nse, maquina, versao_gestor, versao_clipp, sistema, ip, primeiro_contato, ultimo_contato)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-     ON CONFLICT (cnpj, nse) DO UPDATE SET
+    `INSERT INTO instalacoes (cnpj, aplicacao, nse, maquina, versao_gestor, versao_clipp, sistema, ip, primeiro_contato, ultimo_contato)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (cnpj, aplicacao, nse) DO UPDATE SET
        maquina = excluded.maquina, versao_gestor = excluded.versao_gestor, versao_clipp = excluded.versao_clipp,
        sistema = excluded.sistema, ip = excluded.ip, ultimo_contato = excluded.ultimo_contato`
-  ).bind(cnpj, nse, texto(body.maquina, 80), versao, texto(body.versao_clipp, 20), texto(body.sistema, 20), ip, agora, agora).run();
+  ).bind(cnpj, app, nse, texto(body.maquina, 80), versao, texto(body.versao_clipp, 20), texto(body.sistema, 20), ip, agora, agora).run();
   if (!inst) {
-    await registrarEvento(env, cnpj, 'nova_instalacao', `NSE ${nse || '—'} · ${texto(body.maquina, 80) || ''} · v${versao || '?'}`);
+    await registrarEvento(env, cnpj, app, 'nova_instalacao', `NSE ${nse || '—'} · ${texto(body.maquina, 80) || ''} · v${versao || '?'}`);
   } else if (inst.versao_gestor && versao && inst.versao_gestor !== versao) {
-    await registrarEvento(env, cnpj, 'versao', `${texto(body.maquina, 80) || nse}: ${inst.versao_gestor} → ${versao}`);
+    await registrarEvento(env, cnpj, app, 'versao', `${texto(body.maquina, 80) || nse}: ${inst.versao_gestor} → ${versao}`);
   }
 
   const sit = situacaoCliente(cli);
@@ -169,6 +185,7 @@ async function check(request, env) {
   }
   const licenca = await assinarLicenca(env, {
     tipo: 'online',
+    app,
     cnpj,
     nse,
     status: sit.status,
@@ -230,33 +247,42 @@ async function login(request, env) {
 async function listarClientes(url, env) {
   const q = String(url.searchParams.get('q') || '').trim();
   const status = String(url.searchParams.get('status') || '').trim();
+  const app = nomeApp(url.searchParams.get('app'));
   const where = [];
   const params = [];
   if (STATUS_VALIDOS.includes(status)) {
     where.push('c.status = ?');
     params.push(status);
   }
+  if (app) {
+    where.push('c.aplicacao = ?');
+    params.push(app);
+  }
   if (q) {
-    where.push('(c.cnpj LIKE ? OR c.razao LIKE ? OR c.fantasia LIKE ? OR EXISTS (SELECT 1 FROM instalacoes i2 WHERE i2.cnpj = c.cnpj AND (i2.nse LIKE ? OR i2.maquina LIKE ?)))');
+    where.push(`(c.cnpj LIKE ? OR c.razao LIKE ? OR c.fantasia LIKE ? OR c.aplicacao LIKE ? OR EXISTS (
+      SELECT 1 FROM instalacoes i2 WHERE i2.cnpj = c.cnpj AND i2.aplicacao = c.aplicacao AND (i2.nse LIKE ? OR i2.maquina LIKE ?)))`);
     const like = `%${q}%`;
     const likeCnpj = `%${soDigitos(q) || q}%`;
-    params.push(likeCnpj, like, like, like, like);
+    params.push(likeCnpj, like, like, like, like, like);
   }
+  const ultimaInst = (col) => `(SELECT i.${col} FROM instalacoes i WHERE i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao
+    ORDER BY i.ultimo_contato DESC LIMIT 1) AS ${col}`;
   const sql = `
     SELECT c.*,
-      (SELECT COUNT(*) FROM instalacoes i WHERE i.cnpj = c.cnpj) AS instalacoes,
-      (SELECT i.versao_gestor FROM instalacoes i WHERE i.cnpj = c.cnpj ORDER BY i.ultimo_contato DESC LIMIT 1) AS versao_gestor,
-      (SELECT i.maquina FROM instalacoes i WHERE i.cnpj = c.cnpj ORDER BY i.ultimo_contato DESC LIMIT 1) AS maquina
+      (SELECT COUNT(*) FROM instalacoes i WHERE i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao) AS instalacoes,
+      ${ultimaInst('versao_gestor')}, ${ultimaInst('maquina')}, ${ultimaInst('nse')}
     FROM clientes c
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY CASE c.status WHEN 'pendente' THEN 0 ELSE 1 END, COALESCE(c.ultimo_contato, c.criado_em) DESC`;
   const { results } = await env.DB.prepare(sql).bind(...params).all();
   const totais = await env.DB.prepare('SELECT status, COUNT(*) AS n FROM clientes GROUP BY status').all();
+  const apps = await env.DB.prepare('SELECT DISTINCT aplicacao FROM clientes ORDER BY aplicacao').all();
   const agora = new Date();
   return json({
     ok: true,
     clientes: results.map((c) => clientePublico(c, agora)),
     totais: Object.fromEntries(totais.results.map((r) => [r.status, r.n])),
+    aplicacoes: [...new Set([APP_PADRAO, ...apps.results.map((r) => r.aplicacao)])],
   });
 }
 
@@ -266,11 +292,13 @@ function clientePublico(c, agora = new Date()) {
   return { ...resto, sup_propria: !!supHash, situacao: situacaoCliente(c, agora).status };
 }
 
-async function detalheCliente(cnpj, env) {
-  const cli = await env.DB.prepare('SELECT * FROM clientes WHERE cnpj = ?').bind(cnpj).first();
+async function detalheCliente(cnpj, app, env) {
+  const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
-  const inst = await env.DB.prepare('SELECT * FROM instalacoes WHERE cnpj = ? ORDER BY ultimo_contato DESC').bind(cnpj).all();
-  const ev = await env.DB.prepare('SELECT * FROM eventos WHERE cnpj = ? ORDER BY id DESC LIMIT 100').bind(cnpj).all();
+  const inst = await env.DB.prepare('SELECT * FROM instalacoes WHERE cnpj = ? AND aplicacao = ? ORDER BY ultimo_contato DESC')
+    .bind(cnpj, app).all();
+  const ev = await env.DB.prepare('SELECT * FROM eventos WHERE cnpj = ? AND aplicacao = ? ORDER BY id DESC LIMIT 100')
+    .bind(cnpj, app).all();
   return json({
     ok: true,
     cliente: clientePublico(cli),
@@ -293,13 +321,13 @@ async function definirSupPadrao(request, env) {
     `INSERT INTO config (chave, valor, atualizado_em) VALUES ('sup_padrao', ?, ?)
      ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor, atualizado_em = excluded.atualizado_em`
   ).bind(JSON.stringify(sup), agora).run();
-  await registrarEvento(env, '*', 'senha_supervisor', 'Senha padrão do supervisor alterada');
+  await registrarEvento(env, '*', null, 'senha_supervisor', 'Senha padrão do supervisor alterada');
   return obterConfig(env);
 }
 
 /** body.sup = hash novo | null (volta a usar a senha padrão). */
-async function definirSupCliente(cnpj, request, env) {
-  const cli = await env.DB.prepare('SELECT cnpj FROM clientes WHERE cnpj = ?').bind(cnpj).first();
+async function definirSupCliente(cnpj, app, request, env) {
+  const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
   let valor = null;
@@ -309,10 +337,10 @@ async function definirSupCliente(cnpj, request, env) {
     valor = JSON.stringify(sup);
   }
   const agora = agoraIso();
-  await env.DB.prepare('UPDATE clientes SET sup_hash = ?, sup_atualizado_em = ?, atualizado_em = ? WHERE cnpj = ?')
-    .bind(valor, agora, agora, cnpj).run();
-  await registrarEvento(env, cnpj, 'senha_supervisor', valor ? 'Senha própria do supervisor definida' : 'Voltou a usar a senha padrão');
-  return detalheCliente(cnpj, env);
+  await env.DB.prepare('UPDATE clientes SET sup_hash = ?, sup_atualizado_em = ?, atualizado_em = ? WHERE cnpj = ? AND aplicacao = ?')
+    .bind(valor, agora, agora, cnpj, app).run();
+  await registrarEvento(env, cnpj, app, 'senha_supervisor', valor ? 'Senha própria do supervisor definida' : 'Voltou a usar a senha padrão');
+  return detalheCliente(cnpj, app, env);
 }
 
 function camposEditaveis(body) {
@@ -337,8 +365,9 @@ async function criarCliente(request, env) {
   const body = await request.json().catch(() => ({}));
   const cnpj = soDigitos(body.cnpj);
   if (cnpj.length !== 14 && cnpj.length !== 11) return json({ ok: false, error: 'CNPJ/CPF inválido.' }, 400);
-  const existe = await env.DB.prepare('SELECT cnpj FROM clientes WHERE cnpj = ?').bind(cnpj).first();
-  if (existe) return json({ ok: false, error: 'Cliente já cadastrado.' }, 409);
+  const app = body.aplicacao === undefined || body.aplicacao === '' ? APP_PADRAO : nomeApp(body.aplicacao);
+  if (!app) return json({ ok: false, error: 'Nome da aplicação inválido.' }, 400);
+  if (await buscarCliente(env, cnpj, app)) return json({ ok: false, error: `Cliente já cadastrado no ${app}.` }, 409);
   let campos;
   try {
     campos = camposEditaveis({ status: 'liberado', ...body });
@@ -347,16 +376,16 @@ async function criarCliente(request, env) {
   }
   const agora = agoraIso();
   await env.DB.prepare(
-    `INSERT INTO clientes (cnpj, razao, fantasia, status, pago_ate, mensagem, observacao, criado_em, atualizado_em)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(cnpj, campos.razao ?? null, campos.fantasia ?? null, campos.status, campos.pago_ate ?? null,
+    `INSERT INTO clientes (cnpj, aplicacao, razao, fantasia, status, pago_ate, mensagem, observacao, criado_em, atualizado_em)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).bind(cnpj, app, campos.razao ?? null, campos.fantasia ?? null, campos.status, campos.pago_ate ?? null,
     campos.mensagem ?? null, campos.observacao ?? null, agora, agora).run();
-  await registrarEvento(env, cnpj, 'cadastro_manual', `status ${campos.status}`);
-  return detalheCliente(cnpj, env);
+  await registrarEvento(env, cnpj, app, 'cadastro_manual', `status ${campos.status}`);
+  return detalheCliente(cnpj, app, env);
 }
 
-async function atualizarCliente(cnpj, request, env) {
-  const cli = await env.DB.prepare('SELECT * FROM clientes WHERE cnpj = ?').bind(cnpj).first();
+async function atualizarCliente(cnpj, app, request, env) {
+  const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
   let campos;
@@ -366,32 +395,32 @@ async function atualizarCliente(cnpj, request, env) {
     return json({ ok: false, error: e.message }, 400);
   }
   const chaves = Object.keys(campos);
-  if (!chaves.length) return detalheCliente(cnpj, env);
+  if (!chaves.length) return detalheCliente(cnpj, app, env);
   await env.DB.prepare(
-    `UPDATE clientes SET ${chaves.map((k) => `${k} = ?`).join(', ')}, atualizado_em = ? WHERE cnpj = ?`
-  ).bind(...chaves.map((k) => campos[k]), agoraIso(), cnpj).run();
+    `UPDATE clientes SET ${chaves.map((k) => `${k} = ?`).join(', ')}, atualizado_em = ? WHERE cnpj = ? AND aplicacao = ?`
+  ).bind(...chaves.map((k) => campos[k]), agoraIso(), cnpj, app).run();
   if (campos.status && campos.status !== cli.status) {
-    await registrarEvento(env, cnpj, 'status', `${cli.status} → ${campos.status}`);
+    await registrarEvento(env, cnpj, app, 'status', `${cli.status} → ${campos.status}`);
   }
   const outros = chaves.filter((k) => k !== 'status' && (campos[k] ?? null) !== (cli[k] ?? null));
   if (outros.length) {
-    await registrarEvento(env, cnpj, 'edicao', outros.map((k) => `${k}: ${campos[k] ?? '—'}`).join(' · '));
+    await registrarEvento(env, cnpj, app, 'edicao', outros.map((k) => `${k}: ${campos[k] ?? '—'}`).join(' · '));
   }
-  return detalheCliente(cnpj, env);
+  return detalheCliente(cnpj, app, env);
 }
 
-async function excluirCliente(cnpj, env) {
+async function excluirCliente(cnpj, app, env) {
   await env.DB.batch([
-    env.DB.prepare('DELETE FROM eventos WHERE cnpj = ?').bind(cnpj),
-    env.DB.prepare('DELETE FROM instalacoes WHERE cnpj = ?').bind(cnpj),
-    env.DB.prepare('DELETE FROM clientes WHERE cnpj = ?').bind(cnpj),
+    env.DB.prepare('DELETE FROM eventos WHERE cnpj = ? AND aplicacao = ?').bind(cnpj, app),
+    env.DB.prepare('DELETE FROM instalacoes WHERE cnpj = ? AND aplicacao = ?').bind(cnpj, app),
+    env.DB.prepare('DELETE FROM clientes WHERE cnpj = ? AND aplicacao = ?').bind(cnpj, app),
   ]);
   return json({ ok: true });
 }
 
 /** Código para colar na tela de serviço quando o cliente está sem internet. */
-async function licencaOffline(cnpj, request, env) {
-  const cli = await env.DB.prepare('SELECT * FROM clientes WHERE cnpj = ?').bind(cnpj).first();
+async function licencaOffline(cnpj, app, request, env) {
+  const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
   const dias = Math.min(Math.max(parseInt(body.dias, 10) || 30, 1), 365);
@@ -400,6 +429,7 @@ async function licencaOffline(cnpj, request, env) {
   const validoAte = new Date(emitido.getTime() + dias * 86400000);
   const licenca = await assinarLicenca(env, {
     tipo: 'offline',
+    app,
     cnpj,
     nse,
     status: 'liberado',
@@ -409,10 +439,12 @@ async function licencaOffline(cnpj, request, env) {
     valido_ate: validoAte.toISOString(),
     sup: await supDoCliente(env, cli),
   });
-  await registrarEvento(env, cnpj, 'licenca_offline', `${dias} dia(s)${nse ? ` · NSE ${nse}` : ''}`);
+  await registrarEvento(env, cnpj, app, 'licenca_offline', `${dias} dia(s)${nse ? ` · NSE ${nse}` : ''}`);
   const codigo = `MTL1.${b64url(enc.encode(JSON.stringify(licenca)))}`;
   return json({ ok: true, codigo, valido_ate: validoAte.toISOString() });
 }
+
+const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor)?$`);
 
 async function rotaAdmin(request, env, url) {
   if (url.pathname === '/api/admin/login' && request.method === 'POST') return login(request, env);
@@ -424,14 +456,14 @@ async function rotaAdmin(request, env, url) {
     if (request.method === 'GET') return listarClientes(url, env);
     if (request.method === 'POST') return criarCliente(request, env);
   }
-  const m = url.pathname.match(/^\/api\/admin\/clientes\/(\d{11,14})(\/licenca-offline|\/supervisor)?$/);
+  const m = url.pathname.match(ROTA_CLIENTE);
   if (m) {
-    const cnpj = m[1];
-    if (m[2] === '/licenca-offline' && request.method === 'POST') return licencaOffline(cnpj, request, env);
-    if (m[2] === '/supervisor' && request.method === 'PUT') return definirSupCliente(cnpj, request, env);
-    if (!m[2] && request.method === 'GET') return detalheCliente(cnpj, env);
-    if (!m[2] && request.method === 'PUT') return atualizarCliente(cnpj, request, env);
-    if (!m[2] && request.method === 'DELETE') return excluirCliente(cnpj, env);
+    const [, app, cnpj, sub] = m;
+    if (sub === '/licenca-offline' && request.method === 'POST') return licencaOffline(cnpj, app, request, env);
+    if (sub === '/supervisor' && request.method === 'PUT') return definirSupCliente(cnpj, app, request, env);
+    if (!sub && request.method === 'GET') return detalheCliente(cnpj, app, env);
+    if (!sub && request.method === 'PUT') return atualizarCliente(cnpj, app, request, env);
+    if (!sub && request.method === 'DELETE') return excluirCliente(cnpj, app, env);
   }
   return json({ ok: false, error: 'Rota não encontrada.' }, 404);
 }

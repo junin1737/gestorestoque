@@ -1172,7 +1172,7 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   body.origem = isNativeApk() ? 'celular' : 'navegador';
   if (editarQtd && state.isNovo && $('#q-atual')) {
     body.qtd_atual = parseBrMoney($('#q-atual').value);
-  } else if (editarQtd && $('#q-nova')) {
+  } else if (editarQtd && $('#q-nova') && String($('#q-nova').value).trim()) {
     const nova = parseBrMoney($('#q-nova').value);
     const base = Number(it.qtd_atual || 0);
     if (Number.isFinite(nova) && Math.abs(nova - base) > 1e-9) {
@@ -1565,13 +1565,15 @@ function renderDetalhe() {
     }
   }
 
-  function applyDelta(delta) {
-    const d = Number.isFinite(delta) ? delta : 0;
+  let deltaAtual = 0;
+  function applyDelta(delta, { manterNova = false } = {}) {
+    const d = Number.isFinite(delta) ? Number(delta.toFixed(6)) : 0;
+    deltaAtual = d;
     syncing = true;
     if (qAdd) qAdd.value = fmtMoney2(d > 0 ? d : 0);
     if (qRem) qRem.value = fmtMoney2(d < 0 ? Math.abs(d) : 0);
     if (qAtual) qAtual.value = fmtMoney2(base + d);
-    if (qNova) qNova.value = fmtMoney2(base + d);
+    if (qNova && !manterNova) qNova.value = fmtMoney2(base + d);
     syncing = false;
     paintDiff(d);
   }
@@ -1591,20 +1593,25 @@ function renderDetalhe() {
   qAdd?.addEventListener('input', () => { state.qtdModo = 'delta'; updateDiffFromAddRem(); });
   qRem?.addEventListener('input', () => { state.qtdModo = 'delta'; updateDiffFromAddRem(); });
   qAtual?.addEventListener('input', () => { state.qtdModo = 'absoluto'; updateAddRemFromAtual(); });
+  // O campo é do usuário enquanto ele digita (pode ficar vazio); só formata ao sair.
+  qNova?.addEventListener('focus', () => qNova.select());
   qNova?.addEventListener('input', () => {
     if (syncing) return;
     state.qtdModo = 'absoluto';
-    applyDelta(parseBrMoney(qNova.value) - base);
+    const vazio = !String(qNova.value).trim();
+    applyDelta(vazio ? 0 : parseBrMoney(qNova.value) - base, { manterNova: true });
+  });
+  qNova?.addEventListener('blur', () => {
+    if (!String(qNova.value).trim()) state.qtdModo = 'delta';
+    applyDelta(deltaAtual);
   });
   $('#q-plus')?.addEventListener('click', () => {
     state.qtdModo = 'delta';
-    const cur = parseBrMoney(qNova?.value ?? qAtual?.value ?? base);
-    applyDelta((cur + 1) - base);
+    applyDelta(deltaAtual + 1);
   });
   $('#q-minus')?.addEventListener('click', () => {
     state.qtdModo = 'delta';
-    const cur = parseBrMoney(qNova?.value ?? qAtual?.value ?? base);
-    applyDelta((cur - 1) - base);
+    applyDelta(deltaAtual - 1);
   });
   $('#btn-salvar-contagem')?.addEventListener('click', () => $('#btn-salvar-produto')?.click());
   $('#btn-salvar-produto-aside')?.addEventListener('click', () => $('#btn-salvar-produto')?.click());
