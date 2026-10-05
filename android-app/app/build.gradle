@@ -10,8 +10,8 @@ android {
         applicationId "com.mtautomacoes.gestorestoque"
         minSdk 24
         targetSdk 34
-        versionCode 25
-        versionName "1.0.24"
+        versionCode 26
+        versionName "1.0.25"
         // Celulares reais são ARM; x86 só serve para emulador e dobra o tamanho (OCR do ML Kit).
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a'

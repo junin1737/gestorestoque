@@ -6,8 +6,6 @@ import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
-import android.media.AudioManager;
-import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.util.Size;
 import android.view.MotionEvent;
@@ -327,11 +325,7 @@ public class LeitorActivity extends AppCompatActivity {
     private void finishWithResult(String valor) {
         if (!done.compareAndSet(false, true)) return;
         runOnUiThread(() -> moldura.marcarLido());
-        try {
-            ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 80);
-            tone.startTone(ToneGenerator.TONE_PROP_ACK, 120);
-            tone.release();
-        } catch (Exception ignored) { /* sem som não impede a leitura */ }
+        Bip.tocar();
         Intent data = new Intent();
         data.putExtra(EXTRA_RAW, valor);
         setResult(Activity.RESULT_OK, data);

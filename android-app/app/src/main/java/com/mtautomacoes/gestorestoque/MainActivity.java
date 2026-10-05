@@ -99,6 +99,7 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, R.string.scan_canceled, Toast.LENGTH_SHORT).show();
                     return;
                 }
+                Bip.tocar();
                 deliverBarcodeToWeb(result.getContents());
             });
 
@@ -323,7 +324,7 @@ public class MainActivity extends AppCompatActivity {
         ));
         options.setPrompt(getString(R.string.scan_barcode_hint));
         options.setOrientationLocked(true);
-        options.setBeepEnabled(true);
+        options.setBeepEnabled(false);
         options.setBarcodeImageEnabled(false);
         options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.NORMAL_SCAN);
         options.setCaptureActivity(PortraitCaptureActivity.class);
@@ -340,7 +341,7 @@ public class MainActivity extends AppCompatActivity {
         ));
         options.setPrompt("Gire o celular e enquadre a barra OU o QR da chave");
         options.setOrientationLocked(false);
-        options.setBeepEnabled(true);
+        options.setBeepEnabled(false);
         options.setBarcodeImageEnabled(false);
         options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.MIXED_SCAN);
         options.setCaptureActivity(AnyOrientationCaptureActivity.class);
