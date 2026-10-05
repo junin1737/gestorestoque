@@ -5,7 +5,9 @@ const path = require('path');
 const { withDb, query } = require('./db');
 const { loadAppConfig, saveAppConfig, getAppDataDir } = require('./config');
 
-const SEED_VERSION = 1;
+const SEED_VERSION = 2;
+/** Remessa/devolução de bonificação, doação ou brinde: não geram financeiro (seed 2). */
+const CFOP_SEM_FINANCEIRO_V2 = ['5910', '6910'];
 
 function paramsFile() {
   return path.join(getAppDataDir(), 'importacao-cfop-params.json');
@@ -46,7 +48,7 @@ function defaultSaida() {
     csosn_saida: '',
     aplicar_saida: 'S',
     obrigar_financeiro: 'S',
-    zerar_negativo: 'S',
+    zerar_negativo: 'N',
     conferir_etapas: 'S',
     ...(bundled?.saida || {}),
   };
@@ -222,6 +224,14 @@ function ensureImportacaoParamsDefaults() {
   local.conversoes = convList;
 
   if (Number(local.seed_version || 0) < SEED_VERSION) {
+    if (Number(local.seed_version || 0) < 2) {
+      for (const it of local.itens) {
+        if (CFOP_SEM_FINANCEIRO_V2.includes(String(it.cfop_origem || '').replace(/\D/g, '').slice(0, 4))) {
+          it.gera_financeiro = 'N';
+        }
+      }
+      local.saida.zerar_negativo = 'N';
+    }
     local.seed_version = SEED_VERSION;
     changed = true;
   }

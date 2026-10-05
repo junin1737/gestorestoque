@@ -136,9 +136,46 @@ function aplicarLicenca(lic, { origem }) {
   return dados;
 }
 
+/** Sem licença guardada e sem pedido feito: nada é enviado ao servidor de licenças até pedirem a liberação. */
+function aguardandoPedido() {
+  const st = carregarEstado();
+  return !st.licenca && !st.solicitado;
+}
+
+function cnpjValido(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (d.length !== 14 || /^(\d)\1+$/.test(d)) return false;
+  const dv = (n) => {
+    let soma = 0;
+    let peso = n - 7;
+    for (let i = 0; i < n; i++) {
+      soma += Number(d[i]) * peso;
+      peso = peso === 2 ? 9 : peso - 1;
+    }
+    const r = soma % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  return dv(12) === Number(d[12]) && dv(13) === Number(d[13]);
+}
+
+/** Pedido de liberação feito ao abrir o painel (tela de serviço), com o CNPJ da revenda. */
+async function solicitar(revendaCnpj) {
+  const rev = String(revendaCnpj || '').replace(/\D/g, '');
+  if (!cnpjValido(rev)) throw new Error('Informe um CNPJ de revenda válido.');
+  const st = carregarEstado();
+  st.solicitado = true;
+  st.revenda_cnpj = rev;
+  salvarEstado();
+  return verificarAgora();
+}
+
 async function verificarAgora() {
   if (!ATIVO) return situacao();
   if (verificando) return verificando;
+  if (aguardandoPedido()) {
+    try { identidade = await lerIdentidade(); } catch { /* sem base ainda */ }
+    return situacao();
+  }
   verificando = (async () => {
     const st = carregarEstado();
     st.ultima_tentativa = new Date().toISOString();
@@ -163,6 +200,7 @@ async function verificarAgora() {
             aplicacao: APLICACAO,
             maquina: os.hostname(),
             versao_gestor: versaoGestor(),
+            revenda_cnpj: st.revenda_cnpj || undefined,
           }),
           signal: ctrl.signal,
         });
@@ -170,7 +208,11 @@ async function verificarAgora() {
         clearTimeout(t);
       }
       const data = await res.json().catch(() => ({}));
-      if (!data.ok || !data.licenca) throw new Error(data.error || `Servidor de licenças respondeu ${res.status}.`);
+      if (!data.ok || !data.licenca) {
+        // Pedido recusado pelo servidor (ex.: revenda não cadastrada): volta a aguardar um novo pedido.
+        if (res.status === 400 && !st.licenca) st.solicitado = false;
+        throw new Error(data.error || `Servidor de licenças respondeu ${res.status}.`);
+      }
       aplicarLicenca(data.licenca, { origem: 'online' });
       st.solicitado_em = data.solicitado_em || null;
       st.ultimo_contato = new Date().toISOString();
@@ -185,7 +227,7 @@ async function verificarAgora() {
       if (semBase) proxima = SEM_BASE_MS;
       else if (st.ultimo_erro) proxima = RETENTATIVA_MS;
       else if (!situacao().liberado) proxima = AGUARDANDO_MS;
-      agendar(proxima);
+      if (!aguardandoPedido()) agendar(proxima);
     }
     return situacao();
   })();
@@ -216,6 +258,7 @@ function situacao() {
     ultimo_contato: st.ultimo_contato || null,
     ultima_tentativa: st.ultima_tentativa || null,
     ultimo_erro: st.ultimo_erro || null,
+    revenda_cnpj: st.revenda_cnpj || null,
     contato: CONTATO,
   };
   let dados = null;
@@ -223,6 +266,14 @@ function situacao() {
     dados = st.licenca ? abrirLicenca(st.licenca) : null;
   } catch {
     dados = null;
+  }
+  if (!dados && aguardandoPedido()) {
+    return {
+      ...base,
+      liberado: false,
+      status: 'nao_solicitado',
+      mensagem: 'Este computador ainda não foi registrado. Clique em "Abrir painel" (ou no endereço do painel) na tela do Gestor Estoque, no computador servidor, para solicitar a liberação.',
+    };
   }
   if (!dados) {
     const nunca = !st.ultima_tentativa || (verificando && !st.ultimo_contato);
@@ -358,6 +409,10 @@ function guardLicenca(req, res, next) {
 function iniciar() {
   if (!ATIVO) return;
   carregarEstado();
+  if (aguardandoPedido()) {
+    setTimeout(() => { verificarAgora().catch(() => {}); }, 3000).unref?.();
+    return;
+  }
   agendar(3000);
 }
 
@@ -366,6 +421,7 @@ module.exports = {
   APLICACAO,
   iniciar,
   verificarAgora,
+  solicitar,
   situacao,
   aplicarCodigoOffline,
   guardLicenca,

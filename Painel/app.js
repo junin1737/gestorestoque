@@ -236,6 +236,7 @@ function mostrarBloqueioLicenca(lic) {
     vencido: 'Licença vencida',
     expirado: 'Licença não validada',
     relogio: 'Data/hora incorreta',
+    nao_solicitado: 'Registro necessário',
   };
   el.querySelector('#lic-titulo').textContent = titulos[l.status] || 'Licença não validada';
   el.querySelector('#lic-msg').textContent = l.mensagem || 'Não foi possível validar a licença deste computador.';
@@ -243,7 +244,7 @@ function mostrarBloqueioLicenca(lic) {
   el.querySelector('#lic-info').textContent = cnpj ? `CNPJ ${cnpj}` : '';
   el.hidden = false;
   // Aguardando aprovação: o serviço reconsulta a cada minuto; a tela libera sozinha quando aprovar.
-  const aguardando = l.status === 'verificando' || l.status === 'pendente';
+  const aguardando = l.status === 'verificando' || l.status === 'pendente' || l.status === 'nao_solicitado';
   if (aguardando && !licencaPoll) {
     const statusInicial = l.status;
     licencaPoll = setInterval(async () => {
@@ -256,7 +257,7 @@ function mostrarBloqueioLicenca(lic) {
         licencaPoll = null;
         mostrarBloqueioLicenca(r.licenca);
       }
-    }, statusInicial === 'pendente' ? 15000 : 3000);
+    }, statusInicial === 'verificando' ? 3000 : 15000);
   }
 }
 

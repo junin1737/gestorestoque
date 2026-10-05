@@ -1,12 +1,12 @@
 {
-  "seed_version": 1,
+  "seed_version": 2,
   "csosn_padrao": "102",
   "saida": {
     "cfop_saida": "",
     "csosn_saida": "",
     "aplicar_saida": "S",
     "obrigar_financeiro": "S",
-    "zerar_negativo": "S",
+    "zerar_negativo": "N",
     "conferir_etapas": "S"
   },
   "itens": [
@@ -93,7 +93,7 @@
       "cti_label": "",
       "cti_cfe_label": "",
       "gera_estoque": "S",
-      "gera_financeiro": "S"
+      "gera_financeiro": "N"
     },
     {
       "cfop_origem": "5949",
@@ -195,7 +195,7 @@
       "cti_label": "",
       "cti_cfe_label": "",
       "gera_estoque": "S",
-      "gera_financeiro": "S"
+      "gera_financeiro": "N"
     },
     {
       "cfop_origem": "6949",

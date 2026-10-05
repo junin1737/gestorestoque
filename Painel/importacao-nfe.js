@@ -3880,21 +3880,23 @@ const ImportacaoNfe = (() => {
         <div class="imp-fields">
           ${field('CFOP saída padrão', 'imp-params-cfop-saida', saida.cfop_saida || '', { third: true })}
           ${field('CSOSN saída padrão', 'imp-params-csosn-saida', saida.csosn_saida || '', { third: true })}
-          <label class="imp-check imp-field third">
+        </div>
+        <div class="imp-check-list">
+          <label class="imp-check">
             <input type="checkbox" id="imp-params-aplicar-saida" ${ynChecked(saida.aplicar_saida !== undefined ? saida.aplicar_saida : 'S') ? 'checked' : ''} />
-            Aplicar saída padrão
+            <span>Aplicar saída padrão</span>
           </label>
-          <label class="imp-check imp-field third">
+          <label class="imp-check">
             <input type="checkbox" id="imp-params-obrigar-fin" ${ynChecked(saida.obrigar_financeiro !== 'N') ? 'checked' : ''} />
-            Obrigar conferência da aba Financeiro antes de gravar
+            <span>Obrigar conferência da aba Financeiro antes de gravar</span>
           </label>
-          <label class="imp-check imp-field third">
+          <label class="imp-check">
             <input type="checkbox" id="imp-params-zerar-neg" ${ynChecked(saida.zerar_negativo === 'S') ? 'checked' : ''} />
-            Se o estoque estiver negativo na entrada, zerar e lançar a qtd da nota
+            <span>Se o estoque estiver negativo na entrada, zerar e lançar a qtd da nota</span>
           </label>
-          <label class="imp-check imp-field" style="grid-column:1/-1">
+          <label class="imp-check">
             <input type="checkbox" id="imp-params-conferir-etapas" ${ynChecked(saida.conferir_etapas === 'S') ? 'checked' : ''} />
-            Conferir etapa a etapa no item (só avança ao confirmar cada aba)
+            <span>Conferir etapa a etapa no item (só avança ao confirmar cada aba)</span>
           </label>
         </div>
       </section>

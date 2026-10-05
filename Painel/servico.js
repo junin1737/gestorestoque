@@ -347,7 +347,13 @@ $('#form-fiscal')?.addEventListener('submit', async (e) => {
 $('#btn-abrir-painel').addEventListener('click', async () => {
   const net = await api('/network');
   const url = (net && net.localUrl) || 'http://127.0.0.1:5077/';
-  window.open(url, '_blank');
+  abrirPainelComLicenca(url);
+});
+
+$('#svc-url').addEventListener('click', (e) => {
+  e.preventDefault();
+  const url = e.currentTarget.href;
+  if (url && !url.endsWith('#')) abrirPainelComLicenca(url);
 });
 
 $('#btn-toggle-svc').addEventListener('click', async () => {
@@ -461,6 +467,7 @@ const LIC_TITULOS = {
   relogio: 'Data/hora do computador incorreta',
   outro_cnpj: 'Licença de outro CNPJ',
   sem_licenca: 'Não validada',
+  nao_solicitado: 'Não registrada — a liberação é solicitada ao abrir o painel',
 };
 
 function fmtDataHora(iso) {
@@ -473,24 +480,19 @@ function fmtCnpj(v) {
   return String(v || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
 }
 
-/** Status para o qual o usuário fechou a janela de registro (não reabre até mudar). */
-let licModalFechadoEm = null;
-let licModalStatus = null;
+/** Endereço do painel que o usuário tentou abrir; abre sozinho quando a licença for liberada. */
+let licUrlPendente = null;
 
-function renderLicModal(l) {
+function preencherLicModal(l) {
   const modal = $('#lic-modal');
-  if (!modal) return;
-  const precisa = !l.liberado && l.status !== 'verificando' && l.status !== 'desativado';
-  if (!precisa) {
-    modal.hidden = true;
-    licModalFechadoEm = null;
-    return;
-  }
-  if (modal.hidden && licModalFechadoEm === l.status) return;
-
   let titulo = `Licença: ${LIC_TITULOS[l.status] || l.status}`;
   let msg = l.mensagem || '';
-  if (l.status === 'pendente') {
+  const pedir = l.status === 'nao_solicitado';
+  if (pedir) {
+    titulo = 'Solicitar liberação';
+    msg = 'Para usar o painel, este computador precisa ser liberado pela MT Automações. '
+      + 'Informe o CNPJ da revenda e clique em Solicitar liberação. Os dados abaixo serão enviados junto.';
+  } else if (l.status === 'pendente') {
     titulo = 'Registro solicitado';
     msg = `Este computador ainda não está liberado. A solicitação de registro foi enviada à MT Automações`
       + `${l.solicitado_em ? ` em ${fmtDataHora(l.solicitado_em)}` : ''} com os dados abaixo. `
@@ -505,9 +507,47 @@ function renderLicModal(l) {
   $('#lic-modal-cnpj').textContent = fmtCnpj(l.cnpj) || '—';
   $('#lic-modal-nse').textContent = l.nse || '—';
   $('#lic-modal-maquina').textContent = l.maquina || '—';
+  const temRevenda = !pedir && !!l.revenda_cnpj;
+  $('#lic-modal-revenda-dt').hidden = !temRevenda;
+  $('#lic-modal-revenda-dd').hidden = !temRevenda;
+  $('#lic-modal-revenda-dd').textContent = fmtCnpj(l.revenda_cnpj) || '—';
+  $('#lic-modal-revenda-box').hidden = !pedir;
+  $('#lic-modal-solicitar').hidden = !pedir;
+  $('#lic-modal-verificar').hidden = pedir;
+  if (pedir && !$('#lic-modal-revenda').value && l.revenda_cnpj) $('#lic-modal-revenda').value = fmtCnpj(l.revenda_cnpj);
   modal.querySelector('.lic-modal-card').classList.toggle('pendente', l.status === 'pendente');
-  licModalStatus = l.status;
-  modal.hidden = false;
+}
+
+function abrirLicModal(l) {
+  preencherLicModal(l);
+  showLicModalStatus(l.status === 'nao_solicitado' && l.ultimo_erro ? `Falha: ${l.ultimo_erro}` : '', false);
+  $('#lic-modal').hidden = false;
+  if (l.status === 'nao_solicitado') $('#lic-modal-revenda').focus();
+}
+
+/** Janela aberta: acompanha a situação; liberou, fecha e abre o painel que o usuário pediu. */
+function renderLicModal(l) {
+  const modal = $('#lic-modal');
+  if (!modal || modal.hidden) return;
+  if (l.liberado || l.status === 'desativado') {
+    modal.hidden = true;
+    if (licUrlPendente) window.open(licUrlPendente, '_blank');
+    licUrlPendente = null;
+    return;
+  }
+  preencherLicModal(l);
+}
+
+async function abrirPainelComLicenca(url) {
+  const res = await api('/licenca');
+  const l = res.ok ? res.licenca : null;
+  if (!l || l.liberado || l.status === 'desativado') {
+    window.open(url, '_blank');
+    return;
+  }
+  licUrlPendente = url;
+  renderLicenca(l);
+  abrirLicModal(l);
 }
 
 function renderLicenca(l) {
@@ -531,7 +571,7 @@ function renderLicenca(l) {
 
   const alerta = $('#lic-alerta');
   if (alerta) {
-    alerta.hidden = !!l.liberado || l.status === 'verificando';
+    alerta.hidden = !!l.liberado || l.status === 'verificando' || l.status === 'nao_solicitado';
     $('#lic-alerta-titulo').textContent = `Licença: ${titulo}`;
     $('#lic-alerta-msg').textContent = l.mensagem || '';
   }
@@ -561,9 +601,35 @@ function showLicModalStatus(text, ok) {
 
 function fecharLicModal() {
   $('#lic-modal').hidden = true;
-  licModalFechadoEm = licModalStatus;
+  licUrlPendente = null;
   showLicModalStatus('');
 }
+
+$('#lic-modal-revenda')?.addEventListener('input', (e) => {
+  const d = e.target.value.replace(/\D/g, '').slice(0, 14);
+  e.target.value = d.length === 14 ? fmtCnpj(d) : d;
+});
+
+$('#lic-modal-solicitar')?.addEventListener('click', async (e) => {
+  const rev = $('#lic-modal-revenda').value.replace(/\D/g, '');
+  if (rev.length !== 14) {
+    showLicModalStatus('Informe o CNPJ da revenda (14 dígitos).', false);
+    return;
+  }
+  e.target.disabled = true;
+  showLicModalStatus('Enviando solicitação…');
+  const res = await api('/licenca/solicitar', { method: 'POST', body: { revenda_cnpj: rev } });
+  e.target.disabled = false;
+  if (!res.ok) {
+    showLicModalStatus(res.error || 'Falha ao solicitar.', false);
+    return;
+  }
+  const l = res.licenca;
+  renderLicenca(l);
+  if (l.liberado) showLicModalStatus('');
+  else if (l.ultimo_erro) showLicModalStatus(`Falha: ${l.ultimo_erro}`, false);
+  else showLicModalStatus('Solicitação enviada à MT Automações.', true);
+});
 
 $('#lic-modal-fechar')?.addEventListener('click', fecharLicModal);
 
@@ -589,6 +655,11 @@ $('#lic-modal-verificar')?.addEventListener('click', async (e) => {
 });
 
 $('#btn-lic-verificar')?.addEventListener('click', async (e) => {
+  const atual = await api('/licenca');
+  if (atual.ok && atual.licenca?.status === 'nao_solicitado') {
+    abrirLicModal(atual.licenca);
+    return;
+  }
   e.target.disabled = true;
   showLicMsg('Consultando servidor de licenças…');
   const res = await api('/licenca/verificar', { method: 'POST', body: {} });

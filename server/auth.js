@@ -43,6 +43,7 @@ const ROTAS_SERVIDOR_LOCAL = [
   /^\/shutdown$/,
   /^\/licenca\/aplicar$/,
   /^\/online(\/|$)/,
+  /^\/licenca\/solicitar$/,
   /^\/database\//,
   /^\/fiscal\//,
 ];
