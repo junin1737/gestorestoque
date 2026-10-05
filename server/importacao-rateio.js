@@ -145,10 +145,15 @@ function calcCustoUnitarioItem(sistema = {}, xmlItem = {}) {
 
 const DIFERENCA_MAX_NF = 0.03;
 
-function totalMercadoriaItem(xmlItem = {}, sistema = {}) {
-  const vProd = Number(
+/** Valor total do item como no DANFE (vProd), sem desconto, despesas nem impostos. */
+function valorProdutoItem(xmlItem = {}) {
+  return round2(Number(
     xmlItem.vProd != null ? xmlItem.vProd : (Number(xmlItem.vUnCom || 0) * Number(xmlItem.qCom || 0))
-  ) || 0;
+  ) || 0);
+}
+
+function totalMercadoriaItem(xmlItem = {}, sistema = {}) {
+  const vProd = valorProdutoItem(xmlItem);
   const vDesc = Number(sistema.v_desc ?? xmlItem.vDesc ?? 0) || 0;
   const vFrete = Number(sistema.v_frete ?? xmlItem.vFrete ?? 0) || 0;
   const vSeg = Number(sistema.v_seguro ?? xmlItem.vSeg ?? 0) || 0;
@@ -223,6 +228,7 @@ module.exports = {
   aplicarRateiosDoXml,
   syncSistemaComXmlItem,
   calcCustoUnitarioItem,
+  valorProdutoItem,
   totalMercadoriaItem,
   validarTotaisNf,
   validarFinanceiroNf,
