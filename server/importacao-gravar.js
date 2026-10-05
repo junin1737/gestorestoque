@@ -3,7 +3,7 @@
 const { withDb, withTransaction, query, writeTargets, hasTable, columnExists, nextGenId } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
-const { round2, calcCustoUnitarioItem, totalMercadoriaItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
+const { round2, calcCustoUnitarioItem, valorProdutoItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
 const { buscarPorCnpj, cadastrarFornecedor, onlyDigits } = require('./importacao-fornecedor');
 
@@ -1196,7 +1196,8 @@ async function gravarNfCompra(sessao, {
         }
         if (!Number.isFinite(vUnitEstoque)) vUnitEstoque = 0;
         it.sistema.prc_custo = vUnitEstoque;
-        const vTotal = totalMercadoriaItem(it.xml || {}, it.sistema || {});
+        // Total/unitário do item iguais ao DANFE; despesas e impostos só no custo (PRC_MEDIO / produto).
+        const vTotal = valorProdutoItem(it.xml || {});
         const vDesc = Number(it.sistema.v_desc ?? it.xml?.vDesc ?? 0);
         const vFrete = Number(it.sistema.v_frete ?? it.xml?.vFrete ?? 0);
         const vSeg = Number(it.sistema.v_seguro ?? it.xml?.vSeg ?? 0);
@@ -1218,7 +1219,11 @@ async function gravarNfCompra(sessao, {
         // multiplica pelo conversor — alinhado à entrada manual, ao SINTEGRA e ao cancelamento.
         const qtdInsert = qtdEstoque > 0 ? qtdEstoque : qtdXml;
         const uniInsert = 'UN';
-        const vUnitInsert = vUnitEstoque > 0 ? vUnitEstoque : (Number(it.xml?.vUnCom || 0) || 0);
+        const vUnCom = Number(it.xml?.vUnCom || 0) || 0;
+        const vUnitNota = Math.abs(qtdInsert - qtdXml) < 1e-9 && vUnCom > 0
+          ? vUnCom
+          : (qtdInsert > 0 ? Number((vTotal / qtdInsert).toFixed(4)) : vUnCom);
+        const prcMedioInsert = vUnitEstoque > 0 ? vUnitEstoque : vUnitNota;
         if (temDesonCols) {
           await query(db, `
             INSERT INTO TB_NFC_ITEM (
@@ -1228,7 +1233,7 @@ async function gravarNfCompra(sessao, {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, [
             idItem, idIdent, idNf, Number(it.nItem), qtdInsert, uniInsert,
             vTotal, vDesc, vFrete, vSeg, vOutro,
-            cfop || null, csosn || null, estBxInsert, vUnitInsert, vUnitInsert,
+            cfop || null, csosn || null, estBxInsert, vUnitNota, prcMedioInsert,
             vDeson > 0 ? vDeson : null,
             vDeson > 0 ? (motDeson ? Number(motDeson) : null) : null,
           ]);
@@ -1241,7 +1246,7 @@ async function gravarNfCompra(sessao, {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, [
             idItem, idIdent, idNf, Number(it.nItem), qtdInsert, uniInsert,
             vTotal, vDesc, vFrete, vSeg, vOutro,
-            cfop || null, csosn || null, estBxInsert, vUnitInsert, vUnitInsert,
+            cfop || null, csosn || null, estBxInsert, vUnitNota, prcMedioInsert,
           ]);
         }
 
