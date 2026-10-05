@@ -644,11 +644,66 @@ function renderOnline(o) {
   const link = $('#online-link');
   link.href = o.link;
   link.textContent = o.link;
-  if (o.ativo && onlineQrDe !== o.link) {
-    onlineQrDe = o.link;
-    api(`/qrcode?data=${encodeURIComponent(o.link)}`).then((qr) => {
+  const qrLink = o.pareamento?.link;
+  if (o.ativo && qrLink && onlineQrDe !== qrLink) {
+    onlineQrDe = qrLink;
+    api(`/qrcode?data=${encodeURIComponent(qrLink)}`).then((qr) => {
       if (qr.ok) $('#online-qr').src = qr.dataUrl;
     });
+  }
+  renderAparelhos(o);
+}
+
+let aparelhosRenderizados = '';
+
+function renderAparelhos(o) {
+  const box = $('#online-aparelhos-box');
+  box.hidden = !o.ativo;
+  const lista = o.aparelhos || [];
+  const chave = JSON.stringify(lista);
+  if (chave === aparelhosRenderizados) return;
+  aparelhosRenderizados = chave;
+  const ul = $('#online-aparelhos');
+  ul.textContent = '';
+  if (!lista.length) {
+    const li = document.createElement('li');
+    li.className = 'ap-vazio';
+    li.textContent = 'Nenhum aparelho autorizado ainda.';
+    ul.appendChild(li);
+    return;
+  }
+  for (const a of lista) {
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    info.className = 'ap-info';
+    const nome = document.createElement('div');
+    nome.className = 'ap-nome';
+    nome.textContent = a.nome;
+    const det = document.createElement('div');
+    det.className = 'ap-det';
+    det.textContent = `Autorizado em ${fmtDataHora(a.criado_em)} · último uso ${fmtDataHora(a.ultimo_uso)}`;
+    info.append(nome, det);
+    const ren = document.createElement('button');
+    ren.type = 'button';
+    ren.className = 'btn-outline small';
+    ren.textContent = 'Renomear';
+    ren.addEventListener('click', async () => {
+      const novo = prompt('Nome do aparelho (ex.: Celular do João):', a.nome);
+      if (!novo || !novo.trim()) return;
+      const res = await api('/online', { method: 'POST', body: { renomear: a.id, nome: novo.trim() } });
+      if (res.ok) renderOnline(res.online);
+    });
+    const rem = document.createElement('button');
+    rem.type = 'button';
+    rem.className = 'btn-outline small';
+    rem.textContent = 'Remover';
+    rem.addEventListener('click', async () => {
+      if (!confirm(`Remover "${a.nome}"? Ele perde o acesso online na hora e precisará ler o QR Code de novo.`)) return;
+      const res = await api('/online', { method: 'POST', body: { revogar: a.id } });
+      if (res.ok) renderOnline(res.online);
+    });
+    li.append(info, ren, rem);
+    ul.appendChild(li);
   }
 }
 
@@ -659,7 +714,7 @@ async function refreshOnline() {
 
 $('#chk-online')?.addEventListener('change', async (e) => {
   const ativo = !!e.target.checked;
-  if (ativo && !confirm('Ligar o acesso pela internet? Qualquer pessoa com usuário e senha do painel poderá entrar de fora da loja usando o QR Code/endereço online.')) {
+  if (ativo && !confirm('Ligar o acesso pela internet? Os aparelhos autorizados pelo QR Code desta tela poderão entrar de fora da loja, com usuário e senha do painel.')) {
     e.target.checked = false;
     return;
   }
@@ -671,7 +726,7 @@ $('#chk-online')?.addEventListener('change', async (e) => {
 });
 
 $('#btn-online-novo')?.addEventListener('click', async () => {
-  if (!confirm('Gerar um novo endereço online? O link e o QR Code atuais param de funcionar e os celulares precisarão ler o QR Code novo.')) return;
+  if (!confirm('Gerar um novo endereço online? O link atual para de funcionar e TODOS os aparelhos autorizados são removidos (precisarão ler o QR Code novo).')) return;
   const res = await api('/online', { method: 'POST', body: { novoEndereco: true } });
   if (res.ok) renderOnline(res.online);
   setTimeout(refreshOnline, 2500);

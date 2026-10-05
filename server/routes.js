@@ -134,9 +134,14 @@ router.get('/online', somenteServidorLocal, (_req, res) => {
 
 router.post('/online', somenteServidorLocal, (req, res) => {
   const tunel = require('./tunel');
+  const aparelhos = require('./aparelhos');
   const body = req.body || {};
-  const online = body.novoEndereco ? tunel.novoEndereco() : tunel.definirAtivo(!!body.ativo);
-  res.json({ ok: true, online });
+  if (body.revogar) aparelhos.revogar(body.revogar);
+  else if (body.renomear) aparelhos.renomear(body.renomear, body.nome);
+  else if (body.revogarTodos) aparelhos.revogarTodos();
+  else if (body.novoEndereco) tunel.novoEndereco();
+  else if (body.ativo != null) tunel.definirAtivo(!!body.ativo);
+  res.json({ ok: true, online: tunel.status() });
 });
 
 router.get('/config', (req, res) => {

@@ -11,6 +11,7 @@ const path = require('path');
 const WebSocket = require('ws');
 const { getAppDataDir } = require('./config');
 const licenca = require('./licenca');
+const aparelhos = require('./aparelhos');
 
 const RELAY_URL = (process.env.GESTOR_RELAY_URL || 'wss://acesso.smsjrdeveloper.com.br').replace(/\/+$/, '');
 const LINK_BASE = RELAY_URL.replace(/^ws/i, 'http');
@@ -67,14 +68,21 @@ function salvarConfig(cfg) {
 
 function status() {
   const cfg = carregarConfig();
-  return {
+  const link = `${LINK_BASE}/t/${cfg.tunelId}`;
+  const out = {
     ativo: !!cfg.ativo,
     conectado: estado.conectado,
     desde: estado.desde,
     ultimo_erro: cfg.ativo ? estado.ultimo_erro : null,
-    link: `${LINK_BASE}/t/${cfg.tunelId}`,
+    link,
     servidor: LINK_BASE,
+    aparelhos: aparelhos.listar(),
   };
+  if (cfg.ativo) {
+    const p = aparelhos.codigoAtual();
+    out.pareamento = { link: `${link}?p=${p.codigo}`, expira_em: p.expira_em };
+  }
+  return out;
 }
 
 function agendarReconexao() {
@@ -301,9 +309,10 @@ function definirAtivo(ativo) {
   return status();
 }
 
-/** Gera novo endereço/segredo: o link e QR Codes antigos deixam de funcionar. */
+/** Gera novo endereço/segredo: link, QR Codes e aparelhos autorizados antigos deixam de funcionar. */
 function novoEndereco() {
   const atual = carregarConfig();
+  aparelhos.revogarTodos();
   salvarConfig({ ativo: atual.ativo, tunelId: novoId(), segredo: crypto.randomBytes(32).toString('base64url') });
   return definirAtivo(atual.ativo);
 }

@@ -138,7 +138,9 @@ export default {
 
     const entrada = url.pathname.match(/^\/t\/([a-z2-7]{20,32})\/?$/);
     if (entrada) {
-      const resp = new Response(null, { status: 302, headers: { Location: '/' } });
+      const codigo = url.searchParams.get('p') || '';
+      const destino = /^[A-Za-z0-9_-]{16,64}$/.test(codigo) ? `/parear?c=${codigo}` : '/';
+      const resp = new Response(null, { status: 302, headers: { Location: destino } });
       resp.headers.append('Set-Cookie', `${COOKIE_TUNEL}=${entrada[1]}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`);
       return comSeguranca(resp);
     }

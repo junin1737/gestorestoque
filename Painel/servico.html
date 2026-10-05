@@ -85,20 +85,24 @@
             <p class="hint"><span id="online-dot" class="dot off"></span> <strong id="online-status">Desligado</strong></p>
             <p class="hint msg-line" id="online-erro" hidden></p>
             <div class="field" id="online-link-box" hidden>
-              <label>Endereço online</label>
+              <label>Endereço online (aparelhos já autorizados)</label>
               <a id="online-link" class="url-link" href="#" target="_blank" rel="noopener">—</a>
             </div>
-            <p class="hint">O computador da loja conecta para fora; nenhuma porta é aberta e o banco de dados não fica exposto. Configuração de banco e certificado continua só neste computador.</p>
+            <div id="online-aparelhos-box" hidden>
+              <label class="online-aparelhos-titulo">Aparelhos autorizados</label>
+              <ul id="online-aparelhos" class="online-aparelhos"></ul>
+            </div>
+            <p class="hint">O computador da loja conecta para fora; nenhuma porta é aberta e o banco de dados não fica exposto. Pela internet só entram aparelhos autorizados pelo QR Code ao lado. Configuração de banco e certificado continua só neste computador.</p>
             <div class="banco-actions left">
               <button type="button" id="btn-online-novo" class="btn-outline small" hidden>Gerar novo endereço</button>
             </div>
           </div>
           <div class="svc-card svc-card-center" id="online-qr-card" hidden>
-            <h2 class="svc-card-title">QR Code online</h2>
+            <h2 class="svc-card-title">Autorizar aparelho</h2>
             <div class="qr-frame">
-              <img id="online-qr" alt="QR Code do acesso online" />
+              <img id="online-qr" alt="QR Code para autorizar aparelho" />
             </div>
-            <p class="hint center">Funciona no 4G/5G ou em qualquer Wi-Fi. Entre com o mesmo usuário e senha do painel.</p>
+            <p class="hint center">Leia com a câmera do celular para autorizar o aparelho. Cada QR Code vale para um aparelho e se renova sozinho. Depois funciona no 4G/5G ou em qualquer Wi-Fi, com o mesmo usuário e senha do painel.</p>
           </div>
         </div>
 

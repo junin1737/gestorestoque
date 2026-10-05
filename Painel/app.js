@@ -190,6 +190,10 @@ async function api(path, options = {}) {
     return { ok: false, error: `Resposta inválida da API (${res.status})` };
   }
   if (data && data.code === 'LICENCA_BLOQUEADA') mostrarBloqueioLicenca(data.licenca);
+  if (res.status === 403 && data?.code === 'APARELHO') {
+    window.location.reload();
+    return data;
+  }
   if (res.status === 401 && (data?.code === 'AUTH' || data?.code === 'SESSAO_TROCADA') && state.usuario) {
     sessaoEncerrada(data.error);
   }
