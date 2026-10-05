@@ -1,0 +1,19 @@
+name = "gestor-relay"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+workers_dev = true
+
+routes = [
+  { pattern = "acesso.smsjrdeveloper.com.br", custom_domain = true }
+]
+
+[[durable_objects.bindings]]
+name = "TUNEL"
+class_name = "Tunel"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Tunel"]
+
+[observability]
+enabled = true

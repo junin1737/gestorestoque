@@ -1,0 +1,13 @@
+{
+  "name": "gestor-relay",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Servidor de passagem do acesso online do Gestor Estoque (Cloudflare Worker + Durable Object).",
+  "scripts": {
+    "dev": "wrangler dev --port 8788 --ip 127.0.0.1",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.147.0"
+  }
+}

@@ -128,6 +128,17 @@ router.post('/licenca/aplicar', somenteServidorLocal, async (req, res) => {
   }
 });
 
+router.get('/online', somenteServidorLocal, (_req, res) => {
+  res.json({ ok: true, online: require('./tunel').status() });
+});
+
+router.post('/online', somenteServidorLocal, (req, res) => {
+  const tunel = require('./tunel');
+  const body = req.body || {};
+  const online = body.novoEndereco ? tunel.novoEndereco() : tunel.definirAtivo(!!body.ativo);
+  res.json({ ok: true, online });
+});
+
 router.get('/config', (req, res) => {
   const cfg = loadAppConfig();
   const conexao = isServidorLocal(req)

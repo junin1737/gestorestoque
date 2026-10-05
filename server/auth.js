@@ -11,7 +11,7 @@ const {
   SUPERVISOR_SENHA_LEGADA,
 } = require('./config');
 const { conferirHashSenha } = require('./senha');
-const { isServidorLocal, clientIp } = require('./origem');
+const { isServidorLocal, clientIp, viaTunel } = require('./origem');
 const licenca = require('./licenca');
 
 const COOKIE = 'gestor_sessao';
@@ -42,6 +42,7 @@ const ROTAS_SERVIDOR_LOCAL = [
   /^\/connect$/,
   /^\/shutdown$/,
   /^\/licenca\/aplicar$/,
+  /^\/online(\/|$)/,
   /^\/database\//,
   /^\/fiscal\//,
 ];
@@ -128,6 +129,7 @@ function lerCookie(req, nome) {
 function definirCookie(res, valor, maxAgeS) {
   const partes = [`${COOKIE}=${encodeURIComponent(valor)}`, 'Path=/', 'HttpOnly', 'SameSite=Strict'];
   if (maxAgeS != null) partes.push(`Max-Age=${maxAgeS}`);
+  if (res.req && viaTunel(res.req)) partes.push('Secure');
   res.setHeader('Set-Cookie', partes.join('; '));
 }
 

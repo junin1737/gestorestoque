@@ -4,7 +4,23 @@ const dns = require('dns');
 
 const MSG_SOMENTE_SERVIDOR = 'Configuração de banco e certificado só pode ser feita no computador servidor.';
 
+/** Porta do servidor interno que só o túnel online usa (0 = acesso online desligado). */
+let portaTunel = 0;
+
+function definirPortaTunel(porta) {
+  portaTunel = Number(porta) || 0;
+}
+
+/** Requisição que veio da internet pelo túnel: nunca conta como computador servidor. */
+function viaTunel(req) {
+  return portaTunel > 0 && req.socket?.localPort === portaTunel;
+}
+
 function clientIp(req) {
+  if (viaTunel(req)) {
+    const remoto = String(req.headers['x-gestor-ip-remoto'] || '').trim().slice(0, 64);
+    return `online:${remoto || 'desconhecido'}`;
+  }
   const raw = String(req.socket?.remoteAddress || req.ip || '').trim();
   return raw.startsWith('::ffff:') ? raw.slice(7) : raw;
 }
@@ -20,6 +36,7 @@ function serverAddresses() {
 
 /** Requisição feita no próprio computador do serviço (loopback ou IP de uma das placas dele). */
 function isServidorLocal(req) {
+  if (viaTunel(req)) return false;
   const ip = clientIp(req);
   if (!ip) return false;
   if (ip === '127.0.0.1' || ip === '::1' || ip.startsWith('127.')) return true;
@@ -70,6 +87,7 @@ async function resolveOrigem(req, body = {}) {
   const tipo = String(body.origem || '').trim().toLowerCase();
   const ua = String(req.get?.('user-agent') || '');
   if (tipo === 'celular' || /Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return 'Celular';
+  if (viaTunel(req)) return 'ONLINE';
   if (isServidorLocal(req)) return os.hostname().toUpperCase().slice(0, 40);
   const ip = clientIp(req);
   const nome = await lookupHostname(ip);
@@ -79,6 +97,8 @@ async function resolveOrigem(req, body = {}) {
 module.exports = {
   MSG_SOMENTE_SERVIDOR,
   clientIp,
+  definirPortaTunel,
+  viaTunel,
   isServidorLocal,
   somenteServidorLocal,
   resolveOrigem,

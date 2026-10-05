@@ -269,6 +269,7 @@ button, input, select, textarea {
 }
 
 .dot {
+  display: inline-block;
   width: 9px; height: 9px; border-radius: 50%;
   background: #bbb;
   flex-shrink: 0;

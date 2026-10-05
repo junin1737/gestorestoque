@@ -5,8 +5,10 @@ const os = require('os');
 const routes = require('./routes');
 const { PORT } = require('./config');
 const { ensureFirebirdClientPath } = require('./nativePath');
-const { somenteServidorLocal } = require('./origem');
+const http = require('http');
+const { somenteServidorLocal, viaTunel, definirPortaTunel } = require('./origem');
 const licenca = require('./licenca');
+const tunel = require('./tunel');
 const auth = require('./auth');
 const idempotencia = require('./idempotencia');
 
@@ -27,6 +29,14 @@ app.use((_req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '10mb' }));
+/** Pela internet não se vê a rede da loja nem se controla o serviço/acesso online. */
+const ROTAS_FORA_DO_TUNEL = /^\/api\/(network|qrcode|shutdown|online)(\/|$)/;
+app.use((req, res, next) => {
+  if (viaTunel(req) && ROTAS_FORA_DO_TUNEL.test(req.path)) {
+    return res.status(403).json({ ok: false, error: 'Disponível somente na rede da loja.' });
+  }
+  next();
+});
 app.use(['/servico.html', '/servico.js', '/servico.css'], somenteServidorLocal);
 app.use(express.static(path.join(__dirname, '..', 'Painel'), {
   etag: false,
@@ -73,6 +83,13 @@ function printListenInfo() {
 const server = app.listen(PORT, '0.0.0.0', () => {
   printListenInfo();
   licenca.iniciar();
+  // Servidor só do túnel online: escuta apenas no loopback, em porta aleatória.
+  const servidorTunel = http.createServer(app);
+  servidorTunel.listen(0, '127.0.0.1', () => {
+    const { port } = servidorTunel.address();
+    definirPortaTunel(port);
+    tunel.iniciar({ porta: port });
+  });
 });
 
 server.on('error', (err) => {

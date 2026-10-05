@@ -617,8 +617,70 @@ $('#btn-lic-aplicar')?.addEventListener('click', async () => {
   }
 });
 
+let onlineQrDe = '';
+
+function renderOnline(o) {
+  if (!o) return;
+  $('#chk-online').checked = !!o.ativo;
+  const dot = $('#online-dot');
+  const st = $('#online-status');
+  if (!o.ativo) {
+    dot.className = 'dot off';
+    st.textContent = 'Desligado';
+  } else if (o.conectado) {
+    dot.className = 'dot on';
+    st.textContent = `Conectado desde ${fmtDataHora(o.desde)}`;
+  } else {
+    dot.className = 'dot off';
+    st.textContent = 'Conectando…';
+  }
+  const erro = $('#online-erro');
+  erro.hidden = !(o.ativo && o.ultimo_erro);
+  erro.textContent = o.ultimo_erro || '';
+  erro.style.color = 'var(--danger)';
+  $('#online-link-box').hidden = !o.ativo;
+  $('#online-qr-card').hidden = !o.ativo;
+  $('#btn-online-novo').hidden = !o.ativo;
+  const link = $('#online-link');
+  link.href = o.link;
+  link.textContent = o.link;
+  if (o.ativo && onlineQrDe !== o.link) {
+    onlineQrDe = o.link;
+    api(`/qrcode?data=${encodeURIComponent(o.link)}`).then((qr) => {
+      if (qr.ok) $('#online-qr').src = qr.dataUrl;
+    });
+  }
+}
+
+async function refreshOnline() {
+  const res = await api('/online');
+  if (res.ok) renderOnline(res.online);
+}
+
+$('#chk-online')?.addEventListener('change', async (e) => {
+  const ativo = !!e.target.checked;
+  if (ativo && !confirm('Ligar o acesso pela internet? Qualquer pessoa com usuário e senha do painel poderá entrar de fora da loja usando o QR Code/endereço online.')) {
+    e.target.checked = false;
+    return;
+  }
+  e.target.disabled = true;
+  const res = await api('/online', { method: 'POST', body: { ativo } });
+  e.target.disabled = false;
+  if (res.ok) renderOnline(res.online);
+  setTimeout(refreshOnline, 2500);
+});
+
+$('#btn-online-novo')?.addEventListener('click', async () => {
+  if (!confirm('Gerar um novo endereço online? O link e o QR Code atuais param de funcionar e os celulares precisarão ler o QR Code novo.')) return;
+  const res = await api('/online', { method: 'POST', body: { novoEndereco: true } });
+  if (res.ok) renderOnline(res.online);
+  setTimeout(refreshOnline, 2500);
+});
+
 (async function boot() {
   await refreshNetwork();
+  await refreshOnline();
+  setInterval(refreshOnline, 5000);
   await loadBanco();
   await loadSobre();
   // Primeira consulta ao servidor de licenças roda logo após abrir: acompanha de perto até ter resposta.

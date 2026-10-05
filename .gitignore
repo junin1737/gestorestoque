@@ -15,3 +15,6 @@ licenca-server/.keys/
 licenca-server/.dev.vars
 licenca-server/.wrangler/
 licenca-server/node_modules/
+relay-server/.wrangler/
+relay-server/.dev.vars
+relay-server/node_modules/

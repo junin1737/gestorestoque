@@ -75,6 +75,33 @@
           </div>
         </div>
 
+        <div class="svc-cards-2" style="margin-top:1rem">
+          <div class="svc-card">
+            <h2 class="svc-card-title">Acesso pela internet (beta)</h2>
+            <label class="switch-row">
+              <input type="checkbox" id="chk-online" />
+              <span>Permitir acesso fora da loja</span>
+            </label>
+            <p class="hint"><span id="online-dot" class="dot off"></span> <strong id="online-status">Desligado</strong></p>
+            <p class="hint msg-line" id="online-erro" hidden></p>
+            <div class="field" id="online-link-box" hidden>
+              <label>Endereço online</label>
+              <a id="online-link" class="url-link" href="#" target="_blank" rel="noopener">—</a>
+            </div>
+            <p class="hint">O computador da loja conecta para fora; nenhuma porta é aberta e o banco de dados não fica exposto. Configuração de banco e certificado continua só neste computador.</p>
+            <div class="banco-actions left">
+              <button type="button" id="btn-online-novo" class="btn-outline small" hidden>Gerar novo endereço</button>
+            </div>
+          </div>
+          <div class="svc-card svc-card-center" id="online-qr-card" hidden>
+            <h2 class="svc-card-title">QR Code online</h2>
+            <div class="qr-frame">
+              <img id="online-qr" alt="QR Code do acesso online" />
+            </div>
+            <p class="hint center">Funciona no 4G/5G ou em qualquer Wi-Fi. Entre com o mesmo usuário e senha do painel.</p>
+          </div>
+        </div>
+
         <div class="svc-action-bar">
           <button type="button" id="btn-toggle-svc" class="btn-stop" title="Parar serviço">
             <span class="stop-icon"></span>

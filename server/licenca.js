@@ -325,6 +325,13 @@ async function conferirSenhaSupervisor(senha, senhaLegada) {
   return calc.length === esperado.length && crypto.timingSafeEqual(calc, esperado);
 }
 
+/** Licença assinada ({payload, sig}) para apresentar ao servidor de acesso online; null se não liberada. */
+function licencaAssinada() {
+  if (!situacao().liberado) return null;
+  const lic = carregarEstado().licenca;
+  return lic && lic.payload && lic.sig ? { payload: lic.payload, sig: lic.sig } : null;
+}
+
 /** Rotas liberadas mesmo com licença bloqueada (tela de login/bloqueio e tela de serviço). */
 const ROTAS_LIVRES = [
   /^\/licenca(\/|$)/,
@@ -336,6 +343,7 @@ const ROTAS_LIVRES = [
   /^\/tema$/,
   /^\/emitente$/,
   /^\/connect$/,
+  /^\/online(\/|$)/,
   /^\/database\//,
   /^\/fiscal\//,
 ];
@@ -361,6 +369,7 @@ module.exports = {
   situacao,
   aplicarCodigoOffline,
   guardLicenca,
+  licencaAssinada,
   hashSupervisor,
   versaoSupervisor,
   conferirSenhaSupervisor,
