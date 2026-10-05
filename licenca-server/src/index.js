@@ -130,8 +130,28 @@ async function registrarEvento(env, cnpj, app, tipo, detalhe) {
 }
 
 function buscarCliente(env, cnpj, app) {
-  return env.DB.prepare('SELECT * FROM clientes WHERE cnpj = ? AND aplicacao = ?').bind(cnpj, app).first();
+  return env.DB.prepare(`SELECT c.*, r.nome AS revenda_nome, r.cnpj AS revenda_cnpj
+    FROM clientes c LEFT JOIN revendas r ON r.id = c.revenda_id
+    WHERE c.cnpj = ? AND c.aplicacao = ?`).bind(cnpj, app).first();
 }
+
+function cnpjValido(v) {
+  const d = soDigitos(v);
+  if (d.length !== 14 || /^(\d)\1+$/.test(d)) return false;
+  const dv = (n) => {
+    let soma = 0;
+    let peso = n - 7;
+    for (let i = 0; i < n; i++) {
+      soma += Number(d[i]) * peso;
+      peso = peso === 2 ? 9 : peso - 1;
+    }
+    const r = soma % 11;
+    return r < 2 ? 0 : 11 - r;
+  };
+  return dv(12) === Number(d[12]) && dv(13) === Number(d[13]);
+}
+
+const MSG_REVENDA = 'CNPJ da revenda não cadastrado. Confira com a MT Automações — (34) 3674-1937.';
 
 // ─── Rota pública: consulta do Gestor ─────────────────────────────────────────
 
@@ -149,17 +169,27 @@ async function check(request, env) {
   const nse = texto(body.nse, 40) || '';
   const agora = agoraIso();
   const ip = request.headers.get('CF-Connecting-IP') || '';
+  const revendaCnpj = soDigitos(body.revenda_cnpj);
+  const revenda = revendaCnpj
+    ? await env.DB.prepare('SELECT id, nome FROM revendas WHERE cnpj = ? AND ativo = 1').bind(revendaCnpj).first()
+    : null;
 
   let cli = await buscarCliente(env, cnpj, app);
   if (!cli) {
+    // Gestor que já pede a revenda (1.2.68+) só cria o cadastro com revenda conhecida.
+    if (revendaCnpj && !revenda) return json({ ok: false, error: MSG_REVENDA }, 400);
     await env.DB.prepare(
-      `INSERT INTO clientes (cnpj, aplicacao, razao, fantasia, status, criado_em, atualizado_em, ultimo_contato)
-       VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?)`
-    ).bind(cnpj, app, texto(body.razao, 120), texto(body.fantasia, 120), agora, agora, agora).run();
+      `INSERT INTO clientes (cnpj, aplicacao, razao, fantasia, status, criado_em, atualizado_em, ultimo_contato, revenda_id)
+       VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?, ?)`
+    ).bind(cnpj, app, texto(body.razao, 120), texto(body.fantasia, 120), agora, agora, agora, revenda?.id ?? null).run();
     await registrarEvento(env, cnpj, app, 'novo_cliente',
-      `${texto(body.fantasia, 120) || ''} — NSE ${nse || '—'} — ${texto(body.maquina, 80) || ''}`);
+      `${texto(body.fantasia, 120) || ''} — NSE ${nse || '—'} — ${texto(body.maquina, 80) || ''}${revenda ? ` — revenda ${revenda.nome}` : ''}`);
     cli = await buscarCliente(env, cnpj, app);
   } else {
+    if (!cli.revenda_id && revenda) {
+      await env.DB.prepare('UPDATE clientes SET revenda_id = ? WHERE cnpj = ? AND aplicacao = ?').bind(revenda.id, cnpj, app).run();
+      await registrarEvento(env, cnpj, app, 'edicao', `revenda: ${revenda.nome}`);
+    }
     const razao = texto(body.razao, 120);
     const fantasia = texto(body.fantasia, 120);
     if (contatoAntigo(cli.ultimo_contato) || (razao && razao !== cli.razao) || (fantasia && fantasia !== cli.fantasia)) {
@@ -280,20 +310,28 @@ async function listarClientes(url, env) {
     where.push('c.aplicacao = ?');
     params.push(app);
   }
+  const revendaFiltro = String(url.searchParams.get('revenda') || '').trim();
+  if (revendaFiltro === '0') {
+    where.push('c.revenda_id IS NULL');
+  } else if (/^\d{1,9}$/.test(revendaFiltro)) {
+    where.push('c.revenda_id = ?');
+    params.push(Number(revendaFiltro));
+  }
   if (q) {
-    where.push(`(c.cnpj LIKE ? OR c.razao LIKE ? OR c.fantasia LIKE ? OR c.aplicacao LIKE ? OR EXISTS (
+    where.push(`(c.cnpj LIKE ? OR c.razao LIKE ? OR c.fantasia LIKE ? OR c.aplicacao LIKE ? OR r.nome LIKE ? OR EXISTS (
       SELECT 1 FROM instalacoes i2 WHERE i2.cnpj = c.cnpj AND i2.aplicacao = c.aplicacao AND (i2.nse LIKE ? OR i2.maquina LIKE ?)))`);
     const like = `%${q}%`;
     const likeCnpj = `%${soDigitos(q) || q}%`;
-    params.push(likeCnpj, like, like, like, like, like);
+    params.push(likeCnpj, like, like, like, like, like, like);
   }
   const ultimaInst = (col) => `(SELECT i.${col} FROM instalacoes i WHERE i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao
     ORDER BY i.ultimo_contato DESC LIMIT 1) AS ${col}`;
   const sql = `
-    SELECT c.*,
+    SELECT c.*, r.nome AS revenda_nome, r.cnpj AS revenda_cnpj,
       (SELECT COUNT(*) FROM instalacoes i WHERE i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao) AS instalacoes,
       ${ultimaInst('versao_gestor')}, ${ultimaInst('maquina')}, ${ultimaInst('nse')}
     FROM clientes c
+    LEFT JOIN revendas r ON r.id = c.revenda_id
     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
     ORDER BY CASE c.status WHEN 'pendente' THEN 0 ELSE 1 END, COALESCE(c.ultimo_contato, c.criado_em) DESC`;
   const { results } = await env.DB.prepare(sql).bind(...params).all();
@@ -380,7 +418,86 @@ function camposEditaveis(body) {
   if (body.observacao !== undefined) out.observacao = texto(body.observacao, 1000);
   if (body.razao !== undefined) out.razao = texto(body.razao, 120);
   if (body.fantasia !== undefined) out.fantasia = texto(body.fantasia, 120);
+  if (body.revenda_id !== undefined) {
+    const id = body.revenda_id === null || body.revenda_id === '' ? null : Number(body.revenda_id);
+    if (id !== null && !(Number.isInteger(id) && id > 0)) throw new Error('Revenda inválida.');
+    out.revenda_id = id;
+  }
   return out;
+}
+
+async function conferirRevenda(env, campos) {
+  if (campos.revenda_id == null) return null;
+  const r = await env.DB.prepare('SELECT id, nome FROM revendas WHERE id = ?').bind(campos.revenda_id).first();
+  if (!r) throw new Error('Revenda não encontrada.');
+  return r;
+}
+
+// ─── Revendas ─────────────────────────────────────────────────────────────────
+
+async function listarRevendas(env) {
+  const { results } = await env.DB.prepare(`
+    SELECT r.*, (SELECT COUNT(*) FROM clientes c WHERE c.revenda_id = r.id) AS clientes
+    FROM revendas r ORDER BY r.id`).all();
+  const semRevenda = await env.DB.prepare('SELECT COUNT(*) AS n FROM clientes WHERE revenda_id IS NULL').first();
+  return json({ ok: true, revendas: results, sem_revenda: semRevenda?.n || 0 });
+}
+
+function camposRevenda(body, parcial) {
+  const out = {};
+  if (!parcial || body.nome !== undefined) {
+    const nome = texto(body.nome, 120);
+    if (!nome) throw new Error('Informe o nome da revenda.');
+    out.nome = nome;
+  }
+  if (body.contato !== undefined) out.contato = texto(body.contato, 120);
+  if (body.ativo !== undefined) out.ativo = body.ativo ? 1 : 0;
+  return out;
+}
+
+async function criarRevenda(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const cnpj = soDigitos(body.cnpj);
+  if (!cnpjValido(cnpj)) return json({ ok: false, error: 'CNPJ da revenda inválido.' }, 400);
+  let campos;
+  try {
+    campos = camposRevenda(body, false);
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 400);
+  }
+  if (await env.DB.prepare('SELECT 1 FROM revendas WHERE cnpj = ?').bind(cnpj).first()) {
+    return json({ ok: false, error: 'Revenda já cadastrada com este CNPJ.' }, 409);
+  }
+  const agora = agoraIso();
+  await env.DB.prepare('INSERT INTO revendas (cnpj, nome, contato, ativo, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?, ?)')
+    .bind(cnpj, campos.nome, campos.contato ?? null, campos.ativo ?? 1, agora, agora).run();
+  await registrarEvento(env, '*', null, 'revenda', `Revenda cadastrada: ${campos.nome} (${cnpj})`);
+  return listarRevendas(env);
+}
+
+async function atualizarRevenda(id, request, env) {
+  const atual = await env.DB.prepare('SELECT * FROM revendas WHERE id = ?').bind(id).first();
+  if (!atual) return json({ ok: false, error: 'Revenda não encontrada.' }, 404);
+  const body = await request.json().catch(() => ({}));
+  let campos;
+  try {
+    campos = camposRevenda(body, true);
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 400);
+  }
+  const chaves = Object.keys(campos);
+  if (chaves.length) {
+    await env.DB.prepare(`UPDATE revendas SET ${chaves.map((k) => `${k} = ?`).join(', ')}, atualizado_em = ? WHERE id = ?`)
+      .bind(...chaves.map((k) => campos[k]), agoraIso(), id).run();
+  }
+  return listarRevendas(env);
+}
+
+async function excluirRevenda(id, env) {
+  const uso = await env.DB.prepare('SELECT COUNT(*) AS n FROM clientes WHERE revenda_id = ?').bind(id).first();
+  if (uso?.n) return json({ ok: false, error: `Revenda com ${uso.n} cliente(s). Troque a revenda deles ou desative-a.` }, 409);
+  await env.DB.prepare('DELETE FROM revendas WHERE id = ?').bind(id).run();
+  return listarRevendas(env);
 }
 
 async function criarCliente(request, env) {
@@ -393,15 +510,16 @@ async function criarCliente(request, env) {
   let campos;
   try {
     campos = camposEditaveis({ status: 'liberado', ...body });
+    await conferirRevenda(env, campos);
   } catch (e) {
     return json({ ok: false, error: e.message }, 400);
   }
   const agora = agoraIso();
   await env.DB.prepare(
-    `INSERT INTO clientes (cnpj, aplicacao, razao, fantasia, status, pago_ate, mensagem, observacao, criado_em, atualizado_em)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    `INSERT INTO clientes (cnpj, aplicacao, razao, fantasia, status, pago_ate, mensagem, observacao, criado_em, atualizado_em, revenda_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(cnpj, app, campos.razao ?? null, campos.fantasia ?? null, campos.status, campos.pago_ate ?? null,
-    campos.mensagem ?? null, campos.observacao ?? null, agora, agora).run();
+    campos.mensagem ?? null, campos.observacao ?? null, agora, agora, campos.revenda_id ?? null).run();
   await registrarEvento(env, cnpj, app, 'cadastro_manual', `status ${campos.status}`);
   return detalheCliente(cnpj, app, env);
 }
@@ -411,8 +529,10 @@ async function atualizarCliente(cnpj, app, request, env) {
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
   let campos;
+  let revendaNova = null;
   try {
     campos = camposEditaveis(body);
+    revendaNova = await conferirRevenda(env, campos);
   } catch (e) {
     return json({ ok: false, error: e.message }, 400);
   }
@@ -426,7 +546,8 @@ async function atualizarCliente(cnpj, app, request, env) {
   }
   const outros = chaves.filter((k) => k !== 'status' && (campos[k] ?? null) !== (cli[k] ?? null));
   if (outros.length) {
-    await registrarEvento(env, cnpj, app, 'edicao', outros.map((k) => `${k}: ${campos[k] ?? '—'}`).join(' · '));
+    const valor = (k) => (k === 'revenda_id' ? (revendaNova?.nome || 'sem revenda') : (campos[k] ?? '—'));
+    await registrarEvento(env, cnpj, app, 'edicao', outros.map((k) => `${k === 'revenda_id' ? 'revenda' : k}: ${valor(k)}`).join(' · '));
   }
   return detalheCliente(cnpj, app, env);
 }
@@ -467,6 +588,7 @@ async function licencaOffline(cnpj, app, request, env) {
 }
 
 const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor)?$`);
+const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
 async function rotaAdmin(request, env, url) {
   if (url.pathname === '/api/admin/login' && request.method === 'POST') return login(request, env);
@@ -477,6 +599,16 @@ async function rotaAdmin(request, env, url) {
   if (url.pathname === '/api/admin/clientes') {
     if (request.method === 'GET') return listarClientes(url, env);
     if (request.method === 'POST') return criarCliente(request, env);
+  }
+  if (url.pathname === '/api/admin/revendas') {
+    if (request.method === 'GET') return listarRevendas(env);
+    if (request.method === 'POST') return criarRevenda(request, env);
+  }
+  const mr = url.pathname.match(ROTA_REVENDA);
+  if (mr) {
+    const id = Number(mr[1]);
+    if (request.method === 'PUT') return atualizarRevenda(id, request, env);
+    if (request.method === 'DELETE') return excluirRevenda(id, env);
   }
   const m = url.pathname.match(ROTA_CLIENTE);
   if (m) {

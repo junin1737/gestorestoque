@@ -248,12 +248,18 @@
         <dt>CNPJ</dt><dd id="lic-modal-cnpj">—</dd>
         <dt>NSE Clipp</dt><dd id="lic-modal-nse">—</dd>
         <dt>Computador</dt><dd id="lic-modal-maquina">—</dd>
+        <dt id="lic-modal-revenda-dt" hidden>Revenda</dt><dd id="lic-modal-revenda-dd" hidden>—</dd>
       </dl>
+      <div class="field" id="lic-modal-revenda-box" hidden>
+        <label for="lic-modal-revenda">CNPJ da revenda</label>
+        <input id="lic-modal-revenda" type="text" inputmode="numeric" maxlength="18" placeholder="00.000.000/0000-00" autocomplete="off" />
+      </div>
       <p class="hint msg-line" id="lic-modal-status" hidden></p>
       <div class="banco-actions">
         <button type="button" id="lic-modal-codigo" class="btn-outline">Tenho um código offline</button>
         <button type="button" id="lic-modal-fechar" class="btn-outline">Fechar</button>
         <button type="button" id="lic-modal-verificar" class="btn-teal">Verificar agora</button>
+        <button type="button" id="lic-modal-solicitar" class="btn-teal" hidden>Solicitar liberação</button>
       </div>
     </div>
   </div>

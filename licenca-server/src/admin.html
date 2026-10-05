@@ -109,6 +109,7 @@
 <section id="app" hidden>
   <header class="top">
     <h1>Licenças · MT Automações</h1>
+    <button class="btn sm" id="btn-revendas">Revendas</button>
     <button class="btn sm" id="btn-sup">Senha do supervisor</button>
     <button class="btn sm" id="btn-novo">+ Cadastrar cliente</button>
     <button class="btn sm" id="btn-sair">Sair</button>
@@ -125,6 +126,7 @@
     <div class="toolbar">
       <input id="busca" type="search" placeholder="Buscar por CNPJ, nome, máquina, NSE ou aplicação…" />
       <select id="f-app" title="Aplicação"><option value="">Todas as aplicações</option></select>
+      <select id="f-revenda" title="Revenda"><option value="">Todas as revendas</option></select>
       <button class="btn ghost" id="btn-atualizar">Atualizar</button>
     </div>
     <div class="tabs" id="tabs">
@@ -139,6 +141,7 @@
           <tr>
             <th>Situação</th>
             <th>Cliente</th>
+            <th>Revenda</th>
             <th>Aplicação / NSE</th>
             <th class="col-hide">Máquina / versão</th>
             <th class="col-hide">Último contato</th>
@@ -174,6 +177,7 @@
       <label>Pago até (vazio = sem vencimento)<input type="date" id="d-pago" /></label>
       <label>Razão social<input id="d-razao" maxlength="120" /></label>
       <label>Nome fantasia<input id="d-fantasia" maxlength="120" /></label>
+      <label>Revenda<select id="d-revenda"></select></label>
     </div>
     <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
     <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
@@ -256,6 +260,7 @@
           </select>
         </label>
         <label>Pago até<input type="date" id="n-pago" /></label>
+        <label>Revenda<select id="n-revenda"></select></label>
       </div>
       <label>Observação interna<textarea id="n-obs"></textarea></label>
       <div class="erro" id="n-erro"></div>
@@ -267,17 +272,55 @@
   </form>
 </dialog>
 
+<dialog id="dlg-revendas">
+  <div class="dlg-head">
+    <div style="flex:1">
+      <h2>Revendas</h2>
+      <div class="sub">O Gestor pede o CNPJ da revenda ao solicitar a liberação. Só revendas ativas são aceitas em novas solicitações.</div>
+    </div>
+  </div>
+  <div class="dlg-body">
+    <div class="mini"><table>
+      <thead><tr><th>Nº</th><th>Revenda</th><th>CNPJ</th><th class="col-hide">Contato</th><th>Clientes</th><th>Situação</th><th></th></tr></thead>
+      <tbody id="r-lista"></tbody>
+    </table></div>
+    <div class="sub" id="r-sem" style="margin-top:.4rem"></div>
+    <h3 id="r-form-titulo">Nova revenda</h3>
+    <form id="form-revenda">
+      <div class="grid2">
+        <label>CNPJ<input id="r-cnpj" inputmode="numeric" maxlength="18" required /></label>
+        <label>Nome<input id="r-nome" maxlength="120" required /></label>
+        <label>Contato (telefone / responsável)<input id="r-contato" maxlength="120" /></label>
+        <label>Situação
+          <select id="r-ativo">
+            <option value="1">Ativa</option>
+            <option value="0">Inativa (não aceita novas solicitações)</option>
+          </select>
+        </label>
+      </div>
+      <div class="erro" id="r-erro"></div>
+      <div class="linha" style="justify-content:flex-end">
+        <button class="btn ghost" type="button" id="r-cancelar" hidden>Cancelar edição</button>
+        <button class="btn primary" type="submit" id="r-salvar">Cadastrar revenda</button>
+      </div>
+    </form>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn ghost" id="r-fechar" type="button">Fechar</button>
+  </div>
+</dialog>
+
 <script>
 'use strict';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const st = { token: localStorage.getItem('mt_licenca_token') || '', status: '', q: '', app: '', atual: null, aplicacoes: ['GestorEstoque'] };
+const st = { token: localStorage.getItem('mt_licenca_token') || '', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null };
 const rotaCliente = (c) => `/clientes/${encodeURIComponent(c.app)}/${c.cnpj}`;
 const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloqueado', vencido: 'Vencido' };
 const EVENTO = {
   novo_cliente: 'Solicitou cadastro', nova_instalacao: 'Nova instalação', versao: 'Atualizou versão',
   status: 'Situação alterada', edicao: 'Dados alterados', licenca_offline: 'Licença offline gerada', cadastro_manual: 'Cadastro manual',
-  senha_supervisor: 'Senha do supervisor',
+  senha_supervisor: 'Senha do supervisor', revenda: 'Revenda',
 };
 const SUP_ITER = 400000;
 
@@ -350,7 +393,7 @@ async function api(path, { method = 'GET', body } = {}) {
 function mostrarApp(logado) {
   $('#login').hidden = logado;
   $('#app').hidden = !logado;
-  if (logado) { carregarConfig(); carregar(); }
+  if (logado) { carregarConfig(); carregarRevendas().then(carregar); }
 }
 function sair() {
   st.token = '';
@@ -375,6 +418,7 @@ async function carregar() {
   if (st.status) qs.set('status', st.status);
   if (st.q) qs.set('q', st.q);
   if (st.app) qs.set('app', st.app);
+  if (st.revenda) qs.set('revenda', st.revenda);
   const r = await api(`/clientes?${qs}`);
   if (!r.ok) { toast(r.error || 'Falha ao carregar.', true); return; }
   if (Array.isArray(r.aplicacoes)) {
@@ -401,6 +445,7 @@ async function carregar() {
     <tr class="row${solic ? ' solicitacao' : ''}" data-cnpj="${esc(c.cnpj)}" data-app="${esc(c.aplicacao)}">
       <td><span class="badge b-${esc(c.situacao)}">${solic ? 'Solicitação' : (ROTULO[c.situacao] || esc(c.situacao))}</span></td>
       <td><div class="nome">${esc(c.fantasia || c.razao || 'Sem nome')}</div><div class="sub">${fmtCnpj(c.cnpj)}${c.razao && c.fantasia ? ` · ${esc(c.razao)}` : ''}${solic ? ` · solicitado ${fmtData(c.criado_em)}` : ''}</div></td>
+      <td>${c.revenda_id ? `<div>${esc(c.revenda_nome || `Revenda ${c.revenda_id}`)}</div><div class="sub">Nº ${esc(c.revenda_id)} · ${fmtCnpj(c.revenda_cnpj)}</div>` : '<span class="sub">Sem revenda</span>'}</td>
       <td><div>${esc(c.aplicacao)}</div><div class="sub">NSE ${esc(c.nse || '—')}</div></td>
       <td class="col-hide"><div>${esc(c.maquina || '—')}</div><div class="sub">${c.versao_gestor ? `v${esc(c.versao_gestor)}` : ''}${c.instalacoes > 1 ? ` · ${c.instalacoes} instalações` : ''}</div></td>
       <td class="col-hide"><div>${relativo(c.ultimo_contato)}</div><div class="sub">${fmtData(c.ultimo_contato)}</div></td>
@@ -472,6 +517,81 @@ $('#tbody').addEventListener('click', async (e) => {
   abrirCliente({ cnpj: tr.dataset.cnpj, app: tr.dataset.app });
 });
 $('#f-app').addEventListener('change', (e) => { st.app = e.target.value; carregar(); });
+$('#f-revenda').addEventListener('change', (e) => { st.revenda = e.target.value; carregar(); });
+
+function opcoesRevenda(atual, { vazio = 'Sem revenda' } = {}) {
+  return `<option value="">${esc(vazio)}</option>`
+    + st.revendas
+      .filter((r) => r.ativo || Number(r.id) === Number(atual))
+      .map((r) => `<option value="${r.id}"${Number(r.id) === Number(atual) ? ' selected' : ''}>${r.id} · ${esc(r.nome)}${r.ativo ? '' : ' (inativa)'}</option>`)
+      .join('');
+}
+
+async function carregarRevendas() {
+  const r = await api('/revendas');
+  if (!r.ok) return;
+  st.revendas = r.revendas || [];
+  $('#f-revenda').innerHTML = '<option value="">Todas as revendas</option>'
+    + st.revendas.map((v) => `<option value="${v.id}"${String(v.id) === st.revenda ? ' selected' : ''}>${v.id} · ${esc(v.nome)}</option>`).join('')
+    + `<option value="0"${st.revenda === '0' ? ' selected' : ''}>Sem revenda</option>`;
+  $('#r-lista').innerHTML = st.revendas.length
+    ? st.revendas.map((v) => `<tr data-id="${v.id}">
+        <td>${v.id}</td><td><b>${esc(v.nome)}</b></td><td>${fmtCnpj(v.cnpj)}</td><td class="col-hide">${esc(v.contato || '—')}</td>
+        <td>${v.clientes}</td><td><span class="badge ${v.ativo ? 'b-liberado' : 'b-bloqueado'}">${v.ativo ? 'Ativa' : 'Inativa'}</span></td>
+        <td class="acoes"><button class="btn sm ghost" data-r="editar">Editar</button>${v.clientes ? '' : '<button class="btn sm danger" data-r="excluir">Excluir</button>'}</td>
+      </tr>`).join('')
+    : '<tr><td colspan="7" class="sub">Nenhuma revenda cadastrada.</td></tr>';
+  $('#r-sem').textContent = r.sem_revenda ? `${r.sem_revenda} cliente(s) sem revenda.` : '';
+}
+
+function formRevenda(v) {
+  st.revendaEditando = v ? v.id : null;
+  $('#r-form-titulo').textContent = v ? `Editar revenda nº ${v.id}` : 'Nova revenda';
+  $('#r-cnpj').value = v ? fmtCnpj(v.cnpj) : '';
+  $('#r-cnpj').disabled = !!v;
+  $('#r-nome').value = v?.nome || '';
+  $('#r-contato').value = v?.contato || '';
+  $('#r-ativo').value = v && !v.ativo ? '0' : '1';
+  $('#r-salvar').textContent = v ? 'Salvar alterações' : 'Cadastrar revenda';
+  $('#r-cancelar').hidden = !v;
+  $('#r-erro').textContent = '';
+}
+
+$('#btn-revendas').addEventListener('click', async () => {
+  formRevenda(null);
+  await carregarRevendas();
+  $('#dlg-revendas').showModal();
+});
+$('#r-fechar').addEventListener('click', () => { $('#dlg-revendas').close(); carregar(); });
+$('#r-cancelar').addEventListener('click', () => formRevenda(null));
+$('#r-cnpj').addEventListener('input', (e) => {
+  const d = e.target.value.replace(/\D/g, '').slice(0, 14);
+  e.target.value = d.length === 14 ? fmtCnpj(d) : d;
+});
+$('#r-lista').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-r]');
+  if (!btn) return;
+  const v = st.revendas.find((x) => String(x.id) === btn.closest('tr').dataset.id);
+  if (!v) return;
+  if (btn.dataset.r === 'editar') { formRevenda(v); $('#r-nome').focus(); return; }
+  if (!confirm(`Excluir a revenda ${v.nome}?`)) return;
+  const r = await api(`/revendas/${v.id}`, { method: 'DELETE' });
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  toast('Revenda excluída.');
+  formRevenda(null);
+  carregarRevendas();
+});
+$('#form-revenda').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const body = { nome: $('#r-nome').value, contato: $('#r-contato').value, ativo: $('#r-ativo').value === '1' };
+  const r = st.revendaEditando
+    ? await api(`/revendas/${st.revendaEditando}`, { method: 'PUT', body })
+    : await api('/revendas', { method: 'POST', body: { ...body, cnpj: $('#r-cnpj').value } });
+  if (!r.ok) { $('#r-erro').textContent = r.error || 'Falha ao salvar.'; return; }
+  toast(st.revendaEditando ? 'Revenda atualizada.' : 'Revenda cadastrada.');
+  formRevenda(null);
+  carregarRevendas();
+});
 
 $('#tabs').addEventListener('click', (e) => {
   const tab = e.target.closest('.tab');
@@ -498,6 +618,7 @@ function preencherCliente(r) {
   $('#d-pago').value = c.pago_ate || '';
   $('#d-razao').value = c.razao || '';
   $('#d-fantasia').value = c.fantasia || '';
+  $('#d-revenda').innerHTML = opcoesRevenda(c.revenda_id);
   $('#d-mensagem').value = c.mensagem || '';
   $('#d-obs').value = c.observacao || '';
   $('#d-sup-1').value = '';
@@ -530,6 +651,7 @@ $('#d-salvar').addEventListener('click', async () => {
     pago_ate: $('#d-pago').value || null,
     razao: $('#d-razao').value,
     fantasia: $('#d-fantasia').value,
+    revenda_id: $('#d-revenda').value || null,
     mensagem: $('#d-mensagem').value,
     observacao: $('#d-obs').value,
   };
@@ -588,6 +710,7 @@ $('#btn-novo').addEventListener('click', () => {
   $('#form-novo').reset();
   $('#n-app').innerHTML = st.aplicacoes.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
   if (st.app) $('#n-app').value = st.app;
+  $('#n-revenda').innerHTML = opcoesRevenda(st.revendas.length === 1 ? st.revendas[0].id : null);
   $('#n-erro').textContent = '';
   $('#dlg-novo').showModal();
 });
@@ -603,6 +726,7 @@ $('#form-novo').addEventListener('submit', async (e) => {
       fantasia: $('#n-fantasia').value,
       status: $('#n-status').value,
       pago_ate: $('#n-pago').value || null,
+      revenda_id: $('#n-revenda').value || null,
       observacao: $('#n-obs').value,
     },
   });

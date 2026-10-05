@@ -120,6 +120,14 @@ router.post('/licenca/verificar', async (_req, res) => {
   res.json({ ok: true, licenca: await licenca.verificarAgora() });
 });
 
+router.post('/licenca/solicitar', somenteServidorLocal, async (req, res) => {
+  try {
+    res.json({ ok: true, licenca: await licenca.solicitar(req.body?.revenda_cnpj) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.post('/licenca/aplicar', somenteServidorLocal, async (req, res) => {
   try {
     res.json({ ok: true, licenca: await licenca.aplicarCodigoOffline(req.body?.codigo) });

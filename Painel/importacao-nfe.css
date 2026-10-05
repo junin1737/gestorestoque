@@ -1182,6 +1182,19 @@
   white-space: nowrap;
 }
 
+.imp-check-list {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-top: 0.75rem;
+}
+
+.imp-check-list .imp-check {
+  white-space: normal;
+  text-align: left;
+}
+
 .imp-check input[type="checkbox"] {
   width: 1.05rem;
   height: 1.05rem;
