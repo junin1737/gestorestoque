@@ -16,6 +16,7 @@ import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.view.inputmethod.EditorInfo;
+import android.webkit.CookieManager;
 import android.webkit.JavascriptInterface;
 import android.webkit.JsResult;
 import android.webkit.PermissionRequest;
@@ -57,11 +58,17 @@ import java.util.concurrent.Executors;
 public class MainActivity extends AppCompatActivity {
     private static final String PREFS = "gestor_prefs";
     private static final String KEY_URL = "server_url";
+    /** Endereço do acesso pela internet (https://acesso.../), gravado ao ler o QR Code online. */
+    private static final String KEY_ONLINE = "online_url";
     private static final int REQ_CAMERA_WEB = 1001;
     private static final int REQ_CAMERA_QR = 1002;
     private static final int REQ_CAMERA_BARCODE = 1003;
     private static final int TIMEOUT_CONEXAO_MS = 3000;
+    private static final int TIMEOUT_ONLINE_MS = 9000;
     private static final int TIMEOUT_PAINEL_MS = 20000;
+    private static final int TIMEOUT_PAINEL_ONLINE_MS = 35000;
+    private static final java.util.regex.Pattern LINK_ONLINE =
+            java.util.regex.Pattern.compile("(?i)^https://[a-z0-9.-]+/t/[a-z2-7]{20,32}(\\?p=[A-Za-z0-9_-]{16,64})?$");
 
     private final ExecutorService rede = Executors.newCachedThreadPool();
     private final Handler ui = new Handler(Looper.getMainLooper());
@@ -84,13 +91,18 @@ public class MainActivity extends AppCompatActivity {
                     Toast.makeText(this, R.string.scan_canceled, Toast.LENGTH_SHORT).show();
                     return;
                 }
-                String url = normalizeUrl(result.getContents());
+                String lido = result.getContents().trim();
+                if (LINK_ONLINE.matcher(lido).matches()) {
+                    parearOnline(lido);
+                    return;
+                }
+                String url = normalizeUrl(lido);
                 if (url == null) {
                     Toast.makeText(this, R.string.invalid_qr, Toast.LENGTH_LONG).show();
                     return;
                 }
                 urlInput.setText(url);
-                testarEConectar(url);
+                testarEConectar(url, false);
             });
 
     private final ActivityResultLauncher<ScanOptions> barcodeLauncher =
@@ -138,8 +150,9 @@ public class MainActivity extends AppCompatActivity {
         Button btnScanQr = findViewById(R.id.btn_scan_qr);
 
         SharedPreferences prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
-        boolean firstConnection = !prefs.contains(KEY_URL);
+        boolean firstConnection = !prefs.contains(KEY_URL) && !prefs.contains(KEY_ONLINE);
         String saved = prefs.getString(KEY_URL, "");
+        CookieManager.getInstance().setAcceptCookie(true);
         if (!saved.isEmpty()) {
             urlInput.setText(saved);
         }
@@ -198,8 +211,64 @@ public class MainActivity extends AppCompatActivity {
         if (firstConnection) {
             status.setText(R.string.hint_connect);
             connectPanel.post(this::startQrScan);
-        } else if (!saved.isEmpty()) {
-            testarEConectar(saved);
+        } else {
+            conectarAutomatico();
+        }
+    }
+
+    private String urlOnline() {
+        return getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_ONLINE, "");
+    }
+
+    /** Rede da loja primeiro (3 s); sem resposta, pela internet se o aparelho foi autorizado. */
+    private void conectarAutomatico() {
+        String lan = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_URL, "");
+        if (!lan.isEmpty()) {
+            testarEConectar(lan, true);
+        } else if (!urlOnline().isEmpty()) {
+            testarOnline();
+        }
+    }
+
+    /** QR Code de acesso online: autoriza este aparelho (cookie no WebView) e guarda o endereço. */
+    private void parearOnline(String link) {
+        android.net.Uri u = android.net.Uri.parse(link);
+        String base = "https://" + u.getHost() + "/";
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_ONLINE, base).apply();
+        Toast.makeText(this, R.string.online_pareando, Toast.LENGTH_LONG).show();
+        abrirPainel(link, true);
+    }
+
+    private void testarOnline() {
+        final String online = urlOnline();
+        if (online.isEmpty()) return;
+        showConnectPanel();
+        final int minha = ++tentativa;
+        status.setText(R.string.online_conectando);
+        progress.setIndeterminate(true);
+        progress.setVisibility(View.VISIBLE);
+        final String cookie = CookieManager.getInstance().getCookie(online);
+        ui.postDelayed(() -> resultadoOnline(minha, online, 0), TIMEOUT_ONLINE_MS);
+        rede.execute(() -> {
+            int code = codigoServidor(online, cookie, TIMEOUT_ONLINE_MS);
+            ui.post(() -> resultadoOnline(minha, online, code));
+        });
+    }
+
+    private void resultadoOnline(int minha, String online, int code) {
+        if (minha != tentativa || isFinishing()) return;
+        tentativa++;
+        progress.setIndeterminate(false);
+        progress.setVisibility(View.GONE);
+        if (code >= 200 && code < 300) {
+            Toast.makeText(this, R.string.online_conectado, Toast.LENGTH_SHORT).show();
+            abrirPainel(online, true);
+        } else if (code == 403) {
+            status.setText(R.string.online_nao_autorizado);
+        } else if (code == 503) {
+            status.setText(R.string.online_loja_desconectada);
+        } else {
+            status.setText(R.string.online_sem_resposta);
         }
     }
 
@@ -207,46 +276,56 @@ public class MainActivity extends AppCompatActivity {
      * Fica na tela de conexão enquanto testa o serviço; só abre o WebView se responder em
      * TIMEOUT_CONEXAO_MS. Sem isso o WebView fica preto até o Android desistir do socket.
      */
-    private void testarEConectar(String url) {
+    private void testarEConectar(String url, boolean tentarOnline) {
         showConnectPanel();
         final int minha = ++tentativa;
         urlInput.setText(url);
         status.setText(getString(R.string.connecting_to, url));
         progress.setIndeterminate(true);
         progress.setVisibility(View.VISIBLE);
-        ui.postDelayed(() -> resultadoTeste(minha, url, false), TIMEOUT_CONEXAO_MS);
+        ui.postDelayed(() -> resultadoTeste(minha, url, false, tentarOnline), TIMEOUT_CONEXAO_MS);
         rede.execute(() -> {
-            boolean ok = servidorResponde(url);
-            ui.post(() -> resultadoTeste(minha, url, ok));
+            int code = codigoServidor(url, null, TIMEOUT_CONEXAO_MS);
+            boolean ok = code >= 200 && code < 300;
+            ui.post(() -> resultadoTeste(minha, url, ok, tentarOnline));
         });
     }
 
-    private void resultadoTeste(int minha, String url, boolean ok) {
+    private void resultadoTeste(int minha, String url, boolean ok, boolean tentarOnline) {
         if (minha != tentativa || isFinishing()) return;
         tentativa++;
         progress.setIndeterminate(false);
         progress.setVisibility(View.GONE);
         if (ok) {
             connectWithUrl(url);
+        } else if (tentarOnline && !urlOnline().isEmpty()) {
+            testarOnline();
         } else {
             status.setText(getString(R.string.server_unreachable, url));
         }
     }
 
-    private static boolean servidorResponde(String url) {
+    /** Código HTTP de /api/config (0 = sem resposta). */
+    private static int codigoServidor(String url, String cookie, int timeoutMs) {
         HttpURLConnection conn = null;
         try {
             conn = (HttpURLConnection) new URL(new URL(url), "/api/config").openConnection();
-            conn.setConnectTimeout(TIMEOUT_CONEXAO_MS);
-            conn.setReadTimeout(TIMEOUT_CONEXAO_MS);
+            conn.setConnectTimeout(timeoutMs);
+            conn.setReadTimeout(timeoutMs);
+            conn.setInstanceFollowRedirects(false);
             conn.setRequestProperty("Accept", "application/json");
-            int code = conn.getResponseCode();
-            return code >= 200 && code < 300;
+            if (cookie != null && !cookie.isEmpty()) conn.setRequestProperty("Cookie", cookie);
+            return conn.getResponseCode();
         } catch (Exception e) {
-            return false;
+            return 0;
         } finally {
             if (conn != null) conn.disconnect();
         }
+    }
+
+    private boolean ehOnline(String url) {
+        String online = urlOnline();
+        return url != null && !online.isEmpty() && url.startsWith(online);
     }
 
     private void painelNaoCarregou() {
@@ -495,6 +574,11 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
+                    String falhou = request.getUrl() != null ? request.getUrl().toString() : "";
+                    if (!ehOnline(falhou) && !urlOnline().isEmpty()) {
+                        testarOnline();
+                        return;
+                    }
                     Toast.makeText(MainActivity.this, R.string.toast_offline, Toast.LENGTH_LONG).show();
                     showConnectPanel();
                     status.setText(getString(R.string.load_error, error.getDescription()));
@@ -564,23 +648,32 @@ public class MainActivity extends AppCompatActivity {
 
     private void connect() {
         String raw = urlInput.getText() != null ? urlInput.getText().toString().trim() : "";
+        if (LINK_ONLINE.matcher(raw).matches()) {
+            parearOnline(raw);
+            return;
+        }
         String url = normalizeUrl(raw);
         if (url == null) {
             Toast.makeText(this, R.string.invalid_url, Toast.LENGTH_SHORT).show();
             return;
         }
-        testarEConectar(url);
+        testarEConectar(url, false);
     }
 
+    /** Endereço da rede da loja: grava como servidor local e abre o painel. */
     private void connectWithUrl(String url) {
         urlInput.setText(url);
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, url).apply();
         EmitenteIcon.fetchFromServer(this, null, null, url);
+        abrirPainel(url, false);
+    }
+
+    private void abrirPainel(String url, boolean online) {
         connectPanel.setVisibility(View.GONE);
         browserPanel.setVisibility(View.VISIBLE);
         status.setText(R.string.loading);
         ui.removeCallbacks(watchdogPainel);
-        ui.postDelayed(watchdogPainel, TIMEOUT_PAINEL_MS);
+        ui.postDelayed(watchdogPainel, online ? TIMEOUT_PAINEL_ONLINE_MS : TIMEOUT_PAINEL_MS);
         webView.loadUrl(url);
     }
 
@@ -598,6 +691,14 @@ public class MainActivity extends AppCompatActivity {
     private String normalizeUrl(String raw) {
         if (raw == null || raw.isEmpty()) return null;
         String value = raw.trim();
+        if (value.matches("(?i)^https://.*")) {
+            try {
+                java.net.URI uri = java.net.URI.create(value);
+                return uri.getHost() == null ? null : value;
+            } catch (Exception e) {
+                return null;
+            }
+        }
         if (!value.matches("(?i)^https?://.*")) {
             value = "http://" + value;
         }
@@ -640,6 +741,12 @@ public class MainActivity extends AppCompatActivity {
             }
             pendingPermissionRequest = null;
         }
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        CookieManager.getInstance().flush();
     }
 
     @Override

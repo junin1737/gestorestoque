@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Gestor Estoque</string>
+    <string name="app_name">Gestor Estoque Online</string>
     <string name="brand_name">MT Automações</string>
     <string name="subtitle">Conecte ao serviço do PC na mesma Wi‑Fi</string>
     <string name="scan_qr">Ler QR Code do serviço</string>
@@ -21,5 +21,11 @@
     <string name="camera_denied">Permissão de câmera negada.</string>
     <string name="scan_canceled">Leitura cancelada.</string>
     <string name="scan_barcode_hint">Aponte para o código de barras do produto</string>
+    <string name="online_pareando">Autorizando este aparelho para acesso pela internet…</string>
+    <string name="online_conectando">Fora da rede da loja. Conectando pela internet…</string>
+    <string name="online_conectado">Conectado pela internet</string>
+    <string name="online_nao_autorizado">Este aparelho não está autorizado (ou foi removido) para o acesso pela internet. Leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja.</string>
+    <string name="online_loja_desconectada">O computador da loja está desligado ou sem internet agora. Tente de novo em instantes.</string>
+    <string name="online_sem_resposta">Sem resposta da rede da loja nem pela internet. Confira a conexão do celular.</string>
     <string name="scan_product">Ler código</string>
 </resources>

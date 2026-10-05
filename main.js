@@ -11,6 +11,7 @@ ensureFirebirdClientPath();
 const { promptAndUpdate, checkForGitUpdate, getLocalVersion } = require('./server/updater');
 
 const { PORT } = require('./server/config');
+const edicao = require('./server/edicao');
 let mainWindow;
 let updateCheckStarted = false;
 
@@ -76,7 +77,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 640,
     autoHideMenuBar: true,
-    title: 'Gestor Estoque — Serviço',
+    title: `${edicao.NOME} — Serviço`,
     show: false,
     webPreferences: {
       nodeIntegration: false,
@@ -123,7 +124,7 @@ if (gotLock) {
     console.error('uncaughtException:', err);
     try {
       dialog.showErrorBox(
-        'Gestor Estoque',
+        edicao.NOME,
         `Ocorreu um erro inesperado, mas o serviço continua.\n\n${err && err.message ? err.message : err}`
       );
     } catch { /* ignore */ }

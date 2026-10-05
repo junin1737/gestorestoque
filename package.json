@@ -1,6 +1,6 @@
 {
-  "name": "gestor-estoque",
-  "version": "1.2.66",
+  "name": "gestor-estoque-online",
+  "version": "1.2.66-online.1",
   "description": "Painel Administrativo de Estoque - MT Automações",
   "author": "MT Automações",
   "repository": {
@@ -29,8 +29,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.mtautomacoes.gestor-estoque",
-    "productName": "Gestor Estoque",
+    "appId": "com.mtautomacoes.gestor-estoque-online",
+    "productName": "Gestor Estoque Online",
     "copyright": "Copyright © MT Automações",
     "asar": true,
     "directories": {
@@ -71,7 +71,7 @@
           ]
         }
       ],
-      "artifactName": "GestorEstoque-Setup-${version}.${ext}",
+      "artifactName": "gestorestoque-online-${version}.${ext}",
       "publisherName": "MT Automações",
       "signAndEditExecutable": false
     },
@@ -82,10 +82,11 @@
       "allowElevation": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Gestor Estoque",
+      "shortcutName": "Gestor Estoque Online",
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "include": "installer.nsh"
     }
-  }
+  },
+  "gestorEdicao": "online"
 }

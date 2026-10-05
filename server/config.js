@@ -7,7 +7,9 @@ const { gerarHashSenha } = require('./senha');
 
 /** Só vale enquanto o painel de licenças não definir a senha do supervisor (ou com licença desligada). */
 const SUPERVISOR_SENHA_LEGADA = '1020';
-const PORT = Number(process.env.GESTOR_PORT) || 5077;
+const edicao = require('./edicao');
+
+const PORT = Number(process.env.GESTOR_PORT) || edicao.PORTA_PADRAO;
 
 const MODULOS = {
   estoque: {
@@ -33,9 +35,25 @@ const MODULOS = {
   },
 };
 
+/** Arquivos trazidos do Gestor Estoque normal na primeira abertura da edição online. */
+const ARQUIVOS_HERDADOS = /^(app-config\.json|licenca\.json|importacao-cfop-params\.json|\.fiscal-key|usuarios_[0-9a-f]+\.json)$/;
+
+function herdarDoGestorNormal(raiz, dir) {
+  const origem = path.join(raiz, 'GestorEstoque');
+  try {
+    for (const nome of fs.readdirSync(origem)) {
+      if (ARQUIVOS_HERDADOS.test(nome)) fs.copyFileSync(path.join(origem, nome), path.join(dir, nome));
+    }
+  } catch { /* Gestor normal não instalado: começa do zero */ }
+}
+
 function getAppDataDir() {
-  const dir = path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'GestorEstoque');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const raiz = process.env.APPDATA || path.join(os.homedir(), '.config');
+  const dir = path.join(raiz, edicao.PASTA_DADOS);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    if (edicao.ONLINE) herdarDoGestorNormal(raiz, dir);
+  }
   return dir;
 }
 

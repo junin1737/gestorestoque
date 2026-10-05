@@ -5,9 +5,18 @@ const path = require('path');
 const { app, dialog, BrowserWindow, shell } = require('electron');
 const { spawn } = require('child_process');
 
+const edicao = require('./edicao');
+
 const GH_OWNER = 'junin1737';
 const GH_REPO = 'gestorestoque';
-const GH_BRANCH = 'main';
+const GH_BRANCH = edicao.RAMO_GIT;
+
+/** Instalador da própria edição; a online nunca pega o .exe do Gestor normal (e vice-versa). */
+function acharInstalador(assets) {
+  const proprio = assets.find((a) => edicao.INSTALADOR_RE.test(a.name));
+  if (proprio || edicao.ONLINE) return proprio;
+  return assets.find((a) => /\.exe$/i.test(a.name) && !/^gestorestoque-online-/i.test(a.name));
+}
 
 function cmpVersion(a, b) {
   const pa = String(a || '0').replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0);
@@ -212,8 +221,7 @@ async function fetchReleaseAssetByTag(version) {
   try {
     const release = await httpsGetJson(url);
     const assets = release.assets || [];
-    const setup = assets.find((a) => /GestorEstoque-Setup-.*\.exe$/i.test(a.name))
-      || assets.find((a) => /\.exe$/i.test(a.name));
+    const setup = acharInstalador(assets);
     return {
       tag: String(release.tag_name || '').replace(/^v/i, ''),
       name: release.name || release.tag_name,
@@ -237,8 +245,7 @@ async function fetchLatestReleaseAsset() {
   try {
     const release = await httpsGetJson(url);
     const assets = release.assets || [];
-    const setup = assets.find((a) => /GestorEstoque-Setup-.*\.exe$/i.test(a.name))
-      || assets.find((a) => /\.exe$/i.test(a.name));
+    const setup = acharInstalador(assets);
     return {
       tag: String(release.tag_name || '').replace(/^v/i, ''),
       name: release.name || release.tag_name,
@@ -353,7 +360,7 @@ async function promptAndUpdate(parentWindow) {
     defaultId: 0,
     cancelId: info.downloadUrl ? 1 : 0,
     title: 'Atualização disponível',
-    message: 'Existe uma nova versão do Gestor Estoque. Deseja atualizar agora?',
+    message: `Existe uma nova versão do ${edicao.NOME}. Deseja atualizar agora?`,
     detail,
     noLink: true,
   });
