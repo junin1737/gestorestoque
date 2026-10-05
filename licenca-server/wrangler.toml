@@ -14,7 +14,7 @@ fallthrough = false
 [[d1_databases]]
 binding = "DB"
 database_name = "gestor-licenca"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "b037da95-e1a4-412b-a7e0-3e82647aa072"
 migrations_dir = "migrations"
 
 # Segredos (wrangler secret put ...):

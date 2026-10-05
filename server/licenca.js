@@ -5,8 +5,8 @@ const os = require('os');
 const path = require('path');
 const { getAppDataDir } = require('./config');
 
-// Vazio = controle de licença desligado (só liga quando o servidor de licenças estiver publicado).
-const URL_PADRAO = '';
+// Vazio = controle de licença desligado.
+const URL_PADRAO = 'https://painel.smsjrdeveloper.com.br';
 const LICENCA_URL = (process.env.GESTOR_LICENCA_URL || URL_PADRAO).replace(/\/+$/, '');
 const ATIVO = !!LICENCA_URL;
 const INTERVALO_MS = 30 * 60 * 1000;
