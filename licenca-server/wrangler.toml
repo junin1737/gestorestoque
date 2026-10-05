@@ -1,6 +1,10 @@
 name = "gestor-licenca"
 main = "src/index.js"
 compatibility_date = "2026-09-01"
+workers_dev = true
+routes = [
+  { pattern = "painel.smsjrdeveloper.com.br", custom_domain = true }
+]
 
 [[rules]]
 type = "Text"
