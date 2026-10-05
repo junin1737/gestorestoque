@@ -5,7 +5,7 @@ const path = require('path');
 const crypto = require('crypto');
 
 const SUPERVISOR_SENHA = '1020';
-const PORT = 5077;
+const PORT = Number(process.env.GESTOR_PORT) || 5077;
 
 const MODULOS = {
   estoque: {

@@ -1,6 +1,6 @@
 'use strict';
 
-const { withDb, query } = require('./db');
+const { withDb, useDb, query, nextGenId } = require('./db');
 
 function mapEstFornec(r) {
   if (!r) return null;
@@ -70,12 +70,12 @@ async function buscarEstoqueFornecedor({ idFornec, idIdentificador, codFornecedo
   });
 }
 
-async function upsertEstoqueFornecedor(body = {}) {
+async function upsertEstoqueFornecedor(body = {}, { db: conn = null } = {}) {
   const idIdent = Number(body.id_identificador);
   const idFornec = Number(body.id_fornec);
   if (!idIdent || !idFornec) throw new Error('Informe id_identificador e id_fornec.');
 
-  return withDb(async (db) => {
+  return useDb(conn, async (db) => {
     const existing = await query(db, `
       SELECT FIRST 1 ID_EST_FORNEC FROM TB_ESTOQUE_FORNECEDOR
       WHERE ID_IDENTIFICADOR = ? AND ID_FORNEC = ?`, [idIdent, idFornec]);
@@ -114,14 +114,7 @@ async function upsertEstoqueFornecedor(body = {}) {
       return mapEstFornec(rows[0]);
     }
 
-    let idEstFornec;
-    try {
-      const gen = await query(db, `SELECT GEN_ID(GEN_TB_ESTOQUE_FORNECEDOR_ID, 1) AS ID FROM RDB$DATABASE`);
-      idEstFornec = Number(gen[0].ID);
-    } catch {
-      const max = await query(db, `SELECT COALESCE(MAX(ID_EST_FORNEC),0)+1 AS ID FROM TB_ESTOQUE_FORNECEDOR`);
-      idEstFornec = Number(max[0].ID);
-    }
+    const idEstFornec = await nextGenId(db, 'GEN_TB_ESTOQUE_FORNECEDOR_ID', 'TB_ESTOQUE_FORNECEDOR', 'ID_EST_FORNEC');
 
     await query(db, `
       INSERT INTO TB_ESTOQUE_FORNECEDOR (

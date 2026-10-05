@@ -25,6 +25,7 @@ const {
   getDbMaintenanceInfo,
   releaseDatabase,
   resumeDatabase,
+  nextGenId,
 } = require('./db');
 const {
   AUDIT_TABLE,
@@ -34,8 +35,12 @@ const {
   hasAuditTable,
 } = require('./audit');
 const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora } = require('./datetime');
+const { resolveOrigem, somenteServidorLocal, isServidorLocal } = require('./origem');
 
 const router = express.Router();
+
+/** NF-e de demonstração (mock) só para treinamento — nunca em base de cliente por padrão. */
+const DEMO_ATIVO = process.env.GESTOR_DEMO === '1';
 
 function publicUser(u) {
   return {
@@ -94,33 +99,39 @@ router.get('/qrcode', async (req, res) => {
 });
 
 router.post('/shutdown', (req, res) => {
-  const raw = req.socket?.remoteAddress || req.ip || '';
-  const isLocal =
-    raw === '127.0.0.1' ||
-    raw === '::1' ||
-    raw === '::ffff:127.0.0.1' ||
-    raw.endsWith('127.0.0.1');
-  if (!isLocal) return res.status(403).json({ ok: false, error: 'Somente no servidor local.' });
+  if (!isServidorLocal(req)) return res.status(403).json({ ok: false, error: 'Somente no servidor local.' });
   res.json({ ok: true });
   setTimeout(() => process.exit(0), 300);
 });
 
-router.get('/config', (_req, res) => {
+router.get('/config', (req, res) => {
   const cfg = loadAppConfig();
+  const conexao = isServidorLocal(req)
+    ? { host: cfg.host, port: cfg.port, database: cfg.database }
+    : {};
   res.json({
     ok: true,
     config: {
-      host: cfg.host,
-      port: cfg.port,
-      database: cfg.database,
+      ...conexao,
       sistema: cfg.sistema,
       tema: cfg.tema,
     },
     modulos: MODULOS,
+    demo: DEMO_ATIVO,
   });
 });
 
-router.post('/config', (req, res) => {
+router.post('/tema', (req, res) => {
+  const tema = String(req.body?.tema || '').trim().toLowerCase();
+  if (!['claro', 'escuro', 'empresa'].includes(tema)) {
+    return res.status(400).json({ ok: false, error: 'Tema inválido (claro, escuro ou empresa).' });
+  }
+  const current = loadAppConfig();
+  saveAppConfig({ ...current, tema });
+  res.json({ ok: true, tema });
+});
+
+router.post('/config', somenteServidorLocal, (req, res) => {
   const current = loadAppConfig();
   const body = req.body || {};
   const next = {
@@ -137,7 +148,7 @@ router.post('/config', (req, res) => {
   res.json({ ok: true, config: { ...next, password: undefined } });
 });
 
-router.post('/connect', async (req, res) => {
+router.post('/connect', somenteServidorLocal, async (req, res) => {
   try {
     const current = loadAppConfig();
     const body = req.body || {};
@@ -369,22 +380,7 @@ function mensagemBarrasDuplicado(item) {
   return `Este código de barras já está cadastrado${nome}.`;
 }
 
-async function nextTableId(db, generatorName, tableName, idColumn) {
-  if (generatorName) {
-    try {
-      const rows = await query(db, `SELECT GEN_ID(${generatorName}, 1) AS ID FROM RDB$DATABASE`);
-      const id = Number(rows[0].ID);
-      if (Number.isFinite(id) && id > 0) return id;
-    } catch {
-      /* fallback MAX */
-    }
-  }
-  const max = await query(
-    db,
-    `SELECT COALESCE(MAX(${idColumn}), 0) + 1 AS ID FROM ${tableName}`
-  );
-  return Number(max[0].ID);
-}
+const nextTableId = nextGenId;
 
 router.get('/estoque', async (req, res) => {
   try {
@@ -474,6 +470,52 @@ router.get('/estoque/:idIdentificador/tributacao', async (req, res) => {
   }
 });
 
+function origemDaObservacao(obs) {
+  const s = String(obs || '').trim();
+  const m = s.match(/^Alterado via painel \(([^)]+)\)/i);
+  if (m) return m[1].trim();
+  if (/^Alterado via painel/i.test(s)) return 'Painel';
+  if (/^Zera saldo negativo/i.test(s)) return 'NF compra';
+  return 'Clipp';
+}
+
+function usuarioDaObservacao(obs) {
+  const m = String(obs || '').match(/^Alterado via painel(?: \([^)]+\))? - ([^-]+)/i);
+  return m ? m[1].trim() : '';
+}
+
+/** Último registro de TB_EST_SALDO_ALTERADO do produto (contagem / ajuste de quantidade). */
+async function ultimaAlteracaoQtd(db, t, idIdentificador) {
+  if (!hasTable(t.saldo)) return null;
+  const hasObs = await columnExists(db, t.saldo, 'OBSERVACAO');
+  const rows = await query(
+    db,
+    `SELECT FIRST 1 S.DATA, S.HORA, S.ID_FUNCIONARIO, S.SALDO_ANTIGO, S.SALDO_NOVO,
+            ${hasObs ? 'S.OBSERVACAO' : 'CAST(NULL AS VARCHAR(200)) AS OBSERVACAO'},
+            ${sqlExtractDataHora('S.DATA', 'S.HORA')},
+            F.NOME AS FUNCIONARIO
+     FROM ${t.saldo} S
+     LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = S.ID_FUNCIONARIO
+     WHERE S.ID_IDENTIFICADOR = ?
+     ORDER BY S.DATA DESC, S.HORA DESC, S.ID DESC`,
+    [idIdentificador]
+  );
+  const r = rows[0];
+  if (!r) return null;
+  const obs = String(r.OBSERVACAO || '').trim();
+  const usuario = String(r.FUNCIONARIO || '').trim()
+    || usuarioDaObservacao(obs)
+    || (Number(r.ID_FUNCIONARIO) === 0 ? 'SUPERVISOR' : '');
+  return {
+    origem: origemDaObservacao(obs),
+    data_hora: formatBrDateTime(r.DATA, r.HORA, mapExtractParts(r)),
+    usuario,
+    saldo_antigo: Number(r.SALDO_ANTIGO || 0),
+    saldo_novo: Number(r.SALDO_NOVO || 0),
+    observacao: obs,
+  };
+}
+
 router.get('/estoque/:idIdentificador', async (req, res) => {
   try {
     const id = Number(req.params.idIdentificador);
@@ -537,6 +579,13 @@ router.get('/estoque/:idIdentificador', async (req, res) => {
           num_serial: String(s.NUM_SERIAL || '').trim(),
           status: String(s.STATUS || 'A').trim(),
         }));
+      }
+      try {
+        const tw = (writeTargets(appCfg)[0] || activeTargets(appCfg)[0]).tables;
+        item.ultima_alteracao = await ultimaAlteracaoQtd(db, tw, id);
+      } catch (e) {
+        console.warn('Última alteração:', e.message);
+        item.ultima_alteracao = null;
       }
       return item;
     });
@@ -708,6 +757,8 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
     const body = req.body || {};
     const usuarioNome = String(body.usuarioNome || 'usuário').trim();
     const idFuncionario = Number(body.idFuncionario || 0);
+    const origem = await resolveOrigem(req, body);
+    const obsQtdExtra = String(body.obs_qtd || '').trim().slice(0, 120);
     const result = await withDb(async (db, appCfg) => {
       const barra = body.cod_barras !== undefined ? String(body.cod_barras || '').trim() : '';
       if (barra) {
@@ -810,31 +861,51 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
           prodSets.push('CONTROLA_LOTE_VENDA = ?');
           prodParams.push(body.controla_lote ? 'S' : 'N');
         }
-        const novaQtd = body.qtd_atual !== undefined ? Number(body.qtd_atual) : null;
         if (prodSets.length) {
           prodParams.push(id);
           await query(db, `UPDATE ${t.produto} SET ${prodSets.join(', ')} WHERE ID_IDENTIFICADOR = ?`, prodParams);
         }
 
-        if (novaQtd !== null && novaQtd !== qtdAntiga) {
-          const delta = novaQtd - qtdAntiga;
+        // Ajuste (+/−) vai como delta para não perder vendas feitas enquanto a tela estava aberta;
+        // valor absoluto só quando o usuário digitou a contagem.
+        const qtdDelta = body.qtd_delta != null && body.qtd_delta !== '' ? Number(body.qtd_delta) : null;
+        const qtdAbs = qtdDelta === null && body.qtd_atual !== undefined && body.qtd_atual !== null
+          ? Number(body.qtd_atual) : null;
+        let novaQtd = null;
+        let saldoAntigo = qtdAntiga;
+        const querDelta = qtdDelta !== null && Number.isFinite(qtdDelta) && qtdDelta !== 0;
+        const querAbs = qtdAbs !== null && Number.isFinite(qtdAbs);
+        let nextSaldoId = null;
+        if ((querDelta || querAbs) && hasTable(t.saldo)) {
+          try {
+            const gen = await query(db, `SELECT GEN_ID(${t.genSaldo}, 1) AS ID FROM RDB$DATABASE`);
+            nextSaldoId = Number(gen[0].ID);
+          } catch {
+            throw new Error(`Generator ${t.genSaldo} não encontrado na base — quantidade não alterada.`);
+          }
+        }
+        if (querDelta) {
           await query(
             db,
             `UPDATE ${t.produto} SET QTD_ATUAL = COALESCE(QTD_ATUAL, 0) + ? WHERE ID_IDENTIFICADOR = ?`,
-            [delta, id]
+            [qtdDelta, id]
           );
+          const after = await query(db, `SELECT FIRST 1 QTD_ATUAL FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [id]);
+          novaQtd = Number(after[0]?.QTD_ATUAL || 0);
+          saldoAntigo = Number((novaQtd - qtdDelta).toFixed(6));
+        } else if (querAbs) {
+          const before = await query(db, `SELECT FIRST 1 QTD_ATUAL FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [id]);
+          const atualAgora = Number(before[0]?.QTD_ATUAL || 0);
+          if (qtdAbs !== atualAgora) {
+            await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?`, [qtdAbs, id]);
+            saldoAntigo = atualAgora;
+            novaQtd = qtdAbs;
+          }
         }
 
-        if (novaQtd !== null && novaQtd !== qtdAntiga && hasTable(t.saldo)) {
-          let nextId;
-          try {
-            const gen = await query(db, `SELECT GEN_ID(${t.genSaldo}, 1) AS ID FROM RDB$DATABASE`);
-            nextId = Number(gen[0].ID);
-          } catch {
-            const max = await query(db, `SELECT COALESCE(MAX(ID),0)+1 AS ID FROM ${t.saldo}`);
-            nextId = Number(max[0].ID);
-          }
-          const obs = `Alterado via painel - ${usuarioNome}`;
+        if (novaQtd !== null && nextSaldoId) {
+          const nextId = nextSaldoId;
+          const obs = `Alterado via painel (${origem}) - ${usuarioNome}${obsQtdExtra ? ` - ${obsQtdExtra}` : ''}`.slice(0, 200);
           const agora = localNow();
           try {
             await query(
@@ -842,7 +913,7 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
               `INSERT INTO ${t.saldo}
                 (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO, OBSERVACAO)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-              [nextId, agora.dataSql, id, qtdAntiga, novaQtd, prcMedio, agora.horaSql, idFuncionario || 0, obs]
+              [nextId, agora.dataSql, id, saldoAntigo, novaQtd, prcMedio, agora.horaSql, idFuncionario || 0, obs]
             );
           } catch (e) {
             if (String(e.message || '').includes('OBSERVACAO')) {
@@ -851,7 +922,7 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
                 `INSERT INTO ${t.saldo}
                   (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-                [nextId, agora.dataSql, id, qtdAntiga, novaQtd, prcMedio, agora.horaSql, idFuncionario || 0]
+                [nextId, agora.dataSql, id, saldoAntigo, novaQtd, prcMedio, agora.horaSql, idFuncionario || 0]
               );
             } else throw e;
           }
@@ -901,6 +972,7 @@ router.put('/estoque/:idIdentificador', async (req, res) => {
             id_estoque: updated.id_estoque,
             id_funcionario: idFuncionario,
             usuario: usuarioNome,
+            origem,
           });
         } catch (e) {
           console.warn('Falha ao auditar alteração:', e.message);
@@ -1499,7 +1571,7 @@ router.post('/importacao/sessoes', async (req, res) => {
       chave,
       xmlText: body.xmlText || body.xml || null,
       xmlPath: body.xmlPath || null,
-      allowDemo: !!body.allowDemo || !!body.demo,
+      allowDemo: DEMO_ATIVO && (!!body.allowDemo || !!body.demo),
     });
     if (!out.ok) return res.json(out);
     const forn = await importacaoFornecedor.resolverNaImportacao(out.sessao.xml);
@@ -1838,16 +1910,7 @@ router.post('/importacao/sessoes/:id/confirmar', async (req, res) => {
   }
 });
 
-router.get('/importacao/produtos', (req, res) => {
-  if (!guardImportacaoSupervisor(req, res)) return;
-  try {
-    res.json({ ok: true, itens: importacaoStaging.buscarProdutos(req.query.q) });
-  } catch (err) {
-    res.json({ ok: false, error: err.message, itens: [] });
-  }
-});
-
-router.get('/database/status', (_req, res) => {
+router.get('/database/status', somenteServidorLocal, (_req, res) => {
   const cfg = loadAppConfig();
   res.json({
     ok: true,
@@ -1856,7 +1919,7 @@ router.get('/database/status', (_req, res) => {
   });
 });
 
-router.post('/database/liberar', async (_req, res) => {
+router.post('/database/liberar', somenteServidorLocal, async (_req, res) => {
   try {
     const out = await releaseDatabase();
     res.json(out);
@@ -1865,11 +1928,11 @@ router.post('/database/liberar', async (_req, res) => {
   }
 });
 
-router.post('/database/retomar', (_req, res) => {
+router.post('/database/retomar', somenteServidorLocal, (_req, res) => {
   res.json(resumeDatabase());
 });
 
-router.get('/fiscal/config', (_req, res) => {
+router.get('/fiscal/config', somenteServidorLocal, (_req, res) => {
   try {
     const certificado = require('./certificado');
     res.json({ ok: true, fiscal: certificado.publicFiscalConfig() });
@@ -1878,7 +1941,7 @@ router.get('/fiscal/config', (_req, res) => {
   }
 });
 
-router.post('/fiscal/config', (req, res) => {
+router.post('/fiscal/config', somenteServidorLocal, (req, res) => {
   try {
     const certificado = require('./certificado');
     const body = req.body || {};
@@ -1896,7 +1959,7 @@ router.post('/fiscal/config', (req, res) => {
   }
 });
 
-router.get('/fiscal/certificados', async (_req, res) => {
+router.get('/fiscal/certificados', somenteServidorLocal, async (_req, res) => {
   try {
     const certificado = require('./certificado');
     const itens = await certificado.listWindowsCertificates();
@@ -1906,7 +1969,7 @@ router.get('/fiscal/certificados', async (_req, res) => {
   }
 });
 
-router.post('/fiscal/testar', async (req, res) => {
+router.post('/fiscal/testar', somenteServidorLocal, async (req, res) => {
   try {
     const certificado = require('./certificado');
     const body = req.body || {};

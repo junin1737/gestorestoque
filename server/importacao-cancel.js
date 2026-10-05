@@ -1,6 +1,6 @@
 'use strict';
 
-const { withDb, query, writeTargets } = require('./db');
+const { withDb, withTransaction, query, writeTargets, hasTable, nextGenId } = require('./db');
 
 function localNow() {
   const d = new Date();
@@ -16,14 +16,8 @@ function localNow() {
   };
 }
 
-async function nextMovtoId(db) {
-  try {
-    const gen = await query(db, `SELECT GEN_ID(GEN_TB_MOVDIARIO_ID, 1) AS ID FROM RDB$DATABASE`);
-    return Number(gen[0].ID);
-  } catch {
-    const max = await query(db, `SELECT COALESCE(MAX(ID_MOVTO),0)+1 AS ID FROM TB_MOVDIARIO`);
-    return Number(max[0].ID);
-  }
+function nextMovtoId(db) {
+  return nextGenId(db, 'GEN_TB_MOVDIARIO_ID', 'TB_MOVDIARIO', 'ID_MOVTO');
 }
 
 async function defaultIdCtapla(db) {
@@ -89,14 +83,7 @@ async function zerarContaPagar(db, idCta, nfNumero) {
 
   // Padrão Clipp (ex.: ID_CTAPAG 1987): TIP_CTAPAG=C + baixa TIP_PAGTO=C
   if (!baixaC[0]) {
-    let nextBaixa;
-    try {
-      const gen = await query(db, `SELECT GEN_ID(GEN_TB_CTAPAG_BAIXA_ID, 1) AS ID FROM RDB$DATABASE`);
-      nextBaixa = Number(gen[0].ID);
-    } catch {
-      const max = await query(db, `SELECT COALESCE(MAX(ID_BAIXA),0)+1 AS ID FROM TB_CTAPAG_BAIXA`);
-      nextBaixa = Number(max[0].ID);
-    }
+    const nextBaixa = await nextGenId(db, 'GEN_TB_CTAPAG_BAIXA_ID', 'TB_CTAPAG_BAIXA', 'ID_BAIXA');
     await query(db, `
       INSERT INTO TB_CTAPAG_BAIXA (
         ID_BAIXA, ID_CTAPAG, DT_BAIXA, HR_BAIXA, VLR_PAGO, VLR_DESC, VLR_ACRESC, TIP_PAGTO
@@ -132,7 +119,7 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
   cancelandoIds.add(id);
 
   try {
-    return await withDb(async (db, appCfg) => {
+    return await withDb((conn, appCfg) => withTransaction(conn, async (db) => {
       const nfs = await query(db, `
         SELECT FIRST 1 ID_NFCOMPRA, NF_NUMERO, NF_SERIE, STATUS, ID_FORNEC, NFE_ORIGEM
         FROM TB_NFCOMPRA WHERE ID_NFCOMPRA = ?`, [id]);
@@ -175,6 +162,30 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
 
       const targets = writeTargets(appCfg);
 
+      // Contas primeiro e estoque por último (linhas que o caixa disputa); tudo na mesma
+      // transação, então uma falha no meio não deixa estoque estornado com conta aberta.
+      const links = await query(db, `SELECT ID_CTAPAG FROM TB_NFC_CTAPAG WHERE ID_NFCOMPRA = ?`, [id]);
+      let contasZeradas = 0;
+      const errosConta = [];
+      for (const link of links) {
+        const idCta = Number(link.ID_CTAPAG);
+        if (!idCta) continue;
+        try {
+          await zerarContaPagar(db, idCta, nf.NF_NUMERO);
+          contasZeradas += 1;
+        } catch (err) {
+          errosConta.push(`cta ${idCta}: ${err.message}`);
+          console.warn('Conta a pagar cancel:', err.message);
+        }
+      }
+
+      if (links.length && contasZeradas === 0) {
+        throw new Error(
+          `Não foi possível zerar as contas a pagar (${errosConta.join('; ') || 'sem detalhe'}).`
+        );
+      }
+
+      const temItemLote = hasTable('TB_NFC_ITEM_LOTE');
       for (const it of itens) {
         const idIdent = Number(it.ID_IDENTIFICADOR);
         const qtdItem = Number(it.QTD_ITEM || 0);
@@ -205,28 +216,20 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
              WHERE ID_IDENTIFICADOR = ?`,
             [qtd, idIdent]
           );
+          // Lote do Clipp: nenhum trigger estorna TB_LOTE no cancelamento (o _2 é estornado
+          // por XX_TR_ABX_EST_CANCNF e XX_TR_UP_LOTE só replica aumento, então não duplica).
+          if (!target.manage && temItemLote && hasTable(t.lote)) {
+            const lotes = await query(db, `
+              SELECT ID_LOTE, QTD_ENTRADA FROM TB_NFC_ITEM_LOTE WHERE ID_NFCITEM = ?`, [Number(it.ID_NFCITEM)]);
+            for (const l of lotes) {
+              const qLote = Number(l.QTD_ENTRADA || 0);
+              if (!(qLote > 0)) continue;
+              await query(db, `
+                UPDATE ${t.lote} SET QTD_ATUAL = COALESCE(QTD_ATUAL, 0) - ?
+                WHERE ID_LOTE = ?`, [qLote, Number(l.ID_LOTE)]);
+            }
+          }
         }
-      }
-
-      const links = await query(db, `SELECT ID_CTAPAG FROM TB_NFC_CTAPAG WHERE ID_NFCOMPRA = ?`, [id]);
-      let contasZeradas = 0;
-      const errosConta = [];
-      for (const link of links) {
-        const idCta = Number(link.ID_CTAPAG);
-        if (!idCta) continue;
-        try {
-          await zerarContaPagar(db, idCta, nf.NF_NUMERO);
-          contasZeradas += 1;
-        } catch (err) {
-          errosConta.push(`cta ${idCta}: ${err.message}`);
-          console.warn('Conta a pagar cancel:', err.message);
-        }
-      }
-
-      if (links.length && contasZeradas === 0) {
-        throw new Error(
-          `Não foi possível zerar as contas a pagar (${errosConta.join('; ') || 'sem detalhe'}).`
-        );
       }
 
       await query(db, `
@@ -250,7 +253,7 @@ async function cancelarNfCompra(idNfcompra, { usuario = 'Supervisor', idFunciona
         itens_estornados: itens.length,
         contas_pagar_zeradas: contasZeradas,
       };
-    });
+    }));
   } finally {
     cancelandoIds.delete(id);
   }

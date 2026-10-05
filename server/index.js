@@ -3,10 +3,9 @@ const express = require('express');
 const path = require('path');
 const os = require('os');
 const routes = require('./routes');
-const { PORT: DEFAULT_PORT } = require('./config');
+const { PORT } = require('./config');
 const { ensureFirebirdClientPath } = require('./nativePath');
-
-const PORT = Number(process.env.GESTOR_PORT || DEFAULT_PORT) || DEFAULT_PORT;
+const { somenteServidorLocal } = require('./origem');
 
 ensureFirebirdClientPath();
 
@@ -18,6 +17,7 @@ try {
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
+app.use(['/servico.html', '/servico.js', '/servico.css'], somenteServidorLocal);
 app.use(express.static(path.join(__dirname, '..', 'Painel'), {
   etag: false,
   lastModified: false,

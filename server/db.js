@@ -1,7 +1,20 @@
 'use strict';
 const Firebird = require('node-firebird');
+const FbConnection = require('node-firebird/lib/wire/connection');
+const FbConst = require('node-firebird/lib/wire/const');
 const path = require('path');
 const { loadAppConfig } = require('./config');
+
+// node-firebird 1.1.x envia op_close_blob como "deferred" e não lê a resposta do servidor;
+// dentro de transação explícita essa resposta é consumida pelo próximo prepare e derruba o
+// processo (describe(undefined)). Parâmetro BLOB (ex.: TB_CONTA_PAGAR.OBSERVACAO) dispara.
+FbConnection.prototype.closeBlob = function closeBlob(blob, callback) {
+  const msg = this._msg;
+  msg.pos = 0;
+  msg.addInt(FbConst.op_close_blob);
+  msg.addInt(blob.handle);
+  this._queueEvent(callback);
+};
 
 let tableCache = { checkedAt: 0, names: new Set() };
 let schemaReady = false;
@@ -97,6 +110,68 @@ async function withDb(fn) {
   }
 }
 
+function txCall(tx, method) {
+  return new Promise((resolve, reject) => {
+    tx[method]((err) => (err ? reject(err) : resolve()));
+  });
+}
+
+/**
+ * Executa fn(tx) numa transação única (commit no fim, rollback em erro).
+ * READ COMMITTED + rec_version (no node-firebird a constante se chama ISOLATION_READ_UNCOMMITTED);
+ * WAIT com lock timeout para não travar indefinidamente se o caixa estiver segurando a linha.
+ * DDL (ensureSchema) deve rodar antes, fora da transação.
+ */
+async function withTransaction(db, fn, { waitTimeout = 15 } = {}) {
+  const tx = await new Promise((resolve, reject) => {
+    db.transaction({
+      isolation: Firebird.ISOLATION_READ_UNCOMMITTED,
+      wait: true,
+      waitTimeout,
+    }, (err, t) => (err ? reject(err) : resolve(t)));
+  });
+  try {
+    const out = await fn(tx);
+    await txCall(tx, 'commit');
+    return out;
+  } catch (err) {
+    try { await txCall(tx, 'rollback'); } catch { /* conexão pode ter caído */ }
+    throw err;
+  }
+}
+
+/** Tabelas criadas pelo Gestor: só nelas o MAX+1 é aceitável (o Clipp não insere nelas). */
+const TABELAS_GESTOR = new Set(['GESTOR_EST_ALTERACAO', 'TB_MT_REGRA_TRIBUTO']);
+
+async function nextGenId(db, generatorName, tableName, idColumn) {
+  const tabela = String(tableName || '').toUpperCase();
+  let motivo = 'generator não informado';
+  if (generatorName) {
+    try {
+      const rows = await query(db, `SELECT GEN_ID(${generatorName}, 1) AS ID FROM RDB$DATABASE`);
+      const id = Number(rows[0]?.ID);
+      if (Number.isFinite(id) && id > 0) return id;
+      motivo = `retornou ${rows[0]?.ID}`;
+    } catch (err) {
+      motivo = err.message;
+    }
+  }
+  if (!TABELAS_GESTOR.has(tabela)) {
+    throw new Error(
+      `Generator ${generatorName || '?'} indisponível (${motivo}). ` +
+      `${tabela}.${idColumn} não é gerado por MAX+1 para não colidir com o Clipp.`
+    );
+  }
+  const max = await query(db, `SELECT COALESCE(MAX(${idColumn}), 0) + 1 AS ID FROM ${tabela}`);
+  return Number(max[0].ID);
+}
+
+/** Usa a conexão/transação recebida; sem ela abre uma conexão própria (withDb). */
+function useDb(conn, fn) {
+  if (conn) return fn(conn, loadAppConfig());
+  return withDb(fn);
+}
+
 async function refreshTables(db) {
   const rows = await query(
     db,
@@ -126,6 +201,11 @@ async function columnExists(db, table, column) {
 }
 
 async function ensureSchema(db) {
+  try {
+    await require('./importacao-notas').carregarAliquotasPadrao(db);
+  } catch (err) {
+    console.warn('Alíquotas CBS/IBS:', err.message);
+  }
   if (schemaReady && Date.now() - tableCache.checkedAt < 60000) return;
   await refreshTables(db);
   await refreshGenerators(db);
@@ -381,6 +461,9 @@ function resumeDatabase() {
 
 module.exports = {
   withDb,
+  withTransaction,
+  useDb,
+  nextGenId,
   query,
   connectSmart,
   detach,

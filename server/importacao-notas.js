@@ -331,10 +331,47 @@ async function getNaturezaByCfop(cfop) {
   });
 }
 
-/** Alíquotas-padrão 2026 (LC 214/2025) — Clipp não grava ALIQ_CBS no cadastro, só a classificação. */
+/**
+ * Alíquotas-padrão 2026 (LC 214/2025) — Clipp não grava ALIQ_CBS no cadastro, só a classificação.
+ * Valem como fallback; o valor vigente vem de TB_PARAMETRO (texto pt-BR, ex.: '0,9').
+ */
 const ALIQ_CBS_PADRAO = 0.9;
 const ALIQ_IBS_UF_PADRAO = 0.1;
 const ALIQ_IBS_MUN_PADRAO = 0;
+
+const aliqPadrao = {
+  cbs: ALIQ_CBS_PADRAO,
+  ibs_uf: ALIQ_IBS_UF_PADRAO,
+  ibs_mun: ALIQ_IBS_MUN_PADRAO,
+  carregadoEm: 0,
+};
+
+function parseAliqParametro(v) {
+  const s = String(v ?? '').trim().replace(/\s/g, '').replace(',', '.');
+  if (!s || !/\d/.test(s)) return null;
+  const n = Number(s);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
+/** Atualiza o cache a cada 60 s (chamado pelo ensureSchema de cada conexão). */
+async function carregarAliquotasPadrao(db) {
+  if (Date.now() - aliqPadrao.carregadoEm < 60000) return;
+  aliqPadrao.carregadoEm = Date.now();
+  try {
+    const rows = await query(db, `
+      SELECT TRIM(INFORMACAO) AS INFO, CONTEUDO FROM TB_PARAMETRO
+      WHERE TRIM(INFORMACAO) IN ('ALIQUOTA_CBS_PADRAO', 'ALIQUOTA_IBS_UF_PADRAO', 'ALIQUOTA_IBS_MUN_PADRAO')`);
+    const byInfo = new Map(rows.map((r) => [String(r.INFO || '').trim().toUpperCase(), r.CONTEUDO]));
+    const cbs = parseAliqParametro(byInfo.get('ALIQUOTA_CBS_PADRAO'));
+    const ibsUf = parseAliqParametro(byInfo.get('ALIQUOTA_IBS_UF_PADRAO'));
+    const ibsMun = parseAliqParametro(byInfo.get('ALIQUOTA_IBS_MUN_PADRAO'));
+    aliqPadrao.cbs = cbs ?? ALIQ_CBS_PADRAO;
+    aliqPadrao.ibs_uf = ibsUf ?? ALIQ_IBS_UF_PADRAO;
+    aliqPadrao.ibs_mun = ibsMun ?? ALIQ_IBS_MUN_PADRAO;
+  } catch (e) {
+    console.warn('Alíquotas CBS/IBS (TB_PARAMETRO):', e.message);
+  }
+}
 
 function mapClassTribRow(r) {
   return {
@@ -350,9 +387,9 @@ function mapClassTribRow(r) {
     ind_cred_presumido: String(r.IND_CRED_PRESUMIDO || '').trim(),
     codigo: String(r.COD_CLASS_TRIB || '').trim(),
     descricao: String(r.DESC_CLASS_TRIB || '').trim(),
-    aliq_cbs: ALIQ_CBS_PADRAO,
-    aliq_ibs_uf: ALIQ_IBS_UF_PADRAO,
-    aliq_ibs_mun: ALIQ_IBS_MUN_PADRAO,
+    aliq_cbs: aliqPadrao.cbs,
+    aliq_ibs_uf: aliqPadrao.ibs_uf,
+    aliq_ibs_mun: aliqPadrao.ibs_mun,
   };
 }
 
@@ -368,9 +405,9 @@ function enrichTribRates(trib, classRow) {
       ? trib.percent_red_aliq_ibs
       : (classRow?.PERCENT_RED_ALIQ_IBS ?? classRow?.percent_red_aliq_ibs ?? 0)
   );
-  const aliqCbs = Number(trib.aliq_cbs) > 0 ? Number(trib.aliq_cbs) : ALIQ_CBS_PADRAO;
-  const aliqIbsUf = Number(trib.aliq_ibs_uf) > 0 ? Number(trib.aliq_ibs_uf) : ALIQ_IBS_UF_PADRAO;
-  const aliqIbsMun = Number(trib.aliq_ibs_mun != null ? trib.aliq_ibs_mun : ALIQ_IBS_MUN_PADRAO);
+  const aliqCbs = Number(trib.aliq_cbs) > 0 ? Number(trib.aliq_cbs) : aliqPadrao.cbs;
+  const aliqIbsUf = Number(trib.aliq_ibs_uf) > 0 ? Number(trib.aliq_ibs_uf) : aliqPadrao.ibs_uf;
+  const aliqIbsMun = Number(trib.aliq_ibs_mun != null ? trib.aliq_ibs_mun : aliqPadrao.ibs_mun);
   const efetCbs = aliqCbs * (1 - Math.min(100, Math.max(0, redCbs)) / 100);
   const efetIbsUf = aliqIbsUf * (1 - Math.min(100, Math.max(0, redIbs)) / 100);
   const efetIbsMun = aliqIbsMun * (1 - Math.min(100, Math.max(0, redIbs)) / 100);
@@ -934,6 +971,7 @@ async function getSugestaoTributoEstoque(idIdentificador) {
 }
 
 module.exports = {
+  carregarAliquotasPadrao,
   listNotasCadastradas,
   getNotaById,
   getNotaResumo,

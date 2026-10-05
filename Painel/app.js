@@ -433,10 +433,11 @@ async function bootstrap() {
 
   state.config = cfgRes.config;
   state.modulos = cfgRes.modulos || {};
+  document.body.classList.toggle('gestor-demo', !!cfgRes.demo);
   applyTheme(state.config.tema);
   if ($('#tema-rapido')) $('#tema-rapido').value = state.config.tema || 'claro';
 
-  const conn = await api('/connect', { method: 'POST', body: state.config });
+  const conn = await api('/emitente');
   if (conn.ok) {
     setServiceStatus(true, `Conectado · ${conn.emitente?.nome_fanta || ''}`);
     setEmitenteUI(conn.emitente);
@@ -608,7 +609,7 @@ $('#sidebar-backdrop')?.addEventListener('click', () => setSidebarOpen(false));
 
 $('#tema-rapido').addEventListener('change', async (e) => {
   const tema = e.target.value;
-  await api('/config', { method: 'POST', body: { ...state.config, tema } });
+  await api('/tema', { method: 'POST', body: { tema } });
   state.config.tema = tema;
   applyTheme(tema, state.emitente.logo);
 });
@@ -1034,7 +1035,19 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
   }
   if ((editarVenda || state.isNovo) && $('#p-venda')) body.prc_venda = parseBrMoney($('#p-venda').value);
   if ((editarCusto || state.isNovo) && $('#p-custo') && (verCusto || state.isNovo)) body.prc_custo = parseBrMoney($('#p-custo').value);
-  if (editarQtd && $('#q-atual')) body.qtd_atual = parseBrMoney($('#q-atual').value);
+  body.origem = isNativeApk() ? 'celular' : 'navegador';
+  if (editarQtd && state.isNovo && $('#q-atual')) {
+    body.qtd_atual = parseBrMoney($('#q-atual').value);
+  } else if (editarQtd && $('#q-nova')) {
+    const nova = parseBrMoney($('#q-nova').value);
+    const base = Number(it.qtd_atual || 0);
+    if (Number.isFinite(nova) && Math.abs(nova - base) > 1e-9) {
+      if (state.qtdModo === 'absoluto') body.qtd_atual = nova;
+      else body.qtd_delta = Number((nova - base).toFixed(6));
+      const obsQtd = String($('#q-obs')?.value || '').trim();
+      if (obsQtd) body.obs_qtd = obsQtd;
+    }
+  }
   if ($('#t-cfop')) {
     body.cfop = $('#t-cfop').value;
     body.cfop_nf = $('#t-cfop-nf')?.value || '';
@@ -1302,6 +1315,7 @@ function renderDetalhe() {
       <div class="qty-hero">
         <span>Quantidade atual</span>
         <strong id="q-hero">${fmtNum(qtd)} ${uni}</strong>
+        ${!state.isNovo ? `<small class="qty-ultima" id="q-ultima">${escapeHtml(textoUltimaAlteracao(it.ultima_alteracao))}</small>` : ''}
       </div>
       <p class="hint" style="margin:0 0 0.35rem;font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Ajustar</p>
       <div class="qty-stepper">
@@ -1388,6 +1402,7 @@ function renderDetalhe() {
   const base = Number(it.qtd_atual || 0);
   const uniTxt = it.uni_medida || 'UN';
   let syncing = false;
+  state.qtdModo = 'delta';
 
   function paintDiff(delta) {
     const box = $('#q-diff');
@@ -1425,18 +1440,21 @@ function renderDetalhe() {
     applyDelta(parseBrMoney(qAtual.value) - base);
   }
 
-  qAdd?.addEventListener('input', updateDiffFromAddRem);
-  qRem?.addEventListener('input', updateDiffFromAddRem);
-  qAtual?.addEventListener('input', updateAddRemFromAtual);
+  qAdd?.addEventListener('input', () => { state.qtdModo = 'delta'; updateDiffFromAddRem(); });
+  qRem?.addEventListener('input', () => { state.qtdModo = 'delta'; updateDiffFromAddRem(); });
+  qAtual?.addEventListener('input', () => { state.qtdModo = 'absoluto'; updateAddRemFromAtual(); });
   qNova?.addEventListener('input', () => {
     if (syncing) return;
+    state.qtdModo = 'absoluto';
     applyDelta(parseBrMoney(qNova.value) - base);
   });
   $('#q-plus')?.addEventListener('click', () => {
+    state.qtdModo = 'delta';
     const cur = parseBrMoney(qNova?.value ?? qAtual?.value ?? base);
     applyDelta((cur + 1) - base);
   });
   $('#q-minus')?.addEventListener('click', () => {
+    state.qtdModo = 'delta';
     const cur = parseBrMoney(qNova?.value ?? qAtual?.value ?? base);
     applyDelta((cur - 1) - base);
   });
@@ -2494,6 +2512,12 @@ function fmtMoney2(n) {
 }
 function fmtNum(n) {
   return Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+/** Ex.: "Alterado Celular 31/10/2026 13:25:25 · JOÃO" */
+function textoUltimaAlteracao(u) {
+  if (!u || !u.data_hora) return 'Sem alteração de quantidade registrada';
+  const quem = u.usuario ? ` · ${u.usuario}` : '';
+  return `Alterado ${u.origem || 'Clipp'} ${u.data_hora}${quem}`;
 }
 function fmtMoney(n) {
   return Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });

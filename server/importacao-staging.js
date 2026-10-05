@@ -79,7 +79,27 @@ function loadStore() {
 
 function saveStore(data) {
   ensureStore();
-  fs.writeFileSync(STORE_FILE, JSON.stringify(data, null, 2), 'utf8');
+  const tmp = `${STORE_FILE}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+  fs.renameSync(tmp, STORE_FILE);
+}
+
+/**
+ * Grava só a sessão informada sobre uma leitura nova do arquivo.
+ * Funções async não podem salvar o store lido antes de um await: outra requisição
+ * (celular × PC) pode ter gravado no meio e seria sobrescrita. Leitura+escrita aqui
+ * é síncrona, então não intercala com outras requisições no mesmo processo.
+ */
+function commitSessao(sessao, mutateStore) {
+  const fresh = loadStore();
+  if (!Array.isArray(fresh.sessoes)) fresh.sessoes = [];
+  if (mutateStore) mutateStore(fresh);
+  if (sessao) {
+    const idx = fresh.sessoes.findIndex((x) => x.id === sessao.id);
+    if (idx >= 0) fresh.sessoes[idx] = sessao;
+    else fresh.sessoes.unshift(sessao);
+  }
+  saveStore(fresh);
 }
 
 function newId() {
@@ -457,7 +477,7 @@ async function aplicarVinculosSessao(sessaoId) {
     await reaplicarParamsTributoSessao(s);
   }
   s.updatedAt = new Date().toISOString();
-  saveStore(store);
+  commitSessao(s);
   return mapSessaoForClient(s);
 }
 
@@ -701,6 +721,7 @@ async function createSessao(opts = {}) {
 
   // Sessão JSON "confirmada" não pode bloquear se a NF já foi cancelada no Clipp
   const dupConfirmada = !editarId && store.sessoes.find((s) => s.chave === chave && s.status === 'confirmada');
+  let liberarConfirmadas = false;
   if (dupConfirmada) {
     const { findNfDuplicada } = require('./importacao-notas');
     const dupDb = await findNfDuplicada({
@@ -717,19 +738,8 @@ async function createSessao(opts = {}) {
       };
     }
     // Só existia cancelada no banco (ou nada ativo) → libera reimportação
-    for (const s of store.sessoes) {
-      if (s.chave === chave && s.status === 'confirmada') {
-        s.status = 'cancelada';
-        s.canceledAt = new Date().toISOString();
-        s.updatedAt = s.canceledAt;
-      }
-    }
+    liberarConfirmadas = true;
   }
-
-  // Um único registro em conferência por chave
-  store.sessoes = store.sessoes.filter(
-    (s) => !(s.chave === chave && s.status === 'em_conferencia')
-  );
 
   const ufForn = xml.emit?.enderEmit?.UF || '';
   const now = new Date().toISOString();
@@ -793,7 +803,6 @@ async function createSessao(opts = {}) {
     _sync: { version: 1, pendingCloud: true },
   };
 
-  store.sessoes.unshift(sessao);
   if (editarId) {
     try {
       const { nfFinanceiroBloqueado } = require('./importacao-gravar');
@@ -802,13 +811,27 @@ async function createSessao(opts = {}) {
       if (lock.bloqueado) {
         sessao.financeiro_bloqueado = true;
         sessao.financeiro_bloqueado_motivo = lock.motivo;
-        saveStore(store);
       }
     } catch (e) {
       console.warn('Financeiro bloqueado (edição):', e.message);
     }
   }
-  saveStore(store);
+  commitSessao(sessao, (fresh) => {
+    if (liberarConfirmadas) {
+      const agoraIso = new Date().toISOString();
+      for (const s of fresh.sessoes) {
+        if (s.chave === chave && s.status === 'confirmada') {
+          s.status = 'cancelada';
+          s.canceledAt = agoraIso;
+          s.updatedAt = agoraIso;
+        }
+      }
+    }
+    // Um único registro em conferência por chave
+    fresh.sessoes = fresh.sessoes.filter(
+      (s) => !(s.chave === chave && s.status === 'em_conferencia')
+    );
+  });
   return { ok: true, sessao: mapSessaoForClient(sessao), fonte, sefazErro: sefazErro || null };
 }
 
@@ -937,10 +960,16 @@ async function addItemManual(sessaoId, itemPatch = {}) {
     etapas_ok: {},
   };
   if (itemPatch.sistema) item.sistema = { ...item.sistema, ...itemPatch.sistema };
-  s.itens.push(item);
-  s.updatedAt = new Date().toISOString();
-  saveStore(store);
-  return { ok: true, item: mapItemForClient(item), sessao: mapSessaoForClient(s) };
+  const fresh = loadStore();
+  const sAtual = fresh.sessoes.find((x) => x.id === sessaoId);
+  if (!sAtual) return { ok: false, error: 'Sessão não encontrada' };
+  if (!Array.isArray(sAtual.itens)) sAtual.itens = [];
+  item.nItem = sAtual.itens.length + 1;
+  item.xml.nItem = item.nItem;
+  sAtual.itens.push(item);
+  sAtual.updatedAt = new Date().toISOString();
+  saveStore(fresh);
+  return { ok: true, item: mapItemForClient(item), sessao: mapSessaoForClient(sAtual) };
 }
 
 function listSessoes() {
@@ -1102,11 +1131,26 @@ async function sugerirFinanceiroSessao(sessaoId) {
   };
   s.updatedAt = new Date().toISOString();
   s._sync = { ...(s._sync || {}), version: (s._sync?.version || 0) + 1, pendingCloud: true };
-  saveStore(store);
+  commitSessao(s);
   return { ok: true, sessao: mapSessaoForClient(s) };
 }
 
+/** Evita gravar a mesma NF duas vezes (dois aparelhos clicando em finalizar ao mesmo tempo). */
+const confirmandoIds = new Set();
+
 async function confirmarSessao(sessaoId, opts = {}) {
+  if (confirmandoIds.has(sessaoId)) {
+    return { ok: false, error: 'Esta nota já está sendo gravada em outro aparelho. Aguarde.' };
+  }
+  confirmandoIds.add(sessaoId);
+  try {
+    return await confirmarSessaoInterno(sessaoId, opts);
+  } finally {
+    confirmandoIds.delete(sessaoId);
+  }
+}
+
+async function confirmarSessaoInterno(sessaoId, opts = {}) {
   const store = loadStore();
   const s = store.sessoes.find((x) => x.id === sessaoId);
   if (!s) return { ok: false, error: 'Sessão não encontrada' };
@@ -1195,31 +1239,13 @@ async function confirmarSessao(sessaoId, opts = {}) {
   s.id_nfcompra = gravacao.id_nfcompra;
   s.updatedAt = new Date().toISOString();
   s._sync = { ...(s._sync || {}), version: (s._sync?.version || 0) + 1, pendingCloud: true };
-  saveStore(store);
+  commitSessao(s);
   return {
     ok: true,
     message: `NF ${gravacao.nf_numero}/${gravacao.nf_serie} gravada (cód. ${gravacao.id_nfcompra}) com ${gravacao.itens_gravados} itens e estoque atualizado.`,
     gravacao,
     sessao: mapSessaoForClient(s),
   };
-}
-
-function buscarProdutos(q) {
-  const term = String(q || '').trim().toLowerCase();
-  const mock = [
-    { id_identificador: 4521, descricao: 'Parafuso Sextavado 6x20', cod_barras: '7891234567890', referencia: 'PAR-620' },
-    { id_identificador: 4522, descricao: 'Porca Sextavada M6', cod_barras: '7899876543210', referencia: 'POR-M6' },
-    { id_identificador: 4523, descricao: 'Arruela Lisa M6', cod_barras: '7891112223334', referencia: 'ARR-M6' },
-    { id_identificador: 4600, descricao: 'Parafuso Allen 8x30', cod_barras: '7895556667778', referencia: 'ALL-830' },
-  ];
-  if (!term) return mock;
-  return mock.filter(
-    (p) =>
-      p.descricao.toLowerCase().includes(term)
-      || String(p.cod_barras).includes(term)
-      || p.referencia.toLowerCase().includes(term)
-      || String(p.id_identificador).includes(term)
-  );
 }
 
 module.exports = {
@@ -1234,7 +1260,6 @@ module.exports = {
   updateFinanceiro,
   sugerirFinanceiroSessao,
   confirmarSessao,
-  buscarProdutos,
   setFornecedor,
   updateFornecedor,
   aplicarVinculosSessao,

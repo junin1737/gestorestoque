@@ -10,7 +10,7 @@ ensureFirebirdClientPath();
 
 const { promptAndUpdate, checkForGitUpdate, getLocalVersion } = require('./server/updater');
 
-const PORT = 5077;
+const { PORT } = require('./server/config');
 let mainWindow;
 let updateCheckStarted = false;
 

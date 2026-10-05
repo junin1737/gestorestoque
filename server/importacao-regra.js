@@ -1,6 +1,6 @@
 'use strict';
 
-const { withDb, query } = require('./db');
+const { withDb, useDb, query } = require('./db');
 const { TABLE, GEN, ensureMtRegraTributo } = require('./importacao-mt-schema');
 
 function str(v, max) {
@@ -114,9 +114,9 @@ async function findIdByNaturalKey(db, idFornec, idIdentificador) {
   return rows[0] ? Number(rows[0].ID_REGRA) : null;
 }
 
-async function salvarRegra(body = {}) {
-  return withDb(async (db) => {
-    await ensureMtRegraTributo(db);
+async function salvarRegra(body = {}, { db: conn = null } = {}) {
+  return useDb(conn, async (db) => {
+    if (!conn) await ensureMtRegraTributo(db);
     const now = new Date();
     const aplicar = body.aplicar_saida === false || body.aplicar_saida === 'N' ? 'N' : 'S';
 

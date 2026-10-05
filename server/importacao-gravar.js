@@ -1,6 +1,6 @@
 'use strict';
 
-const { withDb, query, writeTargets, hasTable, columnExists } = require('./db');
+const { withDb, withTransaction, query, writeTargets, hasTable, columnExists, nextGenId } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
 const { round2, calcCustoUnitarioItem, totalMercadoriaItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
@@ -116,19 +116,7 @@ function toDateSql(v) {
   return `${y}-${m}-${day}`;
 }
 
-async function nextId(db, generatorName, tableName, idColumn) {
-  if (generatorName) {
-    try {
-      const rows = await query(db, `SELECT GEN_ID(${generatorName}, 1) AS ID FROM RDB$DATABASE`);
-      const id = Number(rows[0].ID);
-      if (Number.isFinite(id) && id > 0) return id;
-    } catch {
-      /* fallback */
-    }
-  }
-  const max = await query(db, `SELECT COALESCE(MAX(${idColumn}), 0) + 1 AS ID FROM ${tableName}`);
-  return Number(max[0].ID);
-}
+const nextId = nextGenId;
 
 async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   const targets = writeTargets(appCfg);
@@ -259,37 +247,8 @@ async function insertSaldoAlterado(db, t, {
   }
 }
 
-async function zerarNegativoAntesTrigger(db, appCfg, {
-  idIdentificador, prcCusto, usuario, idFuncionario, nfLabel,
-}) {
-  const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
-  if (!zerarNeg) return;
-  const targets = writeTargets(appCfg);
-  const agora = localNow();
-  for (const target of targets) {
-    const t = target.tables;
-    const prodRows = await query(db, `
-      SELECT FIRST 1 QTD_ATUAL, PRC_MEDIO FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
-    if (!prodRows[0]) continue;
-    const qtdAtual = Number(prodRows[0].QTD_ATUAL || 0);
-    if (!(qtdAtual < 0)) continue;
-    const prcMedio = Number(prodRows[0].PRC_MEDIO || prcCusto || 0);
-    await insertSaldoAlterado(db, t, {
-      idIdentificador,
-      saldoAntigo: qtdAtual,
-      saldoNovo: 0,
-      prcMedio: prcMedio || prcCusto || 0,
-      agora,
-      idFuncionario,
-      obs: `Zera saldo negativo antes da entrada NF ${nfLabel} - ${usuario}`,
-    });
-    await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = 0 WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
-  }
-}
-
 async function entradaEstoque(db, appCfg, {
   idIdentificador, qtd, prcCusto, usuario, idFuncionario, nfLabel,
-  skipClipp = false,
   /** false = só atualiza QTD_ATUAL (entrada por NF compra não deve ir em TB_EST_SALDO_ALTERADO). */
   registrarAlteracao = true,
 }) {
@@ -299,7 +258,6 @@ async function entradaEstoque(db, appCfg, {
   const zerarNeg = importacaoParams.getSaidaPadrao().zerar_negativo === 'S';
 
   for (const target of targets) {
-    if (skipClipp && !target.manage) continue;
     const t = target.tables;
     const prodRows = await query(db, `
       SELECT FIRST 1 QTD_ATUAL, PRC_MEDIO FROM ${t.produto} WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
@@ -307,6 +265,10 @@ async function entradaEstoque(db, appCfg, {
     let qtdAtual = Number(prodRows[0].QTD_ATUAL || 0);
     const prcMedio = Number(prodRows[0].PRC_MEDIO || prcCusto || 0);
     if (zerarNeg && qtdAtual < 0) {
+      // Condicional no próprio UPDATE: se uma venda mexeu no saldo depois do SELECT, não sobrescreve.
+      await query(db, `
+        UPDATE ${t.produto} SET QTD_ATUAL = 0
+        WHERE ID_IDENTIFICADOR = ? AND QTD_ATUAL < 0`, [idIdentificador]);
       await insertSaldoAlterado(db, t, {
         idIdentificador,
         saldoAntigo: qtdAtual,
@@ -317,7 +279,6 @@ async function entradaEstoque(db, appCfg, {
         obs: `Zera saldo negativo antes da entrada NF ${nfLabel} - ${usuario}`,
       });
       qtdAtual = 0;
-      await query(db, `UPDATE ${t.produto} SET QTD_ATUAL = 0 WHERE ID_IDENTIFICADOR = ?`, [idIdentificador]);
     }
     const delta = Number(qtd || 0);
     await query(
@@ -807,9 +768,8 @@ async function ensureIdTransportador(db, sessao) {
   return null;
 }
 
-async function gravarTransportadorNf(db, idNf, sessao) {
+async function gravarTransportadorNf(db, idNf, sessao, idTransp) {
   if (!hasTable('TB_NFC_TRANSPORTADOR')) return;
-  const idTransp = await ensureIdTransportador(db, sessao);
   if (!idTransp) return;
   const veic = sessao?.xml?.transp?.veicTransp || {};
   const placa = String(veic.placa || '').replace(/\s/g, '').slice(0, 8) || null;
@@ -951,7 +911,7 @@ async function gravarNfCompra(sessao, {
 
   if (Number(sessao.editar_id_nfcompra)) {
     const idNf = Number(sessao.editar_id_nfcompra);
-    return withDb(async (db, appCfg) => {
+    return withDb((conn, appCfg) => withTransaction(conn, async (db) => {
       const nfAtual = await query(db, `
         SELECT FIRST 1 STATUS FROM TB_NFCOMPRA WHERE ID_NFCOMPRA = ?`, [idNf]);
       if (String(nfAtual[0]?.STATUS || '').trim().toUpperCase() === 'C') {
@@ -1007,14 +967,13 @@ async function gravarNfCompra(sessao, {
         parcelas: parcelasXml.length,
         editado: true,
       };
-    });
+    }));
   }
 
-  return withDb(async (db, appCfg) => {
+  return withDb(async (conn, appCfg) => {
     const agora = localNow();
     const dtEmissao = toDateSql(ide.dhEmi);
     const dtEntrada = toDateSql(sessao.dt_entrada) || agora.dataSql;
-    const idNf = await nextId(db, 'GEN_TB_NFCOMPRA_ID', 'TB_NFCOMPRA', 'ID_NFCOMPRA');
     const idFmapgtoRaw = fin.id_fmapgto != null ? Number(fin.id_fmapgto) : 3;
     const idFmapgto = idFmapgtoRaw === 1 ? 3 : (idFmapgtoRaw || 3);
     const idParcelaRaw = fin.id_parcela != null ? Number(fin.id_parcela) : 24;
@@ -1037,338 +996,309 @@ async function gravarNfCompra(sessao, {
       }
     } catch { /* ignore */ }
 
-    await query(db, `
-      INSERT INTO TB_NFCOMPRA (
-        ID_NFCOMPRA, ID_COMPRADOR, ID_FORNEC, NF_NUMERO, NF_SERIE, NF_MODELO,
-        DT_EMISSAO, DT_ENTRADA, HR_ENTRADA,
-        VLR_BC_FRETE, VLR_BC_SEGURO, VLR_BC_DESPESA,
-        ESPECIE, TIPO_FRETE, PES_LIQUID, PES_BRUTO, STATUS, ID_NATOPE,
-        MARCA, QTD_VOLUM, ID_PARCELA, ID_FMAPGTO, SOMA_FRETE, NUM_VOLUM,
-        NFE_ORIGEM, PROD_REV, CODIGO_BASE, CODIGO_BASE_IPI,
-        SUBTRAI_ICMS_DESON, IMPORTADO_XML, IND_PRES, IND_INTERMED, ENDERECO_ENTREGA
-      ) VALUES (
-        ?, 0, ?, ?, ?, ?,
-        ?, ?, ?,
-        ?, ?, ?,
-        ?, ?, ?, ?, 'E', ?,
-        ?, ?, ?, ?, NULL, ?,
-        ?, 'N', 1, 1,
-        'S', 'S', '1', '0', 'N'
-      )`, [
-      idNf,
-      Number(sessao.fornecedor.id_fornec),
-      nfNumero,
-      serie,
-      modelo.padEnd(2).slice(0, 2),
-      dtEmissao,
-      dtEntrada,
-      agora.horaSql,
-      Number(tot.vFrete || 0),
-      Number(tot.vSeg || 0),
-      0,
-      String(vol0.esp || '').slice(0, 30) || null,
-      String(transp.modFrete || '9').trim().slice(0, 1) || '9',
-      Number(vol0.pesoL || 0),
-      Number(vol0.pesoB || 0),
-      idNatope,
-      String(vol0.marca || '').slice(0, 30) || null,
-      Number(vol0.qVol || itens.length || 0),
-      idParcela,
-      idFmapgto,
-      vol0.nVol ? String(vol0.nVol).slice(0, 30) : null,
-      chave || null,
-    ]);
+    const temDesonCols = await columnExists(conn, 'TB_NFC_ITEM', 'VLR_ICM_DESO')
+      && await columnExists(conn, 'TB_NFC_ITEM', 'ID_MOTIVO_DESO');
+    const idTransportador = hasTable('TB_NFC_TRANSPORTADOR')
+      ? await ensureIdTransportador(conn, sessao)
+      : null;
 
-    let parcelasGeradas = 0;
-    if (geraFinanceiroNota) {
-      const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
-        ? fin.parcelas
-        : [{ nDup: '001', dVenc: agora.dataSql, vDup: tot.vNF || 0 }];
-      const checagemFin = validarFinanceiroNf(sessao.xml, { parcelas: parcelasXml });
-      if (!checagemFin.ok) throw new Error(checagemFin.erro);
-      const vNf = checagemFin.vNf;
-      const somaParc = checagemFin.soma;
-      const idNumPag = await nextId(db, 'GEN_TB_NFCOMPRA_FMAPAGTO_ID', 'TB_NFCOMPRA_FMAPAGTO', 'ID_NUMPAG');
+    return withTransaction(conn, async (db) => {
+      const idNf = await nextId(db, 'GEN_TB_NFCOMPRA_ID', 'TB_NFCOMPRA', 'ID_NFCOMPRA');
       await query(db, `
-        INSERT INTO TB_NFCOMPRA_FMAPAGTO (ID_NUMPAG, VLR_PAGTO, ID_NFCOMPRA, ID_FMANFCE, ID_PARCELA)
-        VALUES (?, ?, ?, ?, ?)`, [
-        idNumPag,
-        vNf || somaParc,
+        INSERT INTO TB_NFCOMPRA (
+          ID_NFCOMPRA, ID_COMPRADOR, ID_FORNEC, NF_NUMERO, NF_SERIE, NF_MODELO,
+          DT_EMISSAO, DT_ENTRADA, HR_ENTRADA,
+          VLR_BC_FRETE, VLR_BC_SEGURO, VLR_BC_DESPESA,
+          ESPECIE, TIPO_FRETE, PES_LIQUID, PES_BRUTO, STATUS, ID_NATOPE,
+          MARCA, QTD_VOLUM, ID_PARCELA, ID_FMAPGTO, SOMA_FRETE, NUM_VOLUM,
+          NFE_ORIGEM, PROD_REV, CODIGO_BASE, CODIGO_BASE_IPI,
+          SUBTRAI_ICMS_DESON, IMPORTADO_XML, IND_PRES, IND_INTERMED, ENDERECO_ENTREGA
+        ) VALUES (
+          ?, 0, ?, ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?,
+          ?, ?, ?, ?, 'E', ?,
+          ?, ?, ?, ?, NULL, ?,
+          ?, 'N', 1, 1,
+          'S', 'S', '1', '0', 'N'
+        )`, [
         idNf,
-        idFmanfce || 5,
+        Number(sessao.fornecedor.id_fornec),
+        nfNumero,
+        serie,
+        modelo.padEnd(2).slice(0, 2),
+        dtEmissao,
+        dtEntrada,
+        agora.horaSql,
+        Number(tot.vFrete || 0),
+        Number(tot.vSeg || 0),
+        0,
+        String(vol0.esp || '').slice(0, 30) || null,
+        String(transp.modFrete || '9').trim().slice(0, 1) || '9',
+        Number(vol0.pesoL || 0),
+        Number(vol0.pesoB || 0),
+        idNatope,
+        String(vol0.marca || '').slice(0, 30) || null,
+        Number(vol0.qVol || itens.length || 0),
         idParcela,
+        idFmapgto,
+        vol0.nVol ? String(vol0.nVol).slice(0, 30) : null,
+        chave || null,
       ]);
 
-      for (let i = 0; i < parcelasXml.length; i++) {
-        const p = parcelasXml[i];
-        const idCta = await nextId(db, 'GEN_TB_CTAPAG_ID', 'TB_CONTA_PAGAR', 'ID_CTAPAG');
-        const doc = `${String(nfNumero).padStart(9, '0')}-${String(i + 1).padStart(2, '0')}`;
+      let parcelasGeradas = 0;
+      if (geraFinanceiroNota) {
+        const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
+          ? fin.parcelas
+          : [{ nDup: '001', dVenc: agora.dataSql, vDup: tot.vNF || 0 }];
+        const checagemFin = validarFinanceiroNf(sessao.xml, { parcelas: parcelasXml });
+        if (!checagemFin.ok) throw new Error(checagemFin.erro);
+        const vNf = checagemFin.vNf;
+        const somaParc = checagemFin.soma;
+        const idNumPag = await nextId(db, 'GEN_TB_NFCOMPRA_FMAPAGTO_ID', 'TB_NFCOMPRA_FMAPAGTO', 'ID_NUMPAG');
         await query(db, `
-          INSERT INTO TB_CONTA_PAGAR (
-            ID_CTAPAG, DOCUMENTO, HISTORICO, DT_EMISSAO, DT_VENCTO, VLR_CTAPAG,
-            TIP_CTAPAG, ID_PORTADOR, ID_FORNEC, CTA_MANUAL, OBSERVACAO
-          ) VALUES (?, ?, ?, ?, ?, ?, 'N', 1, ?, 'N', ?)`, [
-          idCta,
-          doc.slice(0, 20),
-          `Compra NF ${String(nfNumero).padStart(9, '0')}/${serie}/${modelo}`.slice(0, 80),
-          agora.dataSql,
-          toDateSql(p.dVenc) || agora.dataSql,
-          round2(p.vDup || 0),
-          Number(sessao.fornecedor.id_fornec),
-          `Importado via Gestor Estoque — chave ${chave}`.slice(0, 200),
+          INSERT INTO TB_NFCOMPRA_FMAPAGTO (ID_NUMPAG, VLR_PAGTO, ID_NFCOMPRA, ID_FMANFCE, ID_PARCELA)
+          VALUES (?, ?, ?, ?, ?)`, [
+          idNumPag,
+          vNf || somaParc,
+          idNf,
+          idFmanfce || 5,
+          idParcela,
         ]);
-        await ensureContaMovtos(db, idCta, {
-          vlr: round2(p.vDup || 0),
-          historico: `Compra NF ${String(nfNumero).padStart(9, '0')}/${serie}/${modelo}`,
-          dataSql: agora.dataSql,
-          horaSql: agora.horaSql,
-        });
-        await query(db, `
-          INSERT INTO TB_NFC_CTAPAG (ID_NFCOMPRA, ID_CTAPAG, ID_NUMPAG)
-          VALUES (?, ?, ?)`, [idNf, idCta, idNumPag]);
-        parcelasGeradas += 1;
-      }
-    }
 
-    const nfLabel = `${nfNumero}/${serie}`;
-    let itensGravados = 0;
-    let itensComEstoque = 0;
-    const temDesonCols = await columnExists(db, 'TB_NFC_ITEM', 'VLR_ICM_DESO')
-      && await columnExists(db, 'TB_NFC_ITEM', 'ID_MOTIVO_DESO');
-    await gravarTransportadorNf(db, idNf, sessao);
-
-    for (let idx = 0; idx < itens.length; idx++) {
-      const it = itens[idx];
-      const flags = itemFlags[idx] || { gera_estoque: 'S', gera_financeiro: 'S' };
-      let idIdent = it.sistema?.id_identificador ? Number(it.sistema.id_identificador) : null;
-      if (!idIdent && it.sistema?.criar_novo) {
-        const created = await criarProdutoBasico(db, appCfg, it.sistema, it.xml);
-        idIdent = created.id_identificador;
-        it.sistema.id_identificador = idIdent;
-        it.sistema.id_estoque = created.id_estoque;
-        it.sistema.criar_novo = false;
-      }
-      if (!idIdent) throw new Error(`Item ${it.nItem}: produto inválido.`);
-
-      try {
-        const idFornec = sessao.fornecedor?.id_fornec ? Number(sessao.fornecedor.id_fornec) : null;
-        if (idFornec) {
-          const { upsertEstoqueFornecedor } = require('./importacao-estoque-fornec');
-          const trib = it.sistema.tributos || {};
-          await upsertEstoqueFornecedor({
-            id_identificador: idIdent,
-            id_fornec: idFornec,
-            cod_no_fornecedor: it.sistema.cod_fornecedor || it.xml?.cProd || '',
-            cst: trib.cst_icms || it.sistema.cst_icms || '',
-            csosn: it.sistema.csosn_saida || trib.csosn || '',
-            cofins: trib.p_cofins || 0,
-            cst_cofins: trib.cst_cofins || '',
-            pis: trib.p_pis || 0,
-            cst_pis: trib.cst_pis || '',
-            aliq_icms: trib.p_icms || 0,
-            uni_medida: it.sistema.uni_medida || '',
-            cfop: it.sistema.cfop || '',
-            ipi: trib.p_ipi || null,
-            cst_ipi: trib.cst_ipi || '',
-            cod_barras: it.sistema.cod_barras || '',
+        for (let i = 0; i < parcelasXml.length; i++) {
+          const p = parcelasXml[i];
+          const idCta = await nextId(db, 'GEN_TB_CTAPAG_ID', 'TB_CONTA_PAGAR', 'ID_CTAPAG');
+          const doc = `${String(nfNumero).padStart(9, '0')}-${String(i + 1).padStart(2, '0')}`;
+          await query(db, `
+            INSERT INTO TB_CONTA_PAGAR (
+              ID_CTAPAG, DOCUMENTO, HISTORICO, DT_EMISSAO, DT_VENCTO, VLR_CTAPAG,
+              TIP_CTAPAG, ID_PORTADOR, ID_FORNEC, CTA_MANUAL, OBSERVACAO
+            ) VALUES (?, ?, ?, ?, ?, ?, 'N', 1, ?, 'N', ?)`, [
+            idCta,
+            doc.slice(0, 20),
+            `Compra NF ${String(nfNumero).padStart(9, '0')}/${serie}/${modelo}`.slice(0, 80),
+            agora.dataSql,
+            toDateSql(p.dVenc) || agora.dataSql,
+            round2(p.vDup || 0),
+            Number(sessao.fornecedor.id_fornec),
+            `Importado via Gestor Estoque — chave ${chave}`.slice(0, 200),
+          ]);
+          await ensureContaMovtos(db, idCta, {
+            vlr: round2(p.vDup || 0),
+            historico: `Compra NF ${String(nfNumero).padStart(9, '0')}/${serie}/${modelo}`,
+            dataSql: agora.dataSql,
+            horaSql: agora.horaSql,
           });
+          await query(db, `
+            INSERT INTO TB_NFC_CTAPAG (ID_NFCOMPRA, ID_CTAPAG, ID_NUMPAG)
+            VALUES (?, ?, ?)`, [idNf, idCta, idNumPag]);
+          parcelasGeradas += 1;
         }
-      } catch (e) {
-        console.warn('TB_ESTOQUE_FORNECEDOR:', e.message);
       }
 
-      try {
-        const { salvarRegra } = require('./importacao-regra');
-        const trib = it.sistema.tributos || {};
-        await salvarRegra({
-          id_regra: it.sistema.id_regra || undefined,
-          id_fornec: sessao.fornecedor?.id_fornec || null,
-          id_identificador: idIdent,
-          cod_fornecedor: it.sistema.cod_fornecedor || it.xml?.cProd || '',
-          cfop_entrada: it.sistema.cfop || '',
-          cfop_saida: it.sistema.cfop_saida || '',
-          cfop_nf: it.sistema.cfop_nf || '',
-          cst_entrada: trib.cst_icms || it.sistema.cst_icms || '',
-          cst_saida: it.sistema.cst_saida || '',
-          cst_cfe: it.sistema.cst_cfe || trib.cst_cfe || '',
-          csosn_entrada: it.sistema.csosn_entrada || trib.csosn || '',
-          csosn_saida: it.sistema.csosn_saida || '',
-          cst_pis_entrada: trib.cst_pis || '',
-          cst_pis_saida: it.sistema.cst_pis_saida || trib.cst_pis_saida || trib.cst_pis || '',
-          cst_cofins_entrada: trib.cst_cofins || '',
-          cst_cofins_saida: it.sistema.cst_cofins_saida || trib.cst_cofins_saida || trib.cst_cofins || '',
-          pis: trib.p_pis || 0,
-          cofins: trib.p_cofins || 0,
-          id_cti: it.sistema.id_cti || '',
-          id_cti_cfe: it.sistema.id_cti_cfe || '',
-          id_class_trib: tribReformaNfe(it.sistema).id_class_trib ?? null,
-          id_class_trib_nfce: it.sistema.trib_nfce?.id_class_trib ?? null,
-          aplicar_saida: it.sistema.aplicar_saida || 'S',
-        });
-      } catch (e) {
-        console.warn('TB_MT_REGRA_TRIBUTO:', e.message);
-      }
+      const nfLabel = `${nfNumero}/${serie}`;
+      let itensGravados = 0;
+      let itensComEstoque = 0;
+      const pendentesEstoque = [];
+      await gravarTransportadorNf(db, idNf, sessao, idTransportador);
 
-      const conversor = Number(it.sistema.conversor ?? 1) || 1;
-      const qtdXml = Number(it.sistema.qtd_xml) > 0
-        ? Number(it.sistema.qtd_xml)
-        : (Number(it.xml?.qCom || 0) || 0);
-      let qtdEstoque = Number(it.sistema.qtd);
-      if (!(qtdEstoque > 0)) {
-        qtdEstoque = Number((qtdXml * conversor).toFixed(6));
-      }
-      it.sistema.qtd = qtdEstoque;
-      it.sistema.conversor = conversor;
-      it.sistema.qtd_xml = qtdXml;
+      for (let idx = 0; idx < itens.length; idx++) {
+        const it = itens[idx];
+        const flags = itemFlags[idx] || { gera_estoque: 'S', gera_financeiro: 'S' };
+        let idIdent = it.sistema?.id_identificador ? Number(it.sistema.id_identificador) : null;
+        if (!idIdent && it.sistema?.criar_novo) {
+          const created = await criarProdutoBasico(db, appCfg, it.sistema, it.xml);
+          idIdent = created.id_identificador;
+          it.sistema.id_identificador = idIdent;
+          it.sistema.id_estoque = created.id_estoque;
+          it.sistema.criar_novo = false;
+        }
+        if (!idIdent) throw new Error(`Item ${it.nItem}: produto inválido.`);
 
-      const custoInfo = calcCustoUnitarioItem(it.sistema || {}, it.xml || {});
-      let vUnitEstoque = Number(it.sistema.prc_custo);
-      if (Math.abs(conversor - 1) > 1e-9 || !(vUnitEstoque > 0)) {
-        vUnitEstoque = custoInfo.custoEstoque > 0
-          ? custoInfo.custoEstoque
-          : Number(it.xml?.vUnCom || 0);
-      }
-      if (!Number.isFinite(vUnitEstoque)) vUnitEstoque = 0;
-      it.sistema.prc_custo = vUnitEstoque;
-      const vTotal = totalMercadoriaItem(it.xml || {}, it.sistema || {});
-      const vDesc = Number(it.sistema.v_desc ?? it.xml?.vDesc ?? 0);
-      const vFrete = Number(it.sistema.v_frete ?? it.xml?.vFrete ?? 0);
-      const vSeg = Number(it.sistema.v_seguro ?? it.xml?.vSeg ?? 0);
-      const vOutro = Number(it.sistema.v_outro ?? it.xml?.vOutro ?? 0);
-
-      // Clipp: trigger/SINTEGRA usam QTD_ITEM × CONVERSOR(TB_UNI_MEDIDA da UNI_MEDIDA).
-      // Se o conversor do app bate com a unidade, grava qtd da nota + essa unidade.
-      // Senão (ex.: digitou conversor e forçou UN), grava qtd já convertida com UN.
-      let uni = String(it.sistema.uni_medida || it.xml?.uCom || 'UN').trim().slice(0, 6) || 'UN';
-      let convTabela = 1;
-      try {
-        const urows = await query(db, `
-          SELECT FIRST 1 CONVERSOR FROM TB_UNI_MEDIDA WHERE UNIDADE = ?`, [uni]);
-        const n = Number(urows[0]?.CONVERSOR);
-        if (n > 0) convTabela = n;
-      } catch { /* ignore */ }
-      const usaFatorUnidade = Math.abs(conversor - convTabela) <= 1e-6;
-      let qtdNf;
-      let vUnitNf;
-      if (usaFatorUnidade && qtdXml > 0) {
-        qtdNf = qtdXml;
-        vUnitNf = Number((vTotal / qtdNf).toFixed(6));
-      } else {
-        qtdNf = qtdEstoque > 0 ? qtdEstoque : qtdXml;
-        uni = String(it.sistema.uni_medida_saida || 'UN').trim().slice(0, 6) || 'UN';
-        // Garante unidade com fator 1 para o trigger não remultiplicar
         try {
-          const u2 = await query(db, `
-            SELECT FIRST 1 CONVERSOR FROM TB_UNI_MEDIDA WHERE UNIDADE = ?`, [uni]);
-          if (!(Number(u2[0]?.CONVERSOR) > 0) || Math.abs(Number(u2[0].CONVERSOR) - 1) > 1e-6) {
-            uni = 'UN';
+          const idFornec = sessao.fornecedor?.id_fornec ? Number(sessao.fornecedor.id_fornec) : null;
+          if (idFornec) {
+            const { upsertEstoqueFornecedor } = require('./importacao-estoque-fornec');
+            const trib = it.sistema.tributos || {};
+            await upsertEstoqueFornecedor({
+              id_identificador: idIdent,
+              id_fornec: idFornec,
+              cod_no_fornecedor: it.sistema.cod_fornecedor || it.xml?.cProd || '',
+              cst: trib.cst_icms || it.sistema.cst_icms || '',
+              csosn: it.sistema.csosn_saida || trib.csosn || '',
+              cofins: trib.p_cofins || 0,
+              cst_cofins: trib.cst_cofins || '',
+              pis: trib.p_pis || 0,
+              cst_pis: trib.cst_pis || '',
+              aliq_icms: trib.p_icms || 0,
+              uni_medida: it.sistema.uni_medida || '',
+              cfop: it.sistema.cfop || '',
+              ipi: trib.p_ipi || null,
+              cst_ipi: trib.cst_ipi || '',
+              cod_barras: it.sistema.cod_barras || '',
+            }, { db });
           }
-        } catch {
-          uni = 'UN';
+        } catch (e) {
+          console.warn('TB_ESTOQUE_FORNECEDOR:', e.message);
         }
-        vUnitNf = vUnitEstoque;
-      }
-      if (!(vUnitNf > 0)) vUnitNf = Number(it.xml?.vUnCom || 0) || vUnitEstoque;
 
-      const cfop = String(it.sistema.cfop || it.xml?.CFOP || '').slice(0, 4);
-      const csosn = String(
-        it.sistema.csosn_entrada || it.sistema.csosn || it.sistema.tributos?.csosn || ''
-      ).slice(0, 3);
-      // INSERT com EST_BX='N' para o trigger BI não movimentar; depois marcamos 'S'
-      // (cancelamento/relatórios) e lançamos o saldo manualmente.
-      const estBxInsert = 'N';
-      const vDeson = Number(it.sistema.tributos?.v_icms_deson ?? it.xml?.imposto?.vICMSDeson ?? 0);
-      const motDeson = String(it.sistema.tributos?.mot_des_icms || it.xml?.imposto?.motDesICMS || '')
-        .replace(/\D/g, '').slice(0, 2) || null;
+        try {
+          const { salvarRegra } = require('./importacao-regra');
+          const trib = it.sistema.tributos || {};
+          await salvarRegra({
+            id_regra: it.sistema.id_regra || undefined,
+            id_fornec: sessao.fornecedor?.id_fornec || null,
+            id_identificador: idIdent,
+            cod_fornecedor: it.sistema.cod_fornecedor || it.xml?.cProd || '',
+            cfop_entrada: it.sistema.cfop || '',
+            cfop_saida: it.sistema.cfop_saida || '',
+            cfop_nf: it.sistema.cfop_nf || '',
+            cst_entrada: trib.cst_icms || it.sistema.cst_icms || '',
+            cst_saida: it.sistema.cst_saida || '',
+            cst_cfe: it.sistema.cst_cfe || trib.cst_cfe || '',
+            csosn_entrada: it.sistema.csosn_entrada || trib.csosn || '',
+            csosn_saida: it.sistema.csosn_saida || '',
+            cst_pis_entrada: trib.cst_pis || '',
+            cst_pis_saida: it.sistema.cst_pis_saida || trib.cst_pis_saida || trib.cst_pis || '',
+            cst_cofins_entrada: trib.cst_cofins || '',
+            cst_cofins_saida: it.sistema.cst_cofins_saida || trib.cst_cofins_saida || trib.cst_cofins || '',
+            pis: trib.p_pis || 0,
+            cofins: trib.p_cofins || 0,
+            id_cti: it.sistema.id_cti || '',
+            id_cti_cfe: it.sistema.id_cti_cfe || '',
+            id_class_trib: tribReformaNfe(it.sistema).id_class_trib ?? null,
+            id_class_trib_nfce: it.sistema.trib_nfce?.id_class_trib ?? null,
+            aplicar_saida: it.sistema.aplicar_saida || 'S',
+          }, { db });
+        } catch (e) {
+          console.warn('TB_MT_REGRA_TRIBUTO:', e.message);
+        }
 
-      if (flags.gera_estoque === 'S') {
-        await zerarNegativoAntesTrigger(db, appCfg, {
-          idIdentificador: idIdent,
+        const conversor = Number(it.sistema.conversor ?? 1) || 1;
+        const qtdXml = Number(it.sistema.qtd_xml) > 0
+          ? Number(it.sistema.qtd_xml)
+          : (Number(it.xml?.qCom || 0) || 0);
+        let qtdEstoque = Number(it.sistema.qtd);
+        if (!(qtdEstoque > 0)) {
+          qtdEstoque = Number((qtdXml * conversor).toFixed(6));
+        }
+        it.sistema.qtd = qtdEstoque;
+        it.sistema.conversor = conversor;
+        it.sistema.qtd_xml = qtdXml;
+
+        const custoInfo = calcCustoUnitarioItem(it.sistema || {}, it.xml || {});
+        let vUnitEstoque = Number(it.sistema.prc_custo);
+        if (Math.abs(conversor - 1) > 1e-9 || !(vUnitEstoque > 0)) {
+          vUnitEstoque = custoInfo.custoEstoque > 0
+            ? custoInfo.custoEstoque
+            : Number(it.xml?.vUnCom || 0);
+        }
+        if (!Number.isFinite(vUnitEstoque)) vUnitEstoque = 0;
+        it.sistema.prc_custo = vUnitEstoque;
+        const vTotal = totalMercadoriaItem(it.xml || {}, it.sistema || {});
+        const vDesc = Number(it.sistema.v_desc ?? it.xml?.vDesc ?? 0);
+        const vFrete = Number(it.sistema.v_frete ?? it.xml?.vFrete ?? 0);
+        const vSeg = Number(it.sistema.v_seguro ?? it.xml?.vSeg ?? 0);
+        const vOutro = Number(it.sistema.v_outro ?? it.xml?.vOutro ?? 0);
+
+        const cfop = String(it.sistema.cfop || it.xml?.CFOP || '').slice(0, 4);
+        const csosn = String(
+          it.sistema.csosn_entrada || it.sistema.csosn || it.sistema.tributos?.csosn || ''
+        ).slice(0, 3);
+        // INSERT com EST_BX='N' para o trigger BI não movimentar; depois marcamos 'S'
+        // (cancelamento/relatórios) e lançamos o saldo manualmente.
+        const estBxInsert = 'N';
+        const vDeson = Number(it.sistema.tributos?.v_icms_deson ?? it.xml?.imposto?.vICMSDeson ?? 0);
+        const motDeson = String(it.sistema.tributos?.mot_des_icms || it.xml?.imposto?.motDesICMS || '')
+          .replace(/\D/g, '').slice(0, 2) || null;
+
+        const idItem = await nextId(db, 'GEN_TB_NFC_ITEM_ID', 'TB_NFC_ITEM', 'ID_NFCITEM');
+        // QTD_ITEM já em unidade de estoque, UNI_MEDIDA='UN' (conversor 1), porque o SP_MOVIMENTO
+        // multiplica pelo conversor — alinhado à entrada manual, ao SINTEGRA e ao cancelamento.
+        const qtdInsert = qtdEstoque > 0 ? qtdEstoque : qtdXml;
+        const uniInsert = 'UN';
+        const vUnitInsert = vUnitEstoque > 0 ? vUnitEstoque : (Number(it.xml?.vUnCom || 0) || 0);
+        if (temDesonCols) {
+          await query(db, `
+            INSERT INTO TB_NFC_ITEM (
+              ID_NFCITEM, ID_IDENTIFICADOR, ID_NFCOMPRA, NUM_ITEM, QTD_ITEM, UNI_MEDIDA,
+              VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
+              CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT, VLR_ICM_DESO, ID_MOTIVO_DESO
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, [
+            idItem, idIdent, idNf, Number(it.nItem), qtdInsert, uniInsert,
+            vTotal, vDesc, vFrete, vSeg, vOutro,
+            cfop || null, csosn || null, estBxInsert, vUnitInsert, vUnitInsert,
+            vDeson > 0 ? vDeson : null,
+            vDeson > 0 ? (motDeson ? Number(motDeson) : null) : null,
+          ]);
+        } else {
+          await query(db, `
+            INSERT INTO TB_NFC_ITEM (
+              ID_NFCITEM, ID_IDENTIFICADOR, ID_NFCOMPRA, NUM_ITEM, QTD_ITEM, UNI_MEDIDA,
+              VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
+              CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, [
+            idItem, idIdent, idNf, Number(it.nItem), qtdInsert, uniInsert,
+            vTotal, vDesc, vFrete, vSeg, vOutro,
+            cfop || null, csosn || null, estBxInsert, vUnitInsert, vUnitInsert,
+          ]);
+        }
+
+        await insertTributosItem(
+          db,
+          idItem,
+          it.sistema.tributos || {},
+          it.xml?.imposto || {},
+          tribReformaNfe(it.sistema),
+          {
+            aplicarSaida: it.sistema.aplicar_saida,
+            prcVenda: Number(it.sistema.prc_venda || it.sistema.prc_venda || 0),
+          },
+        );
+        await gravarLotesItem(db, appCfg, idItem, idIdent, it);
+        pendentesEstoque.push({
+          it,
+          idItem,
+          idIdent,
+          qtd: flags.gera_estoque === 'S' && qtdEstoque > 0 ? qtdEstoque : 0,
           prcCusto: vUnitEstoque,
-          usuario,
-          idFuncionario,
-          nfLabel,
         });
+        itensGravados += 1;
       }
 
-      const idItem = await nextId(db, 'GEN_TB_NFC_ITEM_ID', 'TB_NFC_ITEM', 'ID_NFCITEM');
-      // QTD já convertida + UN (fator 1) — alinhado à entrada manual e ao cancelamento.
-      const qtdInsert = qtdEstoque > 0 ? qtdEstoque : qtdNf;
-      const uniInsert = 'UN';
-      const vUnitInsert = vUnitEstoque > 0 ? vUnitEstoque : vUnitNf;
-      if (temDesonCols) {
-        await query(db, `
-          INSERT INTO TB_NFC_ITEM (
-            ID_NFCITEM, ID_IDENTIFICADOR, ID_NFCOMPRA, NUM_ITEM, QTD_ITEM, UNI_MEDIDA,
-            VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
-            CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT, VLR_ICM_DESO, ID_MOTIVO_DESO
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`, [
-          idItem, idIdent, idNf, Number(it.nItem), qtdInsert, uniInsert,
-          vTotal, vDesc, vFrete, vSeg, vOutro,
-          cfop || null, csosn || null, estBxInsert, vUnitInsert, vUnitInsert,
-          vDeson > 0 ? vDeson : null,
-          vDeson > 0 ? (motDeson ? Number(motDeson) : null) : null,
-        ]);
-      } else {
-        await query(db, `
-          INSERT INTO TB_NFC_ITEM (
-            ID_NFCITEM, ID_IDENTIFICADOR, ID_NFCOMPRA, NUM_ITEM, QTD_ITEM, UNI_MEDIDA,
-            VLR_TOTAL, VLR_DESC, VLR_FRETE, VLR_SEGURO, VLR_DESPESA,
-            CFOP, CSOSN, EST_BX, VLR_UNIT, PRC_MEDIO, ID_KIT
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`, [
-          idItem, idIdent, idNf, Number(it.nItem), qtdInsert, uniInsert,
-          vTotal, vDesc, vFrete, vSeg, vOutro,
-          cfop || null, csosn || null, estBxInsert, vUnitInsert, vUnitInsert,
-        ]);
-      }
+      await gravarInfoComplementares(db, idNf, sessao);
 
-      await insertTributosItem(
-        db,
-        idItem,
-        it.sistema.tributos || {},
-        it.xml?.imposto || {},
-        tribReformaNfe(it.sistema),
-        {
-          aplicarSaida: it.sistema.aplicar_saida,
-          prcVenda: Number(it.sistema.prc_venda || it.sistema.prc_venda || 0),
-        },
-      );
-      await gravarLotesItem(db, appCfg, idItem, idIdent, it);
-      await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
-      if (flags.gera_estoque === 'S' && qtdEstoque > 0) {
+      // TB_ESTOQUE / TB_EST_PRODUTO por último: são as linhas que o caixa também trava ao vender,
+      // então ficam presas pela transação o menor tempo possível.
+      for (const p of pendentesEstoque) {
+        await atualizarCadastroProduto(db, appCfg, p.it.sistema || {}, p.it.xml || {});
+        if (!(p.qtd > 0)) continue;
         // Atualiza QTD_ATUAL sem gravar em TB_EST_SALDO_ALTERADO — a movimentação
         // no relatório do Clipp já vem como "NF Compra" pelo item da nota.
         await entradaEstoque(db, appCfg, {
-          idIdentificador: idIdent,
-          qtd: qtdEstoque,
-          prcCusto: vUnitEstoque,
+          idIdentificador: p.idIdent,
+          qtd: p.qtd,
+          prcCusto: p.prcCusto,
           usuario,
           idFuncionario,
           nfLabel,
-          skipClipp: false,
           registrarAlteracao: false,
         });
-        try {
-          await query(db, `UPDATE TB_NFC_ITEM SET EST_BX = 'S' WHERE ID_NFCITEM = ?`, [idItem]);
-        } catch (e) {
-          console.warn('Marcar EST_BX:', e.message);
-        }
+        await query(db, `UPDATE TB_NFC_ITEM SET EST_BX = 'S' WHERE ID_NFCITEM = ?`, [p.idItem]);
         itensComEstoque += 1;
       }
-      itensGravados += 1;
-    }
 
-    await gravarInfoComplementares(db, idNf, sessao);
-
-    return {
-      id_nfcompra: idNf,
-      nf_numero: nfNumero,
-      nf_serie: serie,
-      itens_gravados: itensGravados,
-      itens_estoque: itensComEstoque,
-      parcelas: parcelasGeradas,
-      gera_financeiro: geraFinanceiroNota ? 'S' : 'N',
-    };
+      return {
+        id_nfcompra: idNf,
+        nf_numero: nfNumero,
+        nf_serie: serie,
+        itens_gravados: itensGravados,
+        itens_estoque: itensComEstoque,
+        parcelas: parcelasGeradas,
+        gera_financeiro: geraFinanceiroNota ? 'S' : 'N',
+      };
+    });
   });
 }
 

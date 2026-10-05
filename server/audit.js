@@ -138,9 +138,9 @@ function collectChanges(antes, depois) {
   return byTipo;
 }
 
-async function logProductChanges(db, { antes, depois, id_identificador, id_estoque, id_funcionario, usuario }) {
+async function logProductChanges(db, { antes, depois, id_identificador, id_estoque, id_funcionario, usuario, origem }) {
   const byTipo = collectChanges(antes, depois);
-  const obs = `Alterado via painel - ${usuario || 'usuário'}`;
+  const obs = `Alterado via painel${origem ? ` (${origem})` : ''} - ${usuario || 'usuário'}`;
   const ids = [];
   // quantidade continua em TB_EST_SALDO_ALTERADO (ERP); aqui só ficha/preços
   for (const tipo of ['ficha', 'precos']) {
