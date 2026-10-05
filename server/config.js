@@ -34,6 +34,9 @@ const MODULOS = {
     default: { acesso: false },
   },
 };
+if (edicao.ONLINE) {
+  MODULOS.online = { label: 'Acesso online', default: { acesso: false } };
+}
 
 /** Arquivos trazidos do Gestor Estoque normal na primeira abertura da edição online. */
 const ARQUIVOS_HERDADOS = /^(app-config\.json|licenca\.json|importacao-cfop-params\.json|\.fiscal-key|usuarios_[0-9a-f]+\.json)$/;

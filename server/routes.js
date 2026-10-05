@@ -34,7 +34,7 @@ const {
   hasAuditTable,
 } = require('./audit');
 const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora } = require('./datetime');
-const { resolveOrigem, somenteServidorLocal, isServidorLocal } = require('./origem');
+const { resolveOrigem, somenteServidorLocal, isServidorLocal, viaTunel } = require('./origem');
 const licenca = require('./licenca');
 const auth = require('./auth');
 const { gerarHashSenha } = require('./senha');
@@ -252,7 +252,9 @@ router.get('/emitente', async (_req, res) => {
   }
 });
 
-router.get('/funcionarios', async (_req, res) => {
+router.get('/funcionarios', async (req, res) => {
+  const online = viaTunel(req);
+  const podeOnline = (u) => !online || u.supervisor || !!u.permissoes?.online?.acesso;
   try {
     const appCfg = loadAppConfig();
     const usersCfg = loadUsersConfig(appCfg);
@@ -291,12 +293,13 @@ router.get('/funcionarios', async (_req, res) => {
 
     const list = loadUsersConfig(appCfg).usuarios
       .filter((u) => u.supervisor || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id)))
+      .filter(podeOnline)
       .map(usuarioLogin);
 
     res.json({ ok: true, funcionarios: list });
   } catch (err) {
     const appCfg = loadAppConfig();
-    const list = loadUsersConfig(appCfg).usuarios.map(usuarioLogin);
+    const list = loadUsersConfig(appCfg).usuarios.filter(podeOnline).map(usuarioLogin);
     res.json({ ok: false, error: err.message, funcionarios: list });
   }
 });

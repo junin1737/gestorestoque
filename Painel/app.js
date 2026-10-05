@@ -1720,6 +1720,12 @@ function renderUsuarios() {
             <option value="false" ${!u.permissoes?.importacao?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        ${state.modulos?.online ? `<label>Acesso online
+          <select data-perm="online.acesso" ${u.supervisor ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.online?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.online?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>` : ''}
       </div>
     </div>
   `).join('');
@@ -1784,6 +1790,8 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         },
       },
     };
+    const selOnline = $('[data-perm="online.acesso"]', card);
+    if (selOnline) next.permissoes.online = { acesso: selOnline.value === 'true' };
     const senha = $('[data-field="senha"]', card)?.value;
     if (senha) next.senha = senha;
     return next;

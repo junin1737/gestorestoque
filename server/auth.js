@@ -193,6 +193,44 @@ function limparFalhas(req, id) {
   falhas.delete(`ip:${clientIp(req)}`);
 }
 
+// ─── Acesso online: permissão "Acesso online" + funcionário ativo no Clipp ─────
+
+const ATIVO_CACHE_MS = 30 * 1000;
+const ativos = new Map();
+
+/** true/false conforme TB_FUNCIONARIO.STATUS; null se não deu para consultar a base. */
+function funcionarioAtivo(id) {
+  const n = Number(id);
+  if (n === 0) return Promise.resolve(true);
+  const c = ativos.get(n);
+  if (c && (c.pendente || Date.now() - c.em < ATIVO_CACHE_MS)) return c.pendente || Promise.resolve(c.ativo);
+  const { withDb, query } = require('./db');
+  const pendente = withDb((db) => query(db, 'SELECT STATUS FROM TB_FUNCIONARIO WHERE ID_FUNCIONARIO = ?', [n]))
+    .then((rows) => {
+      const st = rows[0] ? String(rows[0].STATUS ?? 'A').trim().toUpperCase() : '';
+      const ativo = !!rows[0] && (st === 'A' || st === '');
+      ativos.set(n, { ativo, em: Date.now() });
+      return ativo;
+    })
+    .catch(() => {
+      ativos.delete(n);
+      return null;
+    });
+  ativos.set(n, { pendente });
+  return pendente;
+}
+
+/** Motivo para barrar o usuário pela internet ({ status, error }) ou null se pode entrar. */
+async function bloqueioOnline(user) {
+  if (!user.supervisor && !user.permissoes?.online?.acesso) {
+    return { status: 401, error: 'Este usuário não tem permissão de acesso online. Peça ao supervisor para liberar em Usuários.' };
+  }
+  const ativo = await funcionarioAtivo(user.id);
+  if (ativo === null) return { status: 503, error: 'Não foi possível conferir o cadastro do funcionário. Tente de novo.' };
+  if (!ativo) return { status: 401, error: 'Funcionário inativo no cadastro. Acesso online bloqueado.' };
+  return null;
+}
+
 async function conferirSenhaUsuario(user, senha) {
   if (user.supervisor) return licenca.conferirSenhaSupervisor(senha, SUPERVISOR_SENHA_LEGADA);
   return conferirHashSenha(senha, user.senhaHash);
@@ -224,6 +262,10 @@ async function login(req, res) {
     });
   }
   limparFalhas(req, id);
+  if (viaTunel(req)) {
+    const b = await bloqueioOnline(user);
+    if (b) return res.json({ ok: false, error: b.error });
+  }
   const { token, dados } = emitirToken(user);
   definirCookie(res, token);
   res.json({
@@ -249,9 +291,13 @@ function logout(req, res) {
   res.json({ ok: true });
 }
 
-function sessao(req, res) {
+async function sessao(req, res) {
   const u = usuarioDaSessao(req);
   if (!u) return res.json({ ok: false, code: 'AUTH' });
+  if (viaTunel(req)) {
+    const b = await bloqueioOnline(u);
+    if (b) return res.json({ ok: false, code: 'AUTH', error: b.error });
+  }
   const { sessao: s, ...usuario } = u;
   res.json({ ok: true, usuario: { ...usuario, temSenha: true }, expira_em: new Date(s.exp).toISOString() });
 }
@@ -285,8 +331,18 @@ function exigirSessao(req, res, next) {
       error: 'Outro usuário entrou neste navegador. Entre novamente.',
     });
   }
-  req.usuario = u;
-  next();
+  if (!viaTunel(req)) {
+    req.usuario = u;
+    return next();
+  }
+  bloqueioOnline(u).then((b) => {
+    if (b) {
+      if (b.status === 401) definirCookie(res, '', 0);
+      return res.status(b.status).json({ ok: false, code: b.status === 401 ? 'AUTH' : 'INDISPONIVEL', error: b.error });
+    }
+    req.usuario = u;
+    next();
+  }, next);
 }
 
 function nivel(u, modulo, acao) {
