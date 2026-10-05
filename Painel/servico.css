@@ -353,6 +353,7 @@ button, input, select, textarea {
   background: var(--teal-light);
   margin-top: 0.75rem;
 }
+.emitente-card[hidden] { display: none; }
 
 .banco-manutencao {
   margin-top: 1.25rem;
