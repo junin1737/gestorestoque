@@ -10,6 +10,8 @@ import android.print.PrintManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
@@ -47,7 +49,11 @@ import com.journeyapps.barcodescanner.ScanOptions;
 
 import org.json.JSONObject;
 
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.Arrays;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends AppCompatActivity {
     private static final String PREFS = "gestor_prefs";
@@ -55,6 +61,14 @@ public class MainActivity extends AppCompatActivity {
     private static final int REQ_CAMERA_WEB = 1001;
     private static final int REQ_CAMERA_QR = 1002;
     private static final int REQ_CAMERA_BARCODE = 1003;
+    private static final int TIMEOUT_CONEXAO_MS = 3000;
+    private static final int TIMEOUT_PAINEL_MS = 20000;
+
+    private final ExecutorService rede = Executors.newCachedThreadPool();
+    private final Handler ui = new Handler(Looper.getMainLooper());
+    /** Incrementa a cada tentativa/abertura da tela de conexão; respostas antigas são ignoradas. */
+    private int tentativa = 0;
+    private final Runnable watchdogPainel = this::painelNaoCarregou;
 
     private WebView webView;
     private View connectPanel;
@@ -79,7 +93,7 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 urlInput.setText(url);
-                connectWithUrl(url);
+                testarEConectar(url);
             });
 
     private final ActivityResultLauncher<ScanOptions> barcodeLauncher =
@@ -136,6 +150,13 @@ public class MainActivity extends AppCompatActivity {
 
         setupWebView();
         EmitenteIcon.restore(this, imgEmitente, txtEmpresa);
+        rede.execute(() -> {
+            try {
+                LocalDb.get(this).getWritableDatabase();
+            } catch (Exception ignored) {
+                /* base local ainda sem uso: falha não bloqueia o app */
+            }
+        });
 
         btnScanQr.setOnClickListener(v -> startQrScan());
         btnConnect.setOnClickListener(v -> connect());
@@ -182,8 +203,61 @@ public class MainActivity extends AppCompatActivity {
             status.setText(R.string.hint_connect);
             connectPanel.post(this::startQrScan);
         } else if (!saved.isEmpty()) {
-            connectWithUrl(saved);
+            testarEConectar(saved);
         }
+    }
+
+    /**
+     * Fica na tela de conexão enquanto testa o serviço; só abre o WebView se responder em
+     * TIMEOUT_CONEXAO_MS. Sem isso o WebView fica preto até o Android desistir do socket.
+     */
+    private void testarEConectar(String url) {
+        showConnectPanel();
+        final int minha = ++tentativa;
+        urlInput.setText(url);
+        status.setText(getString(R.string.connecting_to, url));
+        progress.setIndeterminate(true);
+        progress.setVisibility(View.VISIBLE);
+        ui.postDelayed(() -> resultadoTeste(minha, url, false), TIMEOUT_CONEXAO_MS);
+        rede.execute(() -> {
+            boolean ok = servidorResponde(url);
+            ui.post(() -> resultadoTeste(minha, url, ok));
+        });
+    }
+
+    private void resultadoTeste(int minha, String url, boolean ok) {
+        if (minha != tentativa || isFinishing()) return;
+        tentativa++;
+        progress.setIndeterminate(false);
+        progress.setVisibility(View.GONE);
+        if (ok) {
+            connectWithUrl(url);
+        } else {
+            status.setText(getString(R.string.server_unreachable, url));
+        }
+    }
+
+    private static boolean servidorResponde(String url) {
+        HttpURLConnection conn = null;
+        try {
+            conn = (HttpURLConnection) new URL(new URL(url), "/api/config").openConnection();
+            conn.setConnectTimeout(TIMEOUT_CONEXAO_MS);
+            conn.setReadTimeout(TIMEOUT_CONEXAO_MS);
+            conn.setRequestProperty("Accept", "application/json");
+            int code = conn.getResponseCode();
+            return code >= 200 && code < 300;
+        } catch (Exception e) {
+            return false;
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private void painelNaoCarregou() {
+        if (browserPanel.getVisibility() != View.VISIBLE) return;
+        Toast.makeText(this, R.string.toast_offline, Toast.LENGTH_LONG).show();
+        showConnectPanel();
+        status.setText(getString(R.string.server_unreachable, urlInput.getText().toString()));
     }
 
     private void startQrScan() {
@@ -411,6 +485,7 @@ public class MainActivity extends AppCompatActivity {
 
             @Override
             public void onPageFinished(WebView view, String url) {
+                ui.removeCallbacks(watchdogPainel);
                 progress.setVisibility(View.GONE);
                 status.setText("");
                 injectNativeHooks(view);
@@ -425,10 +500,9 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
-                    progress.setVisibility(View.GONE);
-                    status.setText(getString(R.string.load_error, error.getDescription()));
                     Toast.makeText(MainActivity.this, R.string.toast_offline, Toast.LENGTH_LONG).show();
                     showConnectPanel();
+                    status.setText(getString(R.string.load_error, error.getDescription()));
                 }
             }
         });
@@ -500,7 +574,7 @@ public class MainActivity extends AppCompatActivity {
             Toast.makeText(this, R.string.invalid_url, Toast.LENGTH_SHORT).show();
             return;
         }
-        connectWithUrl(url);
+        testarEConectar(url);
     }
 
     private void connectWithUrl(String url) {
@@ -510,10 +584,16 @@ public class MainActivity extends AppCompatActivity {
         connectPanel.setVisibility(View.GONE);
         browserPanel.setVisibility(View.VISIBLE);
         status.setText(R.string.loading);
+        ui.removeCallbacks(watchdogPainel);
+        ui.postDelayed(watchdogPainel, TIMEOUT_PAINEL_MS);
         webView.loadUrl(url);
     }
 
     private void showConnectPanel() {
+        tentativa++;
+        ui.removeCallbacks(watchdogPainel);
+        progress.setIndeterminate(false);
+        progress.setVisibility(View.GONE);
         webView.stopLoading();
         browserPanel.setVisibility(View.GONE);
         connectPanel.setVisibility(View.VISIBLE);
@@ -569,6 +649,8 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        ui.removeCallbacksAndMessages(null);
+        rede.shutdownNow();
         if (webView != null) {
             webView.destroy();
         }
