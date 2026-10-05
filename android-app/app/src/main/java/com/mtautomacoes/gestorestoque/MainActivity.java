@@ -102,15 +102,19 @@ public class MainActivity extends AppCompatActivity {
                 deliverBarcodeToWeb(result.getContents());
             });
 
-    private final ActivityResultLauncher<Intent> chaveNfeLauncher =
+    private final ActivityResultLauncher<Intent> leitorLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == LeitorActivity.RESULT_LEITOR_ALTERNATIVO) {
+                    startZxingProduto();
+                    return;
+                }
                 if (result.getResultCode() != RESULT_OK || result.getData() == null) {
                     Toast.makeText(this, R.string.scan_canceled, Toast.LENGTH_SHORT).show();
                     return;
                 }
-                String raw = result.getData().getStringExtra(ChaveNfeScanActivity.EXTRA_RAW);
+                String raw = result.getData().getStringExtra(LeitorActivity.EXTRA_RAW);
                 if (raw == null || raw.isEmpty()) {
-                    Toast.makeText(this, "Não li a chave. Tente de novo.", Toast.LENGTH_LONG).show();
+                    Toast.makeText(this, "Não li o código. Tente de novo.", Toast.LENGTH_LONG).show();
                     return;
                 }
                 deliverBarcodeToWeb(raw);
@@ -280,9 +284,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Leitura nativa rápida.
-     * - product / ficha / ean: ZXing EAN/UPC (ágil)
-     * - importacao (chave NF-e): Google Code Scanner com auto-zoom (CODE_128 longo + QR)
+     * Leitura nativa com caixa de foco (LeitorActivity, ML Kit).
+     * - product / ficha / ean: EAN/UPC/CODE_128/CODE_39 (ZXing fica como "Leitor alternativo")
+     * - importacao (chave NF-e): 44 dígitos em CODE_128 ou QR
      */
     private void startBarcodeScan(String mode) {
         String m = mode == null ? "product" : mode.trim().toLowerCase();
@@ -298,11 +302,18 @@ public class MainActivity extends AppCompatActivity {
         }
 
         boolean chave = "importacao".equals(m) || "chave".equals(m);
-        if (chave) {
-            startChaveNfeScan();
-            return;
+        try {
+            Intent intent = new Intent(this, LeitorActivity.class);
+            intent.putExtra(LeitorActivity.EXTRA_MODO, chave ? LeitorActivity.MODO_CHAVE : LeitorActivity.MODO_PRODUTO);
+            leitorLauncher.launch(intent);
+        } catch (Exception e) {
+            if (chave) startChaveNfeScanZxingFallback();
+            else startZxingProduto();
         }
+    }
 
+    /** Leitor antigo (ZXing), usado pelo botão "Leitor alternativo". */
+    private void startZxingProduto() {
         ScanOptions options = new ScanOptions();
         options.setDesiredBarcodeFormats(Arrays.asList(
                 ScanOptions.EAN_13,
@@ -319,16 +330,6 @@ public class MainActivity extends AppCompatActivity {
         options.addExtra(Intents.Scan.SCAN_TYPE, Intents.Scan.NORMAL_SCAN);
         options.setCaptureActivity(PortraitCaptureActivity.class);
         barcodeLauncher.launch(options);
-    }
-
-    /** Scanner contínuo ML Kit + CameraX (rápido). */
-    private void startChaveNfeScan() {
-        try {
-            Intent intent = new Intent(this, ChaveNfeScanActivity.class);
-            chaveNfeLauncher.launch(intent);
-        } catch (Exception e) {
-            startChaveNfeScanZxingFallback();
-        }
     }
 
     private void startChaveNfeScanZxingFallback() {

@@ -29,8 +29,7 @@
             </intent-filter>
         </activity>
         <activity
-            android:name=".ChaveNfeScanActivity"
-            android:screenOrientation="fullSensor"
+            android:name=".LeitorActivity"
             android:stateNotNeeded="true"
             android:theme="@style/Theme.GestorEstoque"
             android:windowSoftInputMode="stateAlwaysHidden" />

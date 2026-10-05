@@ -2622,19 +2622,18 @@ async function onScanFileSelected(file) {
   }
   $('#scan-video').hidden = true;
   try {
-    let code = await decodeBarcodeFromImageUrl(url, file);
+    let code;
     if (isChaveScanTarget()) {
-      const localChave = extractChaveNfe44(code);
-      if (localChave.length === 44) code = localChave;
-      else {
-        msg.textContent = 'Enviando foto ao servidor para ler a chave…';
-        try {
-          code = await decodeChaveViaServidor(file);
-        } catch (err) {
-          msg.textContent = err.message || 'Não li a chave. Tire outra foto mais perto da barra ou do QR.';
-          return;
-        }
+      // Chave: lê no servidor. A leitura local amplia a foto em dezenas de canvas e trava o Safari do iPhone.
+      msg.textContent = 'Enviando foto ao servidor para ler a chave…';
+      try {
+        code = await decodeChaveViaServidor(file);
+      } catch (err) {
+        msg.textContent = err.message || 'Não li a chave. Tire outra foto mais perto da barra ou do QR.';
+        return;
       }
+    } else {
+      code = await decodeBarcodeFromImageUrl(url, file);
     }
     if (!await applyScannedCode(code)) {
       msg.textContent = isChaveScanTarget()
