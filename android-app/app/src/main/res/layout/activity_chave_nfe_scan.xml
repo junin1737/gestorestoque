@@ -31,7 +31,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="4dp"
             android:gravity="center"
-            android:text="Gire na horizontal e aproxime a faixa inteira"
+            android:text="Gire na horizontal e aproxime a faixa inteira. Toque na tela para focar."
             android:textColor="#CCFFFFFF"
             android:textSize="13sp" />
     </LinearLayout>

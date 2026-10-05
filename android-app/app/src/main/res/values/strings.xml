@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">Gestor Estoque</string>
+    <string name="brand_name">MT Automações</string>
     <string name="subtitle">Conecte ao serviço do PC na mesma Wi‑Fi</string>
     <string name="scan_qr">Ler QR Code do serviço</string>
     <string name="scan_qr_hint">Aponte para o QR Code na tela do Gestor Estoque no computador.</string>

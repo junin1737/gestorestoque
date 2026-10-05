@@ -2497,8 +2497,32 @@ function fileToDataUrl(file) {
   });
 }
 
+/** iPhone de 24/48 MP gera foto maior que o limite da API (10 MB em base64): envia no máximo 2400 px. */
+async function fotoReduzidaDataUrl(file, maxLado = 2400) {
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('Não abri a foto'));
+      el.src = url;
+    });
+    const escala = Math.min(1, maxLado / Math.max(img.naturalWidth, img.naturalHeight));
+    if (escala >= 1 && file.size < 4 * 1024 * 1024) return fileToDataUrl(file);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(img.naturalWidth * escala);
+    canvas.height = Math.round(img.naturalHeight * escala);
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL('image/jpeg', 0.92);
+  } catch {
+    return fileToDataUrl(file);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 async function decodeChaveViaServidor(file) {
-  const dataUrl = await fileToDataUrl(file);
+  const dataUrl = await fotoReduzidaDataUrl(file);
   const res = await api('/importacao/decode-chave', {
     method: 'POST',
     body: { image: dataUrl },

@@ -8,6 +8,7 @@ import android.media.AudioManager;
 import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.util.Size;
+import android.view.MotionEvent;
 import android.widget.Button;
 import android.widget.Toast;
 
@@ -15,8 +16,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.OptIn;
 import androidx.camera.core.ExperimentalGetImage;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.camera.core.Camera;
 import androidx.camera.core.CameraSelector;
+import androidx.camera.core.FocusMeteringAction;
 import androidx.camera.core.ImageAnalysis;
+import androidx.camera.core.MeteringPoint;
 import androidx.camera.core.Preview;
 import androidx.camera.lifecycle.ProcessCameraProvider;
 import androidx.camera.view.PreviewView;
@@ -49,6 +53,7 @@ public class ChaveNfeScanActivity extends AppCompatActivity {
     private ExecutorService cameraExecutor;
     private BarcodeScanner scanner;
     private final AtomicBoolean done = new AtomicBoolean(false);
+    private final AtomicBoolean erroAvisado = new AtomicBoolean(false);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -103,8 +108,10 @@ public class ChaveNfeScanActivity extends AppCompatActivity {
                 Preview preview = new Preview.Builder().build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
+                // Chave = CODE_128 de 44 dígitos (~290 módulos): em 1280x720 com o celular em pé
+                // sobram ~2 px por módulo e o ML Kit não decodifica.
                 ImageAnalysis analysis = new ImageAnalysis.Builder()
-                        .setTargetResolution(new Size(1280, 720))
+                        .setTargetResolution(new Size(1920, 1080))
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
                 analysis.setAnalyzer(cameraExecutor, imageProxy -> {
@@ -116,12 +123,20 @@ public class ChaveNfeScanActivity extends AppCompatActivity {
                 });
 
                 provider.unbindAll();
-                provider.bindToLifecycle(
+                Camera camera = provider.bindToLifecycle(
                         this,
                         CameraSelector.DEFAULT_BACK_CAMERA,
                         preview,
                         analysis
                 );
+                previewView.setOnTouchListener((v, ev) -> {
+                    if (ev.getAction() != MotionEvent.ACTION_UP) return true;
+                    MeteringPoint point = previewView.getMeteringPointFactory().createPoint(ev.getX(), ev.getY());
+                    camera.getCameraControl().startFocusAndMetering(
+                            new FocusMeteringAction.Builder(point).build());
+                    v.performClick();
+                    return true;
+                });
             } catch (Exception e) {
                 Toast.makeText(this, "Falha ao abrir câmera: " + e.getMessage(), Toast.LENGTH_LONG).show();
                 setResult(Activity.RESULT_CANCELED);
@@ -150,6 +165,12 @@ public class ChaveNfeScanActivity extends AppCompatActivity {
                                 finishWithResult(chave);
                                 return;
                             }
+                        }
+                    })
+                    .addOnFailureListener(e -> {
+                        if (erroAvisado.compareAndSet(false, true)) {
+                            runOnUiThread(() -> Toast.makeText(this,
+                                    "Leitor da câmera com erro: " + e.getMessage(), Toast.LENGTH_LONG).show());
                         }
                     })
                     .addOnCompleteListener(t -> imageProxy.close());

@@ -13,6 +13,8 @@ const {
 } = require('@zxing/library');
 const { Jimp } = require('jimp');
 
+const LIMITE_DECODE_MS = 25000;
+
 function extractChave44(raw) {
   const text = String(raw || '');
   if (!text) return '';
@@ -80,45 +82,44 @@ async function decodeChaveFromBuffer(buf) {
   }
 
   const hints = buildHints();
-  const attempts = [];
+  const fim = Date.now() + LIMITE_DECODE_MS;
 
-  const add = (factory) => {
-    try {
-      attempts.push(factory());
-    } catch { /* ignore */ }
-  };
-
-  add(() => img.clone());
-  add(() => img.clone().greyscale().contrast(0.35));
-  add(() => img.clone().greyscale().contrast(0.55));
-  add(() => img.clone().rotate(90));
-  add(() => img.clone().rotate(-90));
-  add(() => img.clone().rotate(180));
-
-  const w = img.width;
-  const h = img.height;
-  const strips = [
-    [0, 0, w, Math.max(40, Math.round(h * 0.22))],
-    [0, Math.round(h * 0.08), w, Math.max(40, Math.round(h * 0.25))],
-    [0, Math.round(h * 0.28), w, Math.max(40, Math.round(h * 0.3))],
-    [0, Math.round(h * 0.55), w, Math.max(40, Math.round(h * 0.3))],
-  ];
-  for (const [x, y, sw, sh] of strips) {
-    add(() => {
-      const crop = img.clone().crop({
-        x,
-        y: Math.min(y, h - 2),
-        w: Math.min(sw, w - x),
-        h: Math.min(sh, h - y),
-      });
-      const targetW = Math.min(2200, Math.max(crop.width * 2, crop.width));
-      return crop.resize({ w: targetW, h: Math.max(1, Math.round(crop.height * (targetW / crop.width))) })
-        .greyscale()
-        .contrast(0.4);
-    });
+  // Geradores preguiçosos: cada tentativa só é montada se as anteriores falharem.
+  function* tentativas() {
+    yield () => img.clone();
+    yield () => img.clone().greyscale().contrast(0.35);
+    yield* faixas(img);
+    yield () => img.clone().scaleToFit({ w: 1400, h: 1400 }).greyscale().contrast(0.35);
+    yield () => img.clone().greyscale().contrast(0.55);
+    yield () => img.clone().rotate(90);
+    yield () => img.clone().rotate(-90);
+    yield () => img.clone().rotate(180);
+    const girada = img.clone().rotate(90);
+    yield* faixas(girada);
   }
 
-  for (const attempt of attempts) {
+  /** Faixas horizontais sobrepostas cobrindo a foto inteira: a barra pode estar em qualquer altura. */
+  function* faixas(base) {
+    const w = base.width;
+    const h = base.height;
+    const altura = Math.max(40, Math.round(h * 0.22));
+    const passo = Math.max(20, Math.round(h * 0.11));
+    for (let y = 0; y < h - 20; y += passo) {
+      yield () => base.clone()
+        .crop({ x: 0, y, w, h: Math.min(altura, h - y) })
+        .greyscale()
+        .contrast(0.4);
+    }
+  }
+
+  for (const montar of tentativas()) {
+    if (Date.now() > fim) break;
+    let attempt;
+    try {
+      attempt = montar();
+    } catch {
+      continue;
+    }
     const hit = tryDecodeImage(attempt, hints);
     if (hit) return { ok: true, chave: hit.chave, raw: hit.raw };
   }

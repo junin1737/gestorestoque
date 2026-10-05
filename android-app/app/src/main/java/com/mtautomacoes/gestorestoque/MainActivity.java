@@ -27,7 +27,6 @@ import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ImageView;
 import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -76,8 +75,6 @@ public class MainActivity extends AppCompatActivity {
     private EditText urlInput;
     private ProgressBar progress;
     private TextView status;
-    private ImageView imgEmitente;
-    private TextView txtEmpresa;
     private PermissionRequest pendingPermissionRequest;
     private String pendingBarcodeMode = "product";
 
@@ -136,8 +133,6 @@ public class MainActivity extends AppCompatActivity {
         urlInput = findViewById(R.id.url_input);
         progress = findViewById(R.id.progress);
         status = findViewById(R.id.status);
-        imgEmitente = findViewById(R.id.img_emitente);
-        txtEmpresa = findViewById(R.id.txt_empresa);
         Button btnConnect = findViewById(R.id.btn_connect);
         Button btnScanQr = findViewById(R.id.btn_scan_qr);
 
@@ -149,7 +144,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         setupWebView();
-        EmitenteIcon.restore(this, imgEmitente, txtEmpresa);
+        EmitenteIcon.restore(this, null, null);
         rede.execute(() -> {
             try {
                 LocalDb.get(this).getWritableDatabase();
@@ -493,7 +488,7 @@ public class MainActivity extends AppCompatActivity {
                 view.postDelayed(() -> injectNativeHooks(view), 600);
                 String server = getSharedPreferences(PREFS, MODE_PRIVATE).getString(KEY_URL, "");
                 if (!server.isEmpty()) {
-                    EmitenteIcon.fetchFromServer(MainActivity.this, imgEmitente, txtEmpresa, server);
+                    EmitenteIcon.fetchFromServer(MainActivity.this, null, null, server);
                 }
             }
 
@@ -580,7 +575,7 @@ public class MainActivity extends AppCompatActivity {
     private void connectWithUrl(String url) {
         urlInput.setText(url);
         getSharedPreferences(PREFS, MODE_PRIVATE).edit().putString(KEY_URL, url).apply();
-        EmitenteIcon.fetchFromServer(this, imgEmitente, txtEmpresa, url);
+        EmitenteIcon.fetchFromServer(this, null, null, url);
         connectPanel.setVisibility(View.GONE);
         browserPanel.setVisibility(View.VISIBLE);
         status.setText(R.string.loading);
@@ -706,7 +701,7 @@ public class MainActivity extends AppCompatActivity {
         @JavascriptInterface
         public void setEmitente(String nome, String logoDataUrl) {
             runOnUiThread(() -> EmitenteIcon.applyFromJs(
-                    MainActivity.this, imgEmitente, txtEmpresa, nome, logoDataUrl));
+                    MainActivity.this, null, null, nome, logoDataUrl));
         }
 
         @JavascriptInterface
