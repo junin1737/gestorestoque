@@ -364,6 +364,8 @@ button, input, select, textarea {
 .online-aparelhos .ap-nome { font-weight: 600; font-size: 0.9rem; }
 .online-aparelhos .ap-det { font-size: 0.75rem; color: var(--muted); }
 .online-aparelhos .ap-vazio { color: var(--muted); font-size: 0.85rem; }
+.online-pedidos { border-color: var(--teal); background: var(--teal-light); }
+.online-pedidos .ap-codigo { font-family: ui-monospace, Consolas, monospace; font-weight: 700; font-size: 1.05rem; letter-spacing: 1px; }
 
 .banco-manutencao {
   margin-top: 1.25rem;

@@ -67,17 +67,40 @@ function codigoAtual() {
   return { codigo: codigo.valor, expira_em: new Date(codigo.expira).toISOString() };
 }
 
-function lerCookie(req) {
+function lerCookieNome(req, nomeCookie) {
   const raw = String(req.headers.cookie || '');
   for (const parte of raw.split(';')) {
     const i = parte.indexOf('=');
-    if (i > 0 && parte.slice(0, i).trim() === COOKIE) return decodeURIComponent(parte.slice(i + 1).trim());
+    if (i <= 0 || parte.slice(0, i).trim() !== nomeCookie) continue;
+    try { return decodeURIComponent(parte.slice(i + 1).trim()); } catch { return ''; }
   }
   return '';
 }
 
+function lerCookie(req) {
+  return lerCookieNome(req, COOKIE);
+}
+
 function ipRemoto(req) {
   return String(req.headers['x-gestor-ip-remoto'] || '').slice(0, 64);
+}
+
+function criarAparelho({ nome, ip, navegador }) {
+  const token = crypto.randomBytes(32).toString('base64url');
+  const agora = new Date().toISOString();
+  const itens = carregar();
+  itens.push({
+    id: crypto.randomBytes(8).toString('hex'),
+    nome: nome || nomePeloNavegador(navegador),
+    hash: hash(token),
+    criado_em: agora,
+    ultimo_uso: agora,
+    ip,
+    navegador,
+  });
+  while (itens.length > MAX_APARELHOS) itens.shift();
+  salvar();
+  return token;
 }
 
 /** Troca o código do QR por um aparelho autorizado; devolve o token do cookie ou null. */
@@ -86,22 +109,111 @@ function parear(valor, req) {
   if (!codigo || Date.now() > codigo.expira || v.length !== codigo.valor.length) return null;
   if (!crypto.timingSafeEqual(Buffer.from(v), Buffer.from(codigo.valor))) return null;
   codigo = null;
-  const token = crypto.randomBytes(32).toString('base64url');
-  const agora = new Date().toISOString();
-  const ua = String(req.headers['user-agent'] || '').slice(0, 300);
-  const itens = carregar();
-  itens.push({
-    id: crypto.randomBytes(8).toString('hex'),
-    nome: nomePeloNavegador(ua),
-    hash: hash(token),
-    criado_em: agora,
-    ultimo_uso: agora,
+  return criarAparelho({
     ip: ipRemoto(req),
-    navegador: ua,
+    navegador: String(req.headers['user-agent'] || '').slice(0, 300),
   });
-  while (itens.length > MAX_APARELHOS) itens.shift();
-  salvar();
-  return token;
+}
+
+/*
+ * Pedidos de acesso (aparelho sem câmera): o aparelho pede pela internet e mostra um código curto;
+ * quem está no computador da loja confere o código e autoriza na tela de serviço.
+ * Ficam só em memória, expiram em 15 min e têm limite por IP e no total.
+ */
+const PEDIDO_COOKIE = 'gestor_pedido';
+const PEDIDO_MS = 15 * 60 * 1000;
+const MAX_PEDIDOS = 10;
+const MAX_PEDIDOS_POR_IP = 3;
+const pedidos = new Map();
+
+function limparPedidos() {
+  const agora = Date.now();
+  for (const [h, p] of pedidos) {
+    if (agora > p.expira) pedidos.delete(h);
+  }
+}
+
+function pedidoDaRequisicao(req) {
+  limparPedidos();
+  const token = lerCookieNome(req, PEDIDO_COOKIE);
+  if (!token || token.length < 32) return null;
+  const h = hash(token);
+  const p = pedidos.get(h);
+  return p ? { h, p } : null;
+}
+
+function codigoCurto() {
+  const n = crypto.randomInt(0, 1000000).toString().padStart(6, '0');
+  return `${n.slice(0, 3)}-${n.slice(3)}`;
+}
+
+/** Cria um pedido de acesso; devolve { token, codigo } ou { erro }. */
+function solicitar(req, nome) {
+  limparPedidos();
+  const atual = pedidoDaRequisicao(req);
+  if (atual && atual.p.status === 'pendente') return { token: null, codigo: atual.p.codigo };
+  const ip = ipRemoto(req);
+  const doIp = [...pedidos.values()].filter((p) => p.ip === ip && p.status === 'pendente').length;
+  if (doIp >= MAX_PEDIDOS_POR_IP) return { erro: 'Muitos pedidos deste endereço. Aguarde alguns minutos.' };
+  if (pedidos.size >= MAX_PEDIDOS) return { erro: 'Muitos pedidos aguardando. Tente de novo mais tarde.' };
+  const token = crypto.randomBytes(32).toString('base64url');
+  const navegador = String(req.headers['user-agent'] || '').slice(0, 300);
+  const nomeLimpo = String(nome || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40);
+  const p = {
+    id: crypto.randomBytes(8).toString('hex'),
+    codigo: codigoCurto(),
+    nome: nomeLimpo || nomePeloNavegador(navegador),
+    ip,
+    navegador,
+    criado_em: new Date().toISOString(),
+    expira: Date.now() + PEDIDO_MS,
+    status: 'pendente',
+  };
+  pedidos.set(hash(token), p);
+  return { token, codigo: p.codigo };
+}
+
+/**
+ * Situação do pedido deste aparelho. Se foi autorizado, cria o aparelho e devolve o token do
+ * cookie (uma vez só; o pedido é apagado).
+ */
+function situacaoPedido(req) {
+  const atual = pedidoDaRequisicao(req);
+  if (!atual) return { status: 'nenhum' };
+  const { h, p } = atual;
+  if (p.status === 'aprovado') {
+    pedidos.delete(h);
+    return { status: 'aprovado', token: criarAparelho({ nome: p.nome, ip: ipRemoto(req) || p.ip, navegador: p.navegador }) };
+  }
+  if (p.status === 'recusado') {
+    pedidos.delete(h);
+    return { status: 'recusado' };
+  }
+  return { status: 'pendente', codigo: p.codigo, expira_em: new Date(p.expira).toISOString() };
+}
+
+function listarPedidos() {
+  limparPedidos();
+  return [...pedidos.values()]
+    .filter((p) => p.status === 'pendente')
+    .map(({ id, codigo: c, nome, ip, criado_em }) => ({ id, codigo: c, nome, ip, criado_em }))
+    .sort((a, b) => String(a.criado_em).localeCompare(String(b.criado_em)));
+}
+
+function decidirPedido(id, aprovar) {
+  limparPedidos();
+  for (const p of pedidos.values()) {
+    if (p.id === String(id) && p.status === 'pendente') {
+      p.status = aprovar ? 'aprovado' : 'recusado';
+      p.expira = Date.now() + PEDIDO_MS;
+      return true;
+    }
+  }
+  return false;
+}
+
+function cookiePedido(token, maxAgeS = PEDIDO_MS / 1000) {
+  return `${PEDIDO_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeS}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 function aparelhoDaRequisicao(req) {
@@ -154,6 +266,7 @@ function renomear(id, nome) {
 function revogarTodos() {
   lista = [];
   codigo = null;
+  pedidos.clear();
   salvar();
 }
 
@@ -161,6 +274,11 @@ module.exports = {
   COOKIE,
   codigoAtual,
   parear,
+  solicitar,
+  situacaoPedido,
+  listarPedidos,
+  decidirPedido,
+  cookiePedido,
   aparelhoDaRequisicao,
   cookieAparelho,
   listar,

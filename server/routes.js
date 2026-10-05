@@ -136,7 +136,9 @@ router.post('/online', somenteServidorLocal, (req, res) => {
   const tunel = require('./tunel');
   const aparelhos = require('./aparelhos');
   const body = req.body || {};
-  if (body.revogar) aparelhos.revogar(body.revogar);
+  if (body.autorizarPedido) aparelhos.decidirPedido(body.autorizarPedido, true);
+  else if (body.recusarPedido) aparelhos.decidirPedido(body.recusarPedido, false);
+  else if (body.revogar) aparelhos.revogar(body.revogar);
   else if (body.renomear) aparelhos.renomear(body.renomear, body.nome);
   else if (body.revogarTodos) aparelhos.revogarTodos();
   else if (body.novoEndereco) tunel.novoEndereco();

@@ -83,6 +83,7 @@ function status() {
   if (cfg.ativo) {
     const p = aparelhos.codigoAtual();
     out.pareamento = { link: `${link}?p=${p.codigo}`, expira_em: p.expira_em };
+    out.pedidos = aparelhos.listarPedidos();
   }
   return out;
 }

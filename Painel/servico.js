@@ -651,7 +651,51 @@ function renderOnline(o) {
       if (qr.ok) $('#online-qr').src = qr.dataUrl;
     });
   }
+  renderPedidos(o);
   renderAparelhos(o);
+}
+
+let pedidosRenderizados = '';
+
+function renderPedidos(o) {
+  const lista = o.ativo ? (o.pedidos || []) : [];
+  $('#online-pedidos-box').hidden = !lista.length;
+  const chave = JSON.stringify(lista);
+  if (chave === pedidosRenderizados) return;
+  pedidosRenderizados = chave;
+  const ul = $('#online-pedidos');
+  ul.textContent = '';
+  for (const p of lista) {
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    info.className = 'ap-info';
+    const cod = document.createElement('div');
+    cod.className = 'ap-codigo';
+    cod.textContent = p.codigo;
+    const det = document.createElement('div');
+    det.className = 'ap-det';
+    det.textContent = `${p.nome} · pedido às ${fmtDataHora(p.criado_em)}${p.ip ? ` · IP ${p.ip}` : ''}`;
+    info.append(cod, det);
+    const ok = document.createElement('button');
+    ok.type = 'button';
+    ok.className = 'btn-teal small';
+    ok.textContent = 'Autorizar';
+    ok.addEventListener('click', async () => {
+      if (!confirm(`Autorizar "${p.nome}"?\n\nConfira se o aparelho mostra o código ${p.codigo}. Ele passará a acessar pela internet (com usuário e senha do painel).`)) return;
+      const res = await api('/online', { method: 'POST', body: { autorizarPedido: p.id } });
+      if (res.ok) renderOnline(res.online);
+    });
+    const nao = document.createElement('button');
+    nao.type = 'button';
+    nao.className = 'btn-outline small';
+    nao.textContent = 'Recusar';
+    nao.addEventListener('click', async () => {
+      const res = await api('/online', { method: 'POST', body: { recusarPedido: p.id } });
+      if (res.ok) renderOnline(res.online);
+    });
+    li.append(info, ok, nao);
+    ul.appendChild(li);
+  }
 }
 
 let aparelhosRenderizados = '';
@@ -735,7 +779,7 @@ $('#btn-online-novo')?.addEventListener('click', async () => {
 (async function boot() {
   await refreshNetwork();
   await refreshOnline();
-  setInterval(refreshOnline, 5000);
+  setInterval(refreshOnline, 3000);
   await loadBanco();
   await loadSobre();
   // Primeira consulta ao servidor de licenças roda logo após abrir: acompanha de perto até ter resposta.
