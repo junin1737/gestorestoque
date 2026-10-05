@@ -104,10 +104,6 @@ public class MainActivity extends AppCompatActivity {
 
     private final ActivityResultLauncher<Intent> leitorLauncher =
             registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-                if (result.getResultCode() == LeitorActivity.RESULT_LEITOR_ALTERNATIVO) {
-                    startZxingProduto();
-                    return;
-                }
                 if (result.getResultCode() != RESULT_OK || result.getData() == null) {
                     Toast.makeText(this, R.string.scan_canceled, Toast.LENGTH_SHORT).show();
                     return;
@@ -284,9 +280,9 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * Leitura nativa com caixa de foco (LeitorActivity, ML Kit).
-     * - product / ficha / ean: EAN/UPC/CODE_128/CODE_39 (ZXing fica como "Leitor alternativo")
-     * - importacao (chave NF-e): 44 dígitos em CODE_128 ou QR
+     * Leitura nativa.
+     * - product / ficha / ean: ZXing EAN/UPC/CODE_128/CODE_39
+     * - importacao (chave NF-e): LeitorActivity com caixa de foco (barra/QR + OCR dos 44 dígitos)
      */
     private void startBarcodeScan(String mode) {
         String m = mode == null ? "product" : mode.trim().toLowerCase();
@@ -302,17 +298,19 @@ public class MainActivity extends AppCompatActivity {
         }
 
         boolean chave = "importacao".equals(m) || "chave".equals(m);
+        if (!chave) {
+            startZxingProduto();
+            return;
+        }
         try {
             Intent intent = new Intent(this, LeitorActivity.class);
-            intent.putExtra(LeitorActivity.EXTRA_MODO, chave ? LeitorActivity.MODO_CHAVE : LeitorActivity.MODO_PRODUTO);
+            intent.putExtra(LeitorActivity.EXTRA_MODO, LeitorActivity.MODO_CHAVE);
             leitorLauncher.launch(intent);
         } catch (Exception e) {
-            if (chave) startChaveNfeScanZxingFallback();
-            else startZxingProduto();
+            startChaveNfeScanZxingFallback();
         }
     }
 
-    /** Leitor antigo (ZXing), usado pelo botão "Leitor alternativo". */
     private void startZxingProduto() {
         ScanOptions options = new ScanOptions();
         options.setDesiredBarcodeFormats(Arrays.asList(

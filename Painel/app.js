@@ -2625,7 +2625,7 @@ async function onScanFileSelected(file) {
     let code;
     if (isChaveScanTarget()) {
       // Chave: lê no servidor. A leitura local amplia a foto em dezenas de canvas e trava o Safari do iPhone.
-      msg.textContent = 'Enviando foto ao servidor para ler a chave…';
+      msg.textContent = 'Lendo a chave no servidor (barra ou os 44 números)…';
       try {
         code = await decodeChaveViaServidor(file);
       } catch (err) {

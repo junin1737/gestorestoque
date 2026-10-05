@@ -12,6 +12,8 @@ const {
   HybridBinarizer,
 } = require('@zxing/library');
 const { Jimp } = require('jimp');
+const { chaveValida, chaveEmDigitos, chaveEmTextoOcr } = require('./chave-nfe');
+const { ocrLinhas } = require('./ocr-windows');
 
 const LIMITE_DECODE_MS = 25000;
 
@@ -20,11 +22,21 @@ function extractChave44(raw) {
   if (!text) return '';
   const fromQuery = text.match(/(?:chNFe|chave|chAce|chaveAcesso)=(\d{44})/i)
     || text.match(/[?&]p=(\d{44})(?:\||&|$)/i);
-  if (fromQuery) return fromQuery[1];
-  const digits = text.replace(/\D/g, '');
-  if (digits.length === 44) return digits;
-  const run = digits.match(/\d{44}/);
-  return run ? run[0] : '';
+  if (fromQuery && chaveValida(fromQuery[1])) return fromQuery[1];
+  return chaveEmDigitos(text.replace(/\D/g, ''));
+}
+
+/** Lê os 44 dígitos impressos (OCR do Windows); tenta também a foto girada. */
+async function chavePorOcr(img, fim) {
+  const giros = [0, 90, 270];
+  for (const g of giros) {
+    if (Date.now() > fim) break;
+    const alvo = g ? img.clone().rotate(g) : img;
+    const buf = await alvo.getBuffer('image/jpeg', { quality: 92 });
+    const chave = chaveEmTextoOcr(await ocrLinhas(buf, { timeoutMs: Math.max(3000, fim - Date.now()) }));
+    if (chave) return chave;
+  }
+  return '';
 }
 
 function decodeBitmap(bitmap, hints) {
@@ -112,8 +124,18 @@ async function decodeChaveFromBuffer(buf) {
     }
   }
 
+  // OCR roda em outro processo enquanto a barra é procurada aqui; vale o que achar primeiro.
+  let chaveOcr = '';
+  let ocrTerminou = false;
+  const ocr = chavePorOcr(img.clone(), fim)
+    .then((c) => { chaveOcr = c; })
+    .catch(() => {})
+    .finally(() => { ocrTerminou = true; });
+
   for (const montar of tentativas()) {
     if (Date.now() > fim) break;
+    await new Promise((r) => setImmediate(r));
+    if (chaveOcr) return { ok: true, chave: chaveOcr, raw: chaveOcr, fonte: 'ocr' };
     let attempt;
     try {
       attempt = montar();
@@ -121,8 +143,11 @@ async function decodeChaveFromBuffer(buf) {
       continue;
     }
     const hit = tryDecodeImage(attempt, hints);
-    if (hit) return { ok: true, chave: hit.chave, raw: hit.raw };
+    if (hit) return { ok: true, chave: hit.chave, raw: hit.raw, fonte: 'barra' };
   }
+
+  if (!ocrTerminou) await ocr;
+  if (chaveOcr) return { ok: true, chave: chaveOcr, raw: chaveOcr, fonte: 'ocr' };
 
   return {
     ok: false,

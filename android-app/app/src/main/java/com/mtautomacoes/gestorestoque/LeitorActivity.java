@@ -12,7 +12,6 @@ import android.os.Bundle;
 import android.util.Size;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
-import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -38,10 +37,15 @@ import com.google.common.util.concurrent.ListenableFuture;
 import com.google.mlkit.vision.barcode.BarcodeScanner;
 import com.google.mlkit.vision.barcode.BarcodeScannerOptions;
 import com.google.mlkit.vision.barcode.BarcodeScanning;
-import com.google.mlkit.vision.barcode.ZoomSuggestionOptions;
 import com.google.mlkit.vision.barcode.common.Barcode;
 import com.google.mlkit.vision.common.InputImage;
+import com.google.mlkit.vision.text.Text;
+import com.google.mlkit.vision.text.TextRecognition;
+import com.google.mlkit.vision.text.TextRecognizer;
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -50,68 +54,60 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Leitor de código de barras com caixa de foco (ML Kit + CameraX).
- * Modo "produto": EAN/UPC/CODE_128/CODE_39. Modo "chave": chave NF-e de 44 dígitos (barra ou QR).
+ * Leitor da chave NF-e com caixa de foco (CameraX + ML Kit).
+ * Lê a barra/QR e, em quadros alternados, os 44 dígitos impressos (OCR). Só aceita chave válida
+ * (UF, mês, modelo 55/65 e dígito verificador); pelo OCR exige duas leituras iguais.
  */
 public class LeitorActivity extends AppCompatActivity {
     public static final String EXTRA_MODO = "modo";
     public static final String EXTRA_RAW = "codigo_raw";
-    public static final String MODO_PRODUTO = "produto";
     public static final String MODO_CHAVE = "chave";
-    /** Resultado pedindo o leitor antigo (ZXing) no lugar deste. */
-    public static final int RESULT_LEITOR_ALTERNATIVO = Activity.RESULT_FIRST_USER + 1;
 
     private static final int REQ_CAMERA = 41;
-    private static final Pattern CHAVE_44 = Pattern.compile("(\\d{44})");
     private static final Pattern CHAVE_QUERY =
             Pattern.compile("(?:chNFe|chave|chAce|chaveAcesso)=(\\d{44})", Pattern.CASE_INSENSITIVE);
     private static final Pattern CHAVE_P = Pattern.compile("[?&]p=(\\d{44})(?:\\||&|$)", Pattern.CASE_INSENSITIVE);
+    private static final int[] UFS = {11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 25, 26, 27, 28, 29,
+            31, 32, 33, 35, 41, 42, 43, 50, 51, 52, 53};
 
     private PreviewView previewView;
     private MolduraView moldura;
     private ExecutorService cameraExecutor;
     private BarcodeScanner scanner;
+    private TextRecognizer ocr;
     private Camera camera;
-    private boolean modoChave;
+    private int quadro = 0;
+    private String ultimaOcr = null;
     private final AtomicBoolean done = new AtomicBoolean(false);
     private final AtomicBoolean erroAvisado = new AtomicBoolean(false);
-    /** CODE_128/CODE_39 de produto não têm dígito verificador forte: exige duas leituras iguais. */
-    private String ultimaLeitura = null;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        modoChave = MODO_CHAVE.equals(getIntent().getStringExtra(EXTRA_MODO));
-        setRequestedOrientation(modoChave
-                ? ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                : ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR);
         setContentView(R.layout.activity_leitor);
         previewView = findViewById(R.id.preview_view);
         moldura = findViewById(R.id.moldura);
-        moldura.setProporcao(modoChave ? 0.26f : 0.5f);
+        moldura.setProporcao(0.3f);
         TextView titulo = findViewById(R.id.txt_titulo);
         TextView dica = findViewById(R.id.txt_dica);
-        titulo.setText(modoChave ? "Chave de acesso da NF-e" : "Código de barras do produto");
-        dica.setText(modoChave
-                ? "Encaixe a faixa inteira da chave (ou o QR) dentro da caixa. Deitar o celular ajuda."
-                : "Encaixe o código de barras dentro da caixa.");
+        titulo.setText("Chave de acesso da NF-e");
+        dica.setText("Encaixe na caixa a barra da chave ou os 44 números abaixo dela. Deitar o celular ajuda.");
 
         Button btnCancel = findViewById(R.id.btn_cancel);
         btnCancel.setOnClickListener(v -> {
             setResult(Activity.RESULT_CANCELED);
             finish();
         });
-        Button btnAlternativo = findViewById(R.id.btn_alternativo);
-        if (modoChave) {
-            btnAlternativo.setVisibility(View.GONE);
-        } else {
-            btnAlternativo.setOnClickListener(v -> {
-                setResult(RESULT_LEITOR_ALTERNATIVO);
-                finish();
-            });
-        }
 
+        BarcodeScannerOptions options = new BarcodeScannerOptions.Builder()
+                .setBarcodeFormats(Barcode.FORMAT_CODE_128, Barcode.FORMAT_ITF,
+                        Barcode.FORMAT_QR_CODE, Barcode.FORMAT_CODE_39)
+                .build();
+        scanner = BarcodeScanning.getClient(options);
+        ocr = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS);
         cameraExecutor = Executors.newSingleThreadExecutor();
+
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
                 != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{Manifest.permission.CAMERA}, REQ_CAMERA);
@@ -143,15 +139,11 @@ public class LeitorActivity extends AppCompatActivity {
                 Preview preview = new Preview.Builder().build();
                 preview.setSurfaceProvider(previewView.getSurfaceProvider());
 
-                // Chave = CODE_128 de 44 dígitos (~290 módulos): precisa de mais pixels que um EAN-13.
+                // CODE_128 de 44 dígitos (~290 módulos) e números pequenos: precisa de 1080p.
                 ImageAnalysis analysis = new ImageAnalysis.Builder()
-                        .setTargetResolution(modoChave ? new Size(1920, 1080) : new Size(1280, 720))
+                        .setTargetResolution(new Size(1920, 1080))
                         .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                         .build();
-
-                provider.unbindAll();
-                camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis);
-                scanner = BarcodeScanning.getClient(opcoesLeitor());
                 analysis.setAnalyzer(cameraExecutor, imageProxy -> {
                     if (done.get()) {
                         imageProxy.close();
@@ -159,6 +151,9 @@ public class LeitorActivity extends AppCompatActivity {
                     }
                     analyzeFrame(imageProxy);
                 });
+
+                provider.unbindAll();
+                camera = provider.bindToLifecycle(this, CameraSelector.DEFAULT_BACK_CAMERA, preview, analysis);
                 configurarToque();
                 previewView.post(this::focarNaCaixa);
             } catch (Exception e) {
@@ -167,27 +162,6 @@ public class LeitorActivity extends AppCompatActivity {
                 finish();
             }
         }, ContextCompat.getMainExecutor(this));
-    }
-
-    private BarcodeScannerOptions opcoesLeitor() {
-        BarcodeScannerOptions.Builder b = new BarcodeScannerOptions.Builder();
-        if (modoChave) {
-            b.setBarcodeFormats(Barcode.FORMAT_CODE_128, Barcode.FORMAT_ITF,
-                    Barcode.FORMAT_QR_CODE, Barcode.FORMAT_CODE_39);
-        } else {
-            b.setBarcodeFormats(Barcode.FORMAT_EAN_13, Barcode.FORMAT_EAN_8, Barcode.FORMAT_UPC_A,
-                    Barcode.FORMAT_UPC_E, Barcode.FORMAT_CODE_128, Barcode.FORMAT_CODE_39);
-        }
-        ZoomState zoom = camera != null ? camera.getCameraInfo().getZoomState().getValue() : null;
-        if (zoom != null && zoom.getMaxZoomRatio() > 1.2f) {
-            // Código pequeno/longe: o ML Kit sugere o zoom e a câmera aproxima sozinha.
-            b.setZoomSuggestionOptions(new ZoomSuggestionOptions.Builder(ratio -> {
-                if (camera == null) return false;
-                camera.getCameraControl().setZoomRatio(ratio);
-                return true;
-            }).setMaxSupportedZoomRatio(Math.min(zoom.getMaxZoomRatio(), 5f)).build());
-        }
-        return b.build();
     }
 
     @SuppressLint("ClickableViewAccessibility")
@@ -230,7 +204,7 @@ public class LeitorActivity extends AppCompatActivity {
     @OptIn(markerClass = ExperimentalGetImage.class)
     private void analyzeFrame(ImageProxy imageProxy) {
         try {
-            if (imageProxy.getImage() == null || scanner == null) {
+            if (imageProxy.getImage() == null) {
                 imageProxy.close();
                 return;
             }
@@ -238,52 +212,116 @@ public class LeitorActivity extends AppCompatActivity {
                     imageProxy.getImage(),
                     imageProxy.getImageInfo().getRotationDegrees()
             );
-            scanner.process(image)
-                    .addOnSuccessListener(barcodes -> {
-                        if (done.get() || barcodes == null) return;
-                        for (Barcode b : barcodes) {
-                            String valor = modoChave ? extractChave(b.getRawValue()) : valorProduto(b);
-                            if (valor != null) {
-                                finishWithResult(valor);
-                                return;
+            boolean vezDoOcr = (quadro++ % 2) == 1;
+            if (vezDoOcr) {
+                ocr.process(image)
+                        .addOnSuccessListener(this::avaliarTexto)
+                        .addOnFailureListener(this::avisarErro)
+                        .addOnCompleteListener(t -> imageProxy.close());
+            } else {
+                scanner.process(image)
+                        .addOnSuccessListener(barcodes -> {
+                            if (done.get() || barcodes == null) return;
+                            for (Barcode b : barcodes) {
+                                String chave = chaveDaBarra(b.getRawValue());
+                                if (chave != null) {
+                                    finishWithResult(chave);
+                                    return;
+                                }
                             }
-                        }
-                    })
-                    .addOnFailureListener(e -> {
-                        if (erroAvisado.compareAndSet(false, true)) {
-                            runOnUiThread(() -> Toast.makeText(this,
-                                    "Leitor da câmera com erro: " + e.getMessage(), Toast.LENGTH_LONG).show());
-                        }
-                    })
-                    .addOnCompleteListener(t -> imageProxy.close());
+                        })
+                        .addOnFailureListener(this::avisarErro)
+                        .addOnCompleteListener(t -> imageProxy.close());
+            }
         } catch (Exception e) {
             imageProxy.close();
         }
     }
 
-    private String valorProduto(Barcode b) {
-        String raw = b.getRawValue();
-        if (raw == null || raw.trim().isEmpty()) return null;
-        raw = raw.trim();
-        int f = b.getFormat();
-        boolean comVerificador = f == Barcode.FORMAT_EAN_13 || f == Barcode.FORMAT_EAN_8
-                || f == Barcode.FORMAT_UPC_A || f == Barcode.FORMAT_UPC_E;
-        if (comVerificador) return raw;
-        if (raw.equals(ultimaLeitura)) return raw;
-        ultimaLeitura = raw;
+    private void avisarErro(Exception e) {
+        if (erroAvisado.compareAndSet(false, true)) {
+            runOnUiThread(() -> Toast.makeText(this,
+                    "Leitor da câmera com erro: " + e.getMessage(), Toast.LENGTH_LONG).show());
+        }
+    }
+
+    private void avaliarTexto(Text texto) {
+        if (done.get() || texto == null) return;
+        List<String> linhas = new ArrayList<>();
+        for (Text.TextBlock bloco : texto.getTextBlocks()) {
+            for (Text.Line linha : bloco.getLines()) linhas.add(digitosOcr(linha.getText()));
+        }
+        String chave = null;
+        for (String d : linhas) {
+            chave = chaveEmDigitos(d);
+            if (chave != null) break;
+        }
+        for (int i = 0; chave == null && i + 1 < linhas.size(); i++) {
+            chave = chaveEmDigitos(linhas.get(i) + linhas.get(i + 1));
+        }
+        if (chave == null) return;
+        if (chave.equals(ultimaOcr)) {
+            finishWithResult(chave);
+        } else {
+            ultimaOcr = chave;
+        }
+    }
+
+    /** Troca letras que o OCR confunde com números (O→0, I→1, S→5, B→8…) e remove o resto. */
+    private static String digitosOcr(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (char ch : s.toCharArray()) {
+            switch (ch) {
+                case 'O': case 'o': case 'D': case 'Q': sb.append('0'); break;
+                case 'I': case 'l': case 'i': case '|': sb.append('1'); break;
+                case 'S': case 's': sb.append('5'); break;
+                case 'B': sb.append('8'); break;
+                case 'Z': case 'z': sb.append('2'); break;
+                case 'G': case 'b': sb.append('6'); break;
+                case 'g': case 'q': sb.append('9'); break;
+                default: if (ch >= '0' && ch <= '9') sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
+    private static String chaveDaBarra(String raw) {
+        if (raw == null || raw.isEmpty()) return null;
+        Matcher q = CHAVE_QUERY.matcher(raw);
+        if (q.find() && chaveValida(q.group(1))) return q.group(1);
+        Matcher p = CHAVE_P.matcher(raw);
+        if (p.find() && chaveValida(p.group(1))) return p.group(1);
+        return chaveEmDigitos(raw.replaceAll("\\D", ""));
+    }
+
+    private static String chaveEmDigitos(String d) {
+        for (int i = 0; i + 44 <= d.length(); i++) {
+            String c = d.substring(i, i + 44);
+            if (chaveValida(c)) return c;
+        }
         return null;
     }
 
-    private static String extractChave(String raw) {
-        if (raw == null || raw.isEmpty()) return null;
-        Matcher q = CHAVE_QUERY.matcher(raw);
-        if (q.find()) return q.group(1);
-        Matcher p = CHAVE_P.matcher(raw);
-        if (p.find()) return p.group(1);
-        String digits = raw.replaceAll("\\D", "");
-        Matcher m = CHAVE_44.matcher(digits);
-        if (m.find()) return m.group(1);
-        return null;
+    static boolean chaveValida(String c) {
+        if (c == null || c.length() != 44) return false;
+        for (int i = 0; i < 44; i++) if (c.charAt(i) < '0' || c.charAt(i) > '9') return false;
+        int uf = Integer.parseInt(c.substring(0, 2));
+        boolean ufOk = false;
+        for (int u : UFS) if (u == uf) { ufOk = true; break; }
+        if (!ufOk) return false;
+        int mes = Integer.parseInt(c.substring(4, 6));
+        if (mes < 1 || mes > 12) return false;
+        String modelo = c.substring(20, 22);
+        if (!modelo.equals("55") && !modelo.equals("65")) return false;
+        int soma = 0;
+        int peso = 2;
+        for (int i = 42; i >= 0; i--) {
+            soma += (c.charAt(i) - '0') * peso;
+            peso = peso == 9 ? 2 : peso + 1;
+        }
+        int r = soma % 11;
+        int dv = r < 2 ? 0 : 11 - r;
+        return dv == c.charAt(43) - '0';
     }
 
     private void finishWithResult(String valor) {
@@ -305,6 +343,7 @@ public class LeitorActivity extends AppCompatActivity {
         done.set(true);
         if (cameraExecutor != null) cameraExecutor.shutdown();
         if (scanner != null) scanner.close();
+        if (ocr != null) ocr.close();
         super.onDestroy();
     }
 }
