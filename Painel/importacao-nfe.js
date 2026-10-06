@@ -1929,7 +1929,7 @@ const ImportacaoNfe = (() => {
         <div class="imp-fields">
           ${field('Preço custo', 'imp-custo-ficha', moneyInput(sys.prc_custo ?? custoInfo.custoEstoque), { third: true, money: true })}
           ${field('Margem LB %', 'imp-margem', sys.margem_lb ?? 0, { type: 'number', step: '0.01', third: true })}
-          ${field('Preço venda', 'imp-venda', Number(sys.prc_venda) > 0 ? moneyInput(sys.prc_venda) : '', { third: true, money: true, placeholder: 'Opcional' })}
+          ${field('Preço venda', 'imp-venda', Number(sys.prc_venda) > 0 ? moneyInput(sys.prc_venda) : '', { third: true, money: true, placeholder: 'Vazio = 0,01' })}
           ${field('Status', 'imp-status-prod', sys.status || 'A', { third: true })}
           ${comboField('Unidade', 'imp-uni-ficha', 'imp-uni-ficha-list', sys.uni_medida_saida || sys.uni_medida || '', { third: true, placeholder: 'Pesquisar unidade (TB_UNI_MEDIDA)…' })}
         </div>
