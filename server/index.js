@@ -39,6 +39,9 @@ app.use(express.static(path.join(__dirname, '..', 'Painel'), {
     }
   },
 }));
+app.get('/favicon.ico', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'Painel', 'icons', 'favicon.ico'));
+});
 app.use('/api', licenca.guardLicenca, auth.exigirSessao, idempotencia.middleware, routes);
 
 app.get('*', (_req, res) => {

@@ -77,6 +77,7 @@ function createWindow() {
     minHeight: 640,
     autoHideMenuBar: true,
     title: 'Gestor Estoque — Serviço',
+    icon: path.join(__dirname, 'Painel', 'icons', 'icon-512.png'),
     show: false,
     webPreferences: {
       nodeIntegration: false,

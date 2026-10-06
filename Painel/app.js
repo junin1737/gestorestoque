@@ -2019,10 +2019,8 @@ function stopScanner() {
   }
   scanControls = null;
   const video = $('#scan-video');
-  if (video) {
-    video.srcObject = null;
-    video.hidden = true;
-  }
+  if (video) video.srcObject = null;
+  mostrarScanAoVivo(false);
 }
 
 function extractChaveNfe44(raw) {
@@ -2558,9 +2556,10 @@ async function startLiveScanner() {
     return;
   }
 
+  const forChave = isChaveScanTarget();
   try {
     if (preview) preview.hidden = true;
-    video.hidden = false;
+    mostrarScanAoVivo(true, forChave);
     msg.textContent = 'Abrindo câmera ao vivo…';
     const stream = await navigator.mediaDevices.getUserMedia({
       video: {
@@ -2573,67 +2572,137 @@ async function startLiveScanner() {
     video.srcObject = stream;
     await video.play();
 
-    const forChave = isChaveScanTarget();
     const reader = getZxingReader(forChave);
-    scanControls = { stream, reader, timer: null };
-
-    // Preferir BarcodeDetector nativo do iOS (melhor em CODE_128/QR ao vivo)
-    if ('BarcodeDetector' in window) {
-      const detectorFormats = forChave
-        ? ['code_128', 'qr_code', 'itf', 'code_39']
-        : ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'];
-      let detector = null;
-      for (const formats of [detectorFormats, forChave ? ['code_128', 'qr_code'] : ['ean_13', 'code_128']]) {
-        try {
-          detector = new BarcodeDetector({ formats });
-          break;
-        } catch { /* tenta próximo */ }
-      }
-      if (detector) {
-        msg.textContent = forChave
-          ? 'Aponte para a barra da chave ou o QR…'
-          : 'Aponte para o código de barras…';
-        let busy = false;
-        scanControls.timer = setInterval(async () => {
-          if (busy) return;
-          busy = true;
-          try {
-            const codes = await detector.detect(video);
-            if (codes[0]?.rawValue) await applyScannedCode(codes[0].rawValue, { live: true });
-          } catch { /* ignore */ }
-          busy = false;
-        }, 280);
-        return;
-      }
-    }
-
-    if (reader?.decodeFromStream || reader?.decodeFromVideoDevice) {
-      const onResult = (result) => {
-        if (result && scanControls) applyScannedCode(result.getText(), { live: true });
-      };
-      const zx = reader.decodeFromStream
-        ? await reader.decodeFromStream(stream, video, onResult)
-        : await reader.decodeFromVideoDevice(undefined, video, onResult);
-      if (!scanControls) {
-        try { zx?.stop?.(); } catch { /* ignore */ }
-        return;
-      }
-      scanControls.zx = zx;
-      msg.textContent = forChave
-        ? 'Aponte para a barra da chave ou o QR, bem perto e sem reflexo…'
-        : 'Aponte para o código de barras…';
-      if (forChave) {
-        scanControls.hintTimer = setTimeout(() => {
-          if (scanControls) msg.textContent = 'Não leu ainda? Aproxime/afaste devagar ou toque em “Abrir câmera / galeria” para fotografar.';
-        }, 12000);
-      }
+    const detector = criarBarcodeDetector(forChave);
+    if (!reader?.decodeFromCanvas && !detector) {
+      stream.getTracks().forEach((t) => t.stop());
+      mostrarScanAoVivo(false);
+      msg.textContent = 'Leitura ao vivo indisponível neste navegador. Use a foto do código.';
       return;
     }
-
-    msg.textContent = 'Leitura ao vivo indisponível neste navegador. Use a foto do código.';
+    scanControls = { stream, reader, timer: null };
+    msg.textContent = forChave
+      ? 'Coloque a barra da chave (ou o QR) dentro da faixa, bem perto e sem reflexo.'
+      : 'Coloque o código de barras dentro da faixa.';
+    lerQuadrosAoVivo(video, { forChave, reader, detector });
+    if (forChave) {
+      scanControls.hintTimer = setTimeout(() => {
+        if (scanControls) msg.textContent = 'Não leu ainda? Afaste/aproxime devagar até a barra ficar nítida, ou toque em “Abrir câmera / galeria” para fotografar.';
+      }, 15000);
+    }
   } catch (err) {
+    mostrarScanAoVivo(false);
     msg.textContent = `Não foi possível abrir a câmera ao vivo: ${err.message}. Use “Abrir câmera / galeria”.`;
   }
+}
+
+function mostrarScanAoVivo(ativo, forChave = false) {
+  const box = $('#scan-live');
+  if (box) box.hidden = !ativo;
+  $('#scan-guia')?.classList.toggle('chave', !!forChave);
+  $('#dlg-scan')?.classList.toggle('scan-ao-vivo', !!ativo);
+}
+
+function criarBarcodeDetector(forChave) {
+  if (!('BarcodeDetector' in window)) return null;
+  const opcoes = forChave
+    ? [['code_128', 'qr_code', 'itf', 'code_39'], ['code_128', 'qr_code']]
+    : [['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128', 'code_39'], ['ean_13', 'code_128']];
+  for (const formats of opcoes) {
+    try { return new BarcodeDetector({ formats }); } catch { /* tenta o próximo */ }
+  }
+  return null;
+}
+
+/** Retângulo da faixa de mira em pixels do vídeo (o vídeo é exibido com object-fit: cover). */
+function regiaoDaMira(video) {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  const caixa = video.getBoundingClientRect();
+  const mira = $('#scan-guia')?.getBoundingClientRect();
+  if (!mira || !caixa.width || !caixa.height) {
+    return { sx: 0, sy: Math.round(vh * 0.3), sw: vw, sh: Math.round(vh * 0.4) };
+  }
+  const escala = Math.max(caixa.width / vw, caixa.height / vh);
+  const ox = (vw * escala - caixa.width) / 2;
+  const oy = (vh * escala - caixa.height) / 2;
+  let sx = (mira.left - caixa.left + ox) / escala;
+  let sy = (mira.top - caixa.top + oy) / escala;
+  let sw = mira.width / escala;
+  let sh = mira.height / escala;
+  // Folga em volta: a barra pode passar um pouco da faixa.
+  sx -= sw * 0.06;
+  sw *= 1.12;
+  sy -= sh * 0.25;
+  sh *= 1.5;
+  sx = Math.max(0, sx);
+  sy = Math.max(0, sy);
+  sw = Math.min(vw - sx, sw);
+  sh = Math.min(vh - sy, sh);
+  return { sx: Math.round(sx), sy: Math.round(sy), sw: Math.round(sw), sh: Math.round(sh) };
+}
+
+/**
+ * Lê só a faixa de mira, ampliada: a barra longa da chave (44 dígitos) ocupa pouco do quadro inteiro.
+ * Alterna imagem normal e com contraste; na chave, manda um quadro ao servidor a cada 3 s.
+ */
+function lerQuadrosAoVivo(video, { forChave, reader, detector }) {
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  let volta = 0;
+  let ocupado = false;
+  let servidorOcupado = false;
+  let ultimoServidor = Date.now();
+  const larguraAlvo = forChave ? 1800 : 1200;
+
+  const recortar = (ampliar) => {
+    const r = regiaoDaMira(video);
+    if (r.sw < 16 || r.sh < 16) return false;
+    const escala = ampliar ? Math.min(2.5, Math.max(1, larguraAlvo / r.sw)) : 1;
+    canvas.width = Math.round(r.sw * escala);
+    canvas.height = Math.round(r.sh * escala);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(video, r.sx, r.sy, r.sw, r.sh, 0, 0, canvas.width, canvas.height);
+    return true;
+  };
+
+  const tentarServidor = () => {
+    if (!forChave || servidorOcupado || Date.now() - ultimoServidor < 3000) return;
+    if (!recortar(false)) return;
+    servidorOcupado = true;
+    ultimoServidor = Date.now();
+    const image = canvas.toDataURL('image/jpeg', 0.9);
+    api('/importacao/decode-chave', { method: 'POST', body: { image } })
+      .then((res) => {
+        if (res?.ok && res.chave && scanControls) applyScannedCode(res.chave, { live: true });
+      })
+      .catch(() => {})
+      .finally(() => { servidorOcupado = false; });
+  };
+
+  scanControls.timer = setInterval(async () => {
+    if (ocupado || !scanControls || video.readyState < 2 || !video.videoWidth) return;
+    ocupado = true;
+    try {
+      tentarServidor();
+      if (!recortar(true)) return;
+      if (volta % 2 === 1) applyMono(ctx, canvas.width, canvas.height, 'contrast');
+      volta += 1;
+      let texto = '';
+      if (detector) {
+        try {
+          const codes = await detector.detect(canvas);
+          texto = codes[0]?.rawValue || '';
+        } catch { /* tenta o ZXing */ }
+      }
+      if (!texto && reader?.decodeFromCanvas) {
+        try { texto = reader.decodeFromCanvas(canvas)?.getText() || ''; } catch { /* nada nesta volta */ }
+      }
+      if (texto && scanControls) await applyScannedCode(texto, { live: true });
+    } finally {
+      ocupado = false;
+    }
+  }, 200);
 }
 
 async function onScanFileSelected(file) {
@@ -2648,7 +2717,7 @@ async function onScanFileSelected(file) {
     preview.src = url;
     preview.hidden = false;
   }
-  $('#scan-video').hidden = true;
+  stopScanner();
   try {
     let code;
     if (isChaveScanTarget()) {
