@@ -22,6 +22,7 @@ const ImportacaoNfe = (() => {
     parcelamentos: [],
     emitenteSimples: null,
     xmlTextPendente: null,
+    chaveConsulta: '',
     financeiroVisitado: false,
     saidaParams: null,
   };
@@ -4561,6 +4562,17 @@ const ImportacaoNfe = (() => {
     return false;
   }
 
+  function abrirConsultaChave(chave) {
+    const digits = extractChaveDigits(chave);
+    if (digits.length !== 44) return false;
+    state.sessao = null;
+    state.itemIndex = 0;
+    state.xmlTextPendente = null;
+    state.chaveConsulta = digits;
+    state.view = 'consultar';
+    return true;
+  }
+
   function abrirSessaoImportada(sessao) {
     state.sessao = sessao || null;
     state.itemIndex = 0;
@@ -4590,6 +4602,17 @@ const ImportacaoNfe = (() => {
     }
     if (state.view === 'consultar') {
       showView('consultar');
+      const chave = state.chaveConsulta || '';
+      if (chave) {
+        state.chaveConsulta = '';
+        state.xmlTextPendente = null;
+        const file = $('#imp-xml-file');
+        if (file) file.value = '';
+        const field = $('#imp-chave');
+        if (field) field.value = chave;
+        syncChaveCount();
+        consultarChave();
+      }
       return;
     }
     showView('inicio');
@@ -4621,6 +4644,7 @@ const ImportacaoNfe = (() => {
     getView: () => state.view,
     isDirtyConferencia,
     abrirSessaoImportada,
+    abrirConsultaChave,
   };
 })();
 

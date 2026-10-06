@@ -735,6 +735,25 @@ label.compras-auto span {
 .compras-lista .item-row,
 .compras-row { cursor: default; }
 .compras-row:hover { transform: none; }
+.compras-chave {
+  margin: 0.15rem 0 0;
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  color: var(--text);
+  word-break: break-all;
+}
+.compras-chave span {
+  display: inline-block;
+  margin-right: 0.35rem;
+  font-family: inherit;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .toolbar input[type="search"] {
   max-width: none;
   flex: 1;

@@ -34,6 +34,12 @@ const Compras = (() => {
     return fmtQuando(iso) || '—';
   }
 
+  function fmtChave(v) {
+    const s = String(v || '').replace(/\D/g, '');
+    if (s.length !== 44) return s || '—';
+    return s.replace(/(\d{4})(?=\d)/g, '$1 ');
+  }
+
   function statusClass(status) {
     if (status === 'Lançada') return 'ok';
     if (status === 'Cancelada') return 'zero';
@@ -130,6 +136,7 @@ const Compras = (() => {
               <span class="chip">${esc(fmtDhEmi(n.dhEmi))}</span>
               <span class="chip">${esc(deps.fmtMoney ? deps.fmtMoney(n.vNF) : n.vNF)}</span>
             </div>
+            <p class="compras-chave"><span>Chave</span> ${esc(fmtChave(n.chave))}</p>
           </div>
           <div class="item-side">
             <span class="stock-badge ${statusClass(n.status)}">${esc(n.status)}</span>
@@ -173,33 +180,23 @@ const Compras = (() => {
 
   async function importar(chave, btn) {
     if (importando) return;
+    const digits = String(chave || '').replace(/\D/g, '');
+    if (digits.length !== 44) {
+      deps.showMsg?.('Chave de acesso inválida.');
+      return;
+    }
     importando = true;
     if (btn) {
       btn.disabled = true;
-      btn.textContent = 'Importando…';
+      btn.textContent = 'Consultando…';
     }
     try {
-      const xmlRes = await deps.api(`/compras/notas/${encodeURIComponent(chave)}/xml`, {
-        method: 'POST',
-        body: {},
-      });
-      if (!xmlRes?.ok || !xmlRes.xmlText) {
-        deps.showMsg?.(xmlRes?.error || 'Não foi possível obter o XML da NF-e.');
+      const ok = window.ImportacaoNfe?.abrirConsultaChave?.(digits);
+      if (!ok) {
+        deps.showMsg?.('Não foi possível abrir a consulta da nota.');
         return;
       }
-      const sess = await deps.api('/importacao/sessoes', {
-        method: 'POST',
-        body: { chave, xmlText: xmlRes.xmlText },
-      });
-      if (!sess?.ok) {
-        deps.showMsg?.(sess?.error || 'Não foi possível abrir a compra.');
-        if (sess?.code === 'DUPLICADA') load();
-        return;
-      }
-      window.ImportacaoNfe?.abrirSessaoImportada?.(sess.sessao);
       await deps.openImportacao?.();
-      const nNf = sess.sessao?.xml?.ide?.nNF || '';
-      deps.showToast?.(nNf ? `NF ${nNf} aberta para lançamento` : 'Nota aberta para lançamento');
     } finally {
       importando = false;
       if (btn) {
