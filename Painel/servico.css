@@ -12,6 +12,15 @@
   --font: "Segoe UI", "Helvetica Neue", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+/* Edição local: botões em vermelho. Online mantém o azul-ciano atual. */
+html[data-edicao="local"] {
+  --teal: #d32f2f;
+  --teal-dark: #b71c1c;
+  --teal-light: #fdecea;
+  --line: #f0d4d4;
+}
+html[data-edicao="local"] .stop-icon { background: #fff; }
+
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
 html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
@@ -140,7 +149,7 @@ button, input, select, textarea {
     radial-gradient(circle at 30% 30%, var(--teal) 0 7px, transparent 8px),
     radial-gradient(circle at 70% 28%, var(--teal) 0 6px, transparent 7px),
     radial-gradient(circle at 50% 70%, var(--teal) 0 7px, transparent 8px),
-    linear-gradient(135deg, #e7f7f8, #ffffff);
+    linear-gradient(135deg, var(--teal-light), #ffffff);
   border: 2px solid var(--line);
   position: relative;
   flex-shrink: 0;

@@ -58,6 +58,21 @@ html[data-theme="empresa"] {
   --ok: color-mix(in srgb, var(--empresa-accent) 55%, #1b7f4a);
 }
 
+/* Edição local: botões em vermelho. Online fica no azul céu do :root. */
+html[data-edicao="local"] {
+  --primary-2: #d32f2f;
+  --accent: #d32f2f;
+  --accent-hover: #b71c1c;
+}
+html[data-edicao="local"][data-theme="escuro"] {
+  --primary-2: #ef5350;
+  --accent: #ef5350;
+  --accent-hover: #ff8a80;
+}
+html[data-edicao="local"][data-theme="empresa"] {
+  --primary-2: color-mix(in srgb, var(--empresa-accent) 70%, #fff);
+}
+
 * { box-sizing: border-box; }
 html {
   height: 100%;
@@ -1435,7 +1450,7 @@ html[data-theme="escuro"] .toolbar-select select {
 .est-table tr { cursor: pointer; }
 .est-table tbody tr:hover { background: #f6f8fc; }
 .est-table tr.is-active {
-  background: #eef4ff;
+  background: color-mix(in srgb, var(--accent) 12%, #fff);
   box-shadow: inset 3px 0 0 var(--accent);
 }
 .est-table .prod-name { font-weight: 700; color: var(--text); }
@@ -1455,7 +1470,7 @@ html[data-theme="escuro"] .toolbar-select select {
 }
 .est-card-ico {
   width: 2.2rem; height: 2.2rem; border-radius: 10px;
-  background: #eef3ff; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, #fff); color: var(--accent);
   display: grid; place-items: center;
 }
 .est-card-ico svg { width: 1.1rem; height: 1.1rem; }
@@ -1496,7 +1511,7 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   height: 3rem; border-radius: 12px; border: 1px solid var(--border);
   display: grid; place-items: center;
   font-size: 1.35rem; font-weight: 800;
-  background: #eef4ff; color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, #fff); color: var(--accent);
 }
 .qty-stepper .qty-delta.is-neg { background: var(--danger-bg); color: var(--danger); }
 .qty-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; align-items: end; margin-bottom: 0.85rem; }

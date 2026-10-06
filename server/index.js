@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const routes = require('./routes');
@@ -28,6 +29,34 @@ app.use((_req, res, next) => {
 });
 app.use(express.json({ limit: '10mb' }));
 app.use(['/servico.html', '/servico.js', '/servico.css'], somenteServidorLocal);
+
+function edicaoAtual() {
+  try {
+    return require('./edicao').ONLINE ? 'online' : 'local';
+  } catch {
+    return 'local';
+  }
+}
+
+const EDICAO = edicaoAtual();
+
+function sendPainelHtml(res, filename) {
+  const file = path.join(__dirname, '..', 'Painel', filename);
+  let html = fs.readFileSync(file, 'utf8');
+  if (/data-edicao=/.test(html)) {
+    html = html.replace(/data-edicao="[^"]*"/, `data-edicao="${EDICAO}"`);
+  } else {
+    html = html.replace(/<html\b/i, `<html data-edicao="${EDICAO}"`);
+  }
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.type('html').send(html);
+}
+
+app.get('/servico.html', (_req, res) => sendPainelHtml(res, 'servico.html'));
+app.get(['/', '/index.html'], (_req, res) => sendPainelHtml(res, 'index.html'));
+
 app.use(express.static(path.join(__dirname, '..', 'Painel'), {
   etag: false,
   lastModified: false,
@@ -45,8 +74,7 @@ app.get('/favicon.ico', (_req, res) => {
 app.use('/api', licenca.guardLicenca, auth.exigirSessao, idempotencia.middleware, routes);
 
 app.get('*', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.sendFile(path.join(__dirname, '..', 'Painel', 'index.html'));
+  sendPainelHtml(res, 'index.html');
 });
 
 function lanAddresses() {
