@@ -385,36 +385,64 @@ async function loadSobre() {
     verEl.textContent = 'web';
   }
 
-  const chk = $('#chk-inicio-windows');
   const msg = $('#inicio-windows-msg');
   if (!window.desktop?.getOpenAtLogin) {
-    if (chk) chk.disabled = true;
+    mostrarInicioWindows(false, { indisponivel: true });
     if (msg) msg.textContent = 'Disponível apenas no aplicativo instalado.';
     return;
   }
   try {
     const s = await window.desktop.getOpenAtLogin();
-    if (chk) chk.checked = !!s.openAtLogin;
+    mostrarInicioWindows(!!s.openAtLogin);
   } catch {
     if (msg) msg.textContent = 'Não foi possível ler a configuração de inicialização.';
   }
 }
 
-$('#chk-inicio-windows')?.addEventListener('change', async (e) => {
-  const enabled = !!e.target.checked;
+function mostrarInicioWindows(ativo, { indisponivel = false } = {}) {
+  const chk = $('#chk-inicio-windows');
+  if (chk) {
+    chk.checked = ativo;
+    chk.disabled = indisponivel;
+  }
+  const btn = $('#btn-inicio-windows');
+  if (btn) {
+    btn.disabled = indisponivel;
+    btn.textContent = ativo ? 'Ativado — desativar' : 'Ativar';
+    btn.className = ativo ? 'btn-teal' : 'btn-outline';
+    btn.setAttribute('aria-pressed', ativo ? 'true' : 'false');
+  }
+  const resumo = $('#inicio-windows-resumo');
+  if (resumo) {
+    resumo.textContent = indisponivel
+      ? 'Disponível apenas no aplicativo instalado.'
+      : ativo
+        ? 'Abre sozinho na bandeja ao ligar o computador. Fechar ou minimizar mantém o servidor rodando perto do relógio.'
+        : 'Ao fechar ou minimizar, o servidor continua rodando na bandeja, perto do relógio.';
+  }
+}
+
+async function alterarInicioWindows(enabled) {
   const msg = $('#inicio-windows-msg');
   if (!window.desktop?.setOpenAtLogin) return;
   try {
     const res = await window.desktop.setOpenAtLogin(enabled);
+    mostrarInicioWindows(!!res.openAtLogin);
     if (msg) {
       msg.textContent = res.openAtLogin
-        ? 'Ativado: o serviço abrirá com o Windows.'
+        ? 'Ativado: o serviço abrirá com o Windows, direto na bandeja.'
         : 'Desativado: não inicia automaticamente.';
     }
   } catch (err) {
-    e.target.checked = !enabled;
+    mostrarInicioWindows(!enabled);
     if (msg) msg.textContent = `Falha ao alterar: ${err.message || 'erro'}`;
   }
+}
+
+$('#chk-inicio-windows')?.addEventListener('change', (e) => alterarInicioWindows(!!e.target.checked));
+
+$('#btn-inicio-windows')?.addEventListener('click', () => {
+  alterarInicioWindows($('#btn-inicio-windows').getAttribute('aria-pressed') !== 'true');
 });
 
 $('#btn-verificar-update')?.addEventListener('click', async () => {

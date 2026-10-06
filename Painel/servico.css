@@ -246,6 +246,7 @@ button, input, select, textarea {
   border-radius: 12px;
   flex-wrap: wrap;
 }
+.svc-action-bar-inicio { margin-top: 0.75rem; }
 .svc-action-text { flex: 1; min-width: 160px; }
 .svc-action-text strong { display: block; font-size: 0.95rem; }
 
