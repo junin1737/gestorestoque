@@ -47,6 +47,11 @@ function isNativeApk() {
   }
 }
 
+function isIOS() {
+  const ua = navigator.userAgent || '';
+  return /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
+}
+
 function isChaveScanTarget(target = state.scanTarget) {
   return target === 'importacao';
 }
@@ -2002,6 +2007,10 @@ function exportarAlteracoesPdf() {
 
 function stopScanner() {
   if (scanControls?.timer) clearInterval(scanControls.timer);
+  if (scanControls?.hintTimer) clearTimeout(scanControls.hintTimer);
+  if (scanControls?.zx?.stop) {
+    try { scanControls.zx.stop(); } catch { /* ignore */ }
+  }
   if (scanControls?.reader?.reset) {
     try { scanControls.reader.reset(); } catch { /* ignore */ }
   }
@@ -2079,7 +2088,7 @@ function pickBestBarcode(candidates, target = state.scanTarget) {
   return uniq[0];
 }
 
-async function applyScannedCode(value) {
+async function applyScannedCode(value, { live = false } = {}) {
   if (state.scanTarget === 'importacao') {
     const digits = String(value || '').replace(/\D/g, '');
     const chave = extractChaveNfe44(value) || (digits.length >= 44 ? digits.slice(0, 44) : '');
@@ -2089,7 +2098,7 @@ async function applyScannedCode(value) {
       state.scanTarget = 'search';
       return true;
     }
-    if (value) {
+    if (value && !live) {
       stopScanner();
       $('#dlg-scan')?.close();
       showMsg('Não li os 44 dígitos da chave. Fotografe a faixa do código de barras da chave de acesso (DANFE), na horizontal e bem nítida.');
@@ -2478,6 +2487,12 @@ async function startScanner(target = 'search') {
   const canLive = canUseLiveCamera();
   if (liveBtn) liveBtn.hidden = !canLive;
 
+  if (canLive && isIOS()) {
+    if (liveBtn) liveBtn.hidden = true;
+    startLiveScanner();
+    return;
+  }
+
   if (isChaveScanTarget()) {
     // iPhone: foto + decode no servidor Windows (Safari falha no CODE_128 longo)
     msg.textContent = 'Fotografe a faixa da chave (barra) ou o QR da DANFE, bem perto e nítida.';
@@ -2584,7 +2599,7 @@ async function startLiveScanner() {
           busy = true;
           try {
             const codes = await detector.detect(video);
-            if (codes[0]?.rawValue) await applyScannedCode(codes[0].rawValue);
+            if (codes[0]?.rawValue) await applyScannedCode(codes[0].rawValue, { live: true });
           } catch { /* ignore */ }
           busy = false;
         }, 280);
@@ -2592,14 +2607,26 @@ async function startLiveScanner() {
       }
     }
 
-    if (reader?.decodeFromVideoDevice) {
-      await reader.decodeFromVideoDevice(undefined, video, (result, err) => {
-        if (result) applyScannedCode(result.getText());
-        void err;
-      });
+    if (reader?.decodeFromStream || reader?.decodeFromVideoDevice) {
+      const onResult = (result) => {
+        if (result && scanControls) applyScannedCode(result.getText(), { live: true });
+      };
+      const zx = reader.decodeFromStream
+        ? await reader.decodeFromStream(stream, video, onResult)
+        : await reader.decodeFromVideoDevice(undefined, video, onResult);
+      if (!scanControls) {
+        try { zx?.stop?.(); } catch { /* ignore */ }
+        return;
+      }
+      scanControls.zx = zx;
       msg.textContent = forChave
-        ? 'Aponte para a barra da chave ou o QR…'
+        ? 'Aponte para a barra da chave ou o QR, bem perto e sem reflexo…'
         : 'Aponte para o código de barras…';
+      if (forChave) {
+        scanControls.hintTimer = setTimeout(() => {
+          if (scanControls) msg.textContent = 'Não leu ainda? Aproxime/afaste devagar ou toque em “Abrir câmera / galeria” para fotografar.';
+        }, 12000);
+      }
       return;
     }
 

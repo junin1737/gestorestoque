@@ -476,6 +476,11 @@ function fmtDataHora(iso) {
   return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR');
 }
 
+function fmtDiaYmd(ymd) {
+  const [a, m, d] = String(ymd || '').split('-');
+  return d ? `${d}/${m}/${a}` : '—';
+}
+
 function fmtCnpj(v) {
   return String(v || '').replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
 }
@@ -553,7 +558,8 @@ async function abrirPainelComLicenca(url) {
 function renderLicenca(l) {
   if (!l) return;
   renderLicModal(l);
-  const titulo = LIC_TITULOS[l.status] || l.status;
+  let titulo = LIC_TITULOS[l.status] || l.status;
+  if (l.liberado && l.teste && l.pago_ate) titulo = `Teste grátis até ${fmtDiaYmd(l.pago_ate)}`;
   const st = $('#lic-status');
   if (st) {
     st.textContent = titulo;

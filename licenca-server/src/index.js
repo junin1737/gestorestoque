@@ -89,14 +89,33 @@ function fimDoDiaBrasilia(dataYmd) {
   return new Date(`${dataYmd}T23:59:59-03:00`);
 }
 
+/** Data (AAAA-MM-DD) de hoje + dias, no horário de Brasília. */
+function diaBrasilia(dias = 0) {
+  const d = new Date(Date.now() - 3 * 3600000 + dias * 86400000);
+  return d.toISOString().slice(0, 10);
+}
+
 function situacaoCliente(cli, agora = new Date()) {
   if (cli.status === 'pendente') return { status: 'pendente', mensagem: cli.mensagem || MSG_PENDENTE };
   if (cli.status !== 'liberado') return { status: 'bloqueado', mensagem: cli.mensagem || MSG_BLOQUEADO };
   if (cli.pago_ate && fimDoDiaBrasilia(cli.pago_ate) < agora) {
     const [a, m, d] = cli.pago_ate.split('-');
-    return { status: 'vencido', mensagem: cli.mensagem || `Licença vencida em ${d}/${m}/${a}. Contate a MT Automações — (34) 3674-1937.` };
+    const padrao = cli.em_teste
+      ? `Período de teste grátis encerrado em ${d}/${m}/${a}. Para continuar usando, contate a MT Automações — (34) 3674-1937.`
+      : `Licença vencida em ${d}/${m}/${a}. Contate a MT Automações — (34) 3674-1937.`;
+    return { status: 'vencido', mensagem: cli.mensagem || padrao };
   }
   return { status: 'liberado', mensagem: cli.mensagem || null };
+}
+
+const DIAS_TESTE_PADRAO = 7;
+const DIAS_TESTE_MAX = 90;
+
+async function diasTeste(env) {
+  const r = await lerConfig(env, 'dias_teste');
+  if (r == null) return DIAS_TESTE_PADRAO;
+  const n = parseInt(r.valor, 10);
+  return Number.isInteger(n) && n >= 0 && n <= DIAS_TESTE_MAX ? n : DIAS_TESTE_PADRAO;
 }
 
 /** Valida o hash gerado pelo painel: { alg, iter, salt, hash } (base64). */
@@ -178,12 +197,18 @@ async function check(request, env) {
   if (!cli) {
     // Gestor que já pede a revenda (1.2.68+) só cria o cadastro com revenda conhecida.
     if (revendaCnpj && !revenda) return json({ ok: false, error: MSG_REVENDA }, 400);
+    const dias = await diasTeste(env);
+    const teste = dias > 0;
+    const testeAte = teste ? diaBrasilia(dias) : null;
     await env.DB.prepare(
-      `INSERT INTO clientes (cnpj, aplicacao, razao, fantasia, status, criado_em, atualizado_em, ultimo_contato, revenda_id)
-       VALUES (?, ?, ?, ?, 'pendente', ?, ?, ?, ?)`
-    ).bind(cnpj, app, texto(body.razao, 120), texto(body.fantasia, 120), agora, agora, agora, revenda?.id ?? null).run();
+      `INSERT INTO clientes (cnpj, aplicacao, razao, fantasia, status, pago_ate, em_teste, criado_em, atualizado_em, ultimo_contato, revenda_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(cnpj, app, texto(body.razao, 120), texto(body.fantasia, 120), teste ? 'liberado' : 'pendente', testeAte, teste ? 1 : 0,
+      agora, agora, agora, revenda?.id ?? null).run();
+    const [ta, tm, td] = (testeAte || '').split('-');
     await registrarEvento(env, cnpj, app, 'novo_cliente',
-      `${texto(body.fantasia, 120) || ''} — NSE ${nse || '—'} — ${texto(body.maquina, 80) || ''}${revenda ? ` — revenda ${revenda.nome}` : ''}`);
+      `${texto(body.fantasia, 120) || ''} — NSE ${nse || '—'} — ${texto(body.maquina, 80) || ''}${revenda ? ` — revenda ${revenda.nome}` : ''}`
+      + (teste ? ` — teste grátis de ${dias} dia(s), até ${td}/${tm}/${ta}` : ''));
     cli = await buscarCliente(env, cnpj, app);
   } else {
     if (!cli.revenda_id && revenda) {
@@ -243,6 +268,7 @@ async function check(request, env) {
     status: sit.status,
     mensagem: sit.mensagem,
     pago_ate: cli.pago_ate || null,
+    teste: !!cli.em_teste,
     emitido_em: emitido.toISOString(),
     valido_ate: validoAte.toISOString(),
     sup: sit.status === 'liberado' ? await supDoCliente(env, cli) : null,
@@ -302,9 +328,16 @@ async function listarClientes(url, env) {
   const app = nomeApp(url.searchParams.get('app'));
   const where = [];
   const params = [];
+  const hoje = diaBrasilia(0);
   if (STATUS_VALIDOS.includes(status)) {
     where.push('c.status = ?');
     params.push(status);
+  } else if (status === 'teste') {
+    where.push("c.status = 'liberado' AND c.em_teste = 1 AND (c.pago_ate IS NULL OR c.pago_ate >= ?)");
+    params.push(hoje);
+  } else if (status === 'vencido') {
+    where.push("c.status = 'liberado' AND c.pago_ate < ?");
+    params.push(hoje);
   }
   if (app) {
     where.push('c.aplicacao = ?');
@@ -336,12 +369,18 @@ async function listarClientes(url, env) {
     ORDER BY CASE c.status WHEN 'pendente' THEN 0 ELSE 1 END, COALESCE(c.ultimo_contato, c.criado_em) DESC`;
   const { results } = await env.DB.prepare(sql).bind(...params).all();
   const totais = await env.DB.prepare('SELECT status, COUNT(*) AS n FROM clientes GROUP BY status').all();
+  const prazos = await env.DB.prepare(`SELECT
+      SUM(CASE WHEN em_teste = 1 AND (pago_ate IS NULL OR pago_ate >= ?1) THEN 1 ELSE 0 END) AS teste,
+      SUM(CASE WHEN pago_ate < ?1 THEN 1 ELSE 0 END) AS vencido
+    FROM clientes WHERE status = 'liberado'`).bind(hoje).first();
   const apps = await env.DB.prepare('SELECT DISTINCT aplicacao FROM clientes ORDER BY aplicacao').all();
   const agora = new Date();
   return json({
     ok: true,
     clientes: results.map((c) => clientePublico(c, agora)),
     totais: Object.fromEntries(totais.results.map((r) => [r.status, r.n])),
+    prazos: { teste: prazos?.teste || 0, vencido: prazos?.vencido || 0 },
+    hoje,
     aplicacoes: [...new Set([APP_PADRAO, ...apps.results.map((r) => r.aplicacao)])],
   });
 }
@@ -369,7 +408,25 @@ async function detalheCliente(cnpj, app, env) {
 
 async function obterConfig(env) {
   const padrao = await lerConfig(env, 'sup_padrao');
-  return json({ ok: true, sup_padrao: { definida: !!padrao?.valor, atualizado_em: padrao?.atualizado_em || null } });
+  return json({
+    ok: true,
+    sup_padrao: { definida: !!padrao?.valor, atualizado_em: padrao?.atualizado_em || null },
+    dias_teste: await diasTeste(env),
+  });
+}
+
+async function definirDiasTeste(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const dias = Number(body.dias);
+  if (!Number.isInteger(dias) || dias < 0 || dias > DIAS_TESTE_MAX) {
+    return json({ ok: false, error: `Informe de 0 a ${DIAS_TESTE_MAX} dias.` }, 400);
+  }
+  await env.DB.prepare(
+    `INSERT INTO config (chave, valor, atualizado_em) VALUES ('dias_teste', ?, ?)
+     ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor, atualizado_em = excluded.atualizado_em`
+  ).bind(String(dias), agoraIso()).run();
+  await registrarEvento(env, '*', null, 'config', dias ? `Teste grátis para novos clientes: ${dias} dia(s)` : 'Teste grátis desligado: novos clientes aguardam aprovação');
+  return obterConfig(env);
 }
 
 async function definirSupPadrao(request, env) {
@@ -414,6 +471,7 @@ function camposEditaveis(body) {
     if (body.pago_ate && !d) throw new Error('Data "pago até" inválida (AAAA-MM-DD).');
     out.pago_ate = d;
   }
+  if (body.em_teste !== undefined) out.em_teste = body.em_teste ? 1 : 0;
   if (body.mensagem !== undefined) out.mensagem = texto(body.mensagem, 300);
   if (body.observacao !== undefined) out.observacao = texto(body.observacao, 1000);
   if (body.razao !== undefined) out.razao = texto(body.razao, 120);
@@ -546,8 +604,14 @@ async function atualizarCliente(cnpj, app, request, env) {
   }
   const outros = chaves.filter((k) => k !== 'status' && (campos[k] ?? null) !== (cli[k] ?? null));
   if (outros.length) {
-    const valor = (k) => (k === 'revenda_id' ? (revendaNova?.nome || 'sem revenda') : (campos[k] ?? '—'));
-    await registrarEvento(env, cnpj, app, 'edicao', outros.map((k) => `${k === 'revenda_id' ? 'revenda' : k}: ${valor(k)}`).join(' · '));
+    const ROTULOS = { revenda_id: 'revenda', pago_ate: 'pago até', em_teste: 'teste grátis' };
+    const valor = (k) => {
+      if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
+      if (k === 'em_teste') return campos[k] ? 'sim' : 'não';
+      if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
+      return campos[k] ?? '—';
+    };
+    await registrarEvento(env, cnpj, app, 'edicao', outros.map((k) => `${ROTULOS[k] || k}: ${valor(k)}`).join(' · '));
   }
   return detalheCliente(cnpj, app, env);
 }
@@ -596,6 +660,7 @@ async function rotaAdmin(request, env, url) {
 
   if (url.pathname === '/api/admin/config' && request.method === 'GET') return obterConfig(env);
   if (url.pathname === '/api/admin/config/supervisor' && request.method === 'PUT') return definirSupPadrao(request, env);
+  if (url.pathname === '/api/admin/config/teste' && request.method === 'PUT') return definirDiasTeste(request, env);
   if (url.pathname === '/api/admin/clientes') {
     if (request.method === 'GET') return listarClientes(url, env);
     if (request.method === 'POST') return criarCliente(request, env);
