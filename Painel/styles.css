@@ -1539,7 +1539,15 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   .desktop-only { display: none !important; }
   .btn-icon-menu { display: grid; place-items: center; }
   .user-chip.desktop-only { display: none !important; }
-  #topbar-estoque-actions { display: none; }
+  #btn-exportar-estoque { display: none; }
+  #btn-novo-produto {
+    height: 38px;
+    padding: 0 0.95rem;
+    border-radius: 999px;
+    white-space: nowrap;
+    font-weight: 750;
+  }
+  body:has(#page-estoque.has-ficha) #topbar-estoque-actions { display: none !important; }
   #page-estoque.has-ficha .estoque-split { grid-template-columns: 1fr; }
   #page-estoque.has-ficha #estoque-lista-view { display: none !important; }
   #page-estoque.has-ficha .edit-toolbar { display: grid; }
