@@ -21,6 +21,12 @@ const MAX_RESPOSTA = 50 * 1024 * 1024;
 const PEDACO = 256 * 1024;
 const TIMEOUT_MS = 90 * 1000;
 const LIMITE_POR_MINUTO = 600;
+/** Endereço por loja: <nse>.<domínio>, apontando para o túnel da instalação dona daquele NSE. */
+const DOMINIO_PADRAO = 'smsjrdeveloper.com.br';
+/** O NSE do Clipp sempre tem dígitos; subdomínios só com letras (blog, loja…) seguem para a origem. */
+const APELIDO_RE = /^(?=[a-z]*[0-9])[a-z0-9]{4,40}$/;
+const RESERVADOS = new Set(['www', 'acesso', 'painel', 'api', 'admin', 'mail', 'smtp', 'ftp', 'webmail', 'cpanel', 'ns1', 'ns2']);
+const CACHE_APELIDO_MS = 60 * 1000;
 
 const enc = new TextEncoder();
 const dec = new TextDecoder();
@@ -119,9 +125,56 @@ main{max-width:420px;padding:28px;text-align:center}h1{color:#1e3a5f;font-size:2
   });
 }
 
+function apelidoDaNse(nse) {
+  const a = String(nse || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return APELIDO_RE.test(a) && !RESERVADOS.has(a) ? a : '';
+}
+
+/** Subdomínio de um host do domínio (só um nível), ou '' se não for endereço de loja. */
+function apelidoDoHost(hostname, dominio) {
+  const h = String(hostname || '').toLowerCase();
+  if (!h.endsWith(`.${dominio}`)) return '';
+  const sub = h.slice(0, -(dominio.length + 1));
+  return APELIDO_RE.test(sub) && !RESERVADOS.has(sub) ? sub : '';
+}
+
+const cacheApelidos = new Map();
+async function tunelDoApelido(env, apelido) {
+  const hit = cacheApelidos.get(apelido);
+  if (hit && Date.now() - hit.em < CACHE_APELIDO_MS) return hit.tunel;
+  let tunel = '';
+  try {
+    const r = await env.APELIDO.get(env.APELIDO.idFromName(apelido)).fetch('https://apelido/');
+    tunel = String((await r.json()).tunel || '');
+  } catch { /* trata como inexistente */ }
+  if (!ID_RE.test(tunel)) tunel = '';
+  if (cacheApelidos.size > 5000) cacheApelidos.clear();
+  cacheApelidos.set(apelido, { tunel, em: Date.now() });
+  return tunel;
+}
+
+async function registrarApelido(env, apelido, tunel, cnpj) {
+  try {
+    const r = await env.APELIDO.get(env.APELIDO.idFromName(apelido)).fetch('https://apelido/', {
+      method: 'PUT',
+      body: JSON.stringify({ tunel, cnpj }),
+    });
+    if (r.ok) cacheApelidos.set(apelido, { tunel, em: Date.now() });
+  } catch { /* o Gestor continua usando o link /t/ */ }
+}
+
+function encaminharAoTunel(env, request, id) {
+  // Cabeçalhos internos nunca vêm do cliente.
+  const headers = new Headers(request.headers);
+  for (const k of [...headers.keys()]) if (k.startsWith('x-relay-')) headers.delete(k);
+  const stub = env.TUNEL.get(env.TUNEL.idFromName(id));
+  return stub.fetch(new Request(request, { headers }));
+}
+
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
+    const dominio = String(env.DOMINIO || DOMINIO_PADRAO).toLowerCase();
 
     if (url.pathname === '/tunel/conectar') {
       if (request.headers.get('Upgrade') !== 'websocket') return new Response('WebSocket esperado.', { status: 426 });
@@ -133,7 +186,26 @@ export default {
       headers.set('X-Relay-Cnpj', String(lic.dados.cnpj));
       headers.set('X-Relay-Nse', String(lic.dados.nse || ''));
       const stub = env.TUNEL.get(env.TUNEL.idFromName(id));
-      return stub.fetch(new Request(request, { headers }));
+      const resp = await stub.fetch(new Request(request, { headers }));
+      // O NSE vem da licença assinada: só a instalação dona dele aponta o endereço para o seu túnel.
+      const apelido = apelidoDaNse(lic.dados.nse);
+      if (resp.status === 101 && apelido) ctx.waitUntil(registrarApelido(env, apelido, id, String(lic.dados.cnpj)));
+      return resp;
+    }
+
+    if (url.hostname.toLowerCase() !== `acesso.${dominio}`) {
+      const apelido = apelidoDoHost(url.hostname, dominio);
+      const tunel = apelido ? await tunelDoApelido(env, apelido) : '';
+      if (!tunel) {
+        // A rota curinga também pega outros subdomínios do site: esses seguem para a origem normal.
+        if (!apelido) return fetch(request);
+        return comSeguranca(pagina('Endereço não encontrado', 'Nenhuma loja está usando este endereço. Confira o endereço ou leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja.', 404));
+      }
+      if (url.pathname === '/tunel/saude') {
+        const resp = Response.json({ ok: true, tunel: (await sha256Hex(tunel)).slice(0, 16) }, { headers: { 'Cache-Control': 'no-store' } });
+        return comSeguranca(resp);
+      }
+      return comSeguranca(await encaminharAoTunel(env, request, tunel));
     }
 
     const entrada = url.pathname.match(/^\/t\/([a-z2-7]{20,32})\/?$/);
@@ -149,13 +221,38 @@ export default {
     if (!ID_RE.test(id)) {
       return comSeguranca(pagina('Gestor Estoque', 'Para acessar pela internet, leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja.'));
     }
-    // Cabeçalhos internos nunca vêm do cliente.
-    const headers = new Headers(request.headers);
-    for (const k of [...headers.keys()]) if (k.startsWith('x-relay-')) headers.delete(k);
-    const stub = env.TUNEL.get(env.TUNEL.idFromName(id));
-    return comSeguranca(await stub.fetch(new Request(request, { headers })));
+    return comSeguranca(await encaminharAoTunel(env, request, id));
   },
 };
+
+/** Um por endereço de loja (NSE): guarda para qual túnel ele aponta e de qual CNPJ é. */
+export class Apelido {
+  constructor(ctx) {
+    this.ctx = ctx;
+  }
+
+  async fetch(request) {
+    if (request.method === 'PUT') {
+      let dados;
+      try {
+        dados = await request.json();
+      } catch {
+        return new Response('Inválido.', { status: 400 });
+      }
+      const tunel = String(dados?.tunel || '');
+      const cnpj = String(dados?.cnpj || '');
+      if (!ID_RE.test(tunel) || !cnpj) return new Response('Inválido.', { status: 400 });
+      const atual = await this.ctx.storage.get('apelido');
+      if (atual && atual.cnpj !== cnpj) return new Response('Endereço pertence a outra empresa.', { status: 409 });
+      if (!atual || atual.tunel !== tunel) {
+        await this.ctx.storage.put('apelido', { tunel, cnpj, desde: new Date().toISOString() });
+      }
+      return new Response('ok');
+    }
+    const atual = await this.ctx.storage.get('apelido');
+    return Response.json({ tunel: atual?.tunel || '' });
+  }
+}
 
 /** Cabeçalhos que não atravessam o túnel (conexão/Cloudflare). */
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'te', 'trailer',

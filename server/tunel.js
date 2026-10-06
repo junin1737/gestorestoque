@@ -26,6 +26,20 @@ const ESPERA_MAX_MS = 60 * 1000;
 const TIMEOUT_REQ_MS = 85 * 1000;
 const HOP = new Set(['connection', 'keep-alive', 'transfer-encoding', 'upgrade', 'te', 'trailer',
   'proxy-authorization', 'proxy-authenticate', 'content-length']);
+/** Endereço por loja (<nse>.<domínio do servidor online>); mesmas regras do servidor de passagem. */
+const DOMINIO_APELIDO = (() => {
+  try {
+    const h = new URL(LINK_BASE).hostname;
+    if (/^[\d.]+$|^\[|localhost$/i.test(h) || h.split('.').length < 3) return '';
+    return h.split('.').slice(1).join('.');
+  } catch {
+    return '';
+  }
+})();
+const APELIDO_RE = /^(?=[a-z]*[0-9])[a-z0-9]{4,40}$/;
+const RESERVADOS = new Set(['www', 'acesso', 'painel', 'api', 'admin', 'mail', 'smtp', 'ftp', 'webmail', 'cpanel', 'ns1', 'ns2']);
+const APELIDO_REVER_MS = 10 * 60 * 1000;
+const APELIDO_CONFIRMADO_MS = 6 * 60 * 60 * 1000;
 
 let porta = 0;
 let ws = null;
@@ -35,7 +49,8 @@ let ultimoPong = 0;
 let espera = ESPERA_MIN_MS;
 const recebendo = new Map();
 const emAndamento = new Map();
-const estado = { conectado: false, desde: null, ultimo_erro: null };
+const estado = { conectado: false, desde: null, ultimo_erro: null, apelido: null };
+let timerApelido = null;
 
 function arquivoConfig() {
   return path.join(getAppDataDir(), 'online.json');
@@ -70,7 +85,8 @@ function salvarConfig(cfg) {
 
 function status() {
   const cfg = carregarConfig();
-  const link = `${LINK_BASE}/t/${cfg.tunelId}`;
+  const linkTunel = `${LINK_BASE}/t/${cfg.tunelId}`;
+  const link = estado.apelido || linkTunel;
   const out = {
     ativo: !!cfg.ativo,
     conectado: estado.conectado,
@@ -83,10 +99,71 @@ function status() {
   };
   if (cfg.ativo) {
     const p = aparelhos.codigoAtual();
-    out.pareamento = { link: `${link}?p=${p.codigo}`, expira_em: p.expira_em };
+    const pareamento = estado.apelido ? `${estado.apelido}/parear?c=${p.codigo}` : `${linkTunel}?p=${p.codigo}`;
+    out.pareamento = { link: pareamento, expira_em: p.expira_em };
     out.pedidos = aparelhos.listarPedidos();
   }
   return out;
+}
+
+function apelidoDaLicenca() {
+  if (!DOMINIO_APELIDO) return '';
+  const lic = licenca.licencaAssinada();
+  let nse = '';
+  try {
+    nse = String(JSON.parse(lic.payload).nse || '');
+  } catch {
+    return '';
+  }
+  const a = nse.toLowerCase().replace(/[^a-z0-9]/g, '');
+  return APELIDO_RE.test(a) && !RESERVADOS.has(a) ? a : '';
+}
+
+function agendarApelido(ms) {
+  if (timerApelido) clearTimeout(timerApelido);
+  timerApelido = setTimeout(() => {
+    timerApelido = null;
+    verificarApelido();
+  }, ms);
+  timerApelido.unref?.();
+}
+
+/**
+ * Usa <nse>.<domínio> como link só depois de confirmar que aquele endereço chega neste túnel
+ * (o servidor de passagem devolve o hash do túnel); senão continua no link /t/<id>.
+ */
+function verificarApelido() {
+  const apelido = apelidoDaLicenca();
+  if (!apelido || !estado.conectado) {
+    estado.apelido = null;
+    return;
+  }
+  const host = `${apelido}.${DOMINIO_APELIDO}`;
+  const esperado = crypto.createHash('sha256').update(carregarConfig().tunelId).digest('hex').slice(0, 16);
+  const concluir = (ok) => {
+    estado.apelido = ok ? `https://${host}` : null;
+    agendarApelido(ok ? APELIDO_CONFIRMADO_MS : APELIDO_REVER_MS);
+  };
+  const req = https.get({
+    host,
+    path: '/tunel/saude',
+    headers: { Accept: 'application/json' },
+    lookup: lookupResiliente,
+    timeout: 8000,
+  }, (res) => {
+    let txt = '';
+    res.setEncoding('utf8');
+    res.on('data', (c) => { if (txt.length < 2000) txt += c; });
+    res.on('end', () => {
+      let ok = false;
+      try {
+        ok = res.statusCode === 200 && JSON.parse(txt).tunel === esperado;
+      } catch { /* resposta que não é do servidor de passagem */ }
+      concluir(ok);
+    });
+  });
+  req.on('timeout', () => req.destroy(new Error('timeout')));
+  req.on('error', () => concluir(false));
 }
 
 function agendarReconexao() {
@@ -214,6 +291,7 @@ function conectar() {
     estado.ultimo_erro = null;
     espera = ESPERA_MIN_MS;
     ultimoPong = Date.now();
+    agendarApelido(4000);
     timerPing = setInterval(() => {
       if (!licenca.licencaAssinada()) {
         estado.ultimo_erro = 'Licença não liberada neste computador.';
@@ -368,6 +446,7 @@ function definirAtivo(ativo) {
 function novoEndereco() {
   const atual = carregarConfig();
   aparelhos.revogarTodos();
+  estado.apelido = null;
   salvarConfig({ ativo: atual.ativo, tunelId: novoId(), segredo: crypto.randomBytes(32).toString('base64url') });
   return definirAtivo(atual.ativo);
 }

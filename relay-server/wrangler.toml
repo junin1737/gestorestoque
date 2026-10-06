@@ -3,17 +3,31 @@ main = "src/index.js"
 compatibility_date = "2026-09-01"
 workers_dev = false
 
+# acesso.<domínio>: link /t/<id> do QR Code. *.<domínio>: endereço por loja (<nse>.<domínio>).
+# A rota curinga exige um registro DNS "*" com proxy (laranja) na zona.
 routes = [
-  { pattern = "acesso.smsjrdeveloper.com.br", custom_domain = true }
+  { pattern = "acesso.smsjrdeveloper.com.br", custom_domain = true },
+  { pattern = "*.smsjrdeveloper.com.br/*", zone_name = "smsjrdeveloper.com.br" }
 ]
+
+[vars]
+DOMINIO = "smsjrdeveloper.com.br"
 
 [[durable_objects.bindings]]
 name = "TUNEL"
 class_name = "Tunel"
 
+[[durable_objects.bindings]]
+name = "APELIDO"
+class_name = "Apelido"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Tunel"]
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["Apelido"]
 
 [observability]
 enabled = true
