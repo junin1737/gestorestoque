@@ -6,11 +6,18 @@ function onlyDigits(v) {
   return String(v || '').replace(/\D/g, '');
 }
 
+/** Ramo "Transportes" do Clipp: só fornecedores ativos desse ramo aparecem como transportador. */
+const RAMO_TRANSPORTES = 34;
+
 function formatCnpj(digits) {
   const d = onlyDigits(digits);
+  if (d.length === 11) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
   if (d.length !== 14) return digits || '';
   return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
 }
+
+const docValido = (d) => d.length === 14 || d.length === 11;
+const SQL_DOC = `REPLACE(REPLACE(REPLACE(REPLACE(F.CNPJ, '.', ''), '/', ''), '-', ''), ' ', '')`;
 
 function formatCep(digits) {
   const d = onlyDigits(digits);
@@ -64,11 +71,12 @@ function mapRowToCadastro(row) {
     })(),
     produtor_rural: String(row.PRODUTOR_RURAL || 'N').trim().toUpperCase() === 'S',
     status: String(row.STATUS || 'A').trim(),
+    id_ramo: row.ID_RAMO != null ? Number(row.ID_RAMO) : null,
   };
 }
 
 function mapEmitToCadastro(emit, ide) {
-  const end = emit?.enderEmit || {};
+  const end = emit?.enderEmit || emit?.enderDest || {};
   const fone = parseFone(end.fone || emit?.fone);
   const nNF = ide?.nNF || '';
   const serie = ide?.serie || '';
@@ -138,15 +146,37 @@ async function lookupCidade(db, { id_cidade, municipio, uf }) {
   return { id_cidade: id_cidade || null, municipio: mun, uf: sigla };
 }
 
+/**
+ * Fornecedor pelo CNPJ/CPF. O Clipp mantém um cadastro separado (ramo Transportes) quando a mesma
+ * empresa também transporta: para fornecedor da nota, prefere o cadastro que não é de transporte.
+ */
 async function buscarPorCnpj(cnpj) {
   const digits = onlyDigits(cnpj);
-  if (digits.length !== 14) return null;
+  if (!docValido(digits)) return null;
   return withDb(async (db) => {
     const rows = await query(db, `
-      SELECT F.*, C.NOME AS MUNICIPIO, C.SIGLA_UF AS UF
+      SELECT FIRST 1 F.*, C.NOME AS MUNICIPIO, C.SIGLA_UF AS UF
       FROM TB_FORNECEDOR F
       LEFT JOIN TB_CIDADE_SIS C ON C.ID_CIDADE = F.ID_CIDADE
-      WHERE REPLACE(REPLACE(REPLACE(F.CNPJ, '.', ''), '/', ''), '-', '') = ?`, [digits]);
+      WHERE ${SQL_DOC} = ?
+      ORDER BY CASE WHEN F.ID_RAMO = ${RAMO_TRANSPORTES} THEN 1 ELSE 0 END,
+               CASE WHEN F.STATUS = 'A' OR F.STATUS IS NULL THEN 0 ELSE 1 END,
+               F.ID_FORNEC`, [digits]);
+    return mapRowToCadastro(rows[0]);
+  });
+}
+
+/** Transportador como o Clipp aceita na nota: fornecedor ativo do ramo Transportes. */
+async function buscarTransportador(doc) {
+  const digits = onlyDigits(doc);
+  if (!docValido(digits)) return null;
+  return withDb(async (db) => {
+    const rows = await query(db, `
+      SELECT FIRST 1 F.*, C.NOME AS MUNICIPIO, C.SIGLA_UF AS UF
+      FROM TB_FORNECEDOR F
+      LEFT JOIN TB_CIDADE_SIS C ON C.ID_CIDADE = F.ID_CIDADE
+      WHERE ${SQL_DOC} = ? AND F.ID_RAMO = ${RAMO_TRANSPORTES} AND F.STATUS = 'A'
+      ORDER BY F.ID_FORNEC`, [digits]);
     return mapRowToCadastro(rows[0]);
   });
 }
@@ -197,7 +227,7 @@ async function resolverNaImportacao(xml) {
   let id_fornec = null;
   let origem = 'xml';
 
-  if (cnpj.length === 14) {
+  if (docValido(cnpj)) {
     const found = await buscarPorCnpj(cnpj);
     if (found?.id_fornec) {
       id_fornec = found.id_fornec;
@@ -219,14 +249,15 @@ async function resolverNaImportacao(xml) {
   });
 }
 
-async function cadastrarFornecedor(cadastro, meta = {}) {
+/** `transportador: true` cadastra no ramo Transportes (o Clipp exige isso para aceitar na nota). */
+async function cadastrarFornecedor(cadastro, meta = {}, { transportador = false } = {}) {
   const c = cadastro || {};
   const nome = String(c.nome || '').trim();
   if (!nome) throw new Error('Informe a razão social do fornecedor.');
   const cnpjDigits = onlyDigits(c.cnpj);
-  if (cnpjDigits.length !== 14) throw new Error('CNPJ inválido para cadastro do fornecedor.');
+  if (!docValido(cnpjDigits)) throw new Error('CNPJ/CPF inválido para cadastro do fornecedor.');
 
-  const existente = await buscarPorCnpj(cnpjDigits);
+  const existente = transportador ? await buscarTransportador(cnpjDigits) : await buscarPorCnpj(cnpjDigits);
   if (existente?.id_fornec) {
     return { id_fornec: existente.id_fornec, cadastro: existente, ja_existia: true };
   }
@@ -243,8 +274,8 @@ async function cadastrarFornecedor(cadastro, meta = {}) {
         ID_FORNEC, NOME, NOME_FANTA, CNPJ, INSC_ESTAD, INSC_MUNIC,
         END_CEP, END_TIPO, END_LOGRAD, END_BAIRRO, END_NUMERO, END_COMPLE,
         DDD_COMER, FONE_COMER, DDD_CELUL, FONE_CELUL, DDD_FAX, FONE_FAX, FONE_0800,
-        EMAIL_CONT, EMAIL_NFE, SITE, STATUS, ID_CIDADE, ID_PAIS, OBSERVACAO, PRODUTOR_RURAL
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'A', ?, ?, ?, ?)`, [
+        EMAIL_CONT, EMAIL_NFE, SITE, STATUS, ID_CIDADE, ID_PAIS, OBSERVACAO, PRODUTOR_RURAL, ID_RAMO
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'A', ?, ?, ?, ?, ?)`, [
       idFornec,
       nome,
       String(c.nome_fanta || '').trim() || null,
@@ -271,6 +302,7 @@ async function cadastrarFornecedor(cadastro, meta = {}) {
       '1058',
       obs,
       c.produtor_rural ? 'S' : 'N',
+      transportador ? RAMO_TRANSPORTES : null,
     ]);
 
     const cad = await getFornecedorById(idFornec);
@@ -283,7 +315,9 @@ module.exports = {
   formatCnpj,
   mapEmitToCadastro,
   mapRowToCadastro,
+  RAMO_TRANSPORTES,
   buscarPorCnpj,
+  buscarTransportador,
   buscarFornecedores,
   getFornecedorById,
   resolverNaImportacao,
