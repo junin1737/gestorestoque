@@ -2,8 +2,8 @@
 # Não altera o Electron/servidor/painel existentes.
 
 Ícone:
-  node android-app/scripts/generate-launcher-icon.js
-  (usa TB_EMITENTE.LOGO ou as iniciais do NOME_FANTA)
+  node android-app/scripts/gerar-icone-fixo.js
+  (ícone fixo MT Automações a partir de scripts/icone-origem.jpg; os PNGs gerados ficam versionados)
 
 Gera o APK:
   cd android-app

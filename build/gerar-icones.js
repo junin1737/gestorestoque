@@ -169,7 +169,11 @@ async function main() {
   console.log('Ícones gerados em Painel/icons e build/.');
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
+
+module.exports = { caixaDoQuadrado, raioDoCanto, cobertura, corDaBorda };
