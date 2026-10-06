@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const routes = require('./routes');
@@ -39,7 +40,7 @@ main{max-width:420px;padding:28px;text-align:center}h1{color:#1e3a5f;font-size:2
 .logo{display:block;width:88px;height:88px;margin:0 auto 16px}
 .pedido{margin:22px 0 8px;padding:18px;border-radius:14px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .pedido input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #c9d1dc;border-radius:8px;font-size:15px;margin:6px 0 12px}
-.pedido button{width:100%;padding:11px;border:0;border-radius:8px;background:#1e3a5f;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
+.pedido button{width:100%;padding:11px;border:0;border-radius:8px;background:#2563eb;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
 .pedido button:disabled{opacity:.6;cursor:default}.codigo{font:700 34px ui-monospace,Consolas,monospace;letter-spacing:3px;color:#1e3a5f;margin:6px 0}
 .pedido label{display:block;text-align:left;font-size:13px;color:#5a6577}.erro{color:#b42318}</style>
 </head><body><main><img class="logo" src="/icons/icon-192.png" alt="MT Automações"><h1>${esc(titulo)}</h1><p>${esc(texto)}</p>${extra}<p style="font-size:13px">MT Automações · (34) 3674-1937</p></main></body></html>`;
@@ -135,6 +136,34 @@ app.use((req, res, next) => {
   next();
 });
 app.use(['/servico.html', '/servico.js', '/servico.css'], somenteServidorLocal);
+
+function edicaoAtual() {
+  try {
+    return require('./edicao').ONLINE ? 'online' : 'local';
+  } catch {
+    return 'local';
+  }
+}
+
+const EDICAO = edicaoAtual();
+
+function sendPainelHtml(res, filename) {
+  const file = path.join(__dirname, '..', 'Painel', filename);
+  let html = fs.readFileSync(file, 'utf8');
+  if (/data-edicao=/.test(html)) {
+    html = html.replace(/data-edicao="[^"]*"/, `data-edicao="${EDICAO}"`);
+  } else {
+    html = html.replace(/<html\b/i, `<html data-edicao="${EDICAO}"`);
+  }
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  res.type('html').send(html);
+}
+
+app.get('/servico.html', (_req, res) => sendPainelHtml(res, 'servico.html'));
+app.get(['/', '/index.html'], (_req, res) => sendPainelHtml(res, 'index.html'));
+
 app.use(express.static(path.join(__dirname, '..', 'Painel'), {
   etag: false,
   lastModified: false,
@@ -152,8 +181,7 @@ app.get('/favicon.ico', (_req, res) => {
 app.use('/api', licenca.guardLicenca, auth.exigirSessao, idempotencia.middleware, routes);
 
 app.get('*', (_req, res) => {
-  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
-  res.sendFile(path.join(__dirname, '..', 'Painel', 'index.html'));
+  sendPainelHtml(res, 'index.html');
 });
 
 function lanAddresses() {

@@ -1,16 +1,25 @@
 :root {
-  --teal: #00a8b5;
-  --teal-dark: #008a95;
-  --teal-light: #e7f7f8;
+  --teal: #2563eb;
+  --teal-dark: #1d4ed8;
+  --teal-light: #e7efff;
   --text: #2c3340;
   --muted: #7a8494;
-  --line: #cfe8eb;
+  --line: #d6e4fb;
   --bg: #f4f8f9;
   --card: #ffffff;
   --ok: #1faa4c;
   --danger: #e53935;
   --font: "Segoe UI", "Helvetica Neue", -apple-system, BlinkMacSystemFont, sans-serif;
 }
+
+/* Edição local: botões em vermelho. Online usa o azul céu do :root. */
+html[data-edicao="local"] {
+  --teal: #d32f2f;
+  --teal-dark: #b71c1c;
+  --teal-light: #fdecea;
+  --line: #f0d4d4;
+}
+html[data-edicao="local"] .stop-icon { background: #fff; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -140,7 +149,7 @@ button, input, select, textarea {
     radial-gradient(circle at 30% 30%, var(--teal) 0 7px, transparent 8px),
     radial-gradient(circle at 70% 28%, var(--teal) 0 6px, transparent 7px),
     radial-gradient(circle at 50% 70%, var(--teal) 0 7px, transparent 8px),
-    linear-gradient(135deg, #e7f7f8, #ffffff);
+    linear-gradient(135deg, var(--teal-light), #ffffff);
   border: 2px solid var(--line);
   position: relative;
   flex-shrink: 0;

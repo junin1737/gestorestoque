@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="pt-BR" data-theme="claro">
+<html lang="pt-BR" data-theme="claro" data-edicao="online">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=201" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=201" />
+  <link rel="stylesheet" href="styles.css?v=202" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=202" />
 </head>
 <body>
   <div id="app">
@@ -232,12 +232,31 @@
         <!-- CONSULTAR COMPRAS -->
         <div id="page-compras" class="page" hidden>
           <div class="toolbar compras-toolbar">
-            <p class="hint" id="compras-status">A consulta na SEFAZ roda a cada 1h30.</p>
-            <label class="compras-auto">
-              <input type="checkbox" id="compras-auto" />
-              Importar pendentes automaticamente
-            </label>
-            <p class="hint">Desmarcado. A importação continua manual; o parâmetro fica guardado para o futuro.</p>
+            <div class="compras-head">
+              <div class="compras-head-main">
+                <p class="hint" id="compras-status">A primeira abertura lê os últimos 30 dias. Depois, a cada 1h30.</p>
+                <label class="compras-auto">
+                  <input type="checkbox" id="compras-auto" />
+                  <span>Importar pendentes automaticamente</span>
+                </label>
+                <p class="hint">Desmarcado. A importação continua manual; o parâmetro fica guardado para o futuro.</p>
+              </div>
+              <div class="compras-relogio" id="compras-relogio" title="Minutos até a próxima consulta na SEFAZ">
+                <svg class="compras-ico-relogio" viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.75"/>
+                  <path d="M12 7.5V12l3 2" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+                <div class="compras-crono">
+                  <svg viewBox="0 0 24 24" aria-hidden="true">
+                    <path d="M9.5 2.5h5M12 2.5v2.2" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                    <circle cx="12" cy="14" r="7.25" fill="none" stroke="currentColor" stroke-width="1.75"/>
+                    <path d="M12 14V9.8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/>
+                  </svg>
+                  <strong id="compras-minutos">—</strong>
+                  <span>min</span>
+                </div>
+              </div>
+            </div>
             <div class="compras-toolbar-row">
               <div class="seg" id="compras-filtro" role="tablist">
                 <button type="button" class="seg-btn active" data-status="todas">Todas</button>
@@ -543,9 +562,9 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=201"></script>
-  <script src="importacao-nfe.js?v=201"></script>
-  <script src="compras.js?v=201"></script>
-  <script src="app.js?v=201"></script>
+  <script src="vendor/zxing-browser.min.js?v=202"></script>
+  <script src="importacao-nfe.js?v=202"></script>
+  <script src="compras.js?v=202"></script>
+  <script src="app.js?v=202"></script>
 </body>
 </html>

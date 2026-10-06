@@ -1876,7 +1876,7 @@
   .imp-cmp-arrow { display: none; }
 }
 .imp-result-banner {
-  background: #eef4ff;
+  background: color-mix(in srgb, var(--accent) 12%, #fff);
   color: var(--accent);
   border-radius: 12px;
   padding: 0.75rem 1rem;
@@ -1906,7 +1906,7 @@
   color: inherit;
   font: inherit;
 }
-.imp-item-row.is-current { background: #eef4ff; box-shadow: inset 3px 0 0 var(--accent); }
+.imp-item-row.is-current { background: color-mix(in srgb, var(--accent) 12%, #fff); box-shadow: inset 3px 0 0 var(--accent); }
 .imp-item-row.ok .imp-item-num { background: var(--ok); color: #fff; font-size: 0.8rem; }
 .imp-item-num {
   width: 1.5rem; height: 1.5rem; border-radius: 50%;
