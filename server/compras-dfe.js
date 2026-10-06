@@ -9,8 +9,10 @@ const sefaz = require('./importacao-sefaz');
 
 /** Intervalo entre rodadas na SEFAZ. Acima de 1 h para não cair na rejeição 656. */
 const INTERVALO_MS = 90 * 60 * 1000;
-const JANELA_MS = 30 * 24 * 60 * 60 * 1000;
-const MAX_PAGINAS = 30;
+/** O webservice oficial só devolve documentos dos últimos 90 dias. */
+const JANELA_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_PAGINAS = 40;
+const CONTINUACAO_MS = 3000;
 
 let timer = null;
 let running = false;
@@ -219,27 +221,44 @@ function mergeNota(store, nota) {
   if (store.canceladas[nota.chave]) store.notas[nota.chave].cancelada = true;
 }
 
+function nsuNum(valor) {
+  const n = Number(String(valor || '0').replace(/\D/g, '') || '0');
+  return Number.isFinite(n) ? n : 0;
+}
+
+function filaCompleta(store) {
+  if (!store?.maxNSU) return false;
+  return nsuNum(store.ultNSU) >= nsuNum(store.maxNSU);
+}
+
 function ingerirLote(store, docs, cnpjNosso) {
   const cancelar = [];
+  const stats = { docs: 0, resumo: 0, proc: 0 };
   for (const doc of docs || []) {
+    stats.docs += 1;
     const xml = doc.xml || '';
     cancelar.push(...eventosCancelamento(xml));
     if (/<resNFe[\s>]/i.test(xml)) {
       const nota = notaFromResumo(xml);
       if (!nota) continue;
       if (cnpjNosso && nota.cnpjEmit === cnpjNosso) continue;
+      stats.resumo += 1;
       mergeNota(store, nota);
       continue;
     }
     if (sefaz.xmlNfeCompleto(xml)) {
       const nota = notaFromProc(xml, cnpjNosso);
-      if (nota) mergeNota(store, nota);
+      if (nota) {
+        stats.proc += 1;
+        mergeNota(store, nota);
+      }
     }
   }
   for (const ch of cancelar) {
     store.canceladas[ch] = true;
     if (store.notas[ch]) store.notas[ch].cancelada = true;
   }
+  return stats;
 }
 
 function sleep(ms) {
@@ -272,6 +291,9 @@ async function executarCiclo() {
     }
     let paginas = 0;
     let cnpj = '';
+    let recebidos = 0;
+    let resumos = 0;
+    let procs = 0;
     while (paginas < MAX_PAGINAS) {
       paginas += 1;
       const lote = await sefaz.distribuirNsu(store.ultNSU || '0');
@@ -281,18 +303,22 @@ async function executarCiclo() {
       store.ultimaConsulta = new Date().toISOString();
       if (lote.ultNSU) store.ultNSU = lote.ultNSU;
       if (lote.maxNSU) store.maxNSU = lote.maxNSU;
-      ingerirLote(store, lote.docs, cnpj);
+      const stats = ingerirLote(store, lote.docs, cnpj) || { docs: 0, resumo: 0, proc: 0 };
+      recebidos += stats.docs;
+      resumos += stats.resumo;
+      procs += stats.proc;
       saveStore(store);
-      const semMais = lote.cStat === '137' || !lote.maxNSU || store.ultNSU === lote.maxNSU;
+      const semMais = lote.cStat === '137' || !lote.maxNSU || filaCompleta(store);
       if (semMais || !lote.docs.length) break;
       await sleep(1200);
     }
     podarForaDaJanela(store);
     store.leituraInicial = true;
     saveStore(store);
+    const incompleto = store.ultimoCStat === '138' && !filaCompleta(store);
     // importarAutomatico fica guardado para uma próxima versão; a entrada continua manual.
-    console.log(`Consultar compras: cStat ${store.ultimoCStat || '—'} · NSU ${store.ultNSU} · ${Object.keys(store.notas).length} nota(s) em 30 dias.`);
-    agendar(INTERVALO_MS);
+    console.log(`Consultar compras: cStat ${store.ultimoCStat || '—'} · NSU ${store.ultNSU}/${store.maxNSU || '—'} · ${Object.keys(store.notas).length} nota(s) em 90 dias · ${recebidos} doc(s), ${resumos} resumo(s), ${procs} XML.`);
+    agendar(incompleto ? CONTINUACAO_MS : INTERVALO_MS);
   } catch (err) {
     store.ultimoCStat = err.cStat || '';
     store.ultimoErro = err.code === 'SEM_CERTIFICADO'
@@ -327,7 +353,7 @@ function iniciar() {
   const agora = Date.now();
   const ultima = store.ultimaConsulta ? new Date(store.ultimaConsulta).getTime() : 0;
   const faltam = ultima ? (ultima + INTERVALO_MS) - agora : INTERVALO_MS;
-  const incompleto = store.ultimoCStat === '138' && store.ultNSU && store.maxNSU && store.ultNSU !== store.maxNSU;
+  const incompleto = !filaCompleta(store) && nsuNum(store.maxNSU) > 0 && store.ultimoCStat !== '656';
   agendar(incompleto ? 5000 : Math.max(0, faltam));
 }
 
@@ -335,11 +361,12 @@ function nsuGravado(valor) {
   return String(valor || '0').replace(/\D/g, '') || '0';
 }
 
-/** Primeira abertura da tela: lê a fila da SEFAZ e fica só com os últimos 30 dias. */
+/** Primeira abertura, ou fila ainda incompleta: segue o NSU até o fim dos 90 dias. */
 function sincronizarAoAbrir() {
   const store = loadStore();
   const bloqueado = store.ultimoCStat === '656' && consultaRecente(store);
-  if (!store.leituraInicial && !running && !bloqueado) {
+  const incompleto = !filaCompleta(store) && nsuNum(store.maxNSU) > 0 && store.ultimoCStat !== '656';
+  if (!running && !bloqueado && (!store.leituraInicial || incompleto)) {
     executarCiclo().catch((err) => console.warn('Consultar compras:', err.message));
   }
   return listar();
@@ -422,8 +449,9 @@ async function listar() {
     importarAutomatico: store.importarAutomatico === true,
     leituraInicial: store.leituraInicial === true,
     consultando: running,
+    filaCompleta: filaCompleta(store),
     intervaloMin: 90,
-    janelaDias: 30,
+    janelaDias: 90,
   };
 }
 
