@@ -65,31 +65,84 @@ function buildSoap(nfeDadosMsg) {
   );
 }
 
-function httpsRequestPfx({ host, path, body, pfx, passphrase }) {
+function pfxLegado(err) {
+  return err?.code === 'ERR_CRYPTO_UNSUPPORTED_OPERATION'
+    || /PKCS12|unsupported/i.test(String(err?.message || ''));
+}
+
+async function httpsRequestPfxWindows({ host, path, body, arquivoPfx, passphrase }) {
+  const b64 = Buffer.from(body, 'utf8').toString('base64');
+  const scriptPath = path.join(os.tmpdir(), `gestor-dfe-${process.pid}-${Date.now()}.ps1`);
+  const script = `
+$ErrorActionPreference = 'Stop'
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$flags = [System.Security.Cryptography.X509Certificates.X509KeyStorageFlags]::Exportable
+$cert = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2($env:GESTOR_PFX_PATH, $env:GESTOR_PFX_PASS, $flags)
+$body = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('${b64}'))
+$uri = 'https://${host}${path}'
+$resp = Invoke-WebRequest -Uri $uri -Method POST -Body $body -ContentType 'application/soap+xml; charset=utf-8' -Certificate $cert -UseBasicParsing -TimeoutSec 90
+[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($resp.Content))
+`;
+  fs.writeFileSync(scriptPath, script, 'utf8');
+  try {
+    const { stdout } = await execFileAsync(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', scriptPath],
+      {
+        encoding: 'utf8',
+        maxBuffer: 32 * 1024 * 1024,
+        env: { ...process.env, GESTOR_PFX_PATH: arquivoPfx, GESTOR_PFX_PASS: passphrase || '' },
+      }
+    );
+    return Buffer.from(String(stdout || '').replace(/\s+/g, ''), 'base64').toString('utf8');
+  } finally {
+    try { fs.unlinkSync(scriptPath); } catch { /* arquivo temporário */ }
+  }
+}
+
+function httpsRequestPfx({ host, path, body, pfx, passphrase, arquivoPfx }) {
+  const fallback = () => httpsRequestPfxWindows({ host, path, body, arquivoPfx, passphrase })
+    .then((xml) => ({ status: 200, body: xml }));
   return new Promise((resolve, reject) => {
-    const req = https.request({
-      host,
-      path,
-      method: 'POST',
-      port: 443,
-      pfx,
-      passphrase: passphrase || '',
-      headers: {
-        'Content-Type': 'application/soap+xml; charset=utf-8',
-        'Content-Length': Buffer.byteLength(body),
-      },
-      timeout: 60000,
-    }, (res) => {
-      const chunks = [];
-      res.on('data', (c) => chunks.push(c));
-      res.on('end', () => {
-        resolve({
-          status: res.statusCode,
-          body: Buffer.concat(chunks).toString('utf8'),
+    let req;
+    try {
+      req = https.request({
+        host,
+        path,
+        method: 'POST',
+        port: 443,
+        pfx,
+        passphrase: passphrase || '',
+        headers: {
+          'Content-Type': 'application/soap+xml; charset=utf-8',
+          'Content-Length': Buffer.byteLength(body),
+        },
+        timeout: 60000,
+      }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          resolve({
+            status: res.statusCode,
+            body: Buffer.concat(chunks).toString('utf8'),
+          });
         });
       });
+    } catch (err) {
+      if (arquivoPfx && pfxLegado(err)) {
+        fallback().then(resolve, reject);
+        return;
+      }
+      reject(err);
+      return;
+    }
+    req.on('error', (err) => {
+      if (arquivoPfx && pfxLegado(err)) {
+        fallback().then(resolve, reject);
+        return;
+      }
+      reject(err);
     });
-    req.on('error', reject);
     req.on('timeout', () => {
       req.destroy();
       reject(new Error('Timeout na consulta SEFAZ.'));
@@ -256,12 +309,18 @@ function buildSoapDist(nfeDadosMsg) {
   return buildSoap(nfeDadosMsg);
 }
 
+function nsu15(valor) {
+  const digitos = String(valor || '0').replace(/\D/g, '') || '0';
+  return digitos.padStart(15, '0').slice(-15);
+}
+
 function buildDistNsuXml({ cnpj, tpAmb, cUFAutor, ultNSU }) {
-  const nsu = String(ultNSU || '0').replace(/\D/g, '') || '0';
+  const uf = String(cUFAutor || '').replace(/\D/g, '');
+  const nsu = nsu15(ultNSU);
   return (
     `<distDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">`
     + `<tpAmb>${tpAmb}</tpAmb>`
-    + (cUFAutor ? `<cUFAutor>${cUFAutor}</cUFAutor>` : '')
+    + (uf.length === 2 ? `<cUFAutor>${uf}</cUFAutor>` : '')
     + `<CNPJ>${cnpj}</CNPJ>`
     + `<distNSU><ultNSU>${nsu}</ultNSU></distNSU>`
     + `</distDFeInt>`
@@ -310,6 +369,7 @@ async function enviarSoap({ host, path, soap, fiscal }) {
     body: soap,
     pfx,
     passphrase: senha,
+    arquivoPfx: fiscal.arquivoPfx,
   });
   if (res.status >= 400) {
     throw new Error(`SEFAZ HTTP ${res.status}: ${String(res.body || '').slice(0, 300)}`);

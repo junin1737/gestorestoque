@@ -269,10 +269,12 @@ function mostrarBloqueioLicenca(lic) {
 function setServiceStatus(online, detail) {
   const el = $('#svc-status');
   if (!el) return;
-  el.classList.toggle('erro', !online);
-  el.textContent = online
+  const texto = online
     ? (detail || 'Serviço online')
     : (detail || 'Serviço offline — inicie com iniciar.bat');
+  el.textContent = texto;
+  el.classList.toggle('erro', !online);
+  el.classList.toggle('is-ok', online && /^Conectado/.test(texto));
 }
 
 function can(modulo, acao) {
@@ -541,7 +543,8 @@ async function bootstrap() {
 
   const conn = await api('/emitente');
   if (conn.ok) {
-    setServiceStatus(true, `Conectado · ${conn.emitente?.nome_fanta || ''}`);
+    const nomeConn = String(conn.emitente?.nome_fanta || '').trim();
+    setServiceStatus(true, nomeConn ? `Conectado • ${nomeConn.toLocaleUpperCase('pt-BR')}` : 'Conectado');
     setEmitenteUI(conn.emitente);
     applyTheme(state.config.tema, conn.emitente?.logo);
     await loadFuncionarios();

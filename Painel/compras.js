@@ -50,16 +50,15 @@ const Compras = (() => {
     const amb = dados.ambiente === 'producao' ? 'produção' : 'homologação';
     const pend = (dados.notas || []).filter((n) => n.status === 'Pendente').length;
     const partes = [];
-    if (!dados.certificadoOk) {
-      partes.push(dados.ultimoErro || 'Certificado NF-e não configurado. Configure em Serviço → Certificado NF-e.');
-    } else if (dados.ultimoErro) {
+    if (dados.ultimoErro && !(dados.certificadoOk && /n[aã]o configurado/i.test(dados.ultimoErro))) {
       partes.push(dados.ultimoErro);
     }
-    if (dados.consultando && !dados.leituraInicial) partes.push('Lendo notas dos últimos 30 dias na SEFAZ');
+    if (dados.consultando) partes.push('Lendo a fila da SEFAZ (últimos 90 dias)');
+    else if (dados.filaCompleta === false) partes.push('Ainda há notas na fila da SEFAZ');
     else if (dados.ultimaConsulta) partes.push(`Última consulta ${fmtQuando(dados.ultimaConsulta)}`);
     partes.push(`ambiente ${amb}`);
     partes.push(`${pend} pendente(s)`);
-    partes.push('últimos 30 dias');
+    partes.push('últimos 90 dias');
     el.textContent = partes.join(' · ');
     const chk = $('#compras-auto');
     if (chk && document.activeElement !== chk) chk.checked = !!dados.importarAutomatico;
@@ -112,7 +111,7 @@ const Compras = (() => {
         ? 'Sem certificado, a SEFAZ não envia as notas. Configure o A1 ou o certificado do Windows no serviço.'
         : (dados.notas || []).length
           ? 'Nenhuma nota neste filtro.'
-          : 'Nenhuma NF-e dos últimos 30 dias. A primeira abertura consulta a SEFAZ; as seguintes, a cada 1h30.';
+          : 'Nenhuma NF-e dos últimos 90 dias. A SEFAZ só envia esse período; a lista compara com as já lançadas.';
       box.innerHTML = `<p class="hint">${esc(vazio)}</p>`;
       return;
     }
