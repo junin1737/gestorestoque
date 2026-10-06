@@ -142,7 +142,7 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   if (margem > 0 && prcCusto > 0) {
     prcVenda = Number((prcCusto * (1 + margem / 100)).toFixed(4));
   }
-  if (!(prcVenda > 0)) prcVenda = prcCusto > 0 ? prcCusto : 0.01;
+  if (!(prcVenda > 0)) prcVenda = 0;
   const eanXml = String(xmlItem?.cEAN || '').trim();
   const barras = sistema.ean_em_referencia
     ? (String(sistema.cod_barras || '').trim() || null)

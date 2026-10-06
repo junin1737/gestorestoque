@@ -393,7 +393,7 @@ async function buildSistemaFromXmlItem(xmlItem, ufFornecedor) {
     qtd: Number((Number(xmlItem.qCom || 0) * Number(convSug?.conversor || 1)).toFixed(6)),
     prc_custo: xmlItem.vUnCom,
     prc_custo_nota: xmlItem.vUnCom,
-    prc_venda: Number(xmlItem.vUnCom || 0),
+    prc_venda: 0,
     v_desc: xmlItem.vDesc || 0,
     v_frete: xmlItem.vFrete || 0,
     v_seguro: xmlItem.vSeg || 0,

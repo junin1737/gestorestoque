@@ -998,6 +998,7 @@ const ImportacaoNfe = (() => {
     const ro = opts.readonly ? 'readonly' : '';
     const dis = opts.disabled ? 'disabled' : '';
     const step = opts.step ? ` step="${opts.step}"` : '';
+    const ph = opts.placeholder ? ` placeholder="${esc(opts.placeholder)}"` : '';
     const cls = opts.full
       ? 'imp-field full'
       : opts.half
@@ -1005,7 +1006,7 @@ const ImportacaoNfe = (() => {
         : opts.third
           ? 'imp-field third'
           : 'imp-field';
-    const input = `<input id="${id}" type="${type}" value="${esc(value ?? '')}" ${ro} ${dis}${step} />`;
+    const input = `<input id="${id}" type="${type}" value="${esc(value ?? '')}" ${ro} ${dis}${step}${ph} />`;
     const control = opts.money
       ? `<div class="imp-input-affix"><span>R$</span>${input}</div>`
       : input;
@@ -1664,13 +1665,31 @@ const ImportacaoNfe = (() => {
     `;
   }
 
+  function itemVinculado(it) {
+    return !!(it?.sistema?.id_identificador || it?.sistema?.criar_novo);
+  }
+
   function panelVinculo(it, sys, xml) {
-    const chips = [
+    const temProduto = itemVinculado(it);
+    const chips = temProduto ? [
       cmpHint(xml.cEAN, sys.cod_barras, 'EAN'),
       cmpHint(xml.NCM, sys.ncm, 'NCM'),
       cmpHint(xml.uCom, sys.uni_medida_xml || sys.uni_medida, 'Unid.'),
       cmpHint(xml.cProd, sys.cod_fornecedor, 'Cód.'),
-    ].filter(Boolean).join('');
+    ].filter(Boolean).join('') : '';
+    const cardEstoque = temProduto
+      ? `
+            <p class="imp-cmp-title">${esc(sys.descricao || (sys.criar_novo ? '(novo produto)' : ''))}</p>
+            <dl class="imp-cmp-dl">
+              <div><dt>ID ident.</dt><dd>${sys.id_identificador != null ? esc(sys.id_identificador) : 'novo'}</dd></div>
+              <div><dt>EAN</dt><dd>${esc(sys.cod_barras || '—')}</dd></div>
+              <div><dt>NCM</dt><dd>${esc(sys.ncm || '—')}</dd></div>
+              <div><dt>Unid. estoque</dt><dd>${esc(sys.uni_medida || '—')}</dd></div>
+              <div><dt>Custo / venda</dt><dd>${money(sys.prc_custo)} / ${Number(sys.prc_venda) > 0 ? money(sys.prc_venda) : '—'}</dd></div>
+              <div><dt>Cód. no fornec.</dt><dd>${esc(sys.cod_fornecedor || xml.cProd || '—')}</dd></div>
+            </dl>`
+      : `
+            <p class="imp-cmp-vazio">Tente localizar o produto e, caso não encontre, cadastre como novo.</p>`;
     return `
       <section class="imp-panel" data-panel="vinculo">
         <header class="imp-section-head">
@@ -1690,17 +1709,8 @@ const ImportacaoNfe = (() => {
               <div><dt>CFOP nota</dt><dd>${esc(xml.CFOP || '—')}</dd></div>
             </dl>
           </article>
-          <article class="imp-cmp-card estoque ${sys.id_identificador || sys.criar_novo ? 'ok' : 'pending'}">
-            <header><span class="imp-cmp-tag">No estoque</span><strong>Cadastro local</strong></header>
-            <p class="imp-cmp-title">${esc(sys.descricao || (sys.criar_novo ? '(novo produto)' : 'Sem vínculo'))}</p>
-            <dl class="imp-cmp-dl">
-              <div><dt>ID ident.</dt><dd>${sys.id_identificador != null ? esc(sys.id_identificador) : (sys.criar_novo ? 'novo' : '—')}</dd></div>
-              <div><dt>EAN</dt><dd>${esc(sys.cod_barras || '—')}</dd></div>
-              <div><dt>NCM</dt><dd>${esc(sys.ncm || '—')}</dd></div>
-              <div><dt>Unid. estoque</dt><dd>${esc(sys.uni_medida || '—')}</dd></div>
-              <div><dt>Custo / venda</dt><dd>${money(sys.prc_custo)} / ${money(sys.prc_venda)}</dd></div>
-              <div><dt>Cód. no fornec.</dt><dd>${esc(sys.cod_fornecedor || xml.cProd || '—')}</dd></div>
-            </dl>
+          <article class="imp-cmp-card estoque ${temProduto ? 'ok' : 'pending'}">
+            <header><span class="imp-cmp-tag">No estoque</span><strong>Cadastro local</strong></header>${cardEstoque}
           </article>
         </div>
         ${chips ? `<div class="imp-cmp-chips">${chips}</div>` : ''}
@@ -1919,7 +1929,7 @@ const ImportacaoNfe = (() => {
         <div class="imp-fields">
           ${field('Preço custo', 'imp-custo-ficha', moneyInput(sys.prc_custo ?? custoInfo.custoEstoque), { third: true, money: true })}
           ${field('Margem LB %', 'imp-margem', sys.margem_lb ?? 0, { type: 'number', step: '0.01', third: true })}
-          ${field('Preço venda', 'imp-venda', moneyInput(sys.prc_venda), { third: true, money: true })}
+          ${field('Preço venda', 'imp-venda', Number(sys.prc_venda) > 0 ? moneyInput(sys.prc_venda) : '', { third: true, money: true, placeholder: 'Opcional' })}
           ${field('Status', 'imp-status-prod', sys.status || 'A', { third: true })}
           ${comboField('Unidade', 'imp-uni-ficha', 'imp-uni-ficha-list', sys.uni_medida_saida || sys.uni_medida || '', { third: true, placeholder: 'Pesquisar unidade (TB_UNI_MEDIDA)…' })}
         </div>
@@ -2623,42 +2633,79 @@ const ImportacaoNfe = (() => {
       conversor: Number(it?.sistema?.conversor ?? 1) || 1,
     };
     baseNovo.qtd = Number((baseNovo.qtd_xml * baseNovo.conversor).toFixed(6));
-    if (ean && ean !== 'SEMGTIN' && ean.length >= 8) {
-      try {
-        const res = await api(`/estoque/codigo-barras?code=${encodeURIComponent(ean)}`);
-        const found = res.item;
-        if (found?.id_identificador) {
-          const vincular = await askConfirm(
-            `O código de barras ${ean} já existe no estoque: ${found.descricao} (ID ${found.id_identificador}). Deseja vincular a este produto da nota?`,
-            { okLabel: 'Vincular', cancelLabel: 'Cadastrar novo' }
-          );
-          if (vincular) {
-            await applyVinculo({
-              id_identificador: found.id_identificador,
-              id_estoque: found.id_estoque,
-              descricao: found.descricao,
-              cod_barras: found.cod_barras,
-              criar_novo: false,
-            });
-            return;
-          }
-          await applyVinculo({
-            ...baseNovo,
-            cod_barras: '',
-            referencia: ean,
-            ean_em_referencia: true,
-          });
-          deps.showMsg?.(
-            `Você optou por não vincular. O código de barras da nota (${ean}) será gravado em Referência, não no código de barras, para evitar duplicidade.`
-          );
-          return;
-        }
-      } catch (_) { /* segue cadastro novo */ }
+    baseNovo.prc_venda = 0;
+    baseNovo.margem_lb = 0;
+    const conflitos = await conflitosCodigoBarras(ean);
+    if (!(await confirmarCodigoBarrasNovo(ean, conflitos))) return;
+    if (conflitos.barras) {
+      await applyVinculo({
+        ...baseNovo,
+        cod_barras: '',
+        referencia: ean,
+        ean_em_referencia: true,
+      });
+      deps.showMsg?.(
+        `O código de barras da nota (${ean}) será gravado em Referência, não no código de barras, para evitar duplicidade com o produto ${conflitos.barras.descricao}.`
+      );
+      return;
     }
     await applyVinculo({
       ...baseNovo,
       cod_barras: it?.xml?.cEAN || '',
     });
+  }
+
+  /** Procura o código no código de barras e na referência dos produtos já cadastrados. */
+  async function conflitosCodigoBarras(code) {
+    const vazio = { barras: null, referencia: null };
+    const cod = String(code || '').trim();
+    if (!cod || /^SEM\s*GTIN$/i.test(cod) || cod.length < 8) return vazio;
+    try {
+      const res = await api(`/estoque/codigo-barras?code=${encodeURIComponent(cod)}&ref=1`);
+      return {
+        barras: res.item?.id_identificador ? res.item : null,
+        referencia: res.referencia?.id_identificador ? res.referencia : null,
+      };
+    } catch (_) {
+      return vazio;
+    }
+  }
+
+  async function confirmarCodigoBarrasNovo(code, conflitos) {
+    const opts = { okLabel: 'Continuar cadastro', cancelLabel: 'Cancelar' };
+    if (conflitos.referencia) {
+      const p = conflitos.referencia;
+      const ok = await askConfirm(
+        `Código de barras ${code} na referência do produto ${p.descricao} (ID ${p.id_identificador}). Deseja continuar com o cadastro?`,
+        opts
+      );
+      if (!ok) return false;
+    }
+    if (conflitos.barras) {
+      const p = conflitos.barras;
+      const ok = await askConfirm(
+        `Código de barras ${code} no código de barras do produto ${p.descricao} (ID ${p.id_identificador}). Deseja continuar com o cadastro?`,
+        opts
+      );
+      if (!ok) return false;
+    }
+    return true;
+  }
+
+  /** Código de barras digitado/lido na ficha de um produto novo: mesma conferência do cadastro. */
+  async function conferirEanProdutoNovo(inp, anterior) {
+    const it = itemAt(state.itemIndex);
+    if (!inp || !it?.sistema?.criar_novo) return;
+    const cod = String(inp.value || '').trim();
+    if (!cod || cod === String(anterior || '').trim()) return;
+    const conflitos = await conflitosCodigoBarras(cod);
+    if (await confirmarCodigoBarrasNovo(cod, conflitos)) {
+      it.sistema.cod_barras = cod;
+      inp.dataset.anterior = cod;
+      return;
+    }
+    inp.value = anterior || '';
+    it.sistema.cod_barras = anterior || '';
   }
 
   async function applyVinculo(patch) {
@@ -2874,8 +2921,7 @@ const ImportacaoNfe = (() => {
     }, it?.xml || {}).custoXml;
 
     const margem = gn('#imp-margem') ?? sys.margem_lb ?? 0;
-    let venda = parseMoney($('#imp-venda')?.value);
-    if (venda === undefined) venda = sys.prc_venda;
+    let venda = $('#imp-venda') ? (parseMoney($('#imp-venda').value) ?? 0) : sys.prc_venda;
     const calc = calcVendaPorMargem(custo, margem);
     if (calc != null && ($('#imp-margem') || margem > 0)) venda = calc;
 
@@ -3141,6 +3187,8 @@ const ImportacaoNfe = (() => {
       renderSessao();
       showView('sessao');
       setTab('itens');
+    } else if (opts.semRender) {
+      // quem chamou decide a próxima tela
     } else {
       const idx = state.sessao.itens.findIndex((x) => Number(x.nItem) === Number(it.nItem));
       if (idx >= 0) state.itemIndex = idx;
@@ -3149,8 +3197,31 @@ const ImportacaoNfe = (() => {
     return true;
   }
 
+  async function finalizarConferenciaItens() {
+    const voltarSessao = (tab) => {
+      renderSessao();
+      showView('sessao');
+      setTab(tab);
+    };
+    const pendentes = (state.sessao?.itens || []).filter((x) => !itemVinculado(x) || !x.conferido);
+    if (pendentes.length) {
+      deps.showMsg?.(`Ainda falta conferir: item ${pendentes.map((x) => x.nItem).join(', ')}.`);
+      voltarSessao('itens');
+      return;
+    }
+    const ir = await askConfirm('Prosseguir pro financeiro?', { okLabel: 'Sim', cancelLabel: 'Não' });
+    voltarSessao(ir ? 'financeiro' : 'itens');
+  }
+
+  function exigirProdutoVinculado(it) {
+    if (itemVinculado(it)) return true;
+    deps.showMsg?.('Localize o produto no estoque ou cadastre como novo antes de continuar.');
+    return false;
+  }
+
   function setItemTab(tabId) {
     const it = itemAt(state.itemIndex);
+    if (tabId !== 'vinculo' && !exigirProdutoVinculado(it)) return;
     if (!canOpenEtapa(tabId, it)) {
       deps.showToast?.('Confirme a etapa atual antes de avançar');
       return;
@@ -3178,6 +3249,7 @@ const ImportacaoNfe = (() => {
   function avancarEtapa() {
     const idx = ITEM_TABS_ETAPA.findIndex((t) => t.id === state.itemTab);
     if (idx < 0 || idx >= ITEM_TABS_ETAPA.length - 1) return;
+    if (!exigirProdutoVinculado(itemAt(state.itemIndex))) return;
     if (conferirEtapasAtivo()) {
       confirmEtapaAtual();
       deps.showToast?.('Etapa confirmada');
@@ -3456,10 +3528,21 @@ const ImportacaoNfe = (() => {
       saveItem();
     });
     $('#imp-salvar-proximo')?.addEventListener('click', async () => {
+      if (!exigirProdutoVinculado(itemAt(state.itemIndex))) return;
       if (conferirEtapasAtivo()) confirmEtapaAtual();
       const next = state.itemIndex < (state.sessao?.itens?.length || 0) - 1;
-      await saveItem({ next, back: !next });
+      if (next) {
+        await saveItem({ next: true });
+        return;
+      }
+      if (!(await saveItem({ semRender: true }))) return;
+      await finalizarConferenciaItens();
     });
+    const eanInp = $('#imp-ean');
+    if (eanInp) {
+      eanInp.dataset.anterior = eanInp.value;
+      eanInp.addEventListener('change', () => conferirEanProdutoNovo(eanInp, eanInp.dataset.anterior));
+    }
     $$('.imp-sugestao-opt').forEach((btn) => {
       btn.addEventListener('click', () => {
         applyVinculo({
@@ -4427,10 +4510,12 @@ const ImportacaoNfe = (() => {
     if (!raw) return false;
     const inp = $('#imp-ean');
     if (!inp) return false;
+    const anterior = inp.dataset.anterior ?? inp.value;
     inp.value = raw;
     const it = itemAt(state.itemIndex);
     if (it?.sistema) it.sistema.cod_barras = raw;
     deps.showToast?.('Código de barras atualizado');
+    conferirEanProdutoNovo(inp, anterior);
     return true;
   }
 
