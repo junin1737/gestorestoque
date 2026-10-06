@@ -603,7 +603,7 @@ const ImportacaoNfe = (() => {
       && (s.resumo?.total || 0) > 0
       && s.resumo?.pendentes === 0
       && s.resumo?.conferidos === s.resumo?.total;
-    const fornOk = !!s?.fornecedor?.id_fornec;
+    const fornOk = fornecedorPronto(s);
     const ok = !!(itensOk && fornOk);
     // Evita disabled nativo: no APK o clique some e o usuário acha que “não funciona”.
     btn.disabled = false;
@@ -614,6 +614,15 @@ const ImportacaoNfe = (() => {
       : (!fornOk
         ? 'Vincule o fornecedor antes de gravar'
         : 'Confira todos os itens antes de gravar');
+  }
+
+  /** Vinculado, ou com CNPJ/CPF e nome para o servidor cadastrar ao gravar a nota. */
+  function fornecedorPronto(s) {
+    if (s?.fornecedor?.id_fornec) return true;
+    const c = s?.fornecedor?.cadastro || {};
+    const emit = s?.xml?.emit || {};
+    const doc = String(c.cnpj || emit.CNPJ || emit.CPF || '').replace(/\D/g, '');
+    return (doc.length === 14 || doc.length === 11) && !!String(c.nome || emit.xNome || '').trim();
   }
 
   function renderNfChrome() {
@@ -632,7 +641,7 @@ const ImportacaoNfe = (() => {
     const total = s.resumo?.total || 0;
     const pct = total ? Math.round((conferidos / total) * 100) : 0;
     const itensOk = total > 0 && s.resumo?.pendentes === 0 && conferidos === total;
-    const fornOk = !!s?.fornecedor?.id_fornec;
+    const fornOk = fornecedorPronto(s);
     const ok = !!(itensOk && fornOk);
     const fornNome = emit.xFant || emit.xNome || s.fornecedor?.cadastro?.nome_fanta || s.fornecedor?.cadastro?.nome || '';
     el.hidden = false;
@@ -1078,7 +1087,7 @@ const ImportacaoNfe = (() => {
       <section class="imp-section imp-fornec-section">
         <header class="imp-section-head">
           <h4>Fornecedor</h4>
-          <span class="chip pending">Não vinculado</span>
+          <span class="chip pending">${fornecedorPronto(s) ? 'Novo · será cadastrado ao gravar a nota' : 'Não vinculado'}</span>
         </header>
         <div class="imp-vinc-pair imp-fornec-pair">
           <div class="imp-vinc-nota">

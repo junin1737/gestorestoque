@@ -1211,6 +1211,30 @@ async function confirmarSessao(sessaoId, opts = {}) {
   }
 }
 
+/** Emitente ainda sem cadastro: cadastra pelos dados do XML (ou os editados na tela) ao gravar a nota. */
+async function cadastrarFornecedorDaNota(s) {
+  const { cadastrarFornecedor, mapEmitToCadastro } = require('./importacao-fornecedor');
+  const doXml = s.xml?.emit ? mapEmitToCadastro(s.xml.emit, s.xml.ide) : {};
+  const cadastro = { ...doXml, ...(s.fornecedor?.cadastro || {}) };
+  if (!String(cadastro.cnpj || '').replace(/\D/g, '') || !String(cadastro.nome || '').trim()) {
+    return { ok: false, error: 'Fornecedor não vinculado. Vincule ou cadastre o emitente da NF-e.' };
+  }
+  try {
+    const out = await cadastrarFornecedor(cadastro, { nNF: s.xml?.ide?.nNF, serie: s.xml?.ide?.serie });
+    s.fornecedor = {
+      ...(s.fornecedor || {}),
+      id_fornec: out.id_fornec,
+      criar_novo: false,
+      origem: out.ja_existia ? 'cadastro' : 'novo',
+      cadastro: out.cadastro || cadastro,
+    };
+    commitSessao(s);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: `Não foi possível cadastrar o fornecedor: ${err.message}` };
+  }
+}
+
 async function confirmarSessaoInterno(sessaoId, opts = {}) {
   const store = loadStore();
   const s = store.sessoes.find((x) => x.id === sessaoId);
@@ -1223,12 +1247,13 @@ async function confirmarSessaoInterno(sessaoId, opts = {}) {
   if (naoConf.length) {
     return { ok: false, error: `${naoConf.length} item(ns) ainda não conferidos.` };
   }
-  if (!s.fornecedor?.id_fornec) {
-    return { ok: false, error: 'Fornecedor não vinculado. Vincule ou cadastre o emitente da NF-e.' };
-  }
   if (!s.manual && s.fonte !== 'demo') {
     const outro = await conferirDestinatario(s.xml);
     if (outro) return outro;
+  }
+  if (!s.fornecedor?.id_fornec) {
+    const cadastrado = await cadastrarFornecedorDaNota(s);
+    if (!cadastrado.ok) return cadastrado;
   }
 
   if (!Number(s.editar_id_nfcompra)) {

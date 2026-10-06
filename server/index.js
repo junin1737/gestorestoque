@@ -76,6 +76,11 @@ function printListenInfo() {
 const server = app.listen(PORT, '0.0.0.0', () => {
   printListenInfo();
   licenca.iniciar();
+  setTimeout(() => {
+    require('./importacao-gravar').corrigirTransportadoresNf()
+      .then((n) => { if (n) console.log(`Transportador corrigido em ${n} nota(s) de compra importada(s).`); })
+      .catch((err) => console.warn('Correção de transportadores:', err.message));
+  }, 15000).unref();
 });
 
 server.on('error', (err) => {

@@ -5,7 +5,10 @@ const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./impor
 const importacaoParams = require('./importacao-params');
 const { round2, calcCustoUnitarioItem, valorProdutoItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
-const { buscarPorCnpj, cadastrarFornecedor, onlyDigits } = require('./importacao-fornecedor');
+const {
+  RAMO_TRANSPORTES, buscarPorCnpj, buscarTransportador, cadastrarFornecedor, getFornecedorById,
+  mapEmitToCadastro, onlyDigits,
+} = require('./importacao-fornecedor');
 
 function usaLoteItem(it) {
   const flag = String(it?.sistema?.trabalha_lote ?? '').trim().toUpperCase();
@@ -730,42 +733,101 @@ async function toSqlDate(v) {
   return m ? m[1] : null;
 }
 
-async function ensureIdTransportador(db, sessao) {
-  const transp = sessao?.xml?.transp || {};
-  const t = transp.transporta || {};
+/**
+ * Dados para cadastrar o transportador: quando ele é o próprio emitente ou a própria loja
+ * (destinatário), o XML tem o endereço completo; senão usa o bloco <transporta>.
+ */
+function cadastroTransportadorXml(xml, doc) {
+  const t = xml?.transp?.transporta || {};
+  const ide = xml?.ide || {};
+  const emit = xml?.emit || {};
+  const dest = xml?.dest || {};
+  const obs = `Transportador incluído automaticamente via XML (NF-e). Nota fiscal/Série: ${ide.nNF || '—'}/${ide.serie || '—'}`;
+  const mesmo = [emit, dest].find((p) => onlyDigits(p.CNPJ || p.CPF) === doc);
+  if (mesmo) {
+    const base = mapEmitToCadastro(mesmo, ide);
+    return { ...base, nome: base.nome || String(t.xNome || '').trim(), observacao: obs };
+  }
+  return {
+    nome: String(t.xNome || '').trim(),
+    cnpj: doc,
+    insc_estad: String(t.IE || '').trim(),
+    end_lograd: String(t.xEnder || '').trim(),
+    uf: String(t.UF || '').trim(),
+    municipio: String(t.xMun || '').trim(),
+    observacao: obs,
+  };
+}
+
+/** Transportador da NF: fornecedor ativo do ramo Transportes (cadastra se não existir, como o Clipp faz). */
+async function ensureIdTransportador(_db, sessao) {
+  const t = sessao?.xml?.transp?.transporta || {};
   const doc = onlyDigits(t.CNPJ || t.CPF);
-  if (!doc) return null;
+  if (doc.length !== 14 && doc.length !== 11) return null;
   try {
-    const found = await buscarPorCnpj(doc);
+    const found = await buscarTransportador(doc);
     if (found?.id_fornec) return Number(found.id_fornec);
-  } catch { /* CPF pode falhar na busca de CNPJ 14 */ }
-  if (doc.length === 14 && String(t.xNome || '').trim()) {
-    try {
-      const out = await cadastrarFornecedor({
-        nome: String(t.xNome || '').trim(),
-        cnpj: doc,
-        insc_estad: t.IE || '',
-        end_lograd: t.xEnder || '',
-        uf: t.UF || '',
-        municipio: t.xMun || '',
-        observacao: 'Transportador incluído automaticamente via XML (NF-e).',
-      }, { nNF: sessao?.xml?.ide?.nNF, serie: sessao?.xml?.ide?.serie });
-      return Number(out.id_fornec);
-    } catch (e) {
-      console.warn('Transportador cadastro:', e.message);
+    const cadastro = cadastroTransportadorXml(sessao.xml, doc);
+    if (!cadastro.nome) {
+      const outro = await buscarPorCnpj(doc);
+      if (outro?.nome) cadastro.nome = outro.nome;
     }
+    if (!cadastro.nome) return null;
+    const out = await cadastrarFornecedor(cadastro, {}, { transportador: true });
+    return Number(out.id_fornec);
+  } catch (e) {
+    console.warn('Transportador:', e.message);
+    return null;
   }
-  if (doc.length === 11) {
+}
+
+/**
+ * Notas importadas antes desta correção apontam o transportador para um fornecedor fora do ramo
+ * Transportes (o Clipp acusa "transportador inativo" ao abrir). O Clipp sempre grava ramo Transportes,
+ * então só essas são trocadas para o cadastro de transportador do mesmo CNPJ/CPF.
+ */
+async function corrigirTransportadoresNf() {
+  const errados = await withDb(async (db) => {
+    if (!hasTable('TB_NFC_TRANSPORTADOR')) return [];
+    return query(db, `
+      SELECT T.ID_NFCOMPRA, T.ID_TRANSPORTADOR
+      FROM TB_NFC_TRANSPORTADOR T
+      JOIN TB_FORNECEDOR F ON F.ID_FORNEC = T.ID_TRANSPORTADOR
+      WHERE F.ID_RAMO IS DISTINCT FROM ${RAMO_TRANSPORTES}`);
+  });
+  if (!errados.length) return 0;
+  const novoPorAntigo = new Map();
+  for (const r of errados) {
+    const antigo = Number(r.ID_TRANSPORTADOR);
+    if (novoPorAntigo.has(antigo)) continue;
+    let novo = null;
     try {
-      const rows = await query(db, `
-        SELECT FIRST 1 ID_FORNEC FROM TB_FORNECEDOR
-        WHERE REPLACE(REPLACE(REPLACE(REPLACE(CNPJ,'.',''),'/',''),'-',''),' ','') = ?`, [doc]);
-      if (rows[0]) return Number(rows[0].ID_FORNEC);
+      const cad = await getFornecedorById(antigo);
+      const doc = onlyDigits(cad?.cnpj);
+      if (cad && (doc.length === 14 || doc.length === 11)) {
+        const existente = await buscarTransportador(doc);
+        novo = existente?.id_fornec || (await cadastrarFornecedor({
+          ...cad,
+          observacao: 'Transportador incluído automaticamente (correção de nota importada via XML).',
+        }, {}, { transportador: true })).id_fornec;
+      }
     } catch (e) {
-      console.warn('Transportador CPF:', e.message);
+      console.warn(`Transportador ${antigo}:`, e.message);
     }
+    novoPorAntigo.set(antigo, novo ? Number(novo) : null);
   }
-  return null;
+  let corrigidas = 0;
+  await withDb(async (db) => {
+    for (const r of errados) {
+      const novo = novoPorAntigo.get(Number(r.ID_TRANSPORTADOR));
+      if (!novo) continue;
+      await query(db, `
+        UPDATE TB_NFC_TRANSPORTADOR SET ID_TRANSPORTADOR = ?
+        WHERE ID_NFCOMPRA = ? AND ID_TRANSPORTADOR = ?`, [novo, Number(r.ID_NFCOMPRA), Number(r.ID_TRANSPORTADOR)]);
+      corrigidas += 1;
+    }
+  });
+  return corrigidas;
 }
 
 async function gravarTransportadorNf(db, idNf, sessao, idTransp) {
@@ -1337,4 +1399,6 @@ async function nfFinanceiroBloqueado(db, idNf) {
   return { bloqueado: false, motivo: '' };
 }
 
-module.exports = { gravarNfCompra, upsertEstTributosReforma, nfFinanceiroBloqueado };
+module.exports = {
+  gravarNfCompra, upsertEstTributosReforma, nfFinanceiroBloqueado, corrigirTransportadoresNf, ensureIdTransportador,
+};
