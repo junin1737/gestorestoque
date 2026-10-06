@@ -1544,6 +1544,15 @@
   line-height: 1.3;
 }
 
+.imp-cmp-vazio {
+  margin: 0;
+  padding: 1.4rem 0.5rem;
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
 .imp-cmp-dl {
   display: grid;
   gap: 0.35rem;

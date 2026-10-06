@@ -409,6 +409,29 @@ async function findProdutoPorBarras(db, appCfg, code, exceptIdIdentificador) {
   return null;
 }
 
+async function findProdutoPorReferencia(db, appCfg, code) {
+  const ref = String(code || '').trim();
+  if (!ref) return null;
+  for (const target of activeTargets(appCfg)) {
+    const t = target.tables;
+    if (!hasTable(t.produto)) continue;
+    const rows = await query(db, `SELECT FIRST 1 I.ID_IDENTIFICADOR, E.ID_ESTOQUE, E.DESCRICAO, P.REFERENCIA
+       FROM ${t.produto} P
+       JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
+       JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+      WHERE TRIM(CAST(P.REFERENCIA AS VARCHAR(60))) = ?`, [ref]);
+    if (!rows.length) continue;
+    const r = rows[0];
+    return {
+      id_identificador: Number(r.ID_IDENTIFICADOR),
+      id_estoque: Number(r.ID_ESTOQUE),
+      descricao: String(r.DESCRICAO || '').trim(),
+      referencia: String(r.REFERENCIA || '').trim(),
+    };
+  }
+  return null;
+}
+
 function mensagemBarrasDuplicado(item) {
   const nome = item && item.descricao ? ` no produto “${item.descricao}”` : '';
   return `Este código de barras já está cadastrado${nome}.`;
@@ -501,12 +524,16 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
 
 router.get('/estoque/codigo-barras', LER_ESTOQUE, async (req, res) => {
   const code = String(req.query.code || '').trim();
-  if (!code) return res.json({ ok: true, item: null });
+  if (!code) return res.json({ ok: true, item: null, referencia: null });
+  const comReferencia = req.query.ref === '1';
   try {
-    const item = await withDb((db, appCfg) => findProdutoPorBarras(db, appCfg, code));
-    res.json({ ok: true, item });
+    const out = await withDb(async (db, appCfg) => ({
+      item: await findProdutoPorBarras(db, appCfg, code),
+      referencia: comReferencia ? await findProdutoPorReferencia(db, appCfg, code) : null,
+    }));
+    res.json({ ok: true, ...out });
   } catch (err) {
-    res.json({ ok: false, error: err.message, item: null });
+    res.json({ ok: false, error: err.message, item: null, referencia: null });
   }
 });
 
@@ -2185,6 +2212,42 @@ router.post('/fiscal/testar', somenteServidorLocal, async (req, res) => {
     res.json(out);
   } catch (err) {
     res.json({ ok: false, error: err.message });
+  }
+});
+
+const comprasDfe = require('./compras-dfe');
+
+function guardCompras(req, res) {
+  if (auth.temAcesso(req.usuario, 'compras')) return true;
+  res.status(403).json({ ok: false, code: 'SEM_PERMISSAO', error: 'Sem permissão para consultar compras.' });
+  return false;
+}
+
+router.get('/compras', async (req, res) => {
+  if (!guardCompras(req, res)) return;
+  try {
+    res.json(await comprasDfe.listar());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, notas: [] });
+  }
+});
+
+router.post('/compras/parametro', (req, res) => {
+  if (!guardCompras(req, res)) return;
+  try {
+    const flag = req.body?.importarAutomatico === true || req.body?.importar_automatico === true;
+    res.json({ ok: true, importarAutomatico: comprasDfe.setImportarAutomatico(flag) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/compras/notas/:chave/xml', async (req, res) => {
+  if (!guardCompras(req, res)) return;
+  try {
+    res.json(await comprasDfe.obterXmlParaImportar(req.params.chave));
+  } catch (err) {
+    res.json({ ok: false, error: err.message, code: err.code || '' });
   }
 });
 

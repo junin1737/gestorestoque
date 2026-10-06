@@ -190,6 +190,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     definirPortaTunel(port);
     tunel.iniciar({ porta: port });
   });
+  try {
+    require('./compras-dfe').iniciar();
+  } catch (err) {
+    console.warn('Consultar compras:', err.message);
+  }
   setTimeout(() => {
     require('./importacao-gravar').corrigirTransportadoresNf()
       .then((n) => { if (n) console.log(`Transportador corrigido em ${n} nota(s) de compra importada(s).`); })

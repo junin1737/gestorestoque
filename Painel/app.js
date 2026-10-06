@@ -648,6 +648,10 @@ function enterApp() {
   if ($('#nav-importacao')) $('#nav-importacao').hidden = !showImp;
   if ($('#nav-importacao-mobile')) $('#nav-importacao-mobile').hidden = !showImp;
   if ($('#dash-importacao')) $('#dash-importacao').hidden = !showImp;
+  const showCompras = can('compras', 'acesso');
+  if ($('#nav-compras')) $('#nav-compras').hidden = !showCompras;
+  if ($('#nav-compras-mobile')) $('#nav-compras-mobile').hidden = !showCompras;
+  if ($('#dash-compras')) $('#dash-compras').hidden = !showCompras;
   const cfgSrv = $('#btn-config-servidor');
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
@@ -746,7 +750,7 @@ function setNavActive(page) {
   $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   const mais = $('#btn-mais-mobile');
   if (mais) {
-    mais.classList.toggle('active', ['alteracoes', 'usuarios', 'preferencias'].includes(page));
+    mais.classList.toggle('active', ['compras', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
   }
 }
 
@@ -761,6 +765,7 @@ $$('#mobile-nav [data-page]').forEach((btn) => {
 });
 $('#dash-estoque')?.addEventListener('click', () => showPage('estoque'));
 $('#dash-importacao')?.addEventListener('click', () => showPage('importacao'));
+$('#dash-compras')?.addEventListener('click', () => showPage('compras'));
 $('#dash-alteracoes')?.addEventListener('click', () => showPage('alteracoes'));
 
 function scrollAppTop() {
@@ -801,11 +806,19 @@ async function showPage(page) {
     showMsg('Sem permissão para notas de entrada.');
     page = 'dashboard';
   }
+  if (page === 'compras' && !can('compras', 'acesso')) {
+    showMsg('Sem permissão para consultar compras.');
+    page = 'dashboard';
+  }
+
+  const saiaCompras = $('#page-compras') && !$('#page-compras').hidden && page !== 'compras';
+  if (saiaCompras) window.Compras?.onPageLeave?.();
 
   setNavActive(page);
   if ($('#page-dashboard')) $('#page-dashboard').hidden = page !== 'dashboard';
   $('#page-estoque').hidden = page !== 'estoque';
   if ($('#page-importacao')) $('#page-importacao').hidden = page !== 'importacao';
+  if ($('#page-compras')) $('#page-compras').hidden = page !== 'compras';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
   if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
@@ -833,6 +846,8 @@ async function showPage(page) {
     buscarEstoque(state.buscaAplicada, { keepHistory: true });
   } else if (page === 'importacao') {
     window.ImportacaoNfe?.onPageEnter();
+  } else if (page === 'compras') {
+    window.Compras?.onPageEnter();
   }
   scrollAppTop();
 }
@@ -1732,6 +1747,12 @@ function renderUsuarios() {
             <option value="false" ${!u.permissoes?.online?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>` : ''}
+        <label>Consultar Compras
+          <select data-perm="compras.acesso" ${u.supervisor ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.compras?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.compras?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
       </div>
     </div>
   `).join('');
@@ -1793,6 +1814,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         },
         importacao: {
           acesso: $('[data-perm="importacao.acesso"]', card)?.value === 'true',
+        },
+        compras: {
+          acesso: $('[data-perm="compras.acesso"]', card)?.value === 'true',
         },
       },
     };
@@ -2830,6 +2854,15 @@ window.ImportacaoNfe?.init({
   getUsuario: () => state.usuario,
 });
 
+window.Compras?.init({
+  api,
+  showMsg,
+  showToast,
+  escapeHtml,
+  fmtMoney,
+  openImportacao: () => showPage('importacao'),
+});
+
 /** Botão Voltar do Android: uma tela atrás no app (não sair para conexão). */
 window.gestorHardwareBack = () => {
   const dlgDanfe = $('#dlg-danfe');
@@ -2856,6 +2889,11 @@ window.gestorHardwareBack = () => {
     return true;
   }
   if (window.ImportacaoNfe?.handleBack?.()) return true;
+  const pageCompras = $('#page-compras');
+  if (pageCompras && !pageCompras.hidden) {
+    showPage('dashboard');
+    return true;
+  }
   const pageImp = $('#page-importacao');
   if (pageImp && !pageImp.hidden) {
     showPage('dashboard');

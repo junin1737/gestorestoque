@@ -462,6 +462,27 @@ html[data-theme="empresa"] .btn-icon-menu { color: #fff; }
   padding: 0.75rem;
   box-shadow: var(--shadow);
 }
+.compras-toolbar {
+  flex-direction: column;
+  align-items: stretch;
+}
+.compras-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.compras-busca { flex: 1; min-width: 12rem; }
+.compras-auto {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  font-size: var(--fs-sm);
+  font-weight: 650;
+}
+.compras-lista .item-row,
+.compras-row { cursor: default; }
+.compras-row:hover { transform: none; }
 .toolbar input[type="search"] {
   max-width: none;
   flex: 1;
@@ -1287,7 +1308,8 @@ html[data-theme="escuro"] .toolbar-select select {
   }
   #page-dashboard,
   #page-usuarios,
-  #page-importacao {
+  #page-importacao,
+  #page-compras {
     overflow: auto;
     -webkit-overflow-scrolling: touch;
   }
