@@ -33,15 +33,16 @@ function paginaOnline(titulo, texto, extra = '') {
   const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>${esc(titulo)}</title>
+<link rel="icon" href="/icons/favicon.ico"><link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
 <style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f9;color:#1a1f26;display:grid;place-items:center;min-height:100vh}
 main{max-width:420px;padding:28px;text-align:center}h1{color:#1e3a5f;font-size:22px}p{color:#5a6577;line-height:1.5}
-.logo{width:72px;height:72px;border-radius:18px;background:#1e3a5f;color:#fff;font:700 28px system-ui;display:grid;place-items:center;margin:0 auto 16px}
+.logo{display:block;width:88px;height:88px;margin:0 auto 16px}
 .pedido{margin:22px 0 8px;padding:18px;border-radius:14px;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.08)}
 .pedido input{width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid #c9d1dc;border-radius:8px;font-size:15px;margin:6px 0 12px}
 .pedido button{width:100%;padding:11px;border:0;border-radius:8px;background:#1e3a5f;color:#fff;font-size:15px;font-weight:600;cursor:pointer}
 .pedido button:disabled{opacity:.6;cursor:default}.codigo{font:700 34px ui-monospace,Consolas,monospace;letter-spacing:3px;color:#1e3a5f;margin:6px 0}
 .pedido label{display:block;text-align:left;font-size:13px;color:#5a6577}.erro{color:#b42318}</style>
-</head><body><main><div class="logo">MT</div><h1>${esc(titulo)}</h1><p>${esc(texto)}</p>${extra}<p style="font-size:13px">MT Automações · (34) 3674-1937</p></main></body></html>`;
+</head><body><main><img class="logo" src="/icons/icon-192.png" alt="MT Automações"><h1>${esc(titulo)}</h1><p>${esc(texto)}</p>${extra}<p style="font-size:13px">MT Automações · (34) 3674-1937</p></main></body></html>`;
 }
 
 const PEDIDO_HTML = `<div class="pedido" id="pedido">
@@ -114,6 +115,8 @@ app.use((req, res, next) => {
     req.aparelho = ap;
     return next();
   }
+  // Ícones são públicos: aparecem na tela de pareamento e ao salvar na tela inicial.
+  if (req.method === 'GET' && /^\/(icons\/[a-z0-9-]+\.(png|ico)|favicon\.ico|manifest\.webmanifest)$/.test(req.path)) return next();
   if (req.path.startsWith('/api/')) {
     return res.status(403).json({ ok: false, code: 'APARELHO', error: 'Este aparelho não está autorizado para o acesso online.' });
   }
@@ -143,6 +146,9 @@ app.use(express.static(path.join(__dirname, '..', 'Painel'), {
     }
   },
 }));
+app.get('/favicon.ico', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'Painel', 'icons', 'favicon.ico'));
+});
 app.use('/api', licenca.guardLicenca, auth.exigirSessao, idempotencia.middleware, routes);
 
 app.get('*', (_req, res) => {
