@@ -31,6 +31,10 @@ const MODULOS = {
     label: 'Notas de entrada',
     default: { acesso: false },
   },
+  compras: {
+    label: 'Consultar Compras',
+    default: { acesso: false },
+  },
 };
 
 function getAppDataDir() {
@@ -100,6 +104,7 @@ function fullPermissoes() {
     if (key === 'alteracoes') out[key] = { acesso: true };
     if (key === 'usuarios') out[key] = { acesso: true };
     if (key === 'importacao') out[key] = { acesso: true };
+    if (key === 'compras') out[key] = { acesso: true };
   }
   return out;
 }

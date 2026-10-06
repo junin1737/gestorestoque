@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=197" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=197" />
+  <link rel="stylesheet" href="styles.css?v=198" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=198" />
 </head>
 <body>
   <div id="app">
@@ -85,6 +85,10 @@
             Notas de entrada
             <span class="nav-badge" id="nav-imp-badge" hidden>0</span>
           </button>
+          <button class="nav-btn" data-page="compras" id="nav-compras">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M15 15.5 19.5 20M8 10.5h5M10.5 8v5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Consultar compras
+          </button>
           <button class="nav-btn" data-page="alteracoes" id="nav-alteracoes">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15v4M12 11v8M16 8v11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Alterações
@@ -154,6 +158,13 @@
               <strong>Notas de entrada</strong>
               <span>Conferência da NF-e por item</span>
             </button>
+            <button type="button" id="dash-compras" class="dash-card">
+              <span class="dash-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M15 15.5 19.5 20M8 10.5h5M10.5 8v5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+              </span>
+              <strong>Consultar compras</strong>
+              <span>NF-e emitidas contra o CNPJ</span>
+            </button>
             <button type="button" id="dash-alteracoes" class="dash-card" hidden>
               <span class="dash-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M4 19V5M4 19h16M8 15v4M12 11v8M16 8v11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
@@ -215,6 +226,31 @@
               </div>
               <div class="panel detail-panel" id="estoque-detalhe"></div>
             </div>
+          </div>
+        </div>
+
+        <!-- CONSULTAR COMPRAS -->
+        <div id="page-compras" class="page" hidden>
+          <div class="toolbar compras-toolbar">
+            <p class="hint" id="compras-status">A consulta na SEFAZ roda a cada 1h30.</p>
+            <label class="compras-auto">
+              <input type="checkbox" id="compras-auto" />
+              Importar pendentes automaticamente
+            </label>
+            <p class="hint">Desmarcado. A importação continua manual; o parâmetro fica guardado para o futuro.</p>
+            <div class="compras-toolbar-row">
+              <div class="seg" id="compras-filtro" role="tablist">
+                <button type="button" class="seg-btn active" data-status="todas">Todas</button>
+                <button type="button" class="seg-btn" data-status="Pendente">Pendentes</button>
+                <button type="button" class="seg-btn" data-status="Lançada">Lançadas</button>
+              </div>
+              <div class="search-field compras-busca">
+                <input id="compras-busca" type="search" placeholder="Fornecedor, número ou chave" enterkeyhint="search" autocomplete="off" />
+              </div>
+            </div>
+          </div>
+          <div class="panel list-panel list-panel-full">
+            <div id="compras-lista" class="item-list"></div>
           </div>
         </div>
 
@@ -430,6 +466,7 @@
         <div id="mais-sheet" class="mais-sheet" hidden>
           <button type="button" class="mais-sheet-back" id="mais-sheet-back" aria-label="Fechar"></button>
           <div class="mais-sheet-card">
+            <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
             <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
             <button type="button" data-page="preferencias">Preferências</button>
@@ -506,8 +543,9 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=197"></script>
-  <script src="importacao-nfe.js?v=197"></script>
-  <script src="app.js?v=197"></script>
+  <script src="vendor/zxing-browser.min.js?v=198"></script>
+  <script src="importacao-nfe.js?v=198"></script>
+  <script src="compras.js?v=198"></script>
+  <script src="app.js?v=198"></script>
 </body>
 </html>

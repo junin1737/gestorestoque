@@ -4476,6 +4476,14 @@ const ImportacaoNfe = (() => {
     return false;
   }
 
+  function abrirSessaoImportada(sessao) {
+    state.sessao = sessao || null;
+    state.itemIndex = 0;
+    state.tab = 'dados';
+    state.view = 'sessao';
+    state.xmlTextPendente = null;
+  }
+
   function onPageEnter() {
     const title = $('#page-title');
     const sub = $('#page-sub');
@@ -4527,6 +4535,7 @@ const ImportacaoNfe = (() => {
     handleBack,
     getView: () => state.view,
     isDirtyConferencia,
+    abrirSessaoImportada,
   };
 })();
 

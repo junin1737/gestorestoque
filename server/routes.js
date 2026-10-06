@@ -2165,4 +2165,40 @@ router.post('/fiscal/testar', somenteServidorLocal, async (req, res) => {
   }
 });
 
+const comprasDfe = require('./compras-dfe');
+
+function guardCompras(req, res) {
+  if (auth.temAcesso(req.usuario, 'compras')) return true;
+  res.status(403).json({ ok: false, code: 'SEM_PERMISSAO', error: 'Sem permissão para consultar compras.' });
+  return false;
+}
+
+router.get('/compras', async (req, res) => {
+  if (!guardCompras(req, res)) return;
+  try {
+    res.json(await comprasDfe.listar());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, notas: [] });
+  }
+});
+
+router.post('/compras/parametro', (req, res) => {
+  if (!guardCompras(req, res)) return;
+  try {
+    const flag = req.body?.importarAutomatico === true || req.body?.importar_automatico === true;
+    res.json({ ok: true, importarAutomatico: comprasDfe.setImportarAutomatico(flag) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/compras/notas/:chave/xml', async (req, res) => {
+  if (!guardCompras(req, res)) return;
+  try {
+    res.json(await comprasDfe.obterXmlParaImportar(req.params.chave));
+  } catch (err) {
+    res.json({ ok: false, error: err.message, code: err.code || '' });
+  }
+});
+
 module.exports = router;

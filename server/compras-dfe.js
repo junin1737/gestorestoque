@@ -1,0 +1,431 @@
+'use strict';
+
+const fs = require('fs');
+const path = require('path');
+const { getAppDataDir } = require('./config');
+const { withDb, query } = require('./db');
+const { getFiscalConfig } = require('./certificado');
+const sefaz = require('./importacao-sefaz');
+
+/** Intervalo entre rodadas na SEFAZ. Acima de 1 h para não cair na rejeição 656. */
+const INTERVALO_MS = 90 * 60 * 1000;
+const INTERVALO_SEM_CERT_MS = 5 * 60 * 1000;
+const MAX_PAGINAS = 30;
+
+let timer = null;
+let running = false;
+
+function storePath() {
+  return path.join(getAppDataDir(), 'compras-dfe.json');
+}
+
+function xmlPath(chave) {
+  return path.join(getAppDataDir(), 'xml', `${chave}.xml`);
+}
+
+function emptyStore() {
+  return {
+    ultNSU: '0',
+    maxNSU: '0',
+    ultimaConsulta: null,
+    proximaConsulta: null,
+    ultimoErro: '',
+    ultimoCStat: '',
+    importarAutomatico: false,
+    canceladas: {},
+    notas: {},
+  };
+}
+
+function loadStore() {
+  const p = storePath();
+  if (!fs.existsSync(p)) return emptyStore();
+  try {
+    const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
+    return {
+      ...emptyStore(),
+      ...raw,
+      importarAutomatico: raw.importarAutomatico === true,
+      canceladas: raw.canceladas && typeof raw.canceladas === 'object' ? raw.canceladas : {},
+      notas: raw.notas && typeof raw.notas === 'object' ? raw.notas : {},
+    };
+  } catch {
+    return emptyStore();
+  }
+}
+
+function saveStore(store) {
+  const p = storePath();
+  const tmp = `${p}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(store), 'utf8');
+  fs.renameSync(tmp, p);
+}
+
+function decodeXmlText(s) {
+  return String(s || '')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function soDigitos(v) {
+  return String(v || '').replace(/\D/g, '');
+}
+
+function numKey(v) {
+  const d = soDigitos(v);
+  if (!d) return '';
+  const n = Number(d);
+  return Number.isFinite(n) ? String(n) : '';
+}
+
+function serieKey(v) {
+  const t = String(v ?? '').trim();
+  if (!t) return '';
+  if (/^\d+$/.test(t)) return String(Number(t));
+  return t;
+}
+
+function partesChave(chave) {
+  const ch = soDigitos(chave);
+  if (ch.length !== 44) return null;
+  return {
+    cnpjEmit: ch.slice(6, 20),
+    modelo: ch.slice(20, 22),
+    serie: String(Number(ch.slice(22, 25))),
+    nNF: String(Number(ch.slice(25, 34))),
+  };
+}
+
+function lerXmlArquivo(chave) {
+  const p = xmlPath(chave);
+  try {
+    if (!fs.existsSync(p)) return '';
+    return fs.readFileSync(p, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
+function gravarXmlArquivo(chave, xml) {
+  const dir = path.join(getAppDataDir(), 'xml');
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(xmlPath(chave), xml, 'utf8');
+}
+
+function notaFromResumo(xml) {
+  const chave = soDigitos(sefaz.extractTag(xml, 'chNFe'));
+  const partes = partesChave(chave);
+  if (!partes || partes.modelo !== '55') return null;
+  const sit = sefaz.extractTag(xml, 'cSitNFe');
+  return {
+    chave,
+    cnpjEmit: soDigitos(sefaz.extractTag(xml, 'CNPJ')) || partes.cnpjEmit,
+    emitente: decodeXmlText(sefaz.extractTag(xml, 'xNome')),
+    dhEmi: sefaz.extractTag(xml, 'dhEmi'),
+    vNF: Number(sefaz.extractTag(xml, 'vNF') || 0),
+    nNF: partes.nNF,
+    serie: partes.serie,
+    modelo: '55',
+    cancelada: sit === '3' || sit === '2',
+    temXml: false,
+  };
+}
+
+function notaFromProc(xml, cnpjNosso) {
+  if (!sefaz.xmlNfeCompleto(xml)) return null;
+  const inf = sefaz.extractBlock(xml, 'infNFe') || xml;
+  const id = (String(xml).match(/\bId="NFe(\d{44})"/i) || [])[1] || '';
+  const chave = id || soDigitos(sefaz.extractTag(inf, 'chNFe'));
+  const partes = partesChave(chave);
+  if (!partes || partes.modelo !== '55') return null;
+  const emit = sefaz.extractBlock(inf, 'emit');
+  const dest = sefaz.extractBlock(inf, 'dest');
+  const ide = sefaz.extractBlock(inf, 'ide');
+  const tot = sefaz.extractBlock(inf, 'ICMSTot');
+  const destCnpj = soDigitos(sefaz.extractTag(dest, 'CNPJ') || sefaz.extractTag(dest, 'CPF'));
+  if (!cnpjNosso || destCnpj !== cnpjNosso) return null;
+  const emitCnpj = soDigitos(sefaz.extractTag(emit, 'CNPJ') || sefaz.extractTag(emit, 'CPF'));
+  return {
+    chave,
+    cnpjEmit: emitCnpj || partes.cnpjEmit,
+    emitente: decodeXmlText(sefaz.extractTag(emit, 'xNome') || sefaz.extractTag(emit, 'xFant')),
+    dhEmi: sefaz.extractTag(ide, 'dhEmi') || sefaz.extractTag(ide, 'dEmi'),
+    vNF: Number(sefaz.extractTag(tot, 'vNF') || 0),
+    nNF: numKey(sefaz.extractTag(ide, 'nNF')) || partes.nNF,
+    serie: serieKey(sefaz.extractTag(ide, 'serie')) || partes.serie,
+    modelo: '55',
+    cancelada: false,
+    temXml: true,
+    xml,
+  };
+}
+
+function eventosCancelamento(xml) {
+  const chaves = [];
+  if (!/<(?:[\w.-]+:)?tpEvento>\s*11011[12]\s*<\/(?:[\w.-]+:)?tpEvento>/i.test(String(xml || ''))) return chaves;
+  const re = /<(?:[\w.-]+:)?chNFe>\s*(\d{44})\s*<\/(?:[\w.-]+:)?chNFe>/gi;
+  let m;
+  while ((m = re.exec(String(xml)))) chaves.push(m[1]);
+  return chaves;
+}
+
+function mergeNota(store, nota) {
+  const prev = store.notas[nota.chave] || {};
+  const cancelada = !!(nota.cancelada || prev.cancelada || store.canceladas[nota.chave]);
+  store.notas[nota.chave] = {
+    chave: nota.chave,
+    cnpjEmit: nota.cnpjEmit || prev.cnpjEmit || '',
+    emitente: nota.emitente || prev.emitente || '',
+    dhEmi: nota.dhEmi || prev.dhEmi || '',
+    vNF: nota.vNF || prev.vNF || 0,
+    nNF: nota.nNF || prev.nNF || '',
+    serie: nota.serie || prev.serie || '',
+    modelo: '55',
+    cancelada,
+    temXml: !!(nota.temXml || prev.temXml),
+    atualizadaEm: new Date().toISOString(),
+  };
+  if (nota.temXml && nota.xml) {
+    gravarXmlArquivo(nota.chave, nota.xml);
+    store.notas[nota.chave].temXml = true;
+  }
+  if (store.canceladas[nota.chave]) store.notas[nota.chave].cancelada = true;
+}
+
+function ingerirLote(store, docs, cnpjNosso) {
+  const cancelar = [];
+  for (const doc of docs || []) {
+    const xml = doc.xml || '';
+    cancelar.push(...eventosCancelamento(xml));
+    if (/<resNFe[\s>]/i.test(xml)) {
+      const nota = notaFromResumo(xml);
+      if (!nota) continue;
+      if (cnpjNosso && nota.cnpjEmit === cnpjNosso) continue;
+      mergeNota(store, nota);
+      continue;
+    }
+    if (sefaz.xmlNfeCompleto(xml)) {
+      const nota = notaFromProc(xml, cnpjNosso);
+      if (nota) mergeNota(store, nota);
+    }
+  }
+  for (const ch of cancelar) {
+    store.canceladas[ch] = true;
+    if (store.notas[ch]) store.notas[ch].cancelada = true;
+  }
+}
+
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function agendar(ms) {
+  if (timer) clearTimeout(timer);
+  const store = loadStore();
+  store.proximaConsulta = new Date(Date.now() + ms).toISOString();
+  saveStore(store);
+  timer = setTimeout(() => {
+    executarCiclo().catch((err) => console.warn('Consultar compras:', err.message));
+  }, ms);
+  if (timer.unref) timer.unref();
+}
+
+async function executarCiclo() {
+  if (running) return;
+  running = true;
+  const store = loadStore();
+  try {
+    const fiscal = getFiscalConfig();
+    if (!sefaz.fiscalReady(fiscal)) {
+      store.ultimoErro = 'Certificado NF-e não configurado. Configure em Serviço → Certificado NF-e.';
+      store.ultimoCStat = '';
+      saveStore(store);
+      agendar(INTERVALO_SEM_CERT_MS);
+      return;
+    }
+    let paginas = 0;
+    let cnpj = '';
+    while (paginas < MAX_PAGINAS) {
+      paginas += 1;
+      const lote = await sefaz.distribuirNsu(store.ultNSU || '0');
+      cnpj = lote.cnpj || cnpj;
+      store.ultimoCStat = lote.cStat || '';
+      store.ultimoErro = '';
+      store.ultimaConsulta = new Date().toISOString();
+      if (lote.ultNSU) store.ultNSU = lote.ultNSU;
+      if (lote.maxNSU) store.maxNSU = lote.maxNSU;
+      ingerirLote(store, lote.docs, cnpj);
+      saveStore(store);
+      const semMais = lote.cStat === '137' || !lote.maxNSU || store.ultNSU === lote.maxNSU;
+      if (semMais || !lote.docs.length) break;
+      await sleep(1200);
+    }
+    // importarAutomatico fica guardado para uma próxima versão; a entrada continua manual.
+    console.log(`Consultar compras: cStat ${store.ultimoCStat || '—'} · NSU ${store.ultNSU} · ${Object.keys(store.notas).length} nota(s).`);
+    agendar(INTERVALO_MS);
+  } catch (err) {
+    store.ultimoErro = err.message || String(err);
+    store.ultimoCStat = err.cStat || store.ultimoCStat || '';
+    if (err.ultNSU) store.ultNSU = err.ultNSU;
+    store.ultimaConsulta = new Date().toISOString();
+    saveStore(store);
+    console.warn('Consultar compras:', store.ultimoErro);
+    agendar(INTERVALO_MS);
+  } finally {
+    running = false;
+  }
+}
+
+function iniciar() {
+  const store = loadStore();
+  const agora = Date.now();
+  const ultima = store.ultimaConsulta ? new Date(store.ultimaConsulta).getTime() : 0;
+  const faltam = ultima ? (ultima + INTERVALO_MS) - agora : 0;
+  const incompleto = store.ultimoCStat === '138' && store.ultNSU && store.maxNSU && store.ultNSU !== store.maxNSU;
+  const espera = incompleto ? 20000 : (faltam > 0 ? faltam : 20000);
+  agendar(espera);
+}
+
+async function mapaLancadas(notas) {
+  const porChave = new Map();
+  const porTripla = new Map();
+  if (!notas.length) return { porChave, porTripla };
+  const desde = new Date(Date.now() - 120 * 24 * 60 * 60 * 1000);
+  const desdeSql = desde.toISOString().slice(0, 10);
+  try {
+    await withDb(async (db) => {
+      const rows = await query(db, `
+        SELECT N.ID_NFCOMPRA, N.NF_NUMERO, TRIM(COALESCE(N.NF_SERIE, '')) AS NF_SERIE,
+               TRIM(COALESCE(N.NFE_ORIGEM, '')) AS NFE_ORIGEM,
+               REPLACE(REPLACE(REPLACE(REPLACE(TRIM(COALESCE(F.CNPJ, '')), '.', ''), '/', ''), '-', ''), ' ', '') AS CNPJ
+        FROM TB_NFCOMPRA N
+        LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
+        WHERE UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+          AND N.DT_EMISSAO >= ?`, [desdeSql]);
+      for (const r of rows || []) {
+        const id = Number(r.ID_NFCOMPRA);
+        const chave = soDigitos(r.NFE_ORIGEM);
+        if (chave.length === 44) porChave.set(chave, id);
+        const tripla = `${numKey(r.NF_NUMERO)}|${serieKey(r.NF_SERIE)}|${soDigitos(r.CNPJ)}`;
+        if (!porTripla.has(tripla)) porTripla.set(tripla, id);
+      }
+    });
+  } catch (err) {
+    console.warn('Consultar compras: não comparou com TB_NFCOMPRA:', err.message);
+  }
+  return { porChave, porTripla };
+}
+
+async function listar() {
+  const store = loadStore();
+  const fiscal = getFiscalConfig();
+  const brutas = Object.values(store.notas);
+  const mapa = await mapaLancadas(brutas);
+  const notas = brutas.map((n) => {
+    const idChave = mapa.porChave.get(n.chave) || null;
+    const idTripla = mapa.porTripla.get(`${numKey(n.nNF)}|${serieKey(n.serie)}|${soDigitos(n.cnpjEmit)}`) || null;
+    const id = idChave || idTripla;
+    let status = 'Pendente';
+    if (n.cancelada) status = 'Cancelada';
+    else if (id) status = 'Lançada';
+    const arquivo = lerXmlArquivo(n.chave);
+    return {
+      chave: n.chave,
+      nNF: n.nNF || '',
+      serie: n.serie || '',
+      emitente: n.emitente || '',
+      cnpjEmit: n.cnpjEmit || '',
+      dhEmi: n.dhEmi || '',
+      vNF: Number(n.vNF || 0),
+      status,
+      id_nfcompra: id,
+      temXml: !!(n.temXml && sefaz.xmlNfeCompleto(arquivo)),
+    };
+  });
+  notas.sort((a, b) => String(b.dhEmi).localeCompare(String(a.dhEmi)) || b.chave.localeCompare(a.chave));
+  return {
+    ok: true,
+    notas,
+    ultimaConsulta: store.ultimaConsulta,
+    proximaConsulta: store.proximaConsulta,
+    ultimoErro: store.ultimoErro || '',
+    ultimoCStat: store.ultimoCStat || '',
+    certificadoOk: sefaz.fiscalReady(fiscal),
+    ambiente: fiscal.ambiente === 'producao' ? 'producao' : 'homologacao',
+    importarAutomatico: store.importarAutomatico === true,
+    intervaloMin: 90,
+  };
+}
+
+function setImportarAutomatico(valor) {
+  const store = loadStore();
+  store.importarAutomatico = valor === true;
+  saveStore(store);
+  return store.importarAutomatico;
+}
+
+async function obterXmlParaImportar(chave) {
+  const ch = soDigitos(chave);
+  if (ch.length !== 44) {
+    const e = new Error('Chave de acesso inválida.');
+    e.code = 'CHAVE';
+    throw e;
+  }
+  const store = loadStore();
+  const nota = store.notas[ch];
+  if (nota?.cancelada || store.canceladas[ch]) {
+    const e = new Error('Esta NF-e está cancelada na SEFAZ e não pode ser importada.');
+    e.code = 'CANCELADA';
+    throw e;
+  }
+  const arquivo = lerXmlArquivo(ch);
+  if (sefaz.xmlNfeCompleto(arquivo)) {
+    return { ok: true, chave: ch, xmlText: arquivo, via: 'arquivo' };
+  }
+  try {
+    const direto = await sefaz.consultarChaveSefaz(ch);
+    if (direto?.xmlText && sefaz.xmlNfeCompleto(direto.xmlText)) {
+      if (nota) {
+        nota.temXml = true;
+        saveStore(store);
+      }
+      gravarXmlArquivo(ch, direto.xmlText);
+      return { ok: true, chave: ch, xmlText: direto.xmlText, via: 'sefaz' };
+    }
+  } catch (err) {
+    const segue = err.code === 'SEM_XML_COMPLETO' || err.code === 'SEM_XML';
+    if (!segue) throw err;
+  }
+  await sefaz.manifestarCiencia(ch);
+  if (nota) {
+    nota.cienciaEm = new Date().toISOString();
+    saveStore(store);
+  }
+  await sleep(4000);
+  const depois = await sefaz.consultarChaveSefaz(ch);
+  if (!depois?.xmlText || !sefaz.xmlNfeCompleto(depois.xmlText)) {
+    const e = new Error('A ciência foi registrada, mas a SEFAZ ainda não liberou o XML completo. Tente importar de novo em alguns minutos.');
+    e.code = 'SEM_XML_COMPLETO';
+    throw e;
+  }
+  if (nota) {
+    nota.temXml = true;
+    saveStore(store);
+  }
+  gravarXmlArquivo(ch, depois.xmlText);
+  return { ok: true, chave: ch, xmlText: depois.xmlText, via: 'ciencia' };
+}
+
+module.exports = {
+  INTERVALO_MS,
+  iniciar,
+  listar,
+  setImportarAutomatico,
+  obterXmlParaImportar,
+  ingerirLote,
+  partesChave,
+  loadStore,
+};
