@@ -6,6 +6,7 @@ const Compras = (() => {
   let dados = null;
   let filtro = 'todas';
   let timer = null;
+  let relogioTimer = null;
   let importando = false;
 
   function $(sel, root = document) {
@@ -54,14 +55,38 @@ const Compras = (() => {
     } else if (dados.ultimoErro) {
       partes.push(dados.ultimoErro);
     }
-    if (dados.ultimaConsulta) partes.push(`Última consulta ${fmtQuando(dados.ultimaConsulta)}`);
-    if (dados.proximaConsulta) partes.push(`próxima ${fmtQuando(dados.proximaConsulta)}`);
+    if (dados.consultando && !dados.leituraInicial) partes.push('Lendo notas dos últimos 30 dias na SEFAZ');
+    else if (dados.ultimaConsulta) partes.push(`Última consulta ${fmtQuando(dados.ultimaConsulta)}`);
     partes.push(`ambiente ${amb}`);
     partes.push(`${pend} pendente(s)`);
-    partes.push('consulta automática a cada 1h30');
+    partes.push('últimos 30 dias');
     el.textContent = partes.join(' · ');
     const chk = $('#compras-auto');
     if (chk && document.activeElement !== chk) chk.checked = !!dados.importarAutomatico;
+    renderRelogio();
+  }
+
+  function minutosRestantes() {
+    if (dados?.consultando && !dados?.proximaConsulta) return null;
+    if (!dados?.proximaConsulta) return null;
+    const ms = new Date(dados.proximaConsulta).getTime() - Date.now();
+    if (!Number.isFinite(ms)) return null;
+    if (ms <= 0) return 0;
+    return Math.ceil(ms / 60000);
+  }
+
+  function renderRelogio() {
+    const el = $('#compras-minutos');
+    if (!el) return;
+    const unidade = el.parentElement?.querySelector('span');
+    const min = minutosRestantes();
+    if (min == null) {
+      el.textContent = dados?.consultando ? '…' : '—';
+      if (unidade) unidade.textContent = '';
+      return;
+    }
+    el.textContent = String(min);
+    if (unidade) unidade.textContent = 'min';
   }
 
   function notasVisiveis() {
@@ -87,7 +112,7 @@ const Compras = (() => {
         ? 'Sem certificado, a SEFAZ não envia as notas. Configure o A1 ou o certificado do Windows no serviço.'
         : (dados.notas || []).length
           ? 'Nenhuma nota neste filtro.'
-          : 'Nenhuma NF-e destinada ainda. A primeira consulta começa pouco depois de abrir o serviço e, a partir daí, a cada 1h30.';
+          : 'Nenhuma NF-e dos últimos 30 dias. A primeira abertura consulta a SEFAZ; as seguintes, a cada 1h30.';
       box.innerHTML = `<p class="hint">${esc(vazio)}</p>`;
       return;
     }
@@ -118,8 +143,10 @@ const Compras = (() => {
     });
   }
 
-  async function load() {
-    const res = await deps.api('/compras');
+  async function load(opts = {}) {
+    const res = opts.forcar
+      ? await deps.api('/compras/sincronizar', { method: 'POST', body: {} })
+      : await deps.api('/compras');
     if (!res?.ok && res?.error && !res.notas) {
       const el = $('#compras-status');
       if (el) el.textContent = res.error;
@@ -188,18 +215,27 @@ const Compras = (() => {
     const sub = document.getElementById('page-sub');
     if (title) title.textContent = 'Consultar compras';
     if (sub) sub.textContent = 'NF-e emitidas contra o CNPJ';
-    load();
+    load({ forcar: true });
     if (timer) clearInterval(timer);
+    if (relogioTimer) clearInterval(relogioTimer);
     timer = setInterval(() => {
       const page = document.getElementById('page-compras');
       if (page && !page.hidden) load();
     }, 20000);
+    relogioTimer = setInterval(() => {
+      const page = document.getElementById('page-compras');
+      if (page && !page.hidden) renderRelogio();
+    }, 15000);
   }
 
   function onPageLeave() {
     if (timer) {
       clearInterval(timer);
       timer = null;
+    }
+    if (relogioTimer) {
+      clearInterval(relogioTimer);
+      relogioTimer = null;
     }
   }
 

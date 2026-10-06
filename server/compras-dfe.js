@@ -9,7 +9,7 @@ const sefaz = require('./importacao-sefaz');
 
 /** Intervalo entre rodadas na SEFAZ. Acima de 1 h para não cair na rejeição 656. */
 const INTERVALO_MS = 90 * 60 * 1000;
-const INTERVALO_SEM_CERT_MS = 5 * 60 * 1000;
+const JANELA_MS = 30 * 24 * 60 * 60 * 1000;
 const MAX_PAGINAS = 30;
 
 let timer = null;
@@ -32,6 +32,7 @@ function emptyStore() {
     ultimoErro: '',
     ultimoCStat: '',
     importarAutomatico: false,
+    leituraInicial: false,
     canceladas: {},
     notas: {},
   };
@@ -46,6 +47,7 @@ function loadStore() {
       ...emptyStore(),
       ...raw,
       importarAutomatico: raw.importarAutomatico === true,
+      leituraInicial: raw.leituraInicial === true || ['137', '138'].includes(String(raw.ultimoCStat || '')),
       canceladas: raw.canceladas && typeof raw.canceladas === 'object' ? raw.canceladas : {},
       notas: raw.notas && typeof raw.notas === 'object' ? raw.notas : {},
     };
@@ -172,7 +174,29 @@ function eventosCancelamento(xml) {
   return chaves;
 }
 
+function emissaoMs(nota) {
+  const t = Date.parse(nota?.dhEmi || '');
+  if (Number.isFinite(t)) return t;
+  const ch = soDigitos(nota?.chave);
+  if (ch.length !== 44) return Date.now();
+  const aa = Number(ch.slice(2, 4));
+  const mm = Number(ch.slice(4, 6));
+  if (!aa || mm < 1 || mm > 12) return Date.now();
+  return Date.UTC(2000 + aa, mm, 0, 15, 0, 0);
+}
+
+function dentroDaJanela(nota, agora = Date.now()) {
+  return emissaoMs(nota) >= agora - JANELA_MS;
+}
+
+function podarForaDaJanela(store) {
+  for (const chave of Object.keys(store.notas || {})) {
+    if (!dentroDaJanela(store.notas[chave])) delete store.notas[chave];
+  }
+}
+
 function mergeNota(store, nota) {
+  if (!dentroDaJanela(nota)) return;
   const prev = store.notas[nota.chave] || {};
   const cancelada = !!(nota.cancelada || prev.cancelada || store.canceladas[nota.chave]);
   store.notas[nota.chave] = {
@@ -242,8 +266,8 @@ async function executarCiclo() {
     if (!sefaz.fiscalReady(fiscal)) {
       store.ultimoErro = 'Certificado NF-e não configurado. Configure em Serviço → Certificado NF-e.';
       store.ultimoCStat = '';
+      store.proximaConsulta = null;
       saveStore(store);
-      agendar(INTERVALO_SEM_CERT_MS);
       return;
     }
     let paginas = 0;
@@ -263,8 +287,11 @@ async function executarCiclo() {
       if (semMais || !lote.docs.length) break;
       await sleep(1200);
     }
+    podarForaDaJanela(store);
+    store.leituraInicial = true;
+    saveStore(store);
     // importarAutomatico fica guardado para uma próxima versão; a entrada continua manual.
-    console.log(`Consultar compras: cStat ${store.ultimoCStat || '—'} · NSU ${store.ultNSU} · ${Object.keys(store.notas).length} nota(s).`);
+    console.log(`Consultar compras: cStat ${store.ultimoCStat || '—'} · NSU ${store.ultNSU} · ${Object.keys(store.notas).length} nota(s) em 30 dias.`);
     agendar(INTERVALO_MS);
   } catch (err) {
     store.ultimoErro = err.message || String(err);
@@ -279,14 +306,28 @@ async function executarCiclo() {
   }
 }
 
+function consultaRecente(store) {
+  const ultima = store.ultimaConsulta ? new Date(store.ultimaConsulta).getTime() : 0;
+  return !!(ultima && (Date.now() - ultima) < INTERVALO_MS);
+}
+
 function iniciar() {
   const store = loadStore();
+  if (!store.leituraInicial) return;
   const agora = Date.now();
   const ultima = store.ultimaConsulta ? new Date(store.ultimaConsulta).getTime() : 0;
-  const faltam = ultima ? (ultima + INTERVALO_MS) - agora : 0;
+  const faltam = ultima ? (ultima + INTERVALO_MS) - agora : INTERVALO_MS;
   const incompleto = store.ultimoCStat === '138' && store.ultNSU && store.maxNSU && store.ultNSU !== store.maxNSU;
-  const espera = incompleto ? 20000 : (faltam > 0 ? faltam : 20000);
-  agendar(espera);
+  agendar(incompleto ? 5000 : Math.max(0, faltam));
+}
+
+/** Primeira abertura da tela: lê a fila da SEFAZ e fica só com os últimos 30 dias. */
+function sincronizarAoAbrir() {
+  const store = loadStore();
+  if (!store.leituraInicial && !running && !consultaRecente(store)) {
+    executarCiclo().catch((err) => console.warn('Consultar compras:', err.message));
+  }
+  return listar();
 }
 
 async function mapaLancadas(notas) {
@@ -324,7 +365,7 @@ async function listar() {
   const fiscal = getFiscalConfig();
   const brutas = Object.values(store.notas);
   const mapa = await mapaLancadas(brutas);
-  const notas = brutas.map((n) => {
+  const notas = brutas.filter((n) => dentroDaJanela(n)).map((n) => {
     const idChave = mapa.porChave.get(n.chave) || null;
     const idTripla = mapa.porTripla.get(`${numKey(n.nNF)}|${serieKey(n.serie)}|${soDigitos(n.cnpjEmit)}`) || null;
     const id = idChave || idTripla;
@@ -356,7 +397,10 @@ async function listar() {
     certificadoOk: sefaz.fiscalReady(fiscal),
     ambiente: fiscal.ambiente === 'producao' ? 'producao' : 'homologacao',
     importarAutomatico: store.importarAutomatico === true,
+    leituraInicial: store.leituraInicial === true,
+    consultando: running,
     intervaloMin: 90,
+    janelaDias: 30,
   };
 }
 
@@ -423,6 +467,7 @@ module.exports = {
   INTERVALO_MS,
   iniciar,
   listar,
+  sincronizarAoAbrir,
   setImportarAutomatico,
   obterXmlParaImportar,
   ingerirLote,

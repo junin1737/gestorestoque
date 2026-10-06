@@ -2200,6 +2200,15 @@ function guardCompras(req, res) {
   return false;
 }
 
+router.post('/compras/sincronizar', async (req, res) => {
+  if (!guardCompras(req, res)) return;
+  try {
+    res.json(await comprasDfe.sincronizarAoAbrir());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, notas: [] });
+  }
+});
+
 router.get('/compras', async (req, res) => {
   if (!guardCompras(req, res)) return;
   try {

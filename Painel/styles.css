@@ -488,12 +488,77 @@ html[data-theme="empresa"] .btn-icon-menu { color: #fff; }
   align-items: center;
 }
 .compras-busca { flex: 1; min-width: 12rem; }
-.compras-auto {
+.compras-head {
   display: flex;
-  gap: 0.5rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+}
+.compras-head-main {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  min-width: 0;
+  flex: 1;
+}
+.compras-head-main .hint { margin: 0; }
+label.compras-auto {
+  display: inline-flex;
+  flex-direction: row;
+  justify-content: flex-start;
   align-items: center;
+  gap: 0.45rem;
+  width: auto;
+  max-width: 100%;
+  margin: 0;
+  color: var(--text);
   font-size: var(--fs-sm);
   font-weight: 650;
+}
+label.compras-auto input {
+  width: 1.05rem;
+  height: 1.05rem;
+  min-width: 1.05rem;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 auto;
+}
+label.compras-auto span {
+  white-space: nowrap;
+  line-height: 1.2;
+}
+.compras-relogio {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.2rem;
+  flex: 0 0 auto;
+  color: var(--primary);
+  min-width: 3.4rem;
+}
+.compras-ico-relogio { width: 1.85rem; height: 1.85rem; }
+.compras-crono {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.05rem;
+  color: var(--text);
+}
+.compras-crono svg { width: 1.7rem; height: 1.7rem; color: var(--primary); }
+.compras-crono strong {
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.compras-crono span {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  text-transform: lowercase;
 }
 .compras-lista .item-row,
 .compras-row { cursor: default; }
