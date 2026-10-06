@@ -358,12 +358,17 @@ button, input, select, textarea {
 
 .online-aparelhos-titulo { display: block; font-size: 0.8rem; color: var(--muted); margin: 0.6rem 0 0.3rem; }
 .online-aparelhos { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; }
-.online-aparelhos li { display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem; border-top: 1px solid var(--line); }
+.online-aparelhos li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.6rem; padding: 0.5rem 0.75rem; border-top: 1px solid var(--line); }
 .online-aparelhos li:first-child { border-top: none; }
-.online-aparelhos .ap-info { flex: 1; min-width: 0; }
+.online-aparelhos .ap-info { flex: 1 1 14rem; min-width: 0; }
 .online-aparelhos .ap-nome { font-weight: 600; font-size: 0.9rem; }
 .online-aparelhos .ap-det { font-size: 0.75rem; color: var(--muted); }
 .online-aparelhos .ap-vazio { color: var(--muted); font-size: 0.85rem; }
+.online-aparelhos .ap-vence { color: var(--danger); font-weight: 600; }
+.online-validade { display: flex; align-items: center; justify-content: space-between; gap: 0.6rem; flex-wrap: wrap; margin: 0.6rem 0 0.3rem; }
+.online-validade .online-aparelhos-titulo { margin: 0; }
+.online-validade-sel { display: inline-flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--muted); }
+.online-validade-sel select { width: auto; padding: 0.2rem 0.4rem; font-size: 0.8rem; }
 .online-pedidos { border-color: var(--teal); background: var(--teal-light); }
 .online-pedidos .ap-codigo { font-family: ui-monospace, Consolas, monospace; font-weight: 700; font-size: 1.05rem; letter-spacing: 1px; }
 

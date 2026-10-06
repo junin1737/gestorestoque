@@ -148,6 +148,8 @@ router.post('/online', somenteServidorLocal, (req, res) => {
   else if (body.recusarPedido) aparelhos.decidirPedido(body.recusarPedido, false);
   else if (body.revogar) aparelhos.revogar(body.revogar);
   else if (body.renomear) aparelhos.renomear(body.renomear, body.nome);
+  else if (body.renovar) aparelhos.renovar(body.renovar);
+  else if (body.validadeDias != null) aparelhos.definirValidade(body.validadeDias);
   else if (body.revogarTodos) aparelhos.revogarTodos();
   else if (body.novoEndereco) tunel.novoEndereco();
   else if (body.ativo != null) tunel.definirAtivo(!!body.ativo);

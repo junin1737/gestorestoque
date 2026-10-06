@@ -771,9 +771,39 @@ function renderPedidos(o) {
 
 let aparelhosRenderizados = '';
 
+function textoDias(d) {
+  return d === 1 ? '1 dia' : `${d} dias`;
+}
+
+function renderValidade(v) {
+  const sel = $('#online-validade');
+  if (!sel || !v || document.activeElement === sel) return;
+  const chave = `${v.dias}|${(v.opcoes || []).join(',')}`;
+  if (sel.dataset.chave === chave) return;
+  sel.dataset.chave = chave;
+  sel.textContent = '';
+  for (const d of v.opcoes || []) {
+    const opt = document.createElement('option');
+    opt.value = String(d);
+    opt.textContent = textoDias(d);
+    opt.selected = d === v.dias;
+    sel.appendChild(opt);
+  }
+}
+
+$('#online-validade')?.addEventListener('change', async (e) => {
+  const dias = Number(e.target.value);
+  const res = await api('/online', { method: 'POST', body: { validadeDias: dias } });
+  if (res.ok) {
+    e.target.blur();
+    renderOnline(res.online);
+  }
+});
+
 function renderAparelhos(o) {
   const box = $('#online-aparelhos-box');
   box.hidden = !o.ativo;
+  renderValidade(o.validade);
   const lista = o.aparelhos || [];
   const chave = JSON.stringify(lista);
   if (chave === aparelhosRenderizados) return;
@@ -783,7 +813,7 @@ function renderAparelhos(o) {
   if (!lista.length) {
     const li = document.createElement('li');
     li.className = 'ap-vazio';
-    li.textContent = 'Nenhum aparelho autorizado ainda.';
+    li.textContent = 'Nenhum dispositivo confiável ainda.';
     ul.appendChild(li);
     return;
   }
@@ -796,8 +826,24 @@ function renderAparelhos(o) {
     nome.textContent = a.nome;
     const det = document.createElement('div');
     det.className = 'ap-det';
-    det.textContent = `Autorizado em ${fmtDataHora(a.criado_em)} · último uso ${fmtDataHora(a.ultimo_uso)}`;
+    det.append(`Autorizado em ${fmtDataHora(a.criado_em)} · `);
+    const vence = document.createElement('span');
+    const restaMs = new Date(a.expira_em).getTime() - Date.now();
+    if (restaMs < 3 * 24 * 60 * 60 * 1000) vence.className = 'ap-vence';
+    vence.textContent = `válido até ${fmtDataHora(a.expira_em)}`;
+    det.append(vence, ` · último uso ${fmtDataHora(a.ultimo_uso)}`);
     info.append(nome, det);
+    const renov = document.createElement('button');
+    renov.type = 'button';
+    renov.className = 'btn-outline small';
+    renov.textContent = 'Renovar';
+    renov.title = 'Estende a validade a partir de agora';
+    renov.addEventListener('click', async () => {
+      const dias = Number($('#online-validade')?.value) || o.validade?.dias;
+      if (!confirm(`Renovar "${a.nome}" por mais ${textoDias(dias)} a partir de agora?`)) return;
+      const res = await api('/online', { method: 'POST', body: { renovar: a.id } });
+      if (res.ok) renderOnline(res.online);
+    });
     const ren = document.createElement('button');
     ren.type = 'button';
     ren.className = 'btn-outline small';
@@ -817,7 +863,7 @@ function renderAparelhos(o) {
       const res = await api('/online', { method: 'POST', body: { revogar: a.id } });
       if (res.ok) renderOnline(res.online);
     });
-    li.append(info, ren, rem);
+    li.append(info, renov, ren, rem);
     ul.appendChild(li);
   }
 }

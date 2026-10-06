@@ -4,6 +4,7 @@
  * O QR Code da tela de serviço leva um código de pareamento de uso único (expira em 10 min);
  * o aparelho que o lê recebe um cookie próprio. Pela internet, sem aparelho autorizado não se vê
  * nem a tela de login. Revogar um aparelho bloqueia na hora todas as requisições dele.
+ * Cada aparelho vale até expira_em (validade escolhida na tela de serviço); vencido é removido.
  */
 const crypto = require('crypto');
 const fs = require('fs');
@@ -12,11 +13,16 @@ const { getAppDataDir } = require('./config');
 
 const COOKIE = 'gestor_aparelho';
 const CODIGO_MS = 10 * 60 * 1000;
-const VALIDADE_S = 365 * 24 * 60 * 60;
+/** O cookie dura o máximo aceito pelos navegadores; quem manda no vencimento é o expira_em do servidor. */
+const COOKIE_S = 400 * 24 * 60 * 60;
+const DIA_MS = 24 * 60 * 60 * 1000;
+const VALIDADES_DIAS = [1, 7, 15, 30, 60, 90, 180, 365];
+const VALIDADE_PADRAO_DIAS = 30;
 const GRAVAR_USO_MS = 60 * 1000;
 const MAX_APARELHOS = 50;
 
 let lista = null;
+let validadeDias = VALIDADE_PADRAO_DIAS;
 let codigo = null;
 let gravacaoPendente = null;
 
@@ -28,13 +34,34 @@ function hash(token) {
   return crypto.createHash('sha256').update(String(token)).digest('hex');
 }
 
+function venceEm() {
+  return new Date(Date.now() + validadeDias * DIA_MS).toISOString();
+}
+
+function vencido(ap, agora = Date.now()) {
+  const t = new Date(ap.expira_em).getTime();
+  return !Number.isFinite(t) || agora >= t;
+}
+
 function carregar() {
   if (lista) return lista;
+  let migrou = false;
   try {
     const dados = JSON.parse(fs.readFileSync(arquivo(), 'utf8'));
     lista = Array.isArray(dados.aparelhos) ? dados.aparelhos : [];
+    const d = Number(dados.validade_dias);
+    validadeDias = VALIDADES_DIAS.includes(d) ? d : VALIDADE_PADRAO_DIAS;
   } catch {
     lista = [];
+  }
+  for (const ap of lista) {
+    if (!ap.expira_em) {
+      ap.expira_em = venceEm();
+      migrou = true;
+    }
+  }
+  if (migrou) {
+    try { salvar(); } catch { /* grava na próxima alteração */ }
   }
   return lista;
 }
@@ -45,8 +72,19 @@ function salvar() {
     gravacaoPendente = null;
   }
   const tmp = `${arquivo()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ aparelhos: carregar() }, null, 2), { encoding: 'utf8', mode: 0o600 });
+  const dados = { validade_dias: validadeDias, aparelhos: carregar() };
+  fs.writeFileSync(tmp, JSON.stringify(dados, null, 2), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(tmp, arquivo());
+}
+
+/** Remove os vencidos; devolve true se removeu algum. */
+function limparVencidos() {
+  const agora = Date.now();
+  const antes = carregar().length;
+  lista = carregar().filter((a) => !vencido(a, agora));
+  if (lista.length === antes) return false;
+  salvar();
+  return true;
 }
 
 function nomePeloNavegador(ua) {
@@ -95,6 +133,7 @@ function criarAparelho({ nome, ip, navegador }) {
     hash: hash(token),
     criado_em: agora,
     ultimo_uso: agora,
+    expira_em: venceEm(),
     ip,
     navegador,
   });
@@ -223,6 +262,10 @@ function aparelhoDaRequisicao(req) {
   const ap = carregar().find((a) => a.hash === h);
   if (!ap) return null;
   const agora = Date.now();
+  if (vencido(ap, agora)) {
+    limparVencidos();
+    return null;
+  }
   if (agora - new Date(ap.ultimo_uso).getTime() > GRAVAR_USO_MS) {
     ap.ultimo_uso = new Date(agora).toISOString();
     ap.ip = ipRemoto(req) || ap.ip;
@@ -237,14 +280,38 @@ function aparelhoDaRequisicao(req) {
   return ap;
 }
 
-function cookieAparelho(token, maxAgeS = VALIDADE_S) {
+function cookieAparelho(token, maxAgeS = COOKIE_S) {
   return `${COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeS}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 function listar() {
+  limparVencidos();
   return carregar()
-    .map(({ id, nome, criado_em, ultimo_uso, ip }) => ({ id, nome, criado_em, ultimo_uso, ip }))
+    .map(({ id, nome, criado_em, ultimo_uso, expira_em, ip }) => ({ id, nome, criado_em, ultimo_uso, expira_em, ip }))
     .sort((a, b) => String(b.ultimo_uso).localeCompare(String(a.ultimo_uso)));
+}
+
+/** Validade aplicada a quem for autorizado ou renovado daqui em diante. */
+function validade() {
+  carregar();
+  return { dias: validadeDias, opcoes: VALIDADES_DIAS };
+}
+
+function definirValidade(dias) {
+  const d = Number(dias);
+  if (!VALIDADES_DIAS.includes(d)) return false;
+  carregar();
+  validadeDias = d;
+  salvar();
+  return true;
+}
+
+function renovar(id) {
+  const ap = carregar().find((a) => a.id === String(id));
+  if (!ap || vencido(ap)) return false;
+  ap.expira_em = venceEm();
+  salvar();
+  return true;
 }
 
 function revogar(id) {
@@ -282,6 +349,9 @@ module.exports = {
   aparelhoDaRequisicao,
   cookieAparelho,
   listar,
+  validade,
+  definirValidade,
+  renovar,
   revogar,
   renomear,
   revogarTodos,

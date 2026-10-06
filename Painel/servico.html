@@ -93,8 +93,15 @@
               <ul id="online-pedidos" class="online-aparelhos online-pedidos"></ul>
             </div>
             <div id="online-aparelhos-box" hidden>
-              <label class="online-aparelhos-titulo">Aparelhos autorizados</label>
+              <div class="online-validade">
+                <label class="online-aparelhos-titulo" for="online-validade">Dispositivos confiáveis</label>
+                <span class="online-validade-sel">
+                  Validade
+                  <select id="online-validade" title="Prazo para novos dispositivos e renovações"></select>
+                </span>
+              </div>
               <ul id="online-aparelhos" class="online-aparelhos"></ul>
+              <p class="hint">Cada dispositivo autorizado fica válido pelo prazo escolhido; depois precisa ler o QR Code (ou pedir acesso) de novo. Remova a qualquer momento para bloquear na hora.</p>
             </div>
             <p class="hint">O computador da loja conecta para fora; nenhuma porta é aberta e o banco de dados não fica exposto. Pela internet só entram aparelhos autorizados pelo QR Code ao lado. Configuração de banco e certificado continua só neste computador.</p>
             <div class="banco-actions left">

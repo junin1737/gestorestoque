@@ -118,7 +118,7 @@ app.use((req, res, next) => {
     return res.status(403).json({ ok: false, code: 'APARELHO', error: 'Este aparelho não está autorizado para o acesso online.' });
   }
   return res.status(403).type('html').send(paginaOnline('Aparelho não autorizado',
-    'Para usar o Gestor Estoque fora da loja, leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja. Se este aparelho foi removido, é preciso ler o QR Code de novo.',
+    'Para usar o Gestor Estoque fora da loja, leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja. Se este aparelho foi removido ou a autorização venceu, é preciso ler o QR Code de novo (ou solicitar acesso abaixo).',
     PEDIDO_HTML));
 });
 

@@ -79,6 +79,7 @@ function status() {
     link,
     servidor: LINK_BASE,
     aparelhos: aparelhos.listar(),
+    validade: aparelhos.validade(),
   };
   if (cfg.ativo) {
     const p = aparelhos.codigoAtual();
