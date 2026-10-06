@@ -50,9 +50,7 @@ const Compras = (() => {
     const amb = dados.ambiente === 'producao' ? 'produção' : 'homologação';
     const pend = (dados.notas || []).filter((n) => n.status === 'Pendente').length;
     const partes = [];
-    if (!dados.certificadoOk) {
-      partes.push(dados.ultimoErro || 'Certificado NF-e não configurado. Configure em Serviço → Certificado NF-e.');
-    } else if (dados.ultimoErro) {
+    if (dados.ultimoErro && !(dados.certificadoOk && /n[aã]o configurado/i.test(dados.ultimoErro))) {
       partes.push(dados.ultimoErro);
     }
     if (dados.consultando && !dados.leituraInicial) partes.push('Lendo notas dos últimos 30 dias na SEFAZ');

@@ -294,13 +294,23 @@ async function executarCiclo() {
     console.log(`Consultar compras: cStat ${store.ultimoCStat || '—'} · NSU ${store.ultNSU} · ${Object.keys(store.notas).length} nota(s) em 30 dias.`);
     agendar(INTERVALO_MS);
   } catch (err) {
-    store.ultimoErro = err.message || String(err);
-    store.ultimoCStat = err.cStat || store.ultimoCStat || '';
-    if (err.ultNSU) store.ultNSU = err.ultNSU;
-    store.ultimaConsulta = new Date().toISOString();
-    saveStore(store);
-    console.warn('Consultar compras:', store.ultimoErro);
-    agendar(INTERVALO_MS);
+    store.ultimoCStat = err.cStat || '';
+    store.ultimoErro = err.code === 'SEM_CERTIFICADO'
+      ? 'Certificado NF-e não configurado. Configure em Serviço → Certificado NF-e.'
+      : (err.message || String(err));
+    if (err.ultNSU) store.ultNSU = nsuGravado(err.ultNSU);
+    const espera = err.cStat === '656' || err.code === 'CONSUMO_INDEVIDO';
+    if (espera) {
+      store.ultimaConsulta = new Date().toISOString();
+      saveStore(store);
+      console.warn('Consultar compras:', store.ultimoErro);
+      agendar(INTERVALO_MS);
+    } else {
+      store.ultimaConsulta = null;
+      store.proximaConsulta = null;
+      saveStore(store);
+      console.warn('Consultar compras:', store.ultimoErro);
+    }
   } finally {
     running = false;
   }
@@ -321,10 +331,15 @@ function iniciar() {
   agendar(incompleto ? 5000 : Math.max(0, faltam));
 }
 
+function nsuGravado(valor) {
+  return String(valor || '0').replace(/\D/g, '') || '0';
+}
+
 /** Primeira abertura da tela: lê a fila da SEFAZ e fica só com os últimos 30 dias. */
 function sincronizarAoAbrir() {
   const store = loadStore();
-  if (!store.leituraInicial && !running && !consultaRecente(store)) {
+  const bloqueado = store.ultimoCStat === '656' && consultaRecente(store);
+  if (!store.leituraInicial && !running && !bloqueado) {
     executarCiclo().catch((err) => console.warn('Consultar compras:', err.message));
   }
   return listar();
@@ -360,6 +375,14 @@ async function mapaLancadas(notas) {
   return { porChave, porTripla };
 }
 
+function erroVisivel(store, fiscal) {
+  const pronto = sefaz.fiscalReady(fiscal);
+  const erro = String(store.ultimoErro || '');
+  if (pronto && /n[aã]o configurado/i.test(erro)) return '';
+  if (!pronto) return erro || 'Certificado NF-e não configurado. Configure em Serviço → Certificado NF-e.';
+  return erro;
+}
+
 async function listar() {
   const store = loadStore();
   const fiscal = getFiscalConfig();
@@ -392,7 +415,7 @@ async function listar() {
     notas,
     ultimaConsulta: store.ultimaConsulta,
     proximaConsulta: store.proximaConsulta,
-    ultimoErro: store.ultimoErro || '',
+    ultimoErro: erroVisivel(store, fiscal),
     ultimoCStat: store.ultimoCStat || '',
     certificadoOk: sefaz.fiscalReady(fiscal),
     ambiente: fiscal.ambiente === 'producao' ? 'producao' : 'homologacao',

@@ -256,12 +256,18 @@ function buildSoapDist(nfeDadosMsg) {
   return buildSoap(nfeDadosMsg);
 }
 
+function nsu15(valor) {
+  const digitos = String(valor || '0').replace(/\D/g, '') || '0';
+  return digitos.padStart(15, '0').slice(-15);
+}
+
 function buildDistNsuXml({ cnpj, tpAmb, cUFAutor, ultNSU }) {
-  const nsu = String(ultNSU || '0').replace(/\D/g, '') || '0';
+  const uf = String(cUFAutor || '').replace(/\D/g, '');
+  const nsu = nsu15(ultNSU);
   return (
     `<distDFeInt xmlns="http://www.portalfiscal.inf.br/nfe" versao="1.01">`
     + `<tpAmb>${tpAmb}</tpAmb>`
-    + (cUFAutor ? `<cUFAutor>${cUFAutor}</cUFAutor>` : '')
+    + (uf.length === 2 ? `<cUFAutor>${uf}</cUFAutor>` : '')
     + `<CNPJ>${cnpj}</CNPJ>`
     + `<distNSU><ultNSU>${nsu}</ultNSU></distNSU>`
     + `</distDFeInt>`
