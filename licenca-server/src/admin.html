@@ -64,11 +64,20 @@
   .b-liberado { background: var(--ok-bg); color: var(--ok); }
   .b-pendente { background: var(--warn-bg); color: var(--warn); }
   .b-bloqueado, .b-vencido { background: var(--danger-bg); color: var(--danger); }
+  .b-teste { background: #e6f0ff; color: #1d4ed8; }
+  .v-venc { color: var(--danger); font-weight: 700; }
+  .v-perto { color: var(--warn); font-weight: 700; }
+  .btn-voltar { border: 0; background: transparent; color: var(--brand); font-weight: 700; padding: .2rem .4rem .2rem 0; cursor: pointer; font-size: 15px; white-space: nowrap; }
+  .validade-box { border: 1px solid var(--line); border-radius: 9px; padding: .7rem .8rem; margin-bottom: .7rem; }
+  .validade-box .linha-btns { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-top: .5rem; }
+  .chk { display: inline-flex; align-items: center; gap: .45rem; margin: 0 0 0 .3rem; color: var(--text); font-size: 13px; }
+  .chk input { width: auto; margin: 0; }
 
   dialog { border: 0; border-radius: var(--radius); padding: 0; width: min(760px, 96vw); max-height: 92vh; box-shadow: 0 20px 60px rgba(11,27,51,.25); }
   dialog::backdrop { background: rgba(11,27,51,.45); }
   .dlg-head { padding: 1rem 1.2rem; border-bottom: 1px solid var(--line); display: flex; gap: .8rem; align-items: flex-start; }
   .dlg-head h2 { margin: 0; font-size: 17px; flex: 1; }
+  .dlg-head .dlg-titulo { flex: 1; min-width: 0; }
   .dlg-body { padding: 1rem 1.2rem; overflow: auto; max-height: calc(92vh - 130px); }
   .dlg-foot { padding: .8rem 1.2rem; border-top: 1px solid var(--line); display: flex; gap: .5rem; justify-content: flex-end; flex-wrap: wrap; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 .9rem; }
@@ -91,6 +100,52 @@
     .col-hide { display: none; }
     .grid2 { grid-template-columns: 1fr; }
     td, th { padding: .55rem; }
+    input, select, textarea { font-size: 16px; }
+
+    header.top { padding: .7rem .8rem; gap: .45rem; }
+    header.top h1 { flex-basis: 100%; }
+    header.top .btn { flex: 1 1 auto; }
+    main { padding: .6rem; }
+    .toolbar input { flex-basis: 100%; min-width: 0; }
+    .toolbar select { flex: 1 1 40%; min-width: 0; }
+    .tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab { flex: 0 0 auto; }
+
+    .lista thead { display: none; }
+    .lista table, .lista tbody { display: block; }
+    .lista tr.row {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .25rem .7rem;
+      grid-template-areas: "cli sit" "rev val" "app app" "acoes acoes";
+      padding: .75rem .8rem; border-bottom: 1px solid var(--line);
+    }
+    .lista tr.row:last-child { border-bottom: 0; }
+    .lista tr.row td { display: block; padding: 0; border: 0; min-width: 0; }
+    .lista tr.row td.col-hide { display: none; }
+    .lista td.c-sit { grid-area: sit; text-align: right; }
+    .lista td.c-cli { grid-area: cli; }
+    .lista td.c-rev { grid-area: rev; font-size: 13px; }
+    .lista td.c-val { grid-area: val; text-align: right; font-size: 13px; }
+    .lista td.c-app { grid-area: app; font-size: 13px; color: var(--muted); }
+    .lista td.c-app div { display: inline; }
+    .lista td.c-app .sub::before { content: " · "; }
+    .lista td.acoes { grid-area: acoes; text-align: left; white-space: normal; }
+    .lista td.acoes:empty { display: none; }
+    .lista td.acoes .btn { margin-top: .35rem; }
+
+    dialog { width: 100%; max-width: 100%; height: 100%; max-height: 100%; margin: 0; border-radius: 0; }
+    dialog[open], dialog > form { display: flex; flex-direction: column; }
+    dialog > form { flex: 1; min-height: 0; }
+    .dlg-head { padding: .6rem .9rem .75rem; align-items: center; flex-wrap: wrap; gap: .3rem .6rem; position: sticky; top: 0; background: var(--card); }
+    .dlg-head .dlg-titulo { order: 3; flex: 1 1 100%; }
+    .dlg-head .badge { margin-left: auto; }
+    .dlg-body { flex: 1; min-height: 0; max-height: none; padding: .9rem; }
+    .dlg-foot { padding: .7rem .9rem calc(.7rem + env(safe-area-inset-bottom)); }
+    .dlg-foot .btn { flex: 1 1 auto; }
+    .mini { overflow-x: auto; }
+    .mini table { min-width: 460px; }
+    .linha label { min-width: 100%; }
+    .linha .btn { flex: 1 1 auto; }
   }
 </style>
 </head>
@@ -110,6 +165,7 @@
   <header class="top">
     <h1>Licenças · MT Automações</h1>
     <button class="btn sm" id="btn-revendas">Revendas</button>
+    <button class="btn sm" id="btn-teste">Teste grátis</button>
     <button class="btn sm" id="btn-sup">Senha do supervisor</button>
     <button class="btn sm" id="btn-novo">+ Cadastrar cliente</button>
     <button class="btn sm" id="btn-sair">Sair</button>
@@ -133,6 +189,8 @@
       <button class="tab active" data-status="">Todos <span class="n" data-n="todos">0</span></button>
       <button class="tab pend" data-status="pendente">Solicitações <span class="n" data-n="pendente">0</span></button>
       <button class="tab" data-status="liberado">Liberados <span class="n" data-n="liberado">0</span></button>
+      <button class="tab" data-status="teste">Em teste <span class="n" data-n="teste">0</span></button>
+      <button class="tab" data-status="vencido">Vencidos <span class="n" data-n="vencido">0</span></button>
       <button class="tab" data-status="bloqueado">Bloqueados <span class="n" data-n="bloqueado">0</span></button>
     </div>
     <div class="lista">
@@ -145,7 +203,7 @@
             <th>Aplicação / NSE</th>
             <th class="col-hide">Máquina / versão</th>
             <th class="col-hide">Último contato</th>
-            <th class="col-hide">Pago até</th>
+            <th>Validade</th>
             <th></th>
           </tr>
         </thead>
@@ -159,22 +217,35 @@
 
 <dialog id="dlg-cliente">
   <div class="dlg-head">
-    <div style="flex:1">
+    <button class="btn-voltar" type="button" data-voltar aria-label="Voltar para a lista">‹ Voltar</button>
+    <div class="dlg-titulo">
       <h2 id="d-titulo">Cliente</h2>
       <div class="sub" id="d-sub"></div>
     </div>
     <span class="badge" id="d-badge"></span>
   </div>
   <div class="dlg-body">
+    <div class="validade-box">
+      <div class="grid2">
+        <label>Situação
+          <select id="d-status">
+            <option value="liberado">Liberado</option>
+            <option value="bloqueado">Bloqueado</option>
+            <option value="pendente">Pendente</option>
+          </select>
+        </label>
+        <label>Validade — pago até (vazio = sem vencimento)<input type="date" id="d-pago" /></label>
+      </div>
+      <div class="sub" id="d-validade"></div>
+      <div class="linha-btns">
+        <button class="btn sm ghost" type="button" data-mais="7">+7 dias</button>
+        <button class="btn sm ghost" type="button" data-mais="30">+30 dias</button>
+        <button class="btn sm ghost" type="button" data-mais="90">+90 dias</button>
+        <button class="btn sm ghost" type="button" data-mais="365">+1 ano</button>
+        <label class="chk"><input type="checkbox" id="d-teste" /> Período de teste grátis</label>
+      </div>
+    </div>
     <div class="grid2">
-      <label>Situação
-        <select id="d-status">
-          <option value="liberado">Liberado</option>
-          <option value="bloqueado">Bloqueado</option>
-          <option value="pendente">Pendente</option>
-        </select>
-      </label>
-      <label>Pago até (vazio = sem vencimento)<input type="date" id="d-pago" /></label>
       <label>Razão social<input id="d-razao" maxlength="120" /></label>
       <label>Nome fantasia<input id="d-fantasia" maxlength="120" /></label>
       <label>Revenda<select id="d-revenda"></select></label>
@@ -226,7 +297,7 @@
 
 <dialog id="dlg-sup">
   <form method="dialog" id="form-sup">
-    <div class="dlg-head"><h2>Senha padrão do supervisor</h2></div>
+    <div class="dlg-head"><button class="btn-voltar" type="button" data-voltar aria-label="Voltar">‹ Voltar</button><h2>Senha padrão do supervisor</h2></div>
     <div class="dlg-body">
       <p class="sub" style="margin-top:0">Vale para todos os clientes que não têm senha própria. Ela substitui a antiga 1020 e chega aos Gestores em até 2 minutos (ou no próximo "Verificar novamente"). Mínimo de 8 caracteres, com letras e números. A senha é transformada em hash neste navegador — o servidor nunca recebe a senha em texto.</p>
       <div id="s-info" class="sub" style="margin-bottom:.7rem"></div>
@@ -243,9 +314,9 @@
 
 <dialog id="dlg-novo">
   <form method="dialog" id="form-novo">
-    <div class="dlg-head"><h2>Cadastrar cliente</h2></div>
+    <div class="dlg-head"><button class="btn-voltar" type="button" data-voltar aria-label="Voltar">‹ Voltar</button><h2>Cadastrar cliente</h2></div>
     <div class="dlg-body">
-      <p class="sub" style="margin-top:0">Use para liberar um cliente antes da primeira conexão do Gestor. Clientes que instalarem sem cadastro entram como <b>pendentes</b>.</p>
+      <p class="sub" style="margin-top:0" id="n-info">Use para liberar um cliente antes da primeira conexão do Gestor.</p>
       <div class="grid2">
         <label>CNPJ / CPF<input id="n-cnpj" required inputmode="numeric" /></label>
         <label>Aplicação<select id="n-app"></select></label>
@@ -272,9 +343,25 @@
   </form>
 </dialog>
 
+<dialog id="dlg-teste">
+  <form method="dialog" id="form-teste">
+    <div class="dlg-head"><button class="btn-voltar" type="button" data-voltar aria-label="Voltar">‹ Voltar</button><h2>Teste grátis</h2></div>
+    <div class="dlg-body">
+      <p class="sub" style="margin-top:0">Todo cliente novo entra liberado por este número de dias, contados do dia em que o Gestor dele pediu a liberação. Ao vencer, o Gestor bloqueia até você estender a validade (pago até) na ficha do cliente. Com <b>0</b>, não há teste: novos clientes aguardam a sua aprovação.</p>
+      <label>Dias de teste grátis<input type="number" id="t-dias" min="0" max="90" step="1" required inputmode="numeric" /></label>
+      <div class="erro" id="t-erro"></div>
+    </div>
+    <div class="dlg-foot">
+      <button class="btn ghost" value="cancel" formnovalidate>Cancelar</button>
+      <button class="btn primary" value="ok">Salvar</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlg-revendas">
   <div class="dlg-head">
-    <div style="flex:1">
+    <button class="btn-voltar" type="button" data-voltar aria-label="Voltar">‹ Voltar</button>
+    <div class="dlg-titulo">
       <h2>Revendas</h2>
       <div class="sub">O Gestor pede o CNPJ da revenda ao solicitar a liberação. Só revendas ativas são aceitas em novas solicitações.</div>
     </div>
@@ -316,12 +403,43 @@ const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
 const st = { token: localStorage.getItem('mt_licenca_token') || '', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null };
 const rotaCliente = (c) => `/clientes/${encodeURIComponent(c.app)}/${c.cnpj}`;
-const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloqueado', vencido: 'Vencido' };
+const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloqueado', vencido: 'Vencido', teste: 'Em teste' };
 const EVENTO = {
   novo_cliente: 'Solicitou cadastro', nova_instalacao: 'Nova instalação', versao: 'Atualizou versão',
   status: 'Situação alterada', edicao: 'Dados alterados', licenca_offline: 'Licença offline gerada', cadastro_manual: 'Cadastro manual',
-  senha_supervisor: 'Senha do supervisor', revenda: 'Revenda',
+  senha_supervisor: 'Senha do supervisor', revenda: 'Revenda', config: 'Configuração',
 };
+
+/** Data local de hoje (AAAA-MM-DD) no horário de Brasília. */
+function hojeBrasilia() {
+  return new Date(Date.now() - 3 * 3600000).toISOString().slice(0, 10);
+}
+function diasEntre(ymdA, ymdB) {
+  return Math.round((Date.parse(`${ymdB}T00:00:00Z`) - Date.parse(`${ymdA}T00:00:00Z`)) / 86400000);
+}
+function somarDias(ymd, dias) {
+  return new Date(Date.parse(`${ymd}T00:00:00Z`) + dias * 86400000).toISOString().slice(0, 10);
+}
+function plural(n, um, varios) {
+  return `${n} ${n === 1 ? um : varios}`;
+}
+/** Texto da validade: { html para a lista, texto para a ficha }. */
+function validade(c, hoje = st.hoje || hojeBrasilia()) {
+  if (c.status !== 'liberado') return { html: '<span class="sub">—</span>', texto: '' };
+  if (!c.pago_ate) return { html: '<span class="sub">Sem vencimento</span>', texto: 'Sem vencimento.' };
+  const n = diasEntre(hoje, c.pago_ate);
+  const tipo = c.em_teste ? 'Teste' : 'Pago';
+  if (n < 0) {
+    const t = `${c.em_teste ? 'Teste encerrado' : 'Vencida'} há ${plural(-n, 'dia', 'dias')}`;
+    return { html: `<div class="v-venc">${t}</div><div class="sub">${fmtDia(c.pago_ate)}</div>`, texto: `${t} (${fmtDia(c.pago_ate)}). O Gestor está bloqueado.` };
+  }
+  const resta = n === 0 ? 'vence hoje' : `${plural(n, 'dia', 'dias')}`;
+  const cls = n <= 3 ? ' class="v-perto"' : '';
+  return {
+    html: `<div${cls}>${tipo} · ${resta}</div><div class="sub">até ${fmtDia(c.pago_ate)}</div>`,
+    texto: `${c.em_teste ? 'Em teste grátis' : 'Liberado'} até ${fmtDia(c.pago_ate)} (${resta}).`,
+  };
+}
 const SUP_ITER = 400000;
 
 function senhaFraca(s) {
@@ -428,9 +546,11 @@ async function carregar() {
       + r.aplicacoes.map((a) => `<option value="${esc(a)}"${a === st.app ? ' selected' : ''}>${esc(a)}</option>`).join('');
   }
   const t = r.totais || {};
+  const p = r.prazos || {};
+  if (r.hoje) st.hoje = r.hoje;
   $$('[data-n]').forEach((el) => {
     const k = el.dataset.n;
-    el.textContent = k === 'todos' ? Object.values(t).reduce((a, b) => a + b, 0) : (t[k] || 0);
+    el.textContent = k === 'todos' ? Object.values(t).reduce((a, b) => a + b, 0) : (t[k] ?? p[k] ?? 0);
   });
   const nSolic = t.pendente || 0;
   document.title = `${nSolic ? `(${nSolic}) ` : ''}Licenças · MT Automações`;
@@ -441,15 +561,16 @@ async function carregar() {
   const tb = $('#tbody');
   tb.innerHTML = r.clientes.map((c) => {
     const solic = c.status === 'pendente';
+    const sit = c.situacao === 'liberado' && c.em_teste ? 'teste' : c.situacao;
     return `
     <tr class="row${solic ? ' solicitacao' : ''}" data-cnpj="${esc(c.cnpj)}" data-app="${esc(c.aplicacao)}">
-      <td><span class="badge b-${esc(c.situacao)}">${solic ? 'Solicitação' : (ROTULO[c.situacao] || esc(c.situacao))}</span></td>
-      <td><div class="nome">${esc(c.fantasia || c.razao || 'Sem nome')}</div><div class="sub">${fmtCnpj(c.cnpj)}${c.razao && c.fantasia ? ` · ${esc(c.razao)}` : ''}${solic ? ` · solicitado ${fmtData(c.criado_em)}` : ''}</div></td>
-      <td>${c.revenda_id ? `<div>${esc(c.revenda_nome || `Revenda ${c.revenda_id}`)}</div><div class="sub">Nº ${esc(c.revenda_id)} · ${fmtCnpj(c.revenda_cnpj)}</div>` : '<span class="sub">Sem revenda</span>'}</td>
-      <td><div>${esc(c.aplicacao)}</div><div class="sub">NSE ${esc(c.nse || '—')}</div></td>
+      <td class="c-sit"><span class="badge b-${esc(sit)}">${solic ? 'Solicitação' : (ROTULO[sit] || esc(sit))}</span></td>
+      <td class="c-cli"><div class="nome">${esc(c.fantasia || c.razao || 'Sem nome')}</div><div class="sub">${fmtCnpj(c.cnpj)}${c.razao && c.fantasia ? ` · ${esc(c.razao)}` : ''}${solic ? ` · solicitado ${fmtData(c.criado_em)}` : ''}</div></td>
+      <td class="c-rev">${c.revenda_id ? `<div>${esc(c.revenda_nome || `Revenda ${c.revenda_id}`)}</div><div class="sub">Nº ${esc(c.revenda_id)} · ${fmtCnpj(c.revenda_cnpj)}</div>` : '<span class="sub">Sem revenda</span>'}</td>
+      <td class="c-app"><div>${esc(c.aplicacao)}</div><div class="sub">NSE ${esc(c.nse || '—')}</div></td>
       <td class="col-hide"><div>${esc(c.maquina || '—')}</div><div class="sub">${c.versao_gestor ? `v${esc(c.versao_gestor)}` : ''}${c.instalacoes > 1 ? ` · ${c.instalacoes} instalações` : ''}</div></td>
       <td class="col-hide"><div>${relativo(c.ultimo_contato)}</div><div class="sub">${fmtData(c.ultimo_contato)}</div></td>
-      <td class="col-hide">${fmtDia(c.pago_ate)}</td>
+      <td class="c-val">${validade(c).html}</td>
       <td class="acoes">
         ${solic
           ? `<button class="btn ok sm" data-acao="liberado">Aprovar</button><button class="btn danger sm" data-acao="bloqueado">Recusar</button>`
@@ -465,8 +586,25 @@ async function carregarConfig() {
   const r = await api('/config');
   if (!r.ok) return;
   st.supPadrao = r.sup_padrao;
+  st.diasTeste = r.dias_teste;
   $('#aviso-sup').hidden = !!r.sup_padrao?.definida;
 }
+
+$('#btn-teste').addEventListener('click', () => {
+  $('#t-dias').value = st.diasTeste ?? 7;
+  $('#t-erro').textContent = '';
+  $('#dlg-teste').showModal();
+});
+$('#form-teste').addEventListener('submit', async (e) => {
+  if (e.submitter && e.submitter.value === 'cancel') return;
+  e.preventDefault();
+  const dias = Number($('#t-dias').value);
+  const r = await api('/config/teste', { method: 'PUT', body: { dias } });
+  if (!r.ok) { $('#t-erro').textContent = r.error || 'Falha ao salvar.'; return; }
+  st.diasTeste = r.dias_teste;
+  $('#dlg-teste').close();
+  toast(dias ? `Novos clientes terão ${plural(dias, 'dia', 'dias')} de teste grátis.` : 'Teste grátis desligado: novos clientes aguardam aprovação.');
+});
 
 function abrirSupPadrao() {
   $('#form-sup').reset();
@@ -612,10 +750,14 @@ function preencherCliente(r) {
   st.atual = { cnpj: c.cnpj, app: c.aplicacao };
   $('#d-titulo').textContent = c.fantasia || c.razao || 'Sem nome';
   $('#d-sub').textContent = `${c.aplicacao} · ${fmtCnpj(c.cnpj)} · cadastrado ${fmtData(c.criado_em)} · último contato ${fmtData(c.ultimo_contato)}`;
-  $('#d-badge').className = `badge b-${c.situacao}`;
-  $('#d-badge').textContent = ROTULO[c.situacao] || c.situacao;
+  const sit = c.situacao === 'liberado' && c.em_teste ? 'teste' : c.situacao;
+  $('#d-badge').className = `badge b-${sit}`;
+  $('#d-badge').textContent = ROTULO[sit] || sit;
   $('#d-status').value = c.status;
   $('#d-pago').value = c.pago_ate || '';
+  $('#d-teste').checked = !!c.em_teste;
+  st.atualCliente = c;
+  atualizarTextoValidade();
   $('#d-razao').value = c.razao || '';
   $('#d-fantasia').value = c.fantasia || '';
   $('#d-revenda').innerHTML = opcoesRevenda(c.revenda_id);
@@ -644,11 +786,37 @@ async function abrirCliente(cli) {
   if (!$('#dlg-cliente').open) $('#dlg-cliente').showModal();
 }
 
+/** Prévia da validade com o que está na tela (antes de salvar). */
+function atualizarTextoValidade() {
+  const previa = {
+    status: $('#d-status').value,
+    pago_ate: $('#d-pago').value || null,
+    em_teste: $('#d-teste').checked,
+  };
+  const salvo = st.atualCliente || {};
+  const mudou = previa.status !== salvo.status || previa.pago_ate !== (salvo.pago_ate || null) || previa.em_teste !== !!salvo.em_teste;
+  const texto = validade(previa).texto;
+  $('#d-validade').textContent = mudou && texto ? `${texto.replace(/\.$/, '')} — clique em Salvar para aplicar.` : texto;
+}
+['#d-status', '#d-pago', '#d-teste'].forEach((s) => $(s).addEventListener('input', atualizarTextoValidade));
+$('#d-status').addEventListener('change', atualizarTextoValidade);
+$('#dlg-cliente').addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-mais]');
+  if (!btn) return;
+  const hoje = st.hoje || hojeBrasilia();
+  const atual = $('#d-pago').value;
+  const base = atual && atual > hoje ? atual : hoje;
+  $('#d-pago').value = somarDias(base, Number(btn.dataset.mais));
+  if ($('#d-status').value !== 'liberado') $('#d-status').value = 'liberado';
+  atualizarTextoValidade();
+});
+
 $('#d-fechar').addEventListener('click', () => $('#dlg-cliente').close());
 $('#d-salvar').addEventListener('click', async () => {
   const body = {
     status: $('#d-status').value,
     pago_ate: $('#d-pago').value || null,
+    em_teste: $('#d-teste').checked,
     razao: $('#d-razao').value,
     fantasia: $('#d-fantasia').value,
     revenda_id: $('#d-revenda').value || null,
@@ -679,7 +847,7 @@ $('#d-sup-padrao').addEventListener('click', async () => {
   toast('Cliente voltou a usar a senha padrão.');
 });
 $('#d-excluir').addEventListener('click', async () => {
-  if (!confirm('Excluir este cliente e todo o histórico? Se o Gestor dele conectar de novo, volta como pendente (bloqueado).')) return;
+  if (!confirm('Excluir este cliente e todo o histórico? Se o Gestor dele pedir a liberação de novo, entra como cliente novo.')) return;
   const r = await api(rotaCliente(st.atual), { method: 'DELETE' });
   if (!r.ok) { toast(r.error || 'Falha.', true); return; }
   $('#dlg-cliente').close();
@@ -712,6 +880,9 @@ $('#btn-novo').addEventListener('click', () => {
   if (st.app) $('#n-app').value = st.app;
   $('#n-revenda').innerHTML = opcoesRevenda(st.revendas.length === 1 ? st.revendas[0].id : null);
   $('#n-erro').textContent = '';
+  $('#n-info').textContent = 'Use para liberar um cliente antes da primeira conexão do Gestor. '
+    + (st.diasTeste ? `Quem pedir a liberação pelo Gestor sem cadastro entra em teste grátis de ${plural(st.diasTeste, 'dia', 'dias')}.`
+      : 'Quem pedir a liberação pelo Gestor sem cadastro entra como pendente.');
   $('#dlg-novo').showModal();
 });
 $('#form-novo').addEventListener('submit', async (e) => {
@@ -736,7 +907,28 @@ $('#form-novo').addEventListener('submit', async (e) => {
   carregar();
 });
 
-setInterval(() => { if (st.token && !document.hidden && !$('#dlg-cliente').open) carregar(); }, 60000);
+/* Janelas: "‹ Voltar" fecha; o voltar do celular/navegador também fecha a janela em vez de sair do painel. */
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-voltar]');
+  if (b) b.closest('dialog')?.close();
+});
+for (const d of $$('dialog')) {
+  const abrir = d.showModal.bind(d);
+  d.showModal = () => {
+    abrir();
+    if (history.state?.dlg !== d.id) history.pushState({ dlg: d.id }, '');
+  };
+  d.addEventListener('close', () => {
+    if (history.state?.dlg === d.id) history.back();
+  });
+}
+window.addEventListener('popstate', () => {
+  for (const d of $$('dialog[open]')) {
+    if (history.state?.dlg !== d.id) d.close();
+  }
+});
+
+setInterval(() => { if (st.token && !document.hidden && !$$('dialog[open]').length) carregar(); }, 60000);
 mostrarApp(!!st.token);
 </script>
 </body>

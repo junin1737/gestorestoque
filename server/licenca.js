@@ -291,6 +291,7 @@ function situacao() {
     cnpj: base.cnpj || dados.cnpj,
     tipo: dados.tipo,
     pago_ate: dados.pago_ate || null,
+    teste: !!dados.teste,
     valido_ate: dados.valido_ate,
     emitido_em: dados.emitido_em,
   };
