@@ -47,6 +47,43 @@ function urlAcessoAtual() {
   }
 }
 
+/**
+ * Segredo desta instalação: o servidor de licenças guarda o hash do primeiro que se apresenta para o CNPJ e só ele
+ * registra o endereço de acesso online e responde por matriz/filial. Fica na pasta do Gestor normal para a edição
+ * online da mesma máquina usar o mesmo.
+ */
+let segredo = null;
+function segredoInstalacao() {
+  if (segredo) return segredo;
+  const dir = path.join(process.env.APPDATA || path.join(os.homedir(), '.config'), 'GestorEstoque');
+  const arq = path.join(dir, 'instalacao.key');
+  const valido = (v) => /^[a-f0-9]{64}$/.test(v);
+  try {
+    const lido = fs.readFileSync(arq, 'utf8').trim();
+    if (valido(lido)) return (segredo = lido);
+  } catch { /* gera abaixo */ }
+  const novo = crypto.randomBytes(32).toString('hex');
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(arq, novo, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    return (segredo = novo);
+  } catch (err) {
+    if (err.code === 'EEXIST') {
+      const lido = fs.readFileSync(arq, 'utf8').trim();
+      if (valido(lido)) return (segredo = lido);
+    }
+    throw new Error('Não foi possível gravar o segredo desta instalação.');
+  }
+}
+
+/** Cabeçalhos das chamadas da própria empresa ao servidor de licenças (matriz/filial). */
+async function cabecalhosInstalacao() {
+  const id = await lerIdentidade();
+  const cnpj = String(id.cnpj || '').replace(/\D/g, '');
+  if (!cnpj) throw new Error('CNPJ do emitente (TB_EMITENTE) não encontrado na base.');
+  return { 'X-Gestor-Cnpj': cnpj, 'X-Gestor-Segredo': segredoInstalacao() };
+}
+
 function carregarEstado() {
   if (estado) return estado;
   try {
@@ -212,6 +249,7 @@ async function verificarAgora() {
             versao_gestor: versaoGestor(),
             revenda_cnpj: st.revenda_cnpj || undefined,
             url: urlAcessoAtual(),
+            segredo: (() => { try { return segredoInstalacao(); } catch { return undefined; } })(),
           }),
           signal: ctrl.signal,
         });
@@ -226,6 +264,7 @@ async function verificarAgora() {
       }
       aplicarLicenca(data.licenca, { origem: 'online' });
       st.solicitado_em = data.solicitado_em || null;
+      st.instalacao_confirmada = data.instalacao_confirmada === true;
       st.ultimo_contato = new Date().toISOString();
       st.ultimo_erro = null;
     } catch (err) {
@@ -433,6 +472,7 @@ module.exports = {
   LICENCA_URL,
   APLICACAO,
   lerIdentidade,
+  cabecalhosInstalacao,
   iniciar,
   verificarAgora,
   solicitar,

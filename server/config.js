@@ -37,6 +37,10 @@ const MODULOS = {
     label: 'Consultar Compras',
     default: { acesso: false },
   },
+  condicionais: {
+    label: 'Condicionais',
+    default: { acesso: true },
+  },
 };
 if (edicao.ONLINE) {
   MODULOS.online = { label: 'Acesso online', default: { acesso: false } };
@@ -126,6 +130,7 @@ function fullPermissoes() {
     if (key === 'usuarios') out[key] = { acesso: true };
     if (key === 'importacao') out[key] = { acesso: true };
     if (key === 'compras') out[key] = { acesso: true };
+    if (key === 'condicionais') out[key] = { acesso: true };
   }
   return out;
 }
@@ -204,8 +209,8 @@ function loadUsersConfig(appCfg) {
   return cfg;
 }
 
+/** A senha do MT Entradas é conferida no servidor de licenças; o Gestor não guarda nenhuma. */
 const MT_ENTRADAS_ID = 900001;
-const MT_ENTRADAS_SENHA = '18321937';
 
 function ensureUsuarioMtEntradas(cfg) {
   const atual = (cfg.usuarios || []).find((u) => u.mtEntradas || Number(u.id) === MT_ENTRADAS_ID);
@@ -214,6 +219,7 @@ function ensureUsuarioMtEntradas(cfg) {
     if (!atual.mtEntradas) { atual.mtEntradas = true; mudou = true; }
     if (atual.nome !== 'MT Entradas') { atual.nome = 'MT Entradas'; mudou = true; }
     if (Number(atual.id) !== MT_ENTRADAS_ID) { atual.id = MT_ENTRADAS_ID; mudou = true; }
+    if (atual.senhaHash || atual.senha) { delete atual.senhaHash; delete atual.senha; mudou = true; }
     atual.permissoes = ensureModulos({
       importacao: { acesso: true },
       compras: { acesso: true },
@@ -225,7 +231,6 @@ function ensureUsuarioMtEntradas(cfg) {
     id: MT_ENTRADAS_ID,
     nome: 'MT Entradas',
     mtEntradas: true,
-    senhaHash: gerarHashSenha(MT_ENTRADAS_SENHA),
     senhaVer: 1,
     permissoes: ensureModulos({
       importacao: { acesso: true },

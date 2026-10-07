@@ -196,13 +196,6 @@ function setCfgTab(tab) {
   }
 }
 
-async function registrarEmpresaMt() {
-  if (!state.usuario?.mtEntradas) return;
-  try {
-    await api('/mt/empresas/registrar', { method: 'POST', body: { url: location.origin } });
-  } catch { /* lista segue com o que o servidor já tiver */ }
-}
-
 async function loadEmpresas() {
   const box = $('#empresas-lista');
   if (!box) return;
@@ -214,7 +207,7 @@ async function loadEmpresas() {
     return;
   }
   if (!itens.length) {
-    box.innerHTML = '<p class="empty">Nenhuma empresa gravada ainda. Entre em cada cliente com MT Entradas para ela aparecer aqui.</p>';
+    box.innerHTML = '<p class="empty">Nenhuma empresa online agora. A empresa aparece aqui quando o Gestor online dela está aberto e atualizado.</p>';
     return;
   }
   box.innerHTML = itens.map((e) => `
@@ -236,20 +229,212 @@ async function loadEmpresas() {
         return;
       }
       const ok = await showConfirm(
-        `Entrar em ${nome}? O login será pedido de novo para confirmar que você está na empresa certa.`,
-        { okLabel: 'Entrar', cancelLabel: 'Cancelar' }
+        `Abrir o login de ${nome}? A senha salva não entra sozinha: é preciso clicar em Entrar.`,
+        { okLabel: 'Abrir login', cancelLabel: 'Cancelar' }
       );
       if (!ok) return;
-      location.href = url.endsWith('/') ? url : `${url}/`;
+      await api('/logout', { method: 'POST', body: {} });
+      location.href = urlLoginEmpresa(url);
+    });
+  });
+  await carregarVinculosPainel();
+}
+
+function formatCnpj(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  return d || '—';
+}
+
+function urlLoginEmpresa(url) {
+  try {
+    const u = new URL(url, location.origin);
+    u.searchParams.delete('mt');
+    const path = u.pathname.endsWith('/') ? u.pathname : `${u.pathname}/`;
+    return `${u.origin}${path}${u.search}`;
+  } catch {
+    return url;
+  }
+}
+
+const ROTULO_VINCULO = {
+  ativo: 'Ativo',
+  aguardando: 'Aguardando as duas',
+  aguardando_matriz: 'Aguardando a matriz',
+  aguardando_filial: 'Aguardando a filial',
+  recusado: 'Recusado',
+};
+
+async function carregarLojasLogin() {
+  const box = $('#login-lojas');
+  const lista = $('#login-lojas-lista');
+  if (!box || !lista) return;
+  const res = await api('/mt/grupo');
+  const empresas = (res.empresas || []).filter((e) => e && e.cnpj);
+  if (empresas.length < 2) {
+    box.hidden = true;
+    lista.innerHTML = '';
+    return;
+  }
+  box.hidden = false;
+  lista.innerHTML = empresas.map((e) => `
+    <button type="button" class="login-loja${e.atual ? ' is-atual' : ''}" data-loja-url="${escapeAttr(e.url || '')}" data-loja-atual="${e.atual ? '1' : ''}" ${e.atual || e.url ? '' : 'disabled'}>
+      <strong>${escapeHtml(e.nome || 'Empresa')}</strong>
+      <span>${e.papel === 'matriz' ? 'Matriz' : 'Filial'} · ${escapeHtml(formatCnpj(e.cnpj))}${e.atual ? ' · esta loja' : ''}</span>
+    </button>
+  `).join('');
+  $$('.login-loja', lista).forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.lojaAtual === '1') return;
+      const url = btn.dataset.lojaUrl;
+      if (!url) {
+        showMsg('Esta loja ainda não tem o endereço de acesso. Abra o Gestor dela uma vez.');
+        return;
+      }
+      await api('/logout', { method: 'POST', body: {} });
+      location.href = urlLoginEmpresa(url);
     });
   });
 }
+
+async function carregarPedidoVinculo() {
+  const bar = $('#vinculo-pedido');
+  if (!bar) return;
+  if (!(state.usuario?.supervisor || state.usuario?.mtEntradas)) {
+    bar.hidden = true;
+    return;
+  }
+  const res = await api('/mt/vinculos/pendentes');
+  const item = (res.pendentes || [])[0];
+  const espera = (res.aguardando || [])[0];
+  const texto = $('#vinculo-pedido-texto');
+  const aceitar = $('#vinculo-aceitar');
+  const recusar = $('#vinculo-recusar');
+  if (item) {
+    bar.hidden = false;
+    bar.dataset.id = String(item.id);
+    if (texto) {
+      texto.textContent = `${item.outra_nome || 'A outra loja'} pediu para aparecer junto no login. Esta loja entra como ${item.papel_outra === 'matriz' ? 'filial' : 'matriz'}. Aceite para liberar a escolha.`;
+    }
+    if (aceitar) aceitar.hidden = false;
+    if (recusar) recusar.hidden = false;
+    return;
+  }
+  if (espera) {
+    bar.hidden = false;
+    delete bar.dataset.id;
+    if (texto) texto.textContent = `Vínculo com ${espera.outra_nome || 'a outra loja'} aguardando o aceite dela.`;
+    if (aceitar) aceitar.hidden = true;
+    if (recusar) recusar.hidden = true;
+    return;
+  }
+  bar.hidden = true;
+}
+
+async function responderVinculo(aceite) {
+  const bar = $('#vinculo-pedido');
+  const id = Number(bar?.dataset.id);
+  if (!id) return;
+  const res = await api('/mt/vinculos/aceite', { method: 'POST', body: { id, aceite } });
+  if (!res.ok) {
+    showMsg(res.error || 'Não foi possível gravar o aceite.');
+    return;
+  }
+  await carregarPedidoVinculo();
+}
+
+async function carregarVinculosPainel() {
+  const lista = $('#vinculos-lista');
+  const selM = $('#vinculo-matriz');
+  const selF = $('#vinculo-filial');
+  if (!lista || !selM || !selF) return;
+  const cad = await api('/mt/empresas/cadastro');
+  const empresas = cad.itens || [];
+  const opt = (e) => `<option value="${escapeAttr(e.cnpj)}">${escapeHtml(e.nome || 'Empresa')} · ${escapeHtml(formatCnpj(e.cnpj))}</option>`;
+  selM.innerHTML = `<option value="">Selecione</option>${empresas.map(opt).join('')}`;
+  selF.innerHTML = selM.innerHTML;
+  const res = await api('/mt/vinculos');
+  const itens = res.itens || [];
+  if (!res.ok && res.error) {
+    lista.innerHTML = `<p class="empty">${escapeHtml(res.error)}</p>`;
+    return;
+  }
+  if (!itens.length) {
+    lista.innerHTML = '<p class="empty">Nenhum vínculo criado.</p>';
+    return;
+  }
+  lista.innerHTML = itens.map((v) => `
+    <article class="imp-item-row">
+      <div class="imp-item-main">
+        <strong>${escapeHtml(v.nome_matriz || 'Matriz')} → ${escapeHtml(v.nome_filial || 'Filial')}</strong>
+        <span class="hint">${escapeHtml(formatCnpj(v.cnpj_matriz))} · ${escapeHtml(formatCnpj(v.cnpj_filial))}</span>
+      </div>
+      <span class="chip ${v.status === 'ativo' ? 'ok' : 'pending'}">${escapeHtml(ROTULO_VINCULO[v.status] || v.status || '')}</span>
+    </article>
+  `).join('');
+}
+
+$('#btn-vincular-empresas')?.addEventListener('click', async () => {
+  const cnpjMatriz = $('#vinculo-matriz')?.value || '';
+  const cnpjFilial = $('#vinculo-filial')?.value || '';
+  if (!cnpjMatriz || !cnpjFilial) {
+    showMsg('Selecione a matriz e a filial.');
+    return;
+  }
+  if (cnpjMatriz === cnpjFilial) {
+    showMsg('A matriz e a filial precisam ser empresas diferentes.');
+    return;
+  }
+  const res = await api('/mt/vinculos', { method: 'POST', body: { cnpjMatriz, cnpjFilial } });
+  if (!res.ok) {
+    showMsg(res.error || 'Não foi possível criar o vínculo.');
+    return;
+  }
+  showMsg(res.ativo ? 'Essas lojas já estão vinculadas.' : 'Vínculo criado. Cada loja precisa aceitar no próprio Gestor.');
+  await carregarVinculosPainel();
+});
+
+$('#vinculo-aceitar')?.addEventListener('click', () => responderVinculo('aceito'));
+$('#vinculo-recusar')?.addEventListener('click', () => responderVinculo('recusado'));
+
+/**
+ * No acesso online todas as lojas usam o mesmo endereço: ler o QR Code (ou "Entrar") de outra loja em outra aba
+ * troca a loja do navegador inteiro. Cada resposta traz o identificador da loja; se mudar, nada desta tela continua.
+ */
+let lojaDoPainel = '';
+function mesmaLoja(res) {
+  const loja = res.headers.get('X-Gestor-Loja') || '';
+  if (!loja) return true;
+  if (!lojaDoPainel) lojaDoPainel = loja;
+  if (loja === lojaDoPainel) return true;
+  fecharTelaDeOutraLoja();
+  return false;
+}
+
+function fecharTelaDeOutraLoja() {
+  if (document.body.dataset.lojaTrocada) return;
+  document.body.dataset.lojaTrocada = '1';
+  document.body.innerHTML = `
+    <main class="loja-trocada">
+      <h1>Outra loja foi aberta neste navegador</h1>
+      <p>Em outra aba foi lido o QR Code ou usado o "Entrar" de outra empresa. Para não misturar os dados, esta tela foi fechada.</p>
+      <p>Para voltar a esta loja, leia de novo o QR Code dela. Para usar a loja aberta agora, recarregue.</p>
+      <button type="button" class="btn primary" id="loja-trocada-recarregar">Recarregar</button>
+    </main>`;
+  document.getElementById('loja-trocada-recarregar').addEventListener('click', () => location.reload());
+}
+
+// Voltar pelo histórico restaura a tela antiga da memória, que pode ser de outra loja.
+window.addEventListener('pageshow', (ev) => {
+  if (ev.persisted) location.reload();
+});
 
 async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const grava = method !== 'GET' && method !== 'HEAD';
   const headers = { 'Content-Type': 'application/json', 'X-Device-Id': deviceId(), ...(options.headers || {}) };
   if (state.usuario) headers['X-Gestor-Usuario'] = String(state.usuario.id);
+  if (lojaDoPainel) headers['X-Gestor-Loja'] = lojaDoPainel;
   // Mesma chave nas repetições: se a resposta se perdeu na rede, o servidor não grava duas vezes.
   if (grava) headers['Idempotency-Key'] = novaChaveIdempotencia();
   const init = {
@@ -272,6 +457,7 @@ async function api(path, options = {}) {
       return { ok: false, offline: true, error };
     }
   }
+  if (!mesmaLoja(res)) return { ok: false, code: 'LOJA_TROCADA', error: 'Este navegador passou a acessar outra loja.' };
   let data;
   try {
     data = await res.json();
@@ -633,11 +819,8 @@ async function bootstrap() {
     setEmitenteUI(conn.emitente);
     applyTheme(state.config.tema, conn.emitente?.logo);
     await loadFuncionarios();
-    const sess = await api('/sessao');
-    if (sess.ok && sess.usuario) {
-      state.usuario = sess.usuario;
-      enterApp();
-    }
+    await api('/logout', { method: 'POST', body: {} });
+    await carregarLojasLogin();
   } else {
     setServiceStatus(true, `Painel online, base offline: ${conn.error || 'falha Firebird'}`);
     setEmitenteUI({ nome_fanta: 'Gestor Estoque', logo: null });
@@ -689,8 +872,21 @@ $('#toggle-senha').addEventListener('click', () => {
   mascararSenha(input, !input.classList.contains('senha-mascarada'));
 });
 
+let loginCliqueEm = 0;
+$('#form-login button[type="submit"]')?.addEventListener('click', () => {
+  loginCliqueEm = Date.now();
+});
+$('#login-senha')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loginCliqueEm = Date.now();
+});
+$('#login-usuario')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loginCliqueEm = Date.now();
+});
+
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (Date.now() - loginCliqueEm > 1500) return;
+  loginCliqueEm = 0;
   $('#login-erro').hidden = true;
   const id = Number($('#login-usuario').value);
   const senhaEl = $('#login-senha');
@@ -760,6 +956,9 @@ function enterApp() {
   if ($('#nav-compras')) $('#nav-compras').hidden = !showCompras;
   if ($('#nav-compras-mobile')) $('#nav-compras-mobile').hidden = !showCompras;
   if ($('#dash-compras')) $('#dash-compras').hidden = !showCompras;
+  const showCond = can('condicionais', 'acesso') || can('estoque', 'acesso');
+  if ($('#nav-condicionais')) $('#nav-condicionais').hidden = !showCond;
+  if ($('#nav-condicionais-mobile')) $('#nav-condicionais-mobile').hidden = !showCond;
   const cfgSrv = $('#btn-config-servidor');
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
@@ -767,9 +966,9 @@ function enterApp() {
   const showEmp = !!state.usuario?.mtEntradas;
   if ($('#nav-empresas')) $('#nav-empresas').hidden = !showEmp;
   if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = !showEmp;
-  if (showEmp) registrarEmpresaMt();
   showPage('dashboard');
   loadUnidades();
+  carregarPedidoVinculo();
 }
 
 function trocarUsuario() {
@@ -867,7 +1066,7 @@ function setNavActive(page) {
   $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   const mais = $('#btn-mais-mobile');
   if (mais) {
-    mais.classList.toggle('active', ['compras', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
+    mais.classList.toggle('active', ['compras', 'condicionais', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
   }
 }
 
@@ -927,6 +1126,10 @@ async function showPage(page) {
     showMsg('Sem permissão para consultar compras.');
     page = 'dashboard';
   }
+  if (page === 'condicionais' && !(can('condicionais', 'acesso') || can('estoque', 'acesso'))) {
+    showMsg('Sem permissão para condicionais.');
+    page = 'dashboard';
+  }
   if (page === 'empresas' && !state.usuario?.mtEntradas) {
     showMsg('Somente o usuário MT Entradas troca de empresa.');
     page = 'dashboard';
@@ -940,6 +1143,7 @@ async function showPage(page) {
   $('#page-estoque').hidden = page !== 'estoque';
   if ($('#page-importacao')) $('#page-importacao').hidden = page !== 'importacao';
   if ($('#page-compras')) $('#page-compras').hidden = page !== 'compras';
+  if ($('#page-condicionais')) $('#page-condicionais').hidden = page !== 'condicionais';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
   if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
@@ -975,6 +1179,10 @@ async function showPage(page) {
     window.ImportacaoNfe?.onPageEnter();
   } else if (page === 'compras') {
     window.Compras?.onPageEnter();
+  } else if (page === 'condicionais') {
+    $('#page-title').textContent = 'Condicionais';
+    $('#page-sub').textContent = 'Peças reservadas para o cliente';
+    window.Condicionais?.onPageEnter();
   }
   scrollAppTop();
 }
@@ -1126,6 +1334,17 @@ function qtdClass(qtd) {
   return '';
 }
 
+function codigoEstoque(it) {
+  const cod = String(it.id_estoque ?? '').padStart(6, '0');
+  const ident = it.id_identificador == null ? '' : String(it.id_identificador);
+  return `<div class="prod-cod"><strong>${escapeHtml(cod)}</strong><span>${escapeHtml(ident)}</span></div>`;
+}
+
+function botaoCondicional(it) {
+  if (!(Number(it.qtd_reserv) > 0)) return '';
+  return `<button type="button" class="btn small" data-cond-prod="${it.id_identificador}">Condicional</button>`;
+}
+
 function renderEstoqueLista() {
   const box = $('#estoque-lista');
   if (!box) return;
@@ -1176,10 +1395,11 @@ function renderEstoqueLista() {
         <tbody>
           ${rows.map(({ it, qtd, cls, active, uni, barras }) => `
             <tr class="${active}" data-id="${it.id_identificador}">
-              <td>${escapeHtml(String(it.id_estoque ?? it.id_identificador).padStart(6, '0'))}</td>
+              <td>${codigoEstoque(it)}</td>
               <td>
-                <div class="prod-name">${escapeHtml(it.descricao)}</div>
+                <div class="prod-name">${escapeHtml(it.descricao_exibicao || it.descricao)}</div>
                 ${barras ? `<div class="prod-sub">${escapeHtml(barras)}</div>` : ''}
+                ${botaoCondicional(it)}
               </td>
               <td>${escapeHtml(it.grupo || '—')}</td>
               <td class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</td>
@@ -1198,14 +1418,21 @@ function renderEstoqueLista() {
             <svg viewBox="0 0 24 24"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
           </div>
           <div>
-            <strong>${escapeHtml(it.descricao)}</strong>
-            <div class="prod-sub">${escapeHtml(String(it.id_estoque ?? '').padStart(6, '0'))}${barras ? ` · ${escapeHtml(barras)}` : ''}${it.prc_venda != null ? ` · ${fmtMoney(it.prc_venda)}` : ''}</div>
+            <strong>${escapeHtml(it.descricao_exibicao || it.descricao)}</strong>
+            <div class="prod-sub">${codigoEstoque(it)}${barras ? ` · ${escapeHtml(barras)}` : ''}${it.prc_venda != null ? ` · ${fmtMoney(it.prc_venda)}` : ''}</div>
+            ${botaoCondicional(it)}
           </div>
           <span class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</span>
         </div>`).join('')}
     </div>`;
 
   box.innerHTML = table + cards;
+  box.querySelectorAll('[data-cond-prod]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      window.Condicionais?.abrirDoProduto(Number(btn.dataset.condProd));
+    });
+  });
   box.querySelectorAll('[data-id]').forEach((row) => {
     row.addEventListener('click', () => openProduto(Number(row.dataset.id)));
   });
@@ -1541,7 +1768,7 @@ function renderDetalhe() {
     ${desktop ? `
     <div class="ficha-aside-head">
       <div>
-        <h2>${escapeHtml(it.descricao || 'Novo produto')}</h2>
+        <h2>${escapeHtml(it.descricao_exibicao || it.descricao || 'Novo produto')}</h2>
         <p class="hint">Cód. ${escapeHtml(String(it.id_estoque ?? 'novo'))} · Ident. ${escapeHtml(String(it.id_identificador ?? 'novo'))}</p>
       </div>
       <span class="${inativo ? 'chip-inativo' : 'chip-ativo'}">${inativo ? 'Inativo' : 'Ativo'}</span>
@@ -1558,6 +1785,7 @@ function renderDetalhe() {
         <label>ID Estoque<input value="${it.id_estoque ?? 'Novo'}" disabled /></label>
         <label>ID Identificador<input value="${it.id_identificador ?? 'Novo'}" disabled /></label>
         <label class="full">Descrição<input id="f-descricao" maxlength="120" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
+        ${!state.isNovo ? `<div class="full"><button type="button" class="btn small" id="btn-condicionais-prod" ${Number(it.qtd_reserv) > 0 ? '' : 'disabled'}>Condicionais${Number(it.qtd_reserv) > 0 ? ` (${fmtNum(it.qtd_reserv)})` : ''}</button></div>` : ''}
         <label>Grupo
           <div class="input-row">
             <select id="f-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>
@@ -1798,6 +2026,9 @@ function renderDetalhe() {
     startScanner('ficha');
   });
 
+  $('#btn-condicionais-prod')?.addEventListener('click', () => {
+    if (Number(it.qtd_reserv) > 0) window.Condicionais?.abrirDoProduto(it.id_identificador);
+  });
   $('#btn-novo-grupo')?.addEventListener('click', async () => {
     const nome = await showPrompt({ message: 'Nome do novo grupo:' });
     if (!nome) return;
@@ -1878,6 +2109,12 @@ function renderUsuarios() {
           <select data-perm="compras.acesso" ${u.supervisor ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.compras?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.compras?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
+        <label>Condicionais
+          <select data-perm="condicionais.acesso" ${u.supervisor ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.condicionais?.acesso !== false ? 'selected' : ''}>Sim</option>
+            <option value="false" ${u.permissoes?.condicionais?.acesso === false ? 'selected' : ''}>Não</option>
           </select>
         </label>
       </div>
@@ -2997,6 +3234,8 @@ window.Compras?.init({
   fmtMoney,
   openImportacao: () => showPage('importacao'),
 });
+
+window.Condicionais?.init({ api });
 
 /** Botão Voltar do Android: uma tela atrás no app (não sair para conexão). */
 window.gestorHardwareBack = () => {

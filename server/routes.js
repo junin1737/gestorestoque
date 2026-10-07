@@ -8,6 +8,7 @@ const {
   MODULOS,
   ensureModulos,
   fullPermissoes,
+  isMtEntradas,
 } = require('./config');
 const {
   withDb,
@@ -51,13 +52,18 @@ function publicUser(u) {
     nome: u.nome,
     supervisor: !!u.supervisor,
     permissoes: u.permissoes,
-    temSenha: u.supervisor ? true : !!u.senhaHash,
+    temSenha: temSenha(u),
   };
+}
+
+/** Supervisor e MT Entradas têm a senha conferida fora da lista de usuários. */
+function temSenha(u) {
+  return u.supervisor || isMtEntradas(u) ? true : !!u.senhaHash;
 }
 
 /** Lista da tela de login: sem permissões. */
 function usuarioLogin(u) {
-  return { id: u.id, nome: u.nome, supervisor: !!u.supervisor, temSenha: u.supervisor ? true : !!u.senhaHash };
+  return { id: u.id, nome: u.nome, supervisor: !!u.supervisor, temSenha: temSenha(u) };
 }
 
 router.get('/health', (_req, res) => {
@@ -337,6 +343,7 @@ router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
   // Só altera usuários já existentes (vindos do TB_FUNCIONARIO); a lista não cria nem apaga ninguém.
   cfg.usuarios = cfg.usuarios.map((prev) => {
     if (prev.supervisor) return { id: 0, nome: prev.nome || 'SUPERVISOR', supervisor: true, permissoes: fullPermissoes() };
+    if (isMtEntradas(prev)) return prev;
     const u = enviados.get(Number(prev.id));
     if (!u) return prev;
     const next = {
@@ -356,11 +363,20 @@ router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
   res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser) });
 });
 
+function descricaoExibicao(descricao, grade, cor, tamanho) {
+  const base = String(descricao || '').trim();
+  if (String(grade || '').trim().toUpperCase() !== 'G') return base;
+  return [base, String(cor || '').trim(), String(tamanho || '').trim()].filter(Boolean).join(' - ');
+}
+
 function mapProdutoRow(r) {
+  const descricao = String(r.DESCRICAO || '').trim();
   return {
     id_estoque: Number(r.ID_ESTOQUE),
     id_identificador: Number(r.ID_IDENTIFICADOR),
-    descricao: String(r.DESCRICAO || '').trim(),
+    descricao,
+    descricao_exibicao: descricaoExibicao(descricao, r.GRADE_SERIE, r.COR, r.TAMANHO),
+    qtd_reserv: Number(r.QTD_RESERV || 0),
     id_grupo: r.ID_GRUPO == null ? null : Number(r.ID_GRUPO),
     grupo: String(r.GRUPO || '').trim(),
     uni_medida: String(r.UNI_MEDIDA || '').trim(),
@@ -480,12 +496,19 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
           )`);
           params.push(Number(busca), busca);
         } else {
-          where.push(`(
-            UPPER(E.DESCRICAO) CONTAINING UPPER(?)
-            OR UPPER(P.COD_BARRA) CONTAINING UPPER(?)
-            OR UPPER(P.REFERENCIA) CONTAINING UPPER(?)
-          )`);
-          params.push(busca, busca, busca);
+          const termos = String(busca).split(/\s+/).map((t) => t.trim()).filter((t) => t.length >= 2);
+          const lista = termos.length ? termos : [busca];
+          for (const termo of lista) {
+            where.push(`(
+              UPPER(E.DESCRICAO) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(P.DESC_CMPL, '')) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(P.COD_BARRA, '')) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(P.REFERENCIA, '')) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(N1.DESCRICAO, '')) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(N2.DESCRICAO, '')) CONTAINING UPPER(?)
+            )`);
+            params.push(termo, termo, termo, termo, termo, termo);
+          }
         }
       }
       if (statusFiltro === 'I') {
@@ -502,7 +525,7 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
         SELECT FIRST 200
           E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
           G.DESCRICAO AS GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO,
-          P.QTD_ATUAL, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
+          P.QTD_ATUAL, P.QTD_RESERV, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
           E.GRADE_SERIE, P.CONTROLA_LOTE_VENDA, P.ID_NIVEL1, P.ID_NIVEL2,
           N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO, E.STATUS
         FROM ${t.estoque} E
@@ -603,7 +626,7 @@ router.get('/estoque/:idIdentificador', LER_ESTOQUE, async (req, res) => {
         `SELECT
           E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
           G.DESCRICAO AS GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO,
-          P.QTD_ATUAL, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
+          P.QTD_ATUAL, P.QTD_RESERV, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
           E.GRADE_SERIE, P.CONTROLA_LOTE_VENDA, P.ID_NIVEL1, P.ID_NIVEL2,
           N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO, E.STATUS
         FROM ${t.estoque} E
@@ -1483,6 +1506,16 @@ router.get('/importacao/notas', async (req, res) => {
       dataCampo: req.query.data_campo || req.query.dataCampo || 'entrada',
     });
     let sessoes = importacaoStaging.listSessoes();
+    let cnpjBase = '';
+    try {
+      const emitRows = await withDb((db) => query(db, 'SELECT FIRST 1 CNPJ FROM TB_EMITENTE'));
+      cnpjBase = String(emitRows[0]?.CNPJ || '').replace(/\D/g, '');
+    } catch { /* sem emitente */ }
+    const daBase = (s) => {
+      const doc = String(s.cnpjBase || s.dest_cnpj || s.xml?.dest?.CNPJ || s.xml?.dest?.CPF || '').replace(/\D/g, '');
+      return !cnpjBase || !doc || doc === cnpjBase;
+    };
+    if (cnpjBase) sessoes = sessoes.filter(daBase);
     const nnf = String(req.query.nf || req.query.nnf || req.query.numero || '').replace(/\D/g, '');
     const fornQ = String(req.query.fornecedor || req.query.forn || '').trim().toLowerCase();
     if (nnf) {
@@ -1502,7 +1535,8 @@ router.get('/importacao/notas', async (req, res) => {
         return d >= de && d <= ate;
       });
     }
-    const confirmadas = importacaoStaging.listSessoesConfirmadas();
+    let confirmadas = importacaoStaging.listSessoesConfirmadas();
+    if (cnpjBase) confirmadas = confirmadas.filter(daBase);
     res.json({ ok: true, notas, sessoes, confirmadas });
   } catch (err) {
     res.json({ ok: false, error: err.message, notas: [], sessoes: [] });
@@ -2099,23 +2133,98 @@ router.post('/importacao/conversao-gestor', async (req, res) => {
   }
 });
 
-router.get('/mt/empresas', async (req, res) => {
+/** Token do login MT no servidor de licenças; sem ele (ou vencido lá) a sessão MT acabou. */
+function tokenMt(req, res) {
   if (!req.usuario?.mtEntradas) {
-    return res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
+    res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
+    return null;
   }
+  const token = auth.tokenMtDaSessao(req.usuario);
+  if (!token) {
+    res.status(401).json({ ok: false, code: 'AUTH', error: 'Sessão MT expirada. Entre novamente.' });
+    return null;
+  }
+  return token;
+}
+
+function respostaMt(res, data) {
+  if (data?.status === 401) {
+    return res.status(401).json({ ok: false, code: 'AUTH', error: 'Sessão MT expirada. Entre novamente.' });
+  }
+  const { status: _s, ...resto } = data || {};
+  return res.json(resto);
+}
+
+router.get('/mt/empresas', async (req, res) => {
+  const token = tokenMt(req, res);
+  if (!token) return;
   try {
-    res.json(await require('./mt-empresas').listarEmpresas());
+    respostaMt(res, await require('./mt-empresas').listarEmpresas(token));
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }
 });
 
-router.post('/mt/empresas/registrar', async (req, res) => {
-  if (!req.usuario?.mtEntradas) {
-    return res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
+function podeAutorizarVinculo(req) {
+  return !!(req.usuario && (req.usuario.supervisor || req.usuario.mtEntradas));
+}
+
+router.get('/mt/grupo', async (_req, res) => {
+  try {
+    res.json(await require('./mt-empresas').grupoLogin());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, empresas: [] });
+  }
+});
+
+router.get('/mt/empresas/cadastro', async (req, res) => {
+  const token = tokenMt(req, res);
+  if (!token) return;
+  try {
+    respostaMt(res, await require('./mt-empresas').listarCadastro(token));
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/mt/vinculos', async (req, res) => {
+  const token = tokenMt(req, res);
+  if (!token) return;
+  try {
+    respostaMt(res, await require('./mt-empresas').listarVinculos(token));
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.post('/mt/vinculos', async (req, res) => {
+  const token = tokenMt(req, res);
+  if (!token) return;
+  try {
+    respostaMt(res, await require('./mt-empresas').criarVinculo(token, req.body?.cnpjMatriz, req.body?.cnpjFilial));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/mt/vinculos/pendentes', async (req, res) => {
+  if (!podeAutorizarVinculo(req)) {
+    return res.status(403).json({ ok: false, error: 'Somente o supervisor desta empresa pode autorizar o vínculo.' });
   }
   try {
-    res.json(await require('./mt-empresas').registrarEmpresaAtual(req.body?.url));
+    res.json(await require('./mt-empresas').pendentesDestaEmpresa());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, pendentes: [], aguardando: [] });
+  }
+});
+
+router.post('/mt/vinculos/aceite', async (req, res) => {
+  if (!podeAutorizarVinculo(req)) {
+    return res.status(403).json({ ok: false, error: 'Somente o supervisor desta empresa pode autorizar o vínculo.' });
+  }
+  const aceite = req.body?.aceite === 'recusado' ? 'recusado' : 'aceito';
+  try {
+    res.json(await require('./mt-empresas').responderVinculo(req.body?.id, aceite));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -2317,6 +2426,125 @@ router.post('/compras/notas/:chave/xml', async (req, res) => {
   } catch (err) {
     res.json({ ok: false, error: err.message, code: err.code || '' });
   }
+});
+
+const condicionais = require('./condicionais');
+const VER_CONDICIONAL = exigirModulo('condicionais', 'estoque');
+const LANCAR_CONDICIONAL = exigirModulo('condicionais');
+
+router.get('/condicionais', VER_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await condicionais.listar(req.query.status)) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/condicionais/clientes', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, itens: await condicionais.buscarClientes(req.query.q || '') });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/condicionais/vendedores', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, itens: await condicionais.listarVendedores() });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/condicionais/produto/:id', VER_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await condicionais.doProduto(req.params.id)) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, reservas: [], condicionais: [] });
+  }
+});
+
+router.get('/condicionais/:id/pdf', VER_CONDICIONAL, async (req, res) => {
+  try {
+    const doc = await condicionais.detalhe(req.params.id);
+    const cfg = loadAppConfig();
+    let empresa = '';
+    try {
+      const rows = await withDb((db) => query(db, 'SELECT FIRST 1 NOME_FANTA FROM TB_EMITENTE'));
+      empresa = String(rows[0]?.NOME_FANTA || '').trim();
+    } catch { /* ignore */ }
+    res.type('html').send(condicionais.htmlPdf(doc, empresa || cfg.database));
+  } catch (err) {
+    res.status(400).type('html').send(`<p>${err.message}</p>`);
+  }
+});
+
+router.get('/condicionais/:id', VER_CONDICIONAL, async (req, res) => {
+  try {
+    const doc = await condicionais.detalhe(req.params.id);
+    res.json({ ok: true, condicional: doc, whatsapp: condicionais.textoWhatsapp(doc) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/condicionais', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    const criado = await condicionais.criar({
+      idCliente: req.body?.id_cliente,
+      idFuncionario: req.body?.id_funcionario,
+      obs: req.body?.obs,
+      itens: req.body?.itens,
+      usuario: req.usuario?.nome || '',
+    });
+    res.json({ ok: true, ...criado });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+const DIAS_ROTINA = [0, 1, 2, 3, 4, 5, 6];
+
+function horaValida(v) {
+  if (!/^\d{2}:\d{2}$/.test(String(v || ''))) return '';
+  const [hh, mm] = String(v).split(':').map(Number);
+  if (hh > 23 || mm > 59) return '';
+  return String(v);
+}
+
+function normalizarRotinas(r) {
+  const horas = {};
+  const bruto = r?.horas && typeof r.horas === 'object' ? r.horas : null;
+  if (bruto) {
+    for (const [dia, hora] of Object.entries(bruto)) {
+      const d = Number(dia);
+      const h = horaValida(hora);
+      if (DIAS_ROTINA.includes(d) && h) horas[String(d)] = h;
+    }
+  } else if (Array.isArray(r?.dias)) {
+    const h = horaValida(r.hora) || '22:00';
+    for (const dia of r.dias) {
+      const d = Number(dia);
+      if (DIAS_ROTINA.includes(d)) horas[String(d)] = h;
+    }
+  }
+  return { ativo: r?.ativo === true, horas };
+}
+
+router.get('/rotinas', somenteServidorLocal, (_req, res) => {
+  const cfg = loadAppConfig();
+  res.json({ ok: true, rotinas: normalizarRotinas(cfg.rotinas || {}) });
+});
+
+router.post('/rotinas', somenteServidorLocal, (req, res) => {
+  const body = req.body || {};
+  const rotinas = normalizarRotinas({ ativo: body.ativo === true, horas: body.horas });
+  if (rotinas.ativo && !Object.keys(rotinas.horas).length) {
+    return res.json({ ok: false, error: 'Marque ao menos um dia e o horário dele.' });
+  }
+  const current = loadAppConfig();
+  saveAppConfig({ ...current, rotinas });
+  res.json({ ok: true, rotinas });
 });
 
 module.exports = router;

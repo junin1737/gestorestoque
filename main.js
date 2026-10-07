@@ -1,5 +1,6 @@
 'use strict';
 const { app, BrowserWindow, Menu, Tray, dialog, ipcMain, shell } = require('electron');
+const { spawn } = require('child_process');
 const path = require('path');
 
 const NOME_APP = (() => {
@@ -39,6 +40,38 @@ function mostrarJanela() {
 function encerrarApp() {
   encerrando = true;
   app.quit();
+}
+
+let rotinaDisparada = '';
+
+function checarRotinaDesligamento() {
+  if (rotinaDisparada && encerrando) return;
+  let cfg;
+  try { cfg = require('./server/config').loadAppConfig(); } catch { return; }
+  const r = cfg.rotinas || {};
+  if (r.ativo !== true) return;
+  const agora = new Date();
+  let hora = '';
+  if (r.horas && typeof r.horas === 'object') hora = String(r.horas[String(agora.getDay())] || '');
+  else if (Array.isArray(r.dias) && r.dias.map(Number).includes(agora.getDay())) hora = String(r.hora || '');
+  if (!/^\d{2}:\d{2}$/.test(hora)) return;
+  const [hh, mm] = hora.split(':').map(Number);
+  if (agora.getHours() !== hh || agora.getMinutes() !== mm) return;
+  const chave = `${agora.getFullYear()}-${agora.getMonth()}-${agora.getDate()} ${hora}`;
+  if (rotinaDisparada === chave) return;
+  rotinaDisparada = chave;
+  try {
+    spawn('shutdown', ['/s', '/f', '/t', '20', '/c', 'Gestor Estoque: desligamento programado.'], {
+      windowsHide: true,
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+  } catch (err) {
+    console.warn('Rotina de desligamento:', err.message);
+  }
+  setTimeout(() => {
+    try { encerrarApp(); } catch { /* ignore */ }
+  }, 1000);
 }
 
 function esconderNaBandeja() {
@@ -207,6 +240,7 @@ if (gotLock) {
     if (app.getLoginItemSettings(itemLoginAntigo).openAtLogin) definirIniciarComWindows(true);
     criarBandeja();
     createWindow();
+    setInterval(checarRotinaDesligamento, 20000);
   });
   app.on('window-all-closed', () => app.quit());
   app.on('activate', () => {
