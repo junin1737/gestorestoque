@@ -336,15 +336,80 @@ function textoValidade(valor, doc) {
   return bruto || doc.validade || '____/____/________';
 }
 
+function limpo(v) {
+  return String(v || '').replace(/\s+/g, ' ').trim();
+}
+
+function foneLoja(ddd, numero) {
+  const d = limpo(ddd);
+  const n = limpo(numero);
+  if (!n) return '';
+  return d ? `(${d}) ${n}` : n;
+}
+
+function montarLoja(row) {
+  if (!row) return { nome: '', endereco: '', telefone: '' };
+  const rua = [limpo(row.END_TIPO), limpo(row.END_LOGRAD)].filter(Boolean).join(' ');
+  const numero = [limpo(row.END_NUMERO), limpo(row.END_COMPLE)].filter(Boolean).join(' ');
+  const linha1 = [rua, numero].filter(Boolean).join(', ');
+  const comBairro = [linha1, limpo(row.END_BAIRRO)].filter(Boolean).join(' - ');
+  const cidade = [limpo(row.CIDADE), limpo(row.SIGLA_UF)].filter(Boolean).join('/');
+  const cep = limpo(row.END_CEP);
+  const linha2 = [cidade, cep ? `CEP ${cep}` : ''].filter(Boolean).join(' · ');
+  const telefone = foneLoja(row.DDD_COMER, row.FONE_COMER) || foneLoja(row.DDD_CELUL, row.FONE_CELUL);
+  return {
+    nome: limpo(row.NOME_FANTA) || limpo(row.NOME),
+    endereco: [comBairro, linha2].filter(Boolean).join('\n'),
+    telefone: telefone ? `Tel. ${telefone}` : '',
+  };
+}
+
+async function lojaEmitente() {
+  return withDb(async (db) => {
+    const cidade = hasTable('TB_CIDADE_SIS')
+      ? 'C.NOME AS CIDADE, C.SIGLA_UF'
+      : 'CAST(NULL AS VARCHAR(80)) AS CIDADE, CAST(NULL AS VARCHAR(8)) AS SIGLA_UF';
+    const join = hasTable('TB_CIDADE_SIS')
+      ? 'LEFT JOIN TB_CIDADE_SIS C ON C.ID_CIDADE = E.ID_CIDADE'
+      : '';
+    const rows = await query(db, `
+      SELECT FIRST 1 E.NOME_FANTA, E.NOME, E.END_TIPO, E.END_LOGRAD, E.END_NUMERO, E.END_COMPLE,
+             E.END_BAIRRO, E.END_CEP, E.DDD_COMER, E.FONE_COMER, E.DDD_CELUL, E.FONE_CELUL,
+             ${cidade}
+      FROM TB_EMITENTE E
+      ${join}`);
+    return montarLoja(rows[0]);
+  });
+}
+
+function lojaDe(empresa) {
+  if (empresa && typeof empresa === 'object') {
+    return {
+      nome: limpo(empresa.nome),
+      endereco: String(empresa.endereco || ''),
+      telefone: limpo(empresa.telefone),
+    };
+  }
+  return { nome: limpo(empresa), endereco: '', telefone: '' };
+}
+
 function htmlPdf(doc, empresa, opcoes = {}) {
   const formato = ['a4', 'meia', '80'].includes(opcoes.formato) ? opcoes.formato : 'a4';
   const validade = textoValidade(opcoes.validade, doc);
   const termico = formato === '80';
+  const loja = lojaDe(empresa);
   const page = termico
-    ? '@page { size: 80mm auto; margin: 3mm; }'
+    ? '@page { size: 80mm auto; margin: 4mm 3mm; }'
     : formato === 'meia'
-      ? '@page { size: 148mm 210mm portrait; margin: 8mm; }'
-      : '@page { size: A4 portrait; margin: 14mm; }';
+      ? '@page { size: 148mm 210mm portrait; margin: 10mm 9mm 12mm; }'
+      : '@page { size: A4 portrait; margin: 16mm 14mm 18mm; }';
+  const tela = termico
+    ? 'width:72mm;margin:8px auto;padding:4mm 3mm;font-size:12px;'
+    : formato === 'meia'
+      ? 'max-width:148mm;margin:0 auto;padding:10mm 9mm 12mm;'
+      : 'max-width:210mm;margin:0 auto;padding:16mm 14mm 18mm;';
+  const endereco = String(loja.endereco || '').split('\n').filter(Boolean)
+    .map((linha) => `<div>${esc(linha)}</div>`).join('');
   const itens = doc.itens || [];
   const corpo = termico
     ? itens.map((it) => `
@@ -367,21 +432,28 @@ function htmlPdf(doc, empresa, opcoes = {}) {
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Condicional ${doc.id}</title>
 <style>
   ${page}
-  body{font-family:Segoe UI,sans-serif;color:#152033;margin:0;${termico ? 'width:74mm;font-size:12px;' : ''}}
-  h1{font-size:${termico ? '16px' : '20px'};margin:0 0 4px}
-  table{width:100%;border-collapse:collapse;margin-top:12px}
-  th,td{border-bottom:1px solid #d5dbe3;padding:6px 8px;text-align:left;font-size:12px}
+  body{font-family:Segoe UI,sans-serif;color:#152033;box-sizing:border-box;${tela}}
+  .loja{text-align:center;border-bottom:2px solid #152033;padding-bottom:8px;margin:0 0 12px}
+  .loja-nome{display:block;font-size:${termico ? '14px' : '18px'};letter-spacing:.02em}
+  .loja div{font-size:${termico ? '10px' : '12px'};line-height:1.35}
+  h1{font-size:${termico ? '15px' : '18px'};margin:10px 0 4px}
+  table{width:100%;border-collapse:collapse;margin-top:10px}
+  th,td{border-bottom:1px solid #d5dbe3;padding:5px 6px;text-align:left;font-size:${termico ? '10px' : '12px'}}
   .num{text-align:right} .muted{color:#5c6b7a;font-size:12px}
   .item{border-bottom:1px dashed #c5ced8;padding:6px 0}
-  .total{margin-top:12px;font-size:${termico ? '14px' : '16px'}}
-  .assina{margin-top:28px}
-  .linha{border-bottom:1px solid #152033;height:32px;width:${termico ? '100%' : '240px'}}
-  button{margin:12px 0;padding:8px 14px}
-  @media print { button{display:none} }
+  .total{margin-top:12px;font-size:${termico ? '13px' : '15px'}}
+  .assina{margin-top:26px}
+  .linha{border-bottom:1px solid #152033;height:28px;width:${termico ? '100%' : '220px'}}
+  button{margin:0 0 12px;padding:8px 14px}
+  @media print { body{margin:0;padding:0;max-width:none;width:auto} button{display:none} }
 </style></head><body>
-  <button onclick="window.print()">Imprimir / Salvar PDF</button>
+  <button type="button" onclick="if(parent!==window){parent.postMessage({tipo:'gestor-imprimir'}, location.origin)}else{window.print()}">Imprimir / Salvar PDF</button>
+  <header class="loja">
+    <strong class="loja-nome">${esc(loja.nome || 'Loja')}</strong>
+    ${endereco}
+    ${loja.telefone ? `<div>${esc(loja.telefone)}</div>` : ''}
+  </header>
   <h1>Condicional ${doc.id}</h1>
-  <div class="muted">${esc(empresa || '')}</div>
   <p>Cliente: <strong>${esc(doc.cliente || '—')}</strong><br>
   Data: ${esc(doc.data)} ${esc(doc.horario)}<br>
   Validade: <strong>${esc(validade)}</strong><br>
@@ -424,5 +496,6 @@ module.exports = {
   listarVendedores,
   criar,
   htmlPdf,
+  lojaEmitente,
   textoWhatsapp,
 };

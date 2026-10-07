@@ -2486,15 +2486,13 @@ router.get('/condicionais/produto/:id', VER_CONDICIONAL, async (req, res) => {
 router.get('/condicionais/:id/pdf', VER_CONDICIONAL, async (req, res) => {
   try {
     const doc = await condicionais.detalhe(req.params.id);
-    const cfg = loadAppConfig();
-    let empresa = '';
+    let loja = { nome: '', endereco: '', telefone: '' };
     try {
-      const rows = await withDb((db) => query(db, 'SELECT FIRST 1 NOME_FANTA FROM TB_EMITENTE'));
-      empresa = String(rows[0]?.NOME_FANTA || '').trim();
-    } catch { /* ignore */ }
+      loja = await condicionais.lojaEmitente();
+    } catch { /* a folha segue sem o cabeçalho da loja */ }
     const formato = String(req.query.formato || 'a4');
     const validade = String(req.query.validade || '');
-    res.type('html').send(condicionais.htmlPdf(doc, empresa || cfg.database, { formato, validade }));
+    res.type('html').send(condicionais.htmlPdf(doc, loja, { formato, validade }));
   } catch (err) {
     res.status(400).type('html').send(`<p>${err.message}</p>`);
   }
