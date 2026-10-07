@@ -26,6 +26,7 @@ const ImportacaoNfe = (() => {
     financeiroVisitado: false,
     saidaParams: null,
     itensFiltro: 'todos',
+    grupos: null,
   };
 
   let deps = {};
@@ -662,6 +663,7 @@ const ImportacaoNfe = (() => {
       <strong class="imp-chrome-total">Total ${money(tot.vNF)}</strong>
       <button type="button" class="btn" id="imp-chrome-danfe">DANFE</button>
       <button type="button" class="btn" id="imp-chrome-fin">Financeiro</button>
+      <button type="button" class="btn" id="imp-chrome-sair">Sair</button>
       <button type="button" class="btn primary ${ok ? '' : 'is-disabled'}" id="imp-chrome-gravar" aria-disabled="${ok ? 'false' : 'true'}">Gravar nota</button>
     `;
     $('#imp-chrome-voltar')?.addEventListener('click', () => {
@@ -679,6 +681,7 @@ const ImportacaoNfe = (() => {
       finTab?.click();
     });
     $('#imp-chrome-gravar')?.addEventListener('click', () => $('#imp-btn-confirmar')?.click());
+    $('#imp-chrome-sair')?.addEventListener('click', () => leaveSessaoToHome());
   }
 
   function kv(label, value) {
@@ -942,6 +945,60 @@ const ImportacaoNfe = (() => {
     if (!win) deps.showMsg?.('Permita pop-ups para visualizar o PDF da nota.');
   }
 
+  function abrirRelatorioEntrada(gravacao) {
+    const linhas = gravacao?.relatorio || [];
+    if (!linhas.length) return;
+    const moneyBr = (v) => (v == null || v === '' ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+    const qtdBr = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+    const rows = linhas.map((r) => `
+      <tr>
+        <td>${esc(r.status || '')}</td>
+        <td>${esc(r.id_identificador ?? '')}</td>
+        <td>${esc(r.descricao || '')}</td>
+        <td class="num">${qtdBr(r.qtd_anterior)}</td>
+        <td class="num">${qtdBr(r.qtd_atual)}</td>
+        <td class="num">${moneyBr(r.venda_anterior)}</td>
+        <td class="num">${moneyBr(r.venda_atual)}</td>
+        <td class="num">${moneyBr(r.custo_anterior)}</td>
+        <td class="num">${moneyBr(r.custo_atual)}</td>
+        <td class="num">${moneyBr(r.custo_medio)}</td>
+      </tr>`).join('');
+    const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Entrada NF ${esc(gravacao.nf_numero || '')}</title>
+      <style>
+        body { font-family: Segoe UI, sans-serif; color: #1c2430; margin: 24px; }
+        h1 { font-size: 18px; margin: 0 0 4px; }
+        p { margin: 0 0 16px; color: #5c6b80; }
+        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        th, td { border-bottom: 1px solid #d7dee8; padding: 6px 8px; text-align: left; vertical-align: top; }
+        th { background: #f4f7fb; }
+        td.num, th.num { text-align: right; white-space: nowrap; }
+        button { margin-bottom: 12px; }
+        @media print { button { display: none; } }
+      </style></head><body>
+      <button onclick="window.print()">Imprimir / Salvar PDF</button>
+      <h1>Entrada NF ${esc(gravacao.nf_numero || '—')}/${esc(gravacao.nf_serie || '—')}</h1>
+      <p>Código ${esc(gravacao.id_nfcompra || '—')} · ${linhas.length} produto(s)</p>
+      <table>
+        <thead><tr>
+          <th>Status</th><th>ID</th><th>Descrição</th>
+          <th class="num">Qtd anterior</th><th class="num">Qtd atual</th>
+          <th class="num">Venda anterior</th><th class="num">Venda atual</th>
+          <th class="num">Custo anterior</th><th class="num">Custo atual</th>
+          <th class="num">Custo médio</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+      </body></html>`;
+    const win = window.open('', '_blank');
+    if (!win) {
+      deps.showMsg?.('Permita pop-ups para abrir o relatório da entrada.');
+      return;
+    }
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+  }
+
   function abrirDanfeNota(idNf) {
     if (!idNf) {
       deps.showMsg?.('Nota inválida.');
@@ -1007,6 +1064,9 @@ const ImportacaoNfe = (() => {
           <span class="imp-item-num">${done ? '✓' : esc(it.nItem)}</span>
           <div class="imp-item-main">
             <strong>${esc(descForn)}</strong>
+            ${(sys.id_identificador || sys.criar_novo) && sys.descricao
+    ? `<span class="imp-item-estoque">${esc(sys.descricao)}</span>`
+    : ''}
             <span class="hint">${sys.id_identificador || sys.criar_novo ? `${esc(String(sys.id_identificador || 'novo'))} · ${num(qtdXml)} ${esc(uniXml)}` : 'Sem vínculo'}</span>
           </div>
           <span class="imp-item-val">${money(xml.vProd || xml.vUnCom)}</span>
@@ -1549,6 +1609,7 @@ const ImportacaoNfe = (() => {
 
   function canOpenEtapa(tabId, it) {
     if (!conferirEtapasAtivo()) return true;
+    if (it?.conferido || it?.status === 'conferido') return true;
     const idx = ITEM_TABS_ETAPA.findIndex((t) => t.id === tabId);
     if (idx < 0) return false;
     return idx <= maxEtapaLiberada(it);
@@ -1602,6 +1663,13 @@ const ImportacaoNfe = (() => {
 
   function ynChecked(v) {
     return String(v || '').toUpperCase() === 'S' || v === true || v === 1 || v === '1';
+  }
+
+  async function ensureGrupos() {
+    if (state.grupos) return state.grupos;
+    const res = await api('/grupos');
+    state.grupos = res.grupos || [];
+    return state.grupos;
   }
 
   async function ensureUnidades() {
@@ -1922,6 +1990,26 @@ const ImportacaoNfe = (() => {
     };
   }
 
+  function grupoField(sys) {
+    const grupos = state.grupos || [];
+    const atual = Number(sys.id_grupo) || 0;
+    const opts = grupos.map((g) => {
+      const id = Number(g.id_grupo);
+      return `<option value="${id}" ${id === atual ? 'selected' : ''}>${esc(g.descricao)}</option>`;
+    }).join('');
+    return `
+      <label class="imp-field">
+        <span>Grupo</span>
+        <select id="imp-grupo">
+          <option value="">Sem grupo</option>
+          ${opts}
+        </select>
+      </label>
+      <div class="imp-vinc-btns">
+        <button type="button" class="btn small outline" id="imp-novo-grupo">Cadastrar grupo</button>
+      </div>`;
+  }
+
   function panelSaida(sys, xml, vinculado, descEditable) {
     const custoInfo = calcCustoNotaUnitario(sys, xml);
     return `
@@ -1955,7 +2043,8 @@ const ImportacaoNfe = (() => {
         <div class="imp-block-title">Preço</div>
         <div class="imp-fields">
           ${field('Preço custo', 'imp-custo-ficha', moneyInput(sys.prc_custo ?? custoInfo.custoEstoque), { third: true, money: true })}
-          ${field('Margem LB %', 'imp-margem', sys.margem_lb ?? 0, { type: 'number', step: '0.01', third: true })}
+          ${field('Margem LB %', 'imp-margem', Number(sys.margem_lb) > 0 ? sys.margem_lb : '', { type: 'number', step: '0.01', third: true, placeholder: 'Vazio = sem margem' })}
+          ${sys.criar_novo ? grupoField(sys) : ''}
           ${field('Preço venda', 'imp-venda', Number(sys.prc_venda) > 0 ? moneyInput(sys.prc_venda) : '', { third: true, money: true, placeholder: 'Vazio = 0,01' })}
           ${field('Status', 'imp-status-prod', sys.status || 'A', { third: true })}
           ${comboField('Unidade', 'imp-uni-ficha', 'imp-uni-ficha-list', sys.uni_medida_saida || sys.uni_medida || '', { third: true, placeholder: 'Pesquisar unidade (TB_UNI_MEDIDA)…' })}
@@ -2245,6 +2334,7 @@ const ImportacaoNfe = (() => {
     const host = $('#imp-item-host');
     if (!it || !host) return;
     await ensureUnidades();
+    if ((it.sistema || {}).criar_novo) await ensureGrupos();
     const simples = await ensureEmitenteFiscal();
     await hydrateClassTribRates(it.sistema || {});
     await hydrateTaxaLabels(it.sistema || {});
@@ -2667,7 +2757,7 @@ const ImportacaoNfe = (() => {
     };
     baseNovo.qtd = Number((baseNovo.qtd_xml * baseNovo.conversor).toFixed(6));
     baseNovo.prc_venda = 0;
-    baseNovo.margem_lb = 0;
+    baseNovo.margem_lb = null;
     const conflitos = await conflitosCodigoBarras(ean);
     if (!(await confirmarCodigoBarrasNovo(ean, conflitos))) return;
     if (conflitos.barras) {
@@ -2977,7 +3067,8 @@ const ImportacaoNfe = (() => {
       ...sys, conversor, qtd_xml: qtdXml, qtd, v_desc: vDesc, v_frete: vFrete, v_seguro: vSeguro, v_outro: vOutro,
     }, it?.xml || {}).custoXml;
 
-    const margem = gn('#imp-margem') ?? sys.margem_lb ?? 0;
+    const margemLida = $('#imp-margem') ? Number($('#imp-margem').value) : Number(sys.margem_lb);
+    const margem = Number.isFinite(margemLida) && margemLida > 0 ? margemLida : null;
     let venda = $('#imp-venda') ? (parseMoney($('#imp-venda').value) ?? 0) : sys.prc_venda;
     const calc = calcVendaPorMargem(custo, margem);
     if (calc != null && ($('#imp-margem') || margem > 0)) venda = calc;
@@ -3009,6 +3100,9 @@ const ImportacaoNfe = (() => {
         _cti_label: g('#imp-cti-disp') || sys._cti_label || '',
         _cti_cfe_label: g('#imp-cti-cfe-disp') || sys._cti_cfe_label || '',
         margem_lb: margem,
+        id_grupo: $('#imp-grupo')
+          ? ($('#imp-grupo').value ? Number($('#imp-grupo').value) : null)
+          : (sys.id_grupo ?? null),
         aplicar_saida: aplicarSaida,
         gera_estoque: $('#imp-gera-estoque')
           ? ($('#imp-gera-estoque').checked ? 'S' : 'N')
@@ -3584,6 +3678,25 @@ const ImportacaoNfe = (() => {
     $$('.imp-step').forEach((btn) => {
       btn.addEventListener('click', () => setItemTab(btn.dataset.itemTab));
     });
+    $('#imp-novo-grupo')?.addEventListener('click', async () => {
+      const nome = await askPrompt('Nome do novo grupo:');
+      if (!nome || !String(nome).trim()) return;
+      const res = await api('/grupos', { method: 'POST', body: { descricao: String(nome).trim() } });
+      if (!res.ok) {
+        deps.showMsg?.(res.error || 'Erro ao criar grupo');
+        return;
+      }
+      state.grupos = [...(state.grupos || []), res.grupo];
+      const sel = $('#imp-grupo');
+      if (sel && res.grupo) {
+        const opt = document.createElement('option');
+        opt.value = String(res.grupo.id_grupo);
+        opt.textContent = res.grupo.descricao;
+        opt.selected = true;
+        sel.appendChild(opt);
+      }
+      deps.showToast?.('Grupo cadastrado');
+    });
     $('#imp-salvar-ficha')?.addEventListener('click', async () => {
       const ok = await saveItem({ semRender: true });
       if (!ok) return;
@@ -4016,6 +4129,13 @@ const ImportacaoNfe = (() => {
         <div class="imp-fields">
           ${field('CSOSN padrão (fallback)', 'imp-params-csosn', csosn, { third: true })}
         </div>
+        <div class="imp-field">
+          <span>Natureza padrão de entrada</span>
+          <input type="hidden" id="imp-params-nat-id" value="${esc(saida.id_natope_padrao || '')}" />
+          <input id="imp-params-nat-busca" type="search" autocomplete="off" placeholder="Pesquisar natureza…" data-descricao="${esc(saida.nat_padrao_descricao || '')}" data-cfop="${esc(saida.nat_padrao_cfop || '')}" value="${esc(saida.nat_padrao_descricao ? `${saida.nat_padrao_descricao}${saida.nat_padrao_cfop ? ` · CFOP ${saida.nat_padrao_cfop}` : ''}` : '')}" />
+          <div id="imp-params-nat-list" class="imp-combo-list" hidden></div>
+          <p class="hint">Todas as notas abrem com esta natureza. Se você trocar na nota, a gravação usa a que foi alterada.</p>
+        </div>
         <h5 class="imp-sub">Conversão por linha (entrada → saída NF-e / CF-e)</h5>
         <p class="hint">Colunas Estoque e Financeiro definem se aquele CFOP de entrada movimenta saldo ou entra no contas a pagar. Uso/consumo e imobilizado normalmente ficam sem estoque.</p>
         <div class="imp-params-scroll">
@@ -4114,6 +4234,7 @@ const ImportacaoNfe = (() => {
     }
     bindParamsRowEvents();
     bindParamsConvEvents();
+    wireNaturezaPadrao();
     $('#imp-params-conv-add')?.addEventListener('click', () => {
       const tbody = $('#imp-params-conv-table tbody');
       if (!tbody) return;
@@ -4333,6 +4454,48 @@ const ImportacaoNfe = (() => {
     });
   }
 
+  function wireNaturezaPadrao() {
+    const displayEl = $('#imp-params-nat-busca');
+    const valueEl = $('#imp-params-nat-id');
+    const box = $('#imp-params-nat-list');
+    if (!displayEl || !valueEl || !box) return;
+    const closeList = () => { box.hidden = true; box.innerHTML = ''; };
+    const renderList = async (term) => {
+      box.hidden = false;
+      const res = await api(`/importacao/naturezas?q=${encodeURIComponent(term || '')}`);
+      const list = res.itens || res.naturezas || [];
+      if (!list.length) {
+        box.innerHTML = '<p class="hint">Nenhuma natureza</p>';
+        return;
+      }
+      box.innerHTML = list.map((it) => `
+        <button type="button" class="imp-prod-opt" data-id="${esc(it.id_natope)}" data-desc="${esc(it.descricao || '')}" data-cfop="${esc(it.cfop || '')}">
+          <strong>${esc(it.descricao || '')}</strong>
+          <span>${esc(it.cfop ? `CFOP ${it.cfop}` : '')}</span>
+        </button>`).join('');
+      $$('.imp-prod-opt', box).forEach((btn) => {
+        btn.addEventListener('click', () => {
+          valueEl.value = btn.dataset.id || '';
+          displayEl.dataset.descricao = btn.dataset.desc || '';
+          displayEl.dataset.cfop = btn.dataset.cfop || '';
+          displayEl.value = `${btn.dataset.desc || ''}${btn.dataset.cfop ? ` · CFOP ${btn.dataset.cfop}` : ''}`;
+          closeList();
+        });
+      });
+    };
+    displayEl.addEventListener('focus', () => renderList(String(displayEl.value || '').trim()));
+    displayEl.addEventListener('input', () => {
+      valueEl.value = '';
+      displayEl.dataset.descricao = '';
+      displayEl.dataset.cfop = '';
+      clearTimeout(buscaCodeTimer);
+      buscaCodeTimer = setTimeout(() => renderList(String(displayEl.value || '').trim()), 220);
+    });
+    displayEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeList();
+    });
+  }
+
   function bindParamsRowEvents() {
     $$('#imp-params-table .imp-params-del').forEach((btn) => {
       btn.onclick = () => {
@@ -4381,6 +4544,9 @@ const ImportacaoNfe = (() => {
       obrigar_financeiro: $('#imp-params-obrigar-fin')?.checked ? 'S' : 'N',
       zerar_negativo: $('#imp-params-zerar-neg')?.checked ? 'S' : 'N',
       conferir_etapas: $('#imp-params-conferir-etapas')?.checked ? 'S' : 'N',
+      id_natope_padrao: Number($('#imp-params-nat-id')?.value || 0) || null,
+      nat_padrao_descricao: String($('#imp-params-nat-busca')?.dataset.descricao || $('#imp-params-nat-busca')?.value || '').replace(/\s·\sCFOP\s\d+$/i, '').trim(),
+      nat_padrao_cfop: $('#imp-params-nat-busca')?.dataset.cfop || '',
     };
     const conversoes = $$('#imp-params-conv-table tbody tr').map((tr) => ({
       uni_xml: tr.querySelector('.imp-conv-xml')?.value || '',
@@ -4462,7 +4628,13 @@ const ImportacaoNfe = (() => {
     });
 
     $$('#imp-tabs .imp-tab').forEach((btn) => {
-      btn.addEventListener('click', () => setTab(btn.dataset.tab));
+      btn.addEventListener('click', () => {
+        if (state.view === 'item') {
+          showView('sessao');
+          renderSessao();
+        }
+        setTab(btn.dataset.tab);
+      });
     });
 
     $('#imp-btn-add-item')?.addEventListener('click', () => addItemManual());
@@ -4534,7 +4706,8 @@ const ImportacaoNfe = (() => {
           body: {},
         });
         if (res.ok) {
-          deps.showMsg?.(res.message || 'Entrada confirmada (protótipo)');
+          deps.showMsg?.(res.message || 'Entrada confirmada');
+          abrirRelatorioEntrada(res.gravacao);
           state.sessao = null;
           showView('inicio');
           loadHome();
@@ -4621,16 +4794,14 @@ const ImportacaoNfe = (() => {
     if (s?.id) {
       const ok = await askConfirm(
         s.editar_id_nfcompra
-          ? 'Sair sem gravar as alterações desta nota? A nota cadastrada permanece como estava.'
-          : 'Sair da conferência sem gravar a nota? A sessão permanece em “Em conferência”.',
-        { okLabel: 'Sair', cancelLabel: 'Continuar' }
+          ? 'Sair sem gravar as alterações desta nota? A nota cadastrada permanece como estava e esta conferência será descartada.'
+          : 'Sair sem gravar esta nota? Ela não ficará pendente e nenhum lançamento da nota será gravado. Produtos e parâmetros já salvos no estoque permanecem.',
+        { okLabel: 'Sair sem gravar', cancelLabel: 'Continuar' }
       );
       if (!ok) return false;
-      if (s.editar_id_nfcompra) {
-        try {
-          await api(`/importacao/sessoes/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
-        } catch (_) { /* ignore */ }
-      }
+      try {
+        await api(`/importacao/sessoes/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+      } catch (_) { /* ignore */ }
     }
     state.sessao = null;
     showView('inicio');
