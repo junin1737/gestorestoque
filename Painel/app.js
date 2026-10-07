@@ -756,6 +756,9 @@ function enterApp() {
   if ($('#nav-compras')) $('#nav-compras').hidden = !showCompras;
   if ($('#nav-compras-mobile')) $('#nav-compras-mobile').hidden = !showCompras;
   if ($('#dash-compras')) $('#dash-compras').hidden = !showCompras;
+  const showCond = can('condicionais', 'acesso') || can('estoque', 'acesso');
+  if ($('#nav-condicionais')) $('#nav-condicionais').hidden = !showCond;
+  if ($('#nav-condicionais-mobile')) $('#nav-condicionais-mobile').hidden = !showCond;
   const cfgSrv = $('#btn-config-servidor');
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
@@ -863,7 +866,7 @@ function setNavActive(page) {
   $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
   const mais = $('#btn-mais-mobile');
   if (mais) {
-    mais.classList.toggle('active', ['compras', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
+    mais.classList.toggle('active', ['compras', 'condicionais', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
   }
 }
 
@@ -923,6 +926,10 @@ async function showPage(page) {
     showMsg('Sem permissão para consultar compras.');
     page = 'dashboard';
   }
+  if (page === 'condicionais' && !(can('condicionais', 'acesso') || can('estoque', 'acesso'))) {
+    showMsg('Sem permissão para condicionais.');
+    page = 'dashboard';
+  }
   if (page === 'empresas' && !state.usuario?.mtEntradas) {
     showMsg('Somente o usuário MT Entradas troca de empresa.');
     page = 'dashboard';
@@ -936,6 +943,7 @@ async function showPage(page) {
   $('#page-estoque').hidden = page !== 'estoque';
   if ($('#page-importacao')) $('#page-importacao').hidden = page !== 'importacao';
   if ($('#page-compras')) $('#page-compras').hidden = page !== 'compras';
+  if ($('#page-condicionais')) $('#page-condicionais').hidden = page !== 'condicionais';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
   if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
@@ -971,6 +979,10 @@ async function showPage(page) {
     window.ImportacaoNfe?.onPageEnter();
   } else if (page === 'compras') {
     window.Compras?.onPageEnter();
+  } else if (page === 'condicionais') {
+    $('#page-title').textContent = 'Condicionais';
+    $('#page-sub').textContent = 'Peças reservadas para o cliente';
+    window.Condicionais?.onPageEnter();
   }
   scrollAppTop();
 }
@@ -1174,7 +1186,7 @@ function renderEstoqueLista() {
             <tr class="${active}" data-id="${it.id_identificador}">
               <td>${escapeHtml(String(it.id_estoque ?? it.id_identificador).padStart(6, '0'))}</td>
               <td>
-                <div class="prod-name">${escapeHtml(it.descricao)}</div>
+                <div class="prod-name">${escapeHtml(it.descricao_exibicao || it.descricao)}</div>
                 ${barras ? `<div class="prod-sub">${escapeHtml(barras)}</div>` : ''}
               </td>
               <td>${escapeHtml(it.grupo || '—')}</td>
@@ -1194,7 +1206,7 @@ function renderEstoqueLista() {
             <svg viewBox="0 0 24 24"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
           </div>
           <div>
-            <strong>${escapeHtml(it.descricao)}</strong>
+            <strong>${escapeHtml(it.descricao_exibicao || it.descricao)}</strong>
             <div class="prod-sub">${escapeHtml(String(it.id_estoque ?? '').padStart(6, '0'))}${barras ? ` · ${escapeHtml(barras)}` : ''}${it.prc_venda != null ? ` · ${fmtMoney(it.prc_venda)}` : ''}</div>
           </div>
           <span class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</span>
@@ -1537,7 +1549,7 @@ function renderDetalhe() {
     ${desktop ? `
     <div class="ficha-aside-head">
       <div>
-        <h2>${escapeHtml(it.descricao || 'Novo produto')}</h2>
+        <h2>${escapeHtml(it.descricao_exibicao || it.descricao || 'Novo produto')}</h2>
         <p class="hint">Cód. ${escapeHtml(String(it.id_estoque ?? 'novo'))} · Ident. ${escapeHtml(String(it.id_identificador ?? 'novo'))}</p>
       </div>
       <span class="${inativo ? 'chip-inativo' : 'chip-ativo'}">${inativo ? 'Inativo' : 'Ativo'}</span>
@@ -1554,6 +1566,7 @@ function renderDetalhe() {
         <label>ID Estoque<input value="${it.id_estoque ?? 'Novo'}" disabled /></label>
         <label>ID Identificador<input value="${it.id_identificador ?? 'Novo'}" disabled /></label>
         <label class="full">Descrição<input id="f-descricao" maxlength="120" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
+        ${!state.isNovo ? `<div class="full"><button type="button" class="btn small" id="btn-condicionais-prod" ${Number(it.qtd_reserv) > 0 ? '' : 'disabled'}>Condicionais${Number(it.qtd_reserv) > 0 ? ` (${fmtNum(it.qtd_reserv)})` : ''}</button></div>` : ''}
         <label>Grupo
           <div class="input-row">
             <select id="f-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>
@@ -1794,6 +1807,9 @@ function renderDetalhe() {
     startScanner('ficha');
   });
 
+  $('#btn-condicionais-prod')?.addEventListener('click', () => {
+    if (Number(it.qtd_reserv) > 0) window.Condicionais?.abrirDoProduto(it.id_identificador);
+  });
   $('#btn-novo-grupo')?.addEventListener('click', async () => {
     const nome = await showPrompt({ message: 'Nome do novo grupo:' });
     if (!nome) return;
@@ -1868,6 +1884,12 @@ function renderUsuarios() {
           <select data-perm="compras.acesso" ${u.supervisor ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.compras?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.compras?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
+        <label>Condicionais
+          <select data-perm="condicionais.acesso" ${u.supervisor ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.condicionais?.acesso !== false ? 'selected' : ''}>Sim</option>
+            <option value="false" ${u.permissoes?.condicionais?.acesso === false ? 'selected' : ''}>Não</option>
           </select>
         </label>
       </div>
@@ -2985,6 +3007,8 @@ window.Compras?.init({
   fmtMoney,
   openImportacao: () => showPage('importacao'),
 });
+
+window.Condicionais?.init({ api });
 
 /** Botão Voltar do Android: uma tela atrás no app (não sair para conexão). */
 window.gestorHardwareBack = () => {

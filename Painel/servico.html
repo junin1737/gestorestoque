@@ -103,6 +103,7 @@
           <button type="button" class="svc-tab" data-config-tab="fiscal">Certificado NF-e</button>
           <button type="button" class="svc-tab" data-config-tab="sistema">Sistema</button>
           <button type="button" class="svc-tab" data-config-tab="dispositivos">Dispositivos</button>
+          <button type="button" class="svc-tab" data-config-tab="rotinas">Rotinas</button>
         </nav>
 
         <!-- Aba: Banco -->
@@ -243,6 +244,32 @@
             <p class="hint" id="update-status">Ao abrir o app, consultamos o GitHub por versões novas.</p>
             <button type="button" id="btn-verificar-update" class="btn-teal">Verificar atualização agora</button>
           </div>
+        </div>
+
+        <div id="config-tab-rotinas" class="config-tab-pane" hidden>
+          <p class="svc-lead">No dia e na hora marcados, o Gestor encerra e o Windows desliga este computador.</p>
+          <form id="form-rotinas" class="banco-form">
+            <label class="switch-row">
+              <input type="checkbox" id="rot-ativo" />
+              <span>Desligar automaticamente</span>
+            </label>
+            <label>Hora
+              <input id="rot-hora" type="time" value="22:00" required />
+            </label>
+            <div class="perm-grid" id="rot-dias">
+              <label><input type="checkbox" value="1" /> Segunda</label>
+              <label><input type="checkbox" value="2" /> Terça</label>
+              <label><input type="checkbox" value="3" /> Quarta</label>
+              <label><input type="checkbox" value="4" /> Quinta</label>
+              <label><input type="checkbox" value="5" /> Sexta</label>
+              <label><input type="checkbox" value="6" /> Sábado</label>
+              <label><input type="checkbox" value="0" /> Domingo</label>
+            </div>
+            <p id="rot-msg" class="hint msg-line" hidden></p>
+            <div class="banco-actions">
+              <button type="submit" class="btn-teal">Salvar rotina</button>
+            </div>
+          </form>
         </div>
 
         <div id="config-tab-dispositivos" class="config-tab-pane" hidden>

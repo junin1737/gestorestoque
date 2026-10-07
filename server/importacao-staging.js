@@ -462,6 +462,7 @@ function mapSessaoForClient(s) {
   };
   if (s.fornecedor) out.fornecedor = s.fornecedor;
   if (s.manual) out.manual = true;
+  if (s.cnpjBase) out.cnpjBase = s.cnpjBase;
   if (s.id_natope != null) out.id_natope = s.id_natope;
   if (s.natureza) out.natureza = s.natureza;
   if (s.cfop_todos_perguntado) out.cfop_todos_perguntado = true;
@@ -845,6 +846,7 @@ async function createSessao(opts = {}) {
     sefazErro: sefazErro || null,
     editar_id_nfcompra: editarId || undefined,
     id_natope: idNatope,
+    cnpjBase: String(xml?.dest?.CNPJ || xml?.dest?.CPF || '').replace(/\D/g, ''),
     natureza,
     dt_entrada: todayYmd(),
     xml: {

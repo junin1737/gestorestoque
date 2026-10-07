@@ -35,6 +35,10 @@ const MODULOS = {
     label: 'Consultar Compras',
     default: { acesso: false },
   },
+  condicionais: {
+    label: 'Condicionais',
+    default: { acesso: true },
+  },
 };
 
 function getAppDataDir() {
@@ -105,6 +109,7 @@ function fullPermissoes() {
     if (key === 'usuarios') out[key] = { acesso: true };
     if (key === 'importacao') out[key] = { acesso: true };
     if (key === 'compras') out[key] = { acesso: true };
+    if (key === 'condicionais') out[key] = { acesso: true };
   }
   return out;
 }

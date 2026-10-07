@@ -333,11 +333,20 @@ router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
   res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser) });
 });
 
+function descricaoExibicao(descricao, grade, cor, tamanho) {
+  const base = String(descricao || '').trim();
+  if (String(grade || '').trim().toUpperCase() !== 'G') return base;
+  return [base, String(cor || '').trim(), String(tamanho || '').trim()].filter(Boolean).join(' - ');
+}
+
 function mapProdutoRow(r) {
+  const descricao = String(r.DESCRICAO || '').trim();
   return {
     id_estoque: Number(r.ID_ESTOQUE),
     id_identificador: Number(r.ID_IDENTIFICADOR),
-    descricao: String(r.DESCRICAO || '').trim(),
+    descricao,
+    descricao_exibicao: descricaoExibicao(descricao, r.GRADE_SERIE, r.COR, r.TAMANHO),
+    qtd_reserv: Number(r.QTD_RESERV || 0),
     id_grupo: r.ID_GRUPO == null ? null : Number(r.ID_GRUPO),
     grupo: String(r.GRUPO || '').trim(),
     uni_medida: String(r.UNI_MEDIDA || '').trim(),
@@ -457,12 +466,19 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
           )`);
           params.push(Number(busca), busca);
         } else {
-          where.push(`(
-            UPPER(E.DESCRICAO) CONTAINING UPPER(?)
-            OR UPPER(P.COD_BARRA) CONTAINING UPPER(?)
-            OR UPPER(P.REFERENCIA) CONTAINING UPPER(?)
-          )`);
-          params.push(busca, busca, busca);
+          const termos = String(busca).split(/\s+/).map((t) => t.trim()).filter((t) => t.length >= 2);
+          const lista = termos.length ? termos : [busca];
+          for (const termo of lista) {
+            where.push(`(
+              UPPER(E.DESCRICAO) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(P.DESC_CMPL, '')) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(P.COD_BARRA, '')) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(P.REFERENCIA, '')) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(N1.DESCRICAO, '')) CONTAINING UPPER(?)
+              OR UPPER(COALESCE(N2.DESCRICAO, '')) CONTAINING UPPER(?)
+            )`);
+            params.push(termo, termo, termo, termo, termo, termo);
+          }
         }
       }
       if (statusFiltro === 'I') {
@@ -479,7 +495,7 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
         SELECT FIRST 200
           E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
           G.DESCRICAO AS GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO,
-          P.QTD_ATUAL, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
+          P.QTD_ATUAL, P.QTD_RESERV, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
           E.GRADE_SERIE, P.CONTROLA_LOTE_VENDA, P.ID_NIVEL1, P.ID_NIVEL2,
           N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO, E.STATUS
         FROM ${t.estoque} E
@@ -580,7 +596,7 @@ router.get('/estoque/:idIdentificador', LER_ESTOQUE, async (req, res) => {
         `SELECT
           E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
           G.DESCRICAO AS GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO,
-          P.QTD_ATUAL, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
+          P.QTD_ATUAL, P.QTD_RESERV, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
           E.GRADE_SERIE, P.CONTROLA_LOTE_VENDA, P.ID_NIVEL1, P.ID_NIVEL2,
           N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO, E.STATUS
         FROM ${t.estoque} E
@@ -1460,6 +1476,16 @@ router.get('/importacao/notas', async (req, res) => {
       dataCampo: req.query.data_campo || req.query.dataCampo || 'entrada',
     });
     let sessoes = importacaoStaging.listSessoes();
+    let cnpjBase = '';
+    try {
+      const emitRows = await withDb((db) => query(db, 'SELECT FIRST 1 CNPJ FROM TB_EMITENTE'));
+      cnpjBase = String(emitRows[0]?.CNPJ || '').replace(/\D/g, '');
+    } catch { /* sem emitente */ }
+    const daBase = (s) => {
+      const doc = String(s.cnpjBase || s.dest_cnpj || s.xml?.dest?.CNPJ || s.xml?.dest?.CPF || '').replace(/\D/g, '');
+      return !cnpjBase || !doc || doc === cnpjBase;
+    };
+    if (cnpjBase) sessoes = sessoes.filter(daBase);
     const nnf = String(req.query.nf || req.query.nnf || req.query.numero || '').replace(/\D/g, '');
     const fornQ = String(req.query.fornecedor || req.query.forn || '').trim().toLowerCase();
     if (nnf) {
@@ -1479,7 +1505,8 @@ router.get('/importacao/notas', async (req, res) => {
         return d >= de && d <= ate;
       });
     }
-    const confirmadas = importacaoStaging.listSessoesConfirmadas();
+    let confirmadas = importacaoStaging.listSessoesConfirmadas();
+    if (cnpjBase) confirmadas = confirmadas.filter(daBase);
     res.json({ ok: true, notas, sessoes, confirmadas });
   } catch (err) {
     res.json({ ok: false, error: err.message, notas: [], sessoes: [] });
@@ -2294,6 +2321,110 @@ router.post('/compras/notas/:chave/xml', async (req, res) => {
   } catch (err) {
     res.json({ ok: false, error: err.message, code: err.code || '' });
   }
+});
+
+const condicionais = require('./condicionais');
+const VER_CONDICIONAL = exigirModulo('condicionais', 'estoque');
+const LANCAR_CONDICIONAL = exigirModulo('condicionais');
+
+router.get('/condicionais', VER_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await condicionais.listar()) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/condicionais/clientes', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, itens: await condicionais.buscarClientes(req.query.q || '') });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/condicionais/vendedores', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, itens: await condicionais.listarVendedores() });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/condicionais/produto/:id', VER_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await condicionais.doProduto(req.params.id)) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, reservas: [], condicionais: [] });
+  }
+});
+
+router.get('/condicionais/:id/pdf', VER_CONDICIONAL, async (req, res) => {
+  try {
+    const doc = await condicionais.detalhe(req.params.id);
+    const cfg = loadAppConfig();
+    let empresa = '';
+    try {
+      const rows = await withDb((db) => query(db, 'SELECT FIRST 1 NOME_FANTA FROM TB_EMITENTE'));
+      empresa = String(rows[0]?.NOME_FANTA || '').trim();
+    } catch { /* ignore */ }
+    res.type('html').send(condicionais.htmlPdf(doc, empresa || cfg.database));
+  } catch (err) {
+    res.status(400).type('html').send(`<p>${err.message}</p>`);
+  }
+});
+
+router.get('/condicionais/:id', VER_CONDICIONAL, async (req, res) => {
+  try {
+    const doc = await condicionais.detalhe(req.params.id);
+    res.json({ ok: true, condicional: doc, whatsapp: condicionais.textoWhatsapp(doc) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/condicionais', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    const criado = await condicionais.criar({
+      idCliente: req.body?.id_cliente,
+      idFuncionario: req.body?.id_funcionario,
+      obs: req.body?.obs,
+      itens: req.body?.itens,
+      usuario: req.usuario?.nome || '',
+    });
+    res.json({ ok: true, ...criado });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+const DIAS_ROTINA = [0, 1, 2, 3, 4, 5, 6];
+
+router.get('/rotinas', somenteServidorLocal, (_req, res) => {
+  const cfg = loadAppConfig();
+  const r = cfg.rotinas || {};
+  res.json({
+    ok: true,
+    rotinas: {
+      ativo: r.ativo === true,
+      hora: /^\d{2}:\d{2}$/.test(String(r.hora || '')) ? r.hora : '22:00',
+      dias: Array.isArray(r.dias) ? r.dias.map(Number).filter((d) => DIAS_ROTINA.includes(d)) : [1, 2, 3, 4, 5],
+    },
+  });
+});
+
+router.post('/rotinas', somenteServidorLocal, (req, res) => {
+  const body = req.body || {};
+  const hora = String(body.hora || '');
+  if (!/^\d{2}:\d{2}$/.test(hora)) return res.json({ ok: false, error: 'Informe a hora no formato HH:MM.' });
+  const [hh, mm] = hora.split(':').map(Number);
+  if (hh > 23 || mm > 59) return res.json({ ok: false, error: 'Hora inválida.' });
+  const dias = (Array.isArray(body.dias) ? body.dias : []).map(Number).filter((d) => DIAS_ROTINA.includes(d));
+  if (body.ativo === true && !dias.length) return res.json({ ok: false, error: 'Marque ao menos um dia da semana.' });
+  const current = loadAppConfig();
+  const rotinas = { ativo: body.ativo === true, hora, dias };
+  saveAppConfig({ ...current, rotinas });
+  res.json({ ok: true, rotinas });
 });
 
 module.exports = router;

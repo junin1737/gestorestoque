@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=210" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=210" />
+  <link rel="stylesheet" href="styles.css?v=211" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=211" />
 </head>
 <body>
   <div id="app">
@@ -130,6 +130,10 @@
           <button class="nav-btn" data-page="compras" id="nav-compras">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M15 15.5 19.5 20M8 10.5h5M10.5 8v5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Consultar compras
+          </button>
+          <button class="nav-btn" data-page="condicionais" id="nav-condicionais">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a1 1 0 0 1 1 1v14l-6-3-6 3V5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Condicionais
           </button>
           <button class="nav-btn" data-page="alteracoes" id="nav-alteracoes">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15v4M12 11v8M16 8v11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
@@ -433,6 +437,40 @@
           </div>
         </div>
 
+        <div id="page-condicionais" class="page" hidden>
+          <div class="toolbar">
+            <p class="hint" id="cond-aviso" hidden></p>
+          </div>
+          <div class="form-grid">
+            <h3 class="section-title">Novo condicional</h3>
+            <label class="full">Cliente
+              <input id="cond-cliente" type="search" placeholder="Nome do cliente" autocomplete="off" />
+            </label>
+            <div id="cond-cliente-lista"></div>
+            <label>Vendedor
+              <select id="cond-vendedor"></select>
+            </label>
+            <label>Observação
+              <input id="cond-obs" maxlength="300" />
+            </label>
+            <label>Identificador da peça
+              <input id="cond-peca" inputmode="numeric" placeholder="ID identificador" />
+            </label>
+            <label>Quantidade
+              <input id="cond-qtd" type="number" min="0.001" step="1" value="1" />
+            </label>
+            <div class="banco-actions">
+              <button type="button" class="btn" id="cond-add-peca">Incluir peça</button>
+              <button type="button" class="btn primary" id="cond-salvar">Lançar condicional</button>
+            </div>
+            <p class="hint" id="cond-form-msg"></p>
+            <div id="cond-novos-itens"></div>
+          </div>
+          <h3 class="section-title">Condicionais</h3>
+          <div id="cond-lista" class="item-list"></div>
+          <div id="cond-detalhe" hidden></div>
+        </div>
+
         <!-- ALTERAÇÕES -->
         <div id="page-alteracoes" class="page" hidden>
           <div class="toolbar alteracoes-toolbar">
@@ -552,6 +590,7 @@
           <button type="button" class="mais-sheet-back" id="mais-sheet-back" aria-label="Fechar"></button>
           <div class="mais-sheet-card">
             <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
+            <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
             <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
             <button type="button" data-page="empresas" id="nav-empresas-mobile" hidden>Empresas</button>
@@ -562,6 +601,16 @@
         </div>
       </main>
     </section>
+
+    <dialog id="dlg-condicional" class="dlg">
+      <div class="dlg-card">
+        <h3>Condicionais</h3>
+        <div id="dlg-condicional-body"></div>
+        <div class="banco-actions">
+          <button type="button" class="btn" id="dlg-condicional-fechar">Fechar</button>
+        </div>
+      </div>
+    </dialog>
 
     <dialog id="dlg-scan" class="dlg">
       <div class="dlg-card scan-card">
@@ -629,9 +678,10 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=210"></script>
-  <script src="importacao-nfe.js?v=210"></script>
-  <script src="compras.js?v=210"></script>
-  <script src="app.js?v=210"></script>
+  <script src="vendor/zxing-browser.min.js?v=211"></script>
+  <script src="importacao-nfe.js?v=211"></script>
+  <script src="compras.js?v=211"></script>
+  <script src="condicionais.js?v=211"></script>
+  <script src="app.js?v=211"></script>
 </body>
 </html>

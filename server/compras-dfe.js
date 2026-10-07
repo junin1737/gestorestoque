@@ -40,29 +40,103 @@ function emptyStore() {
   };
 }
 
-function loadStore() {
+let cnpjAtivo = '';
+
+function bucketDe(raw) {
+  return {
+    ...emptyStore(),
+    ...(raw || {}),
+    importarAutomatico: raw?.importarAutomatico === true,
+    leituraInicial: raw?.leituraInicial === true || ['137', '138'].includes(String(raw?.ultimoCStat || '')),
+    canceladas: raw?.canceladas && typeof raw.canceladas === 'object' ? raw.canceladas : {},
+    notas: raw?.notas && typeof raw.notas === 'object' ? raw.notas : {},
+  };
+}
+
+function cnpjDestDoXml(chave) {
+  const xml = lerXmlArquivo(chave);
+  if (!xml) return '';
+  const dest = sefaz.extractBlock(xml, 'dest');
+  return soDigitos(sefaz.extractTag(dest, 'CNPJ') || sefaz.extractTag(dest, 'CPF'));
+}
+
+function loadRoot() {
   const p = storePath();
-  if (!fs.existsSync(p)) return emptyStore();
+  if (!fs.existsSync(p)) return { importarAutomatico: false, porCnpj: {} };
   try {
     const raw = JSON.parse(fs.readFileSync(p, 'utf8'));
-    return {
-      ...emptyStore(),
-      ...raw,
-      importarAutomatico: raw.importarAutomatico === true,
-      leituraInicial: raw.leituraInicial === true || ['137', '138'].includes(String(raw.ultimoCStat || '')),
-      canceladas: raw.canceladas && typeof raw.canceladas === 'object' ? raw.canceladas : {},
-      notas: raw.notas && typeof raw.notas === 'object' ? raw.notas : {},
-    };
+    if (raw.porCnpj && typeof raw.porCnpj === 'object') {
+      return {
+        importarAutomatico: raw.importarAutomatico === true,
+        porCnpj: raw.porCnpj,
+      };
+    }
+    const legado = bucketDe(raw);
+    const porCnpj = {};
+    const dests = new Set();
+    for (const chave of Object.keys(legado.notas)) {
+      const dest = cnpjDestDoXml(chave);
+      if (dest.length >= 11) dests.add(dest);
+    }
+    if (dests.size === 1) {
+      porCnpj[[...dests][0]] = legado;
+    } else {
+      for (const [chave, nota] of Object.entries(legado.notas)) {
+        const dest = cnpjDestDoXml(chave);
+        if (dest.length < 11) continue;
+        if (!porCnpj[dest]) porCnpj[dest] = bucketDe({ importarAutomatico: legado.importarAutomatico });
+        porCnpj[dest].notas[chave] = nota;
+        if (legado.canceladas[chave]) porCnpj[dest].canceladas[chave] = true;
+      }
+    }
+    const root = { importarAutomatico: legado.importarAutomatico === true, porCnpj };
+    saveRoot(root);
+    return root;
   } catch {
-    return emptyStore();
+    return { importarAutomatico: false, porCnpj: {} };
   }
 }
 
-function saveStore(store) {
+function saveRoot(root) {
   const p = storePath();
   const tmp = `${p}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(store), 'utf8');
+  fs.writeFileSync(tmp, JSON.stringify(root), 'utf8');
   fs.renameSync(tmp, p);
+}
+
+function loadStore() {
+  const root = loadRoot();
+  const bucket = cnpjAtivo && root.porCnpj[cnpjAtivo] ? bucketDe(root.porCnpj[cnpjAtivo]) : emptyStore();
+  bucket.importarAutomatico = root.importarAutomatico === true;
+  return bucket;
+}
+
+function saveStore(store) {
+  const root = loadRoot();
+  root.importarAutomatico = store.importarAutomatico === true;
+  if (cnpjAtivo) {
+    const { importarAutomatico, ...bucket } = store;
+    root.porCnpj[cnpjAtivo] = bucket;
+  }
+  saveRoot(root);
+}
+
+async function cnpjEmitente() {
+  try {
+    let cnpj = '';
+    await withDb(async (db) => {
+      const rows = await query(db, 'SELECT FIRST 1 CNPJ FROM TB_EMITENTE');
+      cnpj = soDigitos(rows[0]?.CNPJ);
+    });
+    return cnpj;
+  } catch {
+    return '';
+  }
+}
+
+async function definirCnpj() {
+  cnpjAtivo = await cnpjEmitente();
+  return cnpjAtivo;
 }
 
 function decodeXmlText(s) {
@@ -279,7 +353,14 @@ function agendar(ms) {
 async function executarCiclo() {
   if (running) return;
   running = true;
+  const cnpjBase = await definirCnpj();
   const store = loadStore();
+  if (!cnpjBase) {
+    store.ultimoErro = 'CNPJ da empresa não encontrado nesta base.';
+    store.ultimoCStat = '';
+    running = false;
+    return;
+  }
   try {
     const fiscal = getFiscalConfig();
     if (!sefaz.fiscalReady(fiscal)) {
@@ -348,6 +429,7 @@ function consultaRecente(store) {
 }
 
 function iniciar() {
+  definirCnpj().then(() => {
   const store = loadStore();
   if (!store.leituraInicial) return;
   const agora = Date.now();
@@ -355,6 +437,7 @@ function iniciar() {
   const faltam = ultima ? (ultima + INTERVALO_MS) - agora : INTERVALO_MS;
   const incompleto = !filaCompleta(store) && nsuNum(store.maxNSU) > 0 && store.ultimoCStat !== '656';
   agendar(incompleto ? 5000 : Math.max(0, faltam));
+  }).catch((err) => console.warn('Consultar compras:', err.message));
 }
 
 function nsuGravado(valor) {
@@ -362,7 +445,8 @@ function nsuGravado(valor) {
 }
 
 /** Primeira abertura, ou fila ainda incompleta: segue o NSU até o fim dos 90 dias. */
-function sincronizarAoAbrir() {
+async function sincronizarAoAbrir() {
+  await definirCnpj();
   const store = loadStore();
   const bloqueado = store.ultimoCStat === '656' && consultaRecente(store);
   const incompleto = !filaCompleta(store) && nsuNum(store.maxNSU) > 0 && store.ultimoCStat !== '656';
@@ -411,6 +495,7 @@ function erroVisivel(store, fiscal) {
 }
 
 async function listar() {
+  const cnpjBase = await definirCnpj();
   const store = loadStore();
   const fiscal = getFiscalConfig();
   const brutas = Object.values(store.notas);
@@ -452,6 +537,7 @@ async function listar() {
     filaCompleta: filaCompleta(store),
     intervaloMin: 90,
     janelaDias: 90,
+    cnpj: cnpjBase,
   };
 }
 
@@ -463,6 +549,7 @@ function setImportarAutomatico(valor) {
 }
 
 async function obterXmlParaImportar(chave) {
+  await definirCnpj();
   const ch = soDigitos(chave);
   if (ch.length !== 44) {
     const e = new Error('Chave de acesso inválida.');

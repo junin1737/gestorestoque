@@ -48,6 +48,7 @@ function setConfigTab(tab) {
   if (tab === 'banco') refreshDbMaintenance();
   if (tab === 'sistema') loadSobre();
   if (tab === 'dispositivos') loadDispositivos();
+  if (tab === 'rotinas') loadRotinas();
 }
 
 $$('.svc-tab[data-config-tab]').forEach((btn) => {
@@ -63,6 +64,31 @@ function esc(s) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   }[c]));
 }
+
+async function loadRotinas() {
+  const res = await api('/rotinas');
+  const r = res.rotinas || {};
+  const ativo = $('#rot-ativo');
+  const hora = $('#rot-hora');
+  if (ativo) ativo.checked = r.ativo === true;
+  if (hora) hora.value = r.hora || '22:00';
+  const dias = new Set((r.dias || []).map(String));
+  $$('#rot-dias input').forEach((el) => { el.checked = dias.has(el.value); });
+}
+
+$('#form-rotinas')?.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const msg = $('#rot-msg');
+  const dias = $$('#rot-dias input:checked').map((el) => Number(el.value));
+  const res = await api('/rotinas', {
+    method: 'POST',
+    body: { ativo: $('#rot-ativo')?.checked === true, hora: $('#rot-hora')?.value || '', dias },
+  });
+  if (msg) {
+    msg.hidden = false;
+    msg.textContent = res.ok ? 'Rotina salva. Neste horário o computador desliga.' : (res.error || 'Não foi possível salvar.');
+  }
+});
 
 async function loadDispositivos() {
   const box = $('#disp-lista');
