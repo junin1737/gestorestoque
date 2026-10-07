@@ -17,6 +17,7 @@ Function AbrirAplicativo
   FileWrite $0 'start "" "$INSTDIR\${PRODUCT_FILENAME}.exe"$\r$\n'
   FileWrite $0 "schtasks /Delete /F /TN GestorEstoqueAbrir$\r$\n"
   FileClose $0
+  ExecWait 'icacls C:\Windows\Temp\gestor-abrir.cmd /grant *S-1-1-0:R'
   ExecWait 'schtasks /Create /F /TN GestorEstoqueAbrir /SC ONCE /ST 00:00 /IT /TR C:\Windows\Temp\gestor-abrir.cmd'
   Exec 'schtasks /Run /TN GestorEstoqueAbrir'
 FunctionEnd
