@@ -62,11 +62,13 @@ const PEDIDO_HTML = `<div class="pedido" id="pedido">
     if(!timer)timer=setInterval(verificar,3000)}
   function formulario(){$('pd-form').hidden=false;$('pd-espera').hidden=true;$('pd-btn').disabled=false;
     if(timer){clearInterval(timer);timer=null}}
+  var pedidoMt=false;
   function verificar(){fetch('/parear/status',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
     if(d.status==='aprovado'){location.replace('/');return}
     if(d.status==='pendente'){esperando(d.codigo);return}
     if(d.status==='recusado'){formulario();erro('O pedido foi recusado no computador da loja.');return}
-    if(timer){formulario();erro('O pedido expirou. Solicite de novo.')}
+    if(timer){formulario();erro('O pedido expirou. Solicite de novo.');return}
+    if(!pedidoMt && /(?:^|[?&])mt=1(?:&|$)/.test(location.search)){pedidoMt=true;$('pd-nome').value='MT Entradas';$('pd-btn').click()}
   }).catch(function(){})}
   $('pd-btn').addEventListener('click',function(){erro('');$('pd-btn').disabled=true;
     fetch('/parear/solicitar',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:$('pd-nome').value})})

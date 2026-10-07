@@ -253,6 +253,21 @@ async function check(request, env) {
     await registrarEvento(env, cnpj, app, 'versao', `${texto(body.maquina, 80) || nse}: ${inst.versao_gestor} → ${versao}`);
   }
 
+  const urlTunel = urlTunelValida(body.url);
+  if (urlTunel) {
+    await garantirTabelaMt(env);
+    const nome = texto(body.fantasia, 120) || texto(body.razao, 120);
+    await env.DB.prepare(
+      `INSERT INTO mt_empresas (cnpj, aplicacao, nse, nome, url, atualizado_em)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(cnpj, aplicacao) DO UPDATE SET
+         nse = excluded.nse,
+         nome = COALESCE(excluded.nome, mt_empresas.nome),
+         url = excluded.url,
+         atualizado_em = excluded.atualizado_em`
+    ).bind(cnpj, app, nse, nome, urlTunel, agora).run();
+  }
+
   const sit = situacaoCliente(cli);
   const emitido = new Date();
   let validoAte = new Date(emitido.getTime() + TOLERANCIA_OFFLINE_DIAS * 86400000);
@@ -682,7 +697,7 @@ async function registrarEmpresaMt(request, env) {
   await garantirTabelaMt(env);
   const nome = texto(b.nome, 120);
   const nse = texto(b.nse, 40);
-  const urlPainel = texto(b.url, 300);
+  const urlPainel = urlTunelValida(b.url) || null;
   await env.DB.prepare(
     `INSERT INTO mt_empresas (cnpj, aplicacao, nse, nome, url, atualizado_em)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -695,30 +710,44 @@ async function registrarEmpresaMt(request, env) {
   return json({ ok: true });
 }
 
+/** O check grava o contato no máximo a cada 10 min. Janela um pouco maior para o Gestor aberto aparecer. */
+const JANELA_ONLINE_MS = 15 * 60 * 1000;
+
+function urlTunelValida(v) {
+  const s = String(v || '').trim().replace(/\/$/, '');
+  return /^https:\/\/acesso\.smsjrdeveloper\.com\.br\/t\/[a-z2-7]{20,32}$/.test(s) ? s : '';
+}
+
 async function listarEmpresasMt(url, env) {
   const app = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
   await garantirTabelaMt(env);
+  const desde = new Date(Date.now() - JANELA_ONLINE_MS).toISOString();
   const { results } = await env.DB.prepare(
-    `SELECT m.cnpj, m.nse, m.nome, m.url, m.atualizado_em,
-            (SELECT MAX(i.ultimo_contato) FROM instalacoes i
-              WHERE i.cnpj = m.cnpj AND i.aplicacao = m.aplicacao) AS ultimo_contato
-     FROM mt_empresas m
-     WHERE m.aplicacao = ?
-     ORDER BY m.nome`
-  ).bind(app).all();
-  const agora = Date.now();
-  const itens = (results || []).map((r) => {
-    const t = new Date(r.ultimo_contato || 0).getTime();
-    const online = Number.isFinite(t) && agora - t < 6 * 60 * 1000;
-    return {
+    `SELECT c.cnpj,
+            COALESCE(NULLIF(m.nome, ''), NULLIF(c.fantasia, ''), NULLIF(c.razao, '')) AS nome,
+            i.nse, i.ultimo_contato, m.url
+     FROM clientes c
+     JOIN instalacoes i ON i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao
+     LEFT JOIN mt_empresas m ON m.cnpj = c.cnpj AND m.aplicacao = c.aplicacao
+     WHERE c.aplicacao = ?
+       AND i.ultimo_contato >= ?
+     ORDER BY i.ultimo_contato DESC`
+  ).bind(app, desde).all();
+  const vistos = new Set();
+  const itens = [];
+  for (const r of results || []) {
+    if (vistos.has(r.cnpj)) continue;
+    vistos.add(r.cnpj);
+    itens.push({
       cnpj: r.cnpj,
       nse: r.nse || '',
       nome: r.nome || '',
-      url: r.url || '',
-      online,
+      url: urlTunelValida(r.url) ? `${urlTunelValida(r.url)}?mt=1` : '',
+      online: true,
       ultimo_contato: r.ultimo_contato || null,
-    };
-  });
+    });
+  }
+  itens.sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
   return json({ ok: true, itens });
 }
 

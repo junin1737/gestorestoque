@@ -37,6 +37,7 @@ const DOMINIO_APELIDO = (() => {
   }
 })();
 const APELIDO_RE = /^(?=[a-z]*[0-9])[a-z0-9]{4,40}$/;
+const ID_RE_TUNEL = /^[a-z2-7]{20,32}$/;
 const RESERVADOS = new Set(['www', 'acesso', 'painel', 'api', 'admin', 'mail', 'smtp', 'ftp', 'webmail', 'cpanel', 'ns1', 'ns2']);
 const APELIDO_REVER_MS = 10 * 60 * 1000;
 const APELIDO_CONFIRMADO_MS = 6 * 60 * 60 * 1000;
@@ -81,6 +82,13 @@ function salvarConfig(cfg) {
   fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), { encoding: 'utf8', mode: 0o600 });
   fs.renameSync(tmp, arquivoConfig());
   cfgCache = cfg;
+}
+
+/** Link que funciona sem DNS do NSE: o computador do cliente é quem conhece o id do túnel. */
+function linkEstavel() {
+  const cfg = carregarConfig();
+  if (!cfg.ativo || !estado.conectado || !ID_RE_TUNEL.test(String(cfg.tunelId || ''))) return '';
+  return `${LINK_BASE}/t/${cfg.tunelId}`;
 }
 
 function status() {
@@ -460,6 +468,7 @@ module.exports = {
   RELAY_URL,
   iniciar,
   status,
+  linkEstavel,
   definirAtivo,
   novoEndereco,
 };
