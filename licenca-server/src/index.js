@@ -253,6 +253,21 @@ async function check(request, env) {
     await registrarEvento(env, cnpj, app, 'versao', `${texto(body.maquina, 80) || nse}: ${inst.versao_gestor} → ${versao}`);
   }
 
+  const urlTunel = urlTunelValida(body.url);
+  if (urlTunel) {
+    await garantirTabelaMt(env);
+    const nome = texto(body.fantasia, 120) || texto(body.razao, 120);
+    await env.DB.prepare(
+      `INSERT INTO mt_empresas (cnpj, aplicacao, nse, nome, url, atualizado_em)
+       VALUES (?, ?, ?, ?, ?, ?)
+       ON CONFLICT(cnpj, aplicacao) DO UPDATE SET
+         nse = excluded.nse,
+         nome = COALESCE(excluded.nome, mt_empresas.nome),
+         url = excluded.url,
+         atualizado_em = excluded.atualizado_em`
+    ).bind(cnpj, app, nse, nome, urlTunel, agora).run();
+  }
+
   const sit = situacaoCliente(cli);
   const emitido = new Date();
   let validoAte = new Date(emitido.getTime() + TOLERANCIA_OFFLINE_DIAS * 86400000);
@@ -682,7 +697,7 @@ async function registrarEmpresaMt(request, env) {
   await garantirTabelaMt(env);
   const nome = texto(b.nome, 120);
   const nse = texto(b.nse, 40);
-  const urlPainel = texto(b.url, 300);
+  const urlPainel = urlTunelValida(b.url) || null;
   await env.DB.prepare(
     `INSERT INTO mt_empresas (cnpj, aplicacao, nse, nome, url, atualizado_em)
      VALUES (?, ?, ?, ?, ?, ?)
@@ -698,13 +713,9 @@ async function registrarEmpresaMt(request, env) {
 /** O check grava o contato no máximo a cada 10 min. Janela um pouco maior para o Gestor aberto aparecer. */
 const JANELA_ONLINE_MS = 15 * 60 * 1000;
 
-function urlPublicaEmpresa(nse, urlGravada) {
-  const gravada = String(urlGravada || '').trim();
-  if (/^https:\/\//i.test(gravada) && !/localhost|127\.0\.0\.1/i.test(gravada)) return gravada;
-  const a = String(nse || '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  const reservados = new Set(['www', 'acesso', 'painel', 'api', 'admin', 'mail', 'smtp', 'ftp', 'webmail', 'cpanel', 'ns1', 'ns2']);
-  if (!/^(?=[a-z]*[0-9])[a-z0-9]{4,40}$/.test(a) || reservados.has(a)) return '';
-  return `https://${a}.smsjrdeveloper.com.br`;
+function urlTunelValida(v) {
+  const s = String(v || '').trim().replace(/\/$/, '');
+  return /^https:\/\/acesso\.smsjrdeveloper\.com\.br\/t\/[a-z2-7]{20,32}$/.test(s) ? s : '';
 }
 
 async function listarEmpresasMt(url, env) {
@@ -731,7 +742,7 @@ async function listarEmpresasMt(url, env) {
       cnpj: r.cnpj,
       nse: r.nse || '',
       nome: r.nome || '',
-      url: urlPublicaEmpresa(r.nse, r.url),
+      url: urlTunelValida(r.url) ? `${urlTunelValida(r.url)}?mt=1` : '',
       online: true,
       ultimo_contato: r.ultimo_contato || null,
     });

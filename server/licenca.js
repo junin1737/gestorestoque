@@ -37,6 +37,16 @@ function arquivoEstado() {
   return path.join(getAppDataDir(), 'licenca.json');
 }
 
+/** Link /t/ do acesso online, quando esta edição tem túnel conectado. A edição local não tem. */
+function urlAcessoAtual() {
+  try {
+    const link = require('./tunel').linkEstavel();
+    return link || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function carregarEstado() {
   if (estado) return estado;
   try {
@@ -201,6 +211,7 @@ async function verificarAgora() {
             maquina: os.hostname(),
             versao_gestor: versaoGestor(),
             revenda_cnpj: st.revenda_cnpj || undefined,
+            url: urlAcessoAtual(),
           }),
           signal: ctrl.signal,
         });

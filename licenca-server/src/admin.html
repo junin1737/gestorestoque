@@ -176,7 +176,7 @@
       <h2 style="margin:0">Empresas online</h2>
       <button class="btn sm" id="btn-empresas-atualizar" type="button">Atualizar</button>
     </div>
-    <p class="hint">O status online indica o Gestor aberto, com internet, no servidor do cliente. Acessar abre o painel daquela empresa em uma nova aba. Entre de novo para confirmar a empresa.</p>
+    <p class="hint">O status online indica o Gestor aberto, com internet, no servidor do cliente. Acessar abre o link enviado por aquele computador e já pede a autorização. No computador da loja, autorize o pedido MT Entradas.</p>
     <div class="mini" id="empresas-wrap"><p>Nenhuma empresa registrada ainda.</p></div>
   </section>
   <main id="painel-licencas">
@@ -555,7 +555,7 @@ async function carregarEmpresas() {
       <td>${esc(e.nse || '—')}</td>
       <td>${esc(e.cnpj || '—')}</td>
       <td>${e.online ? 'Online' : 'Off'}</td>
-      <td>${e.url ? `<a class="btn sm" href="${esc(e.url)}" target="_blank" rel="noopener">Acessar</a>` : '—'}</td>
+      <td>${e.url ? `<a class="btn sm" href="${esc(e.url)}" target="_blank" rel="noopener">Acessar</a>` : 'Aguardando o link do cliente'}</td>
     </tr>`).join('')
   }</tbody></table>`;
 }
