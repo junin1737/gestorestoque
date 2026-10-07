@@ -236,14 +236,173 @@ async function loadEmpresas() {
         return;
       }
       const ok = await showConfirm(
-        `Entrar em ${nome}? O login será pedido de novo para confirmar que você está na empresa certa.`,
-        { okLabel: 'Entrar', cancelLabel: 'Cancelar' }
+        `Abrir o login de ${nome}? A senha salva não entra sozinha: é preciso clicar em Entrar.`,
+        { okLabel: 'Abrir login', cancelLabel: 'Cancelar' }
       );
       if (!ok) return;
-      location.href = url.endsWith('/') ? url : `${url}/`;
+      await api('/logout', { method: 'POST', body: {} });
+      location.href = urlLoginEmpresa(url);
+    });
+  });
+  await carregarVinculosPainel();
+}
+
+function formatCnpj(v) {
+  const d = String(v || '').replace(/\D/g, '');
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  return d || '—';
+}
+
+function urlLoginEmpresa(url) {
+  try {
+    const u = new URL(url, location.origin);
+    u.searchParams.delete('mt');
+    const path = u.pathname.endsWith('/') ? u.pathname : `${u.pathname}/`;
+    return `${u.origin}${path}${u.search}`;
+  } catch {
+    return url;
+  }
+}
+
+const ROTULO_VINCULO = {
+  ativo: 'Ativo',
+  aguardando: 'Aguardando as duas',
+  aguardando_matriz: 'Aguardando a matriz',
+  aguardando_filial: 'Aguardando a filial',
+  recusado: 'Recusado',
+};
+
+async function carregarLojasLogin() {
+  const box = $('#login-lojas');
+  const lista = $('#login-lojas-lista');
+  if (!box || !lista) return;
+  const res = await api('/mt/grupo');
+  const empresas = (res.empresas || []).filter((e) => e && e.cnpj);
+  if (empresas.length < 2) {
+    box.hidden = true;
+    lista.innerHTML = '';
+    return;
+  }
+  box.hidden = false;
+  lista.innerHTML = empresas.map((e) => `
+    <button type="button" class="login-loja${e.atual ? ' is-atual' : ''}" data-loja-url="${escapeAttr(e.url || '')}" data-loja-atual="${e.atual ? '1' : ''}" ${e.atual || e.url ? '' : 'disabled'}>
+      <strong>${escapeHtml(e.nome || 'Empresa')}</strong>
+      <span>${e.papel === 'matriz' ? 'Matriz' : 'Filial'} · ${escapeHtml(formatCnpj(e.cnpj))}${e.atual ? ' · esta loja' : ''}</span>
+    </button>
+  `).join('');
+  $$('.login-loja', lista).forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (btn.dataset.lojaAtual === '1') return;
+      const url = btn.dataset.lojaUrl;
+      if (!url) {
+        showMsg('Esta loja ainda não tem o endereço de acesso. Abra o Gestor dela uma vez.');
+        return;
+      }
+      await api('/logout', { method: 'POST', body: {} });
+      location.href = urlLoginEmpresa(url);
     });
   });
 }
+
+async function carregarPedidoVinculo() {
+  const bar = $('#vinculo-pedido');
+  if (!bar) return;
+  if (!(state.usuario?.supervisor || state.usuario?.mtEntradas)) {
+    bar.hidden = true;
+    return;
+  }
+  const res = await api('/mt/vinculos/pendentes');
+  const item = (res.pendentes || [])[0];
+  const espera = (res.aguardando || [])[0];
+  const texto = $('#vinculo-pedido-texto');
+  const aceitar = $('#vinculo-aceitar');
+  const recusar = $('#vinculo-recusar');
+  if (item) {
+    bar.hidden = false;
+    bar.dataset.id = String(item.id);
+    if (texto) {
+      texto.textContent = `${item.outra_nome || 'A outra loja'} pediu para aparecer junto no login. Esta loja entra como ${item.papel_outra === 'matriz' ? 'filial' : 'matriz'}. Aceite para liberar a escolha.`;
+    }
+    if (aceitar) aceitar.hidden = false;
+    if (recusar) recusar.hidden = false;
+    return;
+  }
+  if (espera) {
+    bar.hidden = false;
+    delete bar.dataset.id;
+    if (texto) texto.textContent = `Vínculo com ${espera.outra_nome || 'a outra loja'} aguardando o aceite dela.`;
+    if (aceitar) aceitar.hidden = true;
+    if (recusar) recusar.hidden = true;
+    return;
+  }
+  bar.hidden = true;
+}
+
+async function responderVinculo(aceite) {
+  const bar = $('#vinculo-pedido');
+  const id = Number(bar?.dataset.id);
+  if (!id) return;
+  const res = await api('/mt/vinculos/aceite', { method: 'POST', body: { id, aceite } });
+  if (!res.ok) {
+    showMsg(res.error || 'Não foi possível gravar o aceite.');
+    return;
+  }
+  await carregarPedidoVinculo();
+}
+
+async function carregarVinculosPainel() {
+  const lista = $('#vinculos-lista');
+  const selM = $('#vinculo-matriz');
+  const selF = $('#vinculo-filial');
+  if (!lista || !selM || !selF) return;
+  const cad = await api('/mt/empresas/cadastro');
+  const empresas = cad.itens || [];
+  const opt = (e) => `<option value="${escapeAttr(e.cnpj)}">${escapeHtml(e.nome || 'Empresa')} · ${escapeHtml(formatCnpj(e.cnpj))}</option>`;
+  selM.innerHTML = `<option value="">Selecione</option>${empresas.map(opt).join('')}`;
+  selF.innerHTML = selM.innerHTML;
+  const res = await api('/mt/vinculos');
+  const itens = res.itens || [];
+  if (!res.ok && res.error) {
+    lista.innerHTML = `<p class="empty">${escapeHtml(res.error)}</p>`;
+    return;
+  }
+  if (!itens.length) {
+    lista.innerHTML = '<p class="empty">Nenhum vínculo criado.</p>';
+    return;
+  }
+  lista.innerHTML = itens.map((v) => `
+    <article class="imp-item-row">
+      <div class="imp-item-main">
+        <strong>${escapeHtml(v.nome_matriz || 'Matriz')} → ${escapeHtml(v.nome_filial || 'Filial')}</strong>
+        <span class="hint">${escapeHtml(formatCnpj(v.cnpj_matriz))} · ${escapeHtml(formatCnpj(v.cnpj_filial))}</span>
+      </div>
+      <span class="chip ${v.status === 'ativo' ? 'ok' : 'pending'}">${escapeHtml(ROTULO_VINCULO[v.status] || v.status || '')}</span>
+    </article>
+  `).join('');
+}
+
+$('#btn-vincular-empresas')?.addEventListener('click', async () => {
+  const cnpjMatriz = $('#vinculo-matriz')?.value || '';
+  const cnpjFilial = $('#vinculo-filial')?.value || '';
+  if (!cnpjMatriz || !cnpjFilial) {
+    showMsg('Selecione a matriz e a filial.');
+    return;
+  }
+  if (cnpjMatriz === cnpjFilial) {
+    showMsg('A matriz e a filial precisam ser empresas diferentes.');
+    return;
+  }
+  const res = await api('/mt/vinculos', { method: 'POST', body: { cnpjMatriz, cnpjFilial } });
+  if (!res.ok) {
+    showMsg(res.error || 'Não foi possível criar o vínculo.');
+    return;
+  }
+  showMsg(res.ativo ? 'Essas lojas já estão vinculadas.' : 'Vínculo criado. Cada loja precisa aceitar no próprio Gestor.');
+  await carregarVinculosPainel();
+});
+
+$('#vinculo-aceitar')?.addEventListener('click', () => responderVinculo('aceito'));
+$('#vinculo-recusar')?.addEventListener('click', () => responderVinculo('recusado'));
 
 async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
@@ -629,17 +788,25 @@ async function bootstrap() {
     setEmitenteUI(conn.emitente);
     applyTheme(state.config.tema, conn.emitente?.logo);
     await loadFuncionarios();
-    const sess = await api('/sessao');
-    if (sess.ok && sess.usuario) {
-      state.usuario = sess.usuario;
-      enterApp();
-    }
+    await api('/logout', { method: 'POST', body: {} });
+    api('/mt/presenca', { method: 'POST', body: { url: location.origin } });
+    await carregarLojasLogin();
   } else {
     setServiceStatus(true, `Painel online, base offline: ${conn.error || 'falha Firebird'}`);
     setEmitenteUI({ nome_fanta: 'Gestor Estoque', logo: null });
     $('#login-usuario').innerHTML = '<option value="">Selecione o usuário</option><option value="0">SUPERVISOR (Supervisor)</option>';
   }
 }
+
+window.addEventListener('pageshow', (ev) => {
+  if (!ev.persisted) return;
+  state.usuario = null;
+  const app = $('#view-app');
+  const login = $('#view-login');
+  if (app) app.hidden = true;
+  if (login) login.hidden = false;
+  api('/logout', { method: 'POST', body: {} });
+});
 
 async function loadUnidades() {
   const res = await api('/unidades');
@@ -685,8 +852,21 @@ $('#toggle-senha').addEventListener('click', () => {
   mascararSenha(input, !input.classList.contains('senha-mascarada'));
 });
 
+let loginCliqueEm = 0;
+$('#form-login button[type="submit"]')?.addEventListener('click', () => {
+  loginCliqueEm = Date.now();
+});
+$('#login-senha')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loginCliqueEm = Date.now();
+});
+$('#login-usuario')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') loginCliqueEm = Date.now();
+});
+
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
+  if (Date.now() - loginCliqueEm > 1500) return;
+  loginCliqueEm = 0;
   $('#login-erro').hidden = true;
   const id = Number($('#login-usuario').value);
   const senhaEl = $('#login-senha');
@@ -769,6 +949,7 @@ function enterApp() {
   if (showEmp) registrarEmpresaMt();
   showPage('dashboard');
   loadUnidades();
+  carregarPedidoVinculo();
 }
 
 function trocarUsuario() {

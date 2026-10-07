@@ -34,6 +34,8 @@ const ROTAS_PUBLICAS = [
   /^\/sessao$/,
   /^\/licenca$/,
   /^\/licenca\/verificar$/,
+  /^\/mt\/grupo$/,
+  /^\/mt\/presenca$/,
 ];
 
 /** Tela de serviço (sem login de usuário): só no próprio computador servidor. */

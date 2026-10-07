@@ -751,6 +751,239 @@ async function listarEmpresasMt(url, env) {
   return json({ ok: true, itens });
 }
 
+async function garantirTabelaVinculos(env) {
+  await garantirTabelaMt(env);
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS mt_vinculos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    aplicacao TEXT NOT NULL,
+    cnpj_matriz TEXT NOT NULL,
+    cnpj_filial TEXT NOT NULL,
+    aceite_matriz TEXT,
+    aceite_filial TEXT,
+    criado_em TEXT,
+    atualizado_em TEXT
+  )`).run();
+  await env.DB.prepare(
+    `CREATE UNIQUE INDEX IF NOT EXISTS mt_vinculos_par ON mt_vinculos (aplicacao, cnpj_matriz, cnpj_filial)`
+  ).run();
+}
+
+function statusVinculo(v) {
+  if (v.aceite_matriz === 'recusado' || v.aceite_filial === 'recusado') return 'recusado';
+  if (v.aceite_matriz === 'aceito' && v.aceite_filial === 'aceito') return 'ativo';
+  if (v.aceite_matriz === 'aceito') return 'aguardando_filial';
+  if (v.aceite_filial === 'aceito') return 'aguardando_matriz';
+  return 'aguardando';
+}
+
+async function fichaEmpresaMt(env, app, cnpj) {
+  const row = await env.DB.prepare(
+    `SELECT COALESCE(NULLIF(m.nome, ''), NULLIF(c.fantasia, ''), NULLIF(c.razao, ''), ?) AS nome,
+            m.url
+     FROM (SELECT 1 AS x)
+     LEFT JOIN mt_empresas m ON m.cnpj = ? AND m.aplicacao = ?
+     LEFT JOIN clientes c ON c.cnpj = ? AND c.aplicacao = ?`
+  ).bind(cnpj, cnpj, app, cnpj, app).first();
+  return {
+    cnpj,
+    nome: row?.nome || cnpj,
+    url: urlTunelValida(row?.url) || '',
+  };
+}
+
+async function empresaConhecida(env, app, cnpj) {
+  const cli = await env.DB.prepare(
+    'SELECT 1 AS ok FROM clientes WHERE cnpj = ? AND aplicacao = ?'
+  ).bind(cnpj, app).first();
+  if (cli) return true;
+  const mt = await env.DB.prepare(
+    'SELECT 1 AS ok FROM mt_empresas WHERE cnpj = ? AND aplicacao = ?'
+  ).bind(cnpj, app).first();
+  return !!mt;
+}
+
+async function enriquecerVinculo(env, app, v) {
+  const matriz = await fichaEmpresaMt(env, app, v.cnpj_matriz);
+  const filial = await fichaEmpresaMt(env, app, v.cnpj_filial);
+  return {
+    id: v.id,
+    cnpj_matriz: v.cnpj_matriz,
+    cnpj_filial: v.cnpj_filial,
+    nome_matriz: matriz.nome,
+    nome_filial: filial.nome,
+    url_matriz: matriz.url,
+    url_filial: filial.url,
+    aceite_matriz: v.aceite_matriz || null,
+    aceite_filial: v.aceite_filial || null,
+    status: statusVinculo(v),
+    atualizado_em: v.atualizado_em || null,
+  };
+}
+
+async function listarCadastroMt(url, env) {
+  const app = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
+  await garantirTabelaMt(env);
+  const desde = new Date(Date.now() - JANELA_ONLINE_MS).toISOString();
+  const { results } = await env.DB.prepare(
+    `SELECT m.cnpj, m.nome, m.nse, m.url,
+            (SELECT MAX(i.ultimo_contato) FROM instalacoes i
+              WHERE i.cnpj = m.cnpj AND i.aplicacao = m.aplicacao) AS ultimo_contato
+     FROM mt_empresas m
+     WHERE m.aplicacao = ?
+     ORDER BY m.nome`
+  ).bind(app).all();
+  const itens = (results || []).map((r) => ({
+    cnpj: r.cnpj,
+    nse: r.nse || '',
+    nome: r.nome || '',
+    url: urlTunelValida(r.url) || '',
+    online: !!r.ultimo_contato && r.ultimo_contato >= desde,
+  }));
+  itens.sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
+  return json({ ok: true, itens });
+}
+
+async function listarVinculosMt(url, env) {
+  const app = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
+  await garantirTabelaVinculos(env);
+  const cnpj = soDigitos(url.searchParams.get('cnpj'));
+  const sql = cnpj
+    ? `SELECT * FROM mt_vinculos WHERE aplicacao = ? AND (cnpj_matriz = ? OR cnpj_filial = ?) ORDER BY id DESC`
+    : `SELECT * FROM mt_vinculos WHERE aplicacao = ? ORDER BY id DESC`;
+  const q = env.DB.prepare(sql);
+  const { results } = cnpj ? await q.bind(app, cnpj, cnpj).all() : await q.bind(app).all();
+  const itens = [];
+  for (const v of results || []) itens.push(await enriquecerVinculo(env, app, v));
+  return json({ ok: true, itens });
+}
+
+async function criarVinculoMt(request, env) {
+  const b = await request.json().catch(() => ({}));
+  const app = nomeApp(b.aplicacao) || APP_PADRAO;
+  const cnpjMatriz = soDigitos(b.cnpjMatriz);
+  const cnpjFilial = soDigitos(b.cnpjFilial);
+  if (cnpjMatriz.length < 11 || cnpjFilial.length < 11) {
+    return json({ ok: false, error: 'Informe a matriz e a filial.' }, 400);
+  }
+  if (cnpjMatriz === cnpjFilial) {
+    return json({ ok: false, error: 'A matriz e a filial precisam ser empresas diferentes.' }, 400);
+  }
+  await garantirTabelaVinculos(env);
+  if (!(await empresaConhecida(env, app, cnpjMatriz)) || !(await empresaConhecida(env, app, cnpjFilial))) {
+    return json({ ok: false, error: 'As duas empresas precisam estar no painel.' }, 400);
+  }
+  const outra = await env.DB.prepare(
+    `SELECT id FROM mt_vinculos
+     WHERE aplicacao = ? AND cnpj_filial = ? AND cnpj_matriz != ?
+       AND COALESCE(aceite_matriz, '') != 'recusado'
+       AND COALESCE(aceite_filial, '') != 'recusado'`
+  ).bind(app, cnpjFilial, cnpjMatriz).first();
+  if (outra) return json({ ok: false, error: 'Esta filial já está vinculada a outra matriz.' }, 400);
+  const agora = agoraIso();
+  const existente = await env.DB.prepare(
+    `SELECT * FROM mt_vinculos WHERE aplicacao = ? AND cnpj_matriz = ? AND cnpj_filial = ?`
+  ).bind(app, cnpjMatriz, cnpjFilial).first();
+  let id;
+  if (existente) {
+    if (statusVinculo(existente) === 'ativo') {
+      return json({ ok: true, id: existente.id, ativo: true });
+    }
+    await env.DB.prepare(
+      `UPDATE mt_vinculos
+       SET aceite_matriz = NULL, aceite_filial = NULL, atualizado_em = ?
+       WHERE id = ?`
+    ).bind(agora, existente.id).run();
+    id = existente.id;
+  } else {
+    const ins = await env.DB.prepare(
+      `INSERT INTO mt_vinculos (aplicacao, cnpj_matriz, cnpj_filial, aceite_matriz, aceite_filial, criado_em, atualizado_em)
+       VALUES (?, ?, ?, NULL, NULL, ?, ?)
+       RETURNING id`
+    ).bind(app, cnpjMatriz, cnpjFilial, agora, agora).first();
+    id = ins?.id;
+  }
+  const row = await env.DB.prepare('SELECT * FROM mt_vinculos WHERE id = ?').bind(id).first();
+  return json({ ok: true, vinculo: await enriquecerVinculo(env, app, row) });
+}
+
+async function aceitarVinculoMt(request, env) {
+  const b = await request.json().catch(() => ({}));
+  const app = nomeApp(b.aplicacao) || APP_PADRAO;
+  const cnpj = soDigitos(b.cnpj);
+  const id = Number(b.id);
+  const aceite = b.aceite === 'aceito' || b.aceite === 'recusado' ? b.aceite : '';
+  if (!aceite || !Number.isFinite(id) || cnpj.length < 11) {
+    return json({ ok: false, error: 'Aceite inválido.' }, 400);
+  }
+  await garantirTabelaVinculos(env);
+  const row = await env.DB.prepare(
+    'SELECT * FROM mt_vinculos WHERE id = ? AND aplicacao = ?'
+  ).bind(id, app).first();
+  if (!row) return json({ ok: false, error: 'Vínculo não encontrado.' }, 404);
+  if (statusVinculo(row) === 'recusado') {
+    return json({ ok: false, error: 'Este vínculo foi recusado. Crie de novo no painel.' }, 400);
+  }
+  const agora = agoraIso();
+  if (row.cnpj_matriz === cnpj) {
+    await env.DB.prepare(
+      'UPDATE mt_vinculos SET aceite_matriz = ?, atualizado_em = ? WHERE id = ?'
+    ).bind(aceite, agora, id).run();
+  } else if (row.cnpj_filial === cnpj) {
+    await env.DB.prepare(
+      'UPDATE mt_vinculos SET aceite_filial = ?, atualizado_em = ? WHERE id = ?'
+    ).bind(aceite, agora, id).run();
+  } else {
+    return json({ ok: false, error: 'Esta empresa não faz parte do vínculo.' }, 403);
+  }
+  const atual = await env.DB.prepare('SELECT * FROM mt_vinculos WHERE id = ?').bind(id).first();
+  return json({ ok: true, vinculo: await enriquecerVinculo(env, app, atual) });
+}
+
+async function grupoEmpresaMt(url, env) {
+  const app = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
+  const cnpj = soDigitos(url.searchParams.get('cnpj'));
+  if (cnpj.length < 11) return json({ ok: true, empresas: [] });
+  await garantirTabelaVinculos(env);
+  const { results } = await env.DB.prepare(
+    `SELECT cnpj_matriz, cnpj_filial FROM mt_vinculos
+     WHERE aplicacao = ? AND aceite_matriz = 'aceito' AND aceite_filial = 'aceito'
+       AND (cnpj_matriz = ? OR cnpj_filial = ?)`
+  ).bind(app, cnpj, cnpj).all();
+  const diretos = results || [];
+  if (!diretos.length) return json({ ok: true, empresas: [] });
+  const matrizes = [...new Set(diretos.map((r) => r.cnpj_matriz))];
+  const marcas = matrizes.map(() => '?').join(',');
+  const irmas = await env.DB.prepare(
+    `SELECT cnpj_matriz, cnpj_filial FROM mt_vinculos
+     WHERE aplicacao = ? AND aceite_matriz = 'aceito' AND aceite_filial = 'aceito'
+       AND cnpj_matriz IN (${marcas})`
+  ).bind(app, ...matrizes).all();
+  const ehMatriz = new Set();
+  const cnpjs = new Set([cnpj]);
+  for (const r of irmas.results || []) {
+    ehMatriz.add(r.cnpj_matriz);
+    cnpjs.add(r.cnpj_matriz);
+    cnpjs.add(r.cnpj_filial);
+  }
+  if (cnpjs.size < 2) return json({ ok: true, empresas: [] });
+  const empresas = [];
+  for (const c of cnpjs) {
+    const f = await fichaEmpresaMt(env, app, c);
+    empresas.push({
+      cnpj: f.cnpj,
+      nome: f.nome,
+      url: f.url,
+      papel: ehMatriz.has(c) ? 'matriz' : 'filial',
+      atual: c === cnpj,
+    });
+  }
+  empresas.sort((a, b) => {
+    if (a.papel !== b.papel) return a.papel === 'matriz' ? -1 : 1;
+    return String(a.nome).localeCompare(String(b.nome), 'pt-BR');
+  });
+  return json({ ok: true, empresas });
+}
+
 const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor)?$`);
 const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
@@ -801,6 +1034,11 @@ export default {
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
       if (url.pathname === '/api/mt/empresa' && request.method === 'POST') return await registrarEmpresaMt(request, env);
       if (url.pathname === '/api/mt/empresas' && request.method === 'GET') return await listarEmpresasMt(url, env);
+      if (url.pathname === '/api/mt/empresas/cadastro' && request.method === 'GET') return await listarCadastroMt(url, env);
+      if (url.pathname === '/api/mt/vinculos' && request.method === 'GET') return await listarVinculosMt(url, env);
+      if (url.pathname === '/api/mt/vinculos' && request.method === 'POST') return await criarVinculoMt(request, env);
+      if (url.pathname === '/api/mt/vinculos/aceite' && request.method === 'POST') return await aceitarVinculoMt(request, env);
+      if (url.pathname === '/api/mt/grupo' && request.method === 'GET') return await grupoEmpresaMt(url, env);
       if (url.pathname.startsWith('/api/admin/')) return await rotaAdmin(request, env, url);
       if (url.pathname === '/' || url.pathname === '/admin' || url.pathname === '/admin/') {
         return new Response(ADMIN_HTML, {

@@ -2125,6 +2125,82 @@ router.post('/mt/empresas/registrar', async (req, res) => {
   }
 });
 
+function exigeMt(req, res) {
+  if (req.usuario?.mtEntradas) return true;
+  res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
+  return false;
+}
+
+function podeAutorizarVinculo(req) {
+  return !!(req.usuario && (req.usuario.supervisor || req.usuario.mtEntradas));
+}
+
+router.post('/mt/presenca', async (req, res) => {
+  try {
+    res.json(await require('./mt-empresas').registrarEmpresaAtual(req.body?.url));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/mt/grupo', async (_req, res) => {
+  try {
+    res.json(await require('./mt-empresas').grupoLogin());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, empresas: [] });
+  }
+});
+
+router.get('/mt/empresas/cadastro', async (req, res) => {
+  if (!exigeMt(req, res)) return;
+  try {
+    res.json(await require('./mt-empresas').listarCadastro());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/mt/vinculos', async (req, res) => {
+  if (!exigeMt(req, res)) return;
+  try {
+    res.json(await require('./mt-empresas').listarVinculos());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.post('/mt/vinculos', async (req, res) => {
+  if (!exigeMt(req, res)) return;
+  try {
+    res.json(await require('./mt-empresas').criarVinculo(req.body?.cnpjMatriz, req.body?.cnpjFilial));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/mt/vinculos/pendentes', async (req, res) => {
+  if (!podeAutorizarVinculo(req)) {
+    return res.status(403).json({ ok: false, error: 'Somente o supervisor desta empresa pode autorizar o vínculo.' });
+  }
+  try {
+    res.json(await require('./mt-empresas').pendentesDestaEmpresa());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, pendentes: [], aguardando: [] });
+  }
+});
+
+router.post('/mt/vinculos/aceite', async (req, res) => {
+  if (!podeAutorizarVinculo(req)) {
+    return res.status(403).json({ ok: false, error: 'Somente o supervisor desta empresa pode autorizar o vínculo.' });
+  }
+  const aceite = req.body?.aceite === 'recusado' ? 'recusado' : 'aceito';
+  try {
+    res.json(await require('./mt-empresas').responderVinculo(req.body?.id, aceite));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/dispositivos', somenteServidorLocal, (_req, res) => {
   res.json({ ok: true, itens: require('./dispositivos').listar() });
 });
