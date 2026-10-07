@@ -165,6 +165,28 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function aplicarAtualizacaoSilenciosa(setupPath) {
+  const exe = process.execPath;
+  const pid = process.pid;
+  const scriptPath = path.join(app.getPath('temp'), 'gestor-atualizar.ps1');
+  const ps = [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    `Wait-Process -Id ${pid} -Timeout 180`,
+    `Start-Process -FilePath ${JSON.stringify(setupPath)} -ArgumentList '/S' -Wait`,
+    'Start-Sleep -Seconds 2',
+    `Start-Process -FilePath ${JSON.stringify(exe)}`,
+  ].join('\r\n');
+  fs.writeFileSync(scriptPath, ps, 'utf8');
+  const child = spawn('powershell.exe', [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath,
+  ], {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  child.unref();
+}
+
 async function launchInstaller(exePath) {
   if (!fs.existsSync(exePath)) {
     throw new Error(`Instalador não encontrado: ${exePath}`);
@@ -350,7 +372,7 @@ async function promptAndUpdate(parentWindow) {
     `Versão instalada: ${info.localVersion}`,
     `Versão no GitHub: ${info.remoteVersion}`,
     info.downloadUrl
-      ? 'Ao confirmar, o instalador será baixado e a atualização iniciará automaticamente.'
+      ? 'Ao confirmar, os arquivos da pasta do Gestor são substituídos e o aplicativo reabre já atualizado.'
       : 'Há versão nova no Git, mas o instalador ainda não foi publicado em Releases. Avise a MT Automações.',
   ].join('\n');
 
@@ -416,6 +438,24 @@ async function promptAndUpdate(parentWindow) {
   }
 
   try { progressWin.close(); } catch { /* ignore */ }
+
+  if (app.isPackaged) {
+    try {
+      aplicarAtualizacaoSilenciosa(dest);
+      setTimeout(() => {
+        try { app.quit(); } catch { /* ignore */ }
+      }, 600);
+      return { ok: true, updated: true, silent: true, info, path: dest };
+    } catch (err) {
+      await dialog.showMessageBox(win || undefined, {
+        type: 'error',
+        title: 'Falha na atualização',
+        message: 'Não foi possível substituir os arquivos.',
+        detail: err.message || String(err),
+      });
+      return { ok: false, error: err.message, info };
+    }
+  }
 
   let launched = false;
   try {

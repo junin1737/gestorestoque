@@ -25,6 +25,7 @@ const ImportacaoNfe = (() => {
     chaveConsulta: '',
     financeiroVisitado: false,
     saidaParams: null,
+    itensFiltro: 'todos',
   };
 
   let deps = {};
@@ -959,6 +960,15 @@ const ImportacaoNfe = (() => {
     if (!win) deps.showMsg?.('Permita pop-ups para visualizar o PDF da nota.');
   }
 
+  function setFiltroItens(filtro) {
+    state.itensFiltro = filtro;
+    ['todos', 'pendentes', 'verificados'].forEach((id) => {
+      const btn = $(`#imp-itens-${id}`);
+      if (btn) btn.classList.toggle('active', id === filtro);
+    });
+    renderItensLista();
+  }
+
   function renderItensLista() {
     const s = state.sessao;
     const box = $('#imp-itens-lista');
@@ -968,7 +978,23 @@ const ImportacaoNfe = (() => {
       box.innerHTML = '<p class="empty">Nenhum item na nota</p>';
       return;
     }
-    box.innerHTML = itens.map((it, idx) => {
+    const filtro = state.itensFiltro || 'todos';
+    const visiveis = itens.map((it, idx) => ({ it, idx })).filter(({ it }) => {
+      const done = it.status === 'conferido' || !!it.conferido;
+      if (filtro === 'pendentes') return !done;
+      if (filtro === 'verificados') return done;
+      return true;
+    });
+    if (!visiveis.length) {
+      const vazio = filtro === 'pendentes'
+        ? 'Nenhum item pendente'
+        : filtro === 'verificados'
+          ? 'Nenhum item verificado'
+          : 'Nenhum item na nota';
+      box.innerHTML = `<p class="empty">${vazio}</p>`;
+      return;
+    }
+    box.innerHTML = visiveis.map(({ it, idx }) => {
       const xml = it.xml || {};
       const sys = it.sistema || {};
       const cls = it.status === 'conferido' ? 'ok' : (it.status === 'vinculado' ? 'warn' : 'pending');
@@ -2241,7 +2267,11 @@ const ImportacaoNfe = (() => {
     const isLastTab = tab === 'lote';
 
     let panelHtml = '';
-    if (tab === 'vinculo') panelHtml = panelVinculo(it, sys, xml);
+    if (tab === 'ficha') {
+      panelHtml = `
+        <p class="hint">Cadastre os dados do produto novo. A unidade inicial é UN (1 unidade). Ao salvar, a tela volta para o vínculo.</p>
+        ${panelSaida({ ...sys, uni_medida_saida: sys.uni_medida_saida || 'UN', uni_medida: sys.uni_medida || 'UN' }, xml, true, true)}`;
+    } else if (tab === 'vinculo') panelHtml = panelVinculo(it, sys, xml);
     else if (tab === 'entrada') panelHtml = panelEntrada(sys, xml, trib, imp, simples);
     else if (tab === 'conversao') panelHtml = panelConversao(sys, xml, qtdXml, conversor, qtdConv);
     else if (tab === 'saida') panelHtml = panelSaida(sys, xml, vinculado, descEditable);
@@ -2250,7 +2280,9 @@ const ImportacaoNfe = (() => {
     else panelHtml = panelAnp(sys);
 
     const tabIdx = ITEM_TABS.findIndex((t) => t.id === tab);
-    const footerHtml = isLastTab
+    const footerHtml = tab === 'ficha'
+      ? `<button type="button" class="btn primary" id="imp-salvar-ficha">Salvar ficha</button>`
+      : isLastTab
       ? `
         <button type="button" class="btn" id="imp-etapa-anterior">Etapa anterior</button>
         <button type="button" class="btn outline" id="imp-salvar-item">Salvar item</button>
@@ -2282,7 +2314,7 @@ const ImportacaoNfe = (() => {
         </div>
         <span class="imp-status ${stCls}">${stLbl}</span>
       </div>
-      ${itemTabNav()}
+      ${tab === 'ficha' ? '' : itemTabNav()}
       <div class="imp-item-scroll">
         ${panelHtml}
       </div>
@@ -2603,9 +2635,9 @@ const ImportacaoNfe = (() => {
       if (estFornec.cofins != null && sys.tributos?.p_cofins == null) {
         sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
       }
-      if (estFornec.uni_medida) {
+      if (estFornec.uni_medida && sys.conversor_origem !== 'gestor') {
         if (!filled(sys.uni_medida_saida)) sys.uni_medida_saida = estFornec.uni_medida;
-        // Parametrização prévia da unidade de conversão em TB_ESTOQUE_FORNECEDOR
+        // Primeira entrada: sugere TB_ESTOQUE_FORNECEDOR só se o Gestor ainda não gravou conversão.
         if (!sys.conversor_manual) {
           applyConversaoUnidade(
             sys,
@@ -2786,7 +2818,7 @@ const ImportacaoNfe = (() => {
             p_cofins: f.cofins ?? it.sistema.tributos?.p_cofins,
           };
           it.sistema.uni_medida_cadastro = f.uni_medida || it.sistema.uni_medida_cadastro;
-          if (fiscal.conversao && !it.sistema.conversor_manual) {
+          if (fiscal.conversao && !it.sistema.conversor_manual && it.sistema.conversor_origem !== 'gestor') {
             const conv = fiscal.conversao;
             it.sistema.uni_medida = conv.uni_estoque || it.sistema.uni_medida;
             it.sistema.conversor = conv.conversor ?? it.sistema.conversor;
@@ -2809,6 +2841,22 @@ const ImportacaoNfe = (() => {
       const idFornec = state.sessao?.fornecedor?.id_fornec;
       const codForn = it.xml?.cProd || it.sistema.cod_fornecedor || '';
       try {
+        const qsConv = new URLSearchParams();
+        qsConv.set('id_identificador', String(patch.id_identificador));
+        if (idFornec) qsConv.set('id_fornec', String(idFornec));
+        if (it.xml?.uCom) qsConv.set('uni_xml', it.xml.uCom);
+        const cv = await api(`/importacao/conversao-gestor?${qsConv}`);
+        if (cv.item?.uni_estoque) {
+          it.sistema.uni_medida = cv.item.uni_estoque;
+          it.sistema.conversor = Number(cv.item.conversor || 1) || 1;
+          it.sistema.conversor_origem = 'gestor';
+          const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0);
+          it.sistema.qtd = Number((qtdXml * Number(it.sistema.conversor || 1)).toFixed(6));
+          const custoInfo = calcCustoNotaUnitario(it.sistema, it.xml || {});
+          if (custoInfo.custoEstoque > 0) it.sistema.prc_custo = custoInfo.custoEstoque;
+        }
+      } catch (_) { /* ignore */ }
+      try {
         const qs = new URLSearchParams();
         if (idFornec) qs.set('id_fornec', String(idFornec));
         qs.set('id_identificador', String(patch.id_identificador));
@@ -2823,8 +2871,16 @@ const ImportacaoNfe = (() => {
         }
       } catch (_) { /* ignore */ }
     }
+    if (patch.criar_novo) {
+      it.sistema.uni_medida = 'UN';
+      it.sistema.uni_medida_saida = it.sistema.uni_medida_saida || 'UN';
+      it.sistema.conversor = 1;
+      it.sistema.conversor_origem = 'novo';
+      const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0);
+      it.sistema.qtd = Number(qtdXml.toFixed(6));
+    }
     state.buscaProduto = patch.id_identificador ? patch.descricao : state.buscaProduto;
-    state.itemTab = 'entrada';
+    state.itemTab = patch.criar_novo ? 'ficha' : 'entrada';
     renderItemScreen();
   }
 
@@ -3090,6 +3146,21 @@ const ImportacaoNfe = (() => {
     const sys = it?.sistema || {};
     const trib = sys.tributos || {};
     const idFornec = state.sessao?.fornecedor?.id_fornec;
+    if (sys.id_identificador) {
+      try {
+        await api('/importacao/conversao-gestor', {
+          method: 'POST',
+          body: {
+            id_identificador: sys.id_identificador,
+            id_fornec: idFornec || null,
+            uni_xml: sys.uni_medida_xml || it.xml?.uCom || '',
+            uni_estoque: sys.uni_medida || 'UN',
+            conversor: Number(sys.conversor ?? 1) || 1,
+          },
+        });
+        if (it.sistema) it.sistema.conversor_origem = 'gestor';
+      } catch (_) { /* ignore */ }
+    }
     if (!idFornec) return;
 
     const regraBody = {
@@ -3513,6 +3584,13 @@ const ImportacaoNfe = (() => {
     $$('.imp-step').forEach((btn) => {
       btn.addEventListener('click', () => setItemTab(btn.dataset.itemTab));
     });
+    $('#imp-salvar-ficha')?.addEventListener('click', async () => {
+      const ok = await saveItem({ semRender: true });
+      if (!ok) return;
+      state.itemTab = 'vinculo';
+      renderItemScreen();
+      deps.showToast?.('Ficha salva. Confirme o vínculo para prosseguir.');
+    });
     $('#imp-proxima-etapa')?.addEventListener('click', () => avancarEtapa());
     $('#imp-etapa-anterior')?.addEventListener('click', () => voltarEtapa());
     $('#imp-usar-custo-nota')?.addEventListener('click', () => {
@@ -3920,11 +3998,13 @@ const ImportacaoNfe = (() => {
 
   /* ── PARÂMETROS ─────────────────────────────────────────────────────────── */
 
-  async function loadParamsView() {
+  async function loadParamsView(opts = {}) {
     await ensureUnidades();
     const res = await api('/importacao/params/cfop');
-    const host = $('#imp-params-host');
+    const paraConfig = opts.destino === 'config';
+    const host = paraConfig ? $('#cfg-tributos-host') : $('#imp-params-host');
     if (!host) return;
+    state.paramsNaConfig = paraConfig;
     const itens = res.itens || [];
     const csosn = res.csosn_padrao || '102';
     const saida = res.saida || {};
@@ -3967,7 +4047,7 @@ const ImportacaoNfe = (() => {
           <button type="button" class="btn small outline" id="imp-params-add">Adicionar linha</button>
         </div>
       </section>
-      <section class="imp-section">
+      <section class="imp-section" id="imp-params-saida-sec">
         <header class="imp-section-head"><h4>Dados de saída (padrão / fallback)</h4></header>
         <p class="hint">Usado quando a linha de conversão não tiver saída preenchida.</p>
         <div class="imp-fields">
@@ -3993,7 +4073,7 @@ const ImportacaoNfe = (() => {
           </label>
         </div>
       </section>
-      <section class="imp-section">
+      <section class="imp-section" id="imp-params-conv-sec">
         <header class="imp-section-head"><h4>Conversões de unidade (último vínculo)</h4></header>
         <p class="hint">Unidade de estoque vem de TB_UNI_MEDIDA (com conversor). Ao escolher a unidade, o conversor é preenchido; digite o conversor manualmente se precisar ajustar. Pode cadastrar unidade na hora.</p>
         <div class="imp-params-scroll">
@@ -4024,6 +4104,14 @@ const ImportacaoNfe = (() => {
       tbody.insertAdjacentHTML('beforeend', paramsRowHtml({}, i));
       bindParamsRowEvents();
     });
+    if (paraConfig && $('#cfg-saida-host')) {
+      const saidaNode = host.querySelector('#imp-params-saida-sec');
+      const convNode = host.querySelector('#imp-params-conv-sec');
+      const dest = $('#cfg-saida-host');
+      dest.innerHTML = '';
+      if (saidaNode) dest.appendChild(saidaNode);
+      if (convNode) dest.appendChild(convNode);
+    }
     bindParamsRowEvents();
     bindParamsConvEvents();
     $('#imp-params-conv-add')?.addEventListener('click', () => {
@@ -4264,6 +4352,10 @@ const ImportacaoNfe = (() => {
   }
 
   async function saveParams() {
+    if (!$('#imp-params-table')) {
+      deps.showMsg?.('Aguarde o carregamento dos parâmetros.');
+      return;
+    }
     const csosn = $('#imp-params-csosn')?.value || '102';
     const itens = $$('#imp-params-table tbody tr').map((tr) => ({
       cfop_origem: tr.querySelector('.imp-cfop-origem')?.value || '',
@@ -4306,6 +4398,7 @@ const ImportacaoNfe = (() => {
     }
     state.saidaParams = res.saida || saida;
     deps.showToast?.('Parâmetros salvos');
+    if (state.paramsNaConfig) return;
     showView('inicio');
     loadHome();
   }
@@ -4331,8 +4424,11 @@ const ImportacaoNfe = (() => {
     $('#imp-filtro-ate')?.addEventListener('keydown', blurAndFilter);
     $('#imp-btn-nova')?.addEventListener('click', () => showView('consultar'));
     $('#imp-btn-manual')?.addEventListener('click', () => criarManual());
-    $('#imp-btn-params')?.addEventListener('click', () => loadParamsView());
-    $('#imp-btn-params-sessao')?.addEventListener('click', () => loadParamsView());
+    $('#imp-itens-todos')?.addEventListener('click', () => setFiltroItens('todos'));
+    $('#imp-itens-pendentes')?.addEventListener('click', () => setFiltroItens('pendentes'));
+    $('#imp-itens-verificados')?.addEventListener('click', () => setFiltroItens('verificados'));
+    $('#imp-btn-params')?.addEventListener('click', () => deps.openConfig?.('tributos'));
+    $('#imp-btn-params-sessao')?.addEventListener('click', () => deps.openConfig?.('tributos'));
     $('#imp-btn-ver-pdf')?.addEventListener('click', () => abrirDanfePdf());
     $('#imp-voltar-lista')?.addEventListener('click', () => {
       showView('inicio');
@@ -4645,6 +4741,8 @@ const ImportacaoNfe = (() => {
     isDirtyConferencia,
     abrirSessaoImportada,
     abrirConsultaChave,
+    mountConfig: () => loadParamsView({ destino: 'config' }),
+    saveConfig: () => saveParams(),
   };
 })();
 

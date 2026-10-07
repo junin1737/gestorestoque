@@ -398,6 +398,7 @@ const ROTAS_LIVRES = [
   /^\/online(\/|$)/,
   /^\/database\//,
   /^\/fiscal\//,
+  /^\/dispositivos/,
 ];
 
 function guardLicenca(req, res, next) {
@@ -420,6 +421,7 @@ function iniciar() {
 module.exports = {
   LICENCA_URL,
   APLICACAO,
+  lerIdentidade,
   iniciar,
   verificarAgora,
   solicitar,

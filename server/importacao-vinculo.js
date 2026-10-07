@@ -209,6 +209,27 @@ async function aplicarSugestoesVinculo(sessao) {
     const f = await getProdutoFiscal(p.idLigado);
     aplicarFiscalPreservandoSaida(p.it.sistema, f);
     const xmlItem = p.it.xml || {};
+    const idFornecConv = Number(sessao?.fornecedor?.id_fornec || 0);
+    let usouGestor = false;
+    try {
+      const { buscarConversaoGestor } = require('./importacao-conversao-gestor');
+      const gest = await buscarConversaoGestor({
+        idIdentificador: p.idLigado,
+        idFornec: idFornecConv,
+        uniXml: xmlItem.uCom,
+      });
+      if (gest?.uni_estoque) {
+        usouGestor = true;
+        p.it.sistema.uni_medida = gest.uni_estoque;
+        p.it.sistema.conversor = gest.conversor;
+        p.it.sistema.conversor_origem = 'gestor';
+        const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
+        p.it.sistema.qtd = Number((qtdXml * Number(p.it.sistema.conversor || 1)).toFixed(6));
+      }
+    } catch (e) {
+      console.warn('Conversão Gestor:', e.message);
+    }
+    if (!usouGestor) {
     const conv = importacaoParams.findConversao(xmlItem.uCom, p.idLigado);
     if (conv) {
       p.it.sistema.uni_medida = conv.uni_estoque || p.it.sistema.uni_medida;
@@ -216,9 +237,9 @@ async function aplicarSugestoesVinculo(sessao) {
       const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
       p.it.sistema.qtd = Number((qtdXml * Number(conv.conversor || 1)).toFixed(6));
     }
-    // Parametrização prévia em TB_ESTOQUE_FORNECEDOR (unidade + conversor TB_UNI_MEDIDA)
+    // Primeira entrada: sugere a parametrização do Clipp (TB_ESTOQUE_FORNECEDOR).
     try {
-      const idFornec = Number(sessao?.fornecedor?.id_fornec || 0);
+      const idFornec = idFornecConv;
       if (idFornec && p.idLigado) {
         const { buscarEstoqueFornecedor } = require('./importacao-estoque-fornec');
         const { calcCustoUnitarioItem } = require('./importacao-rateio');
@@ -240,7 +261,8 @@ async function aplicarSugestoesVinculo(sessao) {
     } catch (e) {
       console.warn('Conversão estoque-fornecedor:', e.message);
     }
-    if (conv || Number(p.it.sistema.conversor || 1) !== 1) {
+    }
+    if (Number(p.it.sistema.conversor || 1) !== 1 || p.it.sistema.conversor_origem === 'gestor') {
       try {
         const { calcCustoUnitarioItem } = require('./importacao-rateio');
         const custoInfo = calcCustoUnitarioItem(p.it.sistema, xmlItem);

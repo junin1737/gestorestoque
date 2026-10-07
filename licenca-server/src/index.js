@@ -651,6 +651,66 @@ async function licencaOffline(cnpj, app, request, env) {
   return json({ ok: true, codigo, valido_ate: validoAte.toISOString() });
 }
 
+async function garantirTabelaMt(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS mt_empresas (
+    cnpj TEXT NOT NULL,
+    aplicacao TEXT NOT NULL,
+    nse TEXT,
+    nome TEXT,
+    url TEXT,
+    atualizado_em TEXT,
+    PRIMARY KEY (cnpj, aplicacao)
+  )`).run();
+}
+
+async function registrarEmpresaMt(request, env) {
+  const b = await request.json().catch(() => ({}));
+  const cnpj = soDigitos(b.cnpj);
+  const app = nomeApp(b.aplicacao) || APP_PADRAO;
+  if (cnpj.length < 11) return json({ ok: false, error: 'CNPJ inválido.' }, 400);
+  await garantirTabelaMt(env);
+  const nome = texto(b.nome, 120);
+  const nse = texto(b.nse, 40);
+  const urlPainel = texto(b.url, 300);
+  await env.DB.prepare(
+    `INSERT INTO mt_empresas (cnpj, aplicacao, nse, nome, url, atualizado_em)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(cnpj, aplicacao) DO UPDATE SET
+       nse = excluded.nse,
+       nome = COALESCE(excluded.nome, mt_empresas.nome),
+       url = COALESCE(excluded.url, mt_empresas.url),
+       atualizado_em = excluded.atualizado_em`
+  ).bind(cnpj, app, nse, nome, urlPainel, agoraIso()).run();
+  return json({ ok: true });
+}
+
+async function listarEmpresasMt(url, env) {
+  const app = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
+  await garantirTabelaMt(env);
+  const { results } = await env.DB.prepare(
+    `SELECT m.cnpj, m.nse, m.nome, m.url, m.atualizado_em,
+            (SELECT MAX(i.ultimo_contato) FROM instalacoes i
+              WHERE i.cnpj = m.cnpj AND i.aplicacao = m.aplicacao) AS ultimo_contato
+     FROM mt_empresas m
+     WHERE m.aplicacao = ?
+     ORDER BY m.nome`
+  ).bind(app).all();
+  const agora = Date.now();
+  const itens = (results || []).map((r) => {
+    const t = new Date(r.ultimo_contato || 0).getTime();
+    const online = Number.isFinite(t) && agora - t < 6 * 60 * 1000;
+    return {
+      cnpj: r.cnpj,
+      nse: r.nse || '',
+      nome: r.nome || '',
+      url: r.url || '',
+      online,
+      ultimo_contato: r.ultimo_contato || null,
+    };
+  });
+  return json({ ok: true, itens });
+}
+
 const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor)?$`);
 const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
@@ -692,6 +752,8 @@ export default {
     const url = new URL(request.url);
     try {
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
+      if (url.pathname === '/api/mt/empresa' && request.method === 'POST') return await registrarEmpresaMt(request, env);
+      if (url.pathname === '/api/mt/empresas' && request.method === 'GET') return await listarEmpresasMt(url, env);
       if (url.pathname.startsWith('/api/admin/')) return await rotaAdmin(request, env, url);
       if (url.pathname === '/' || url.pathname === '/admin' || url.pathname === '/admin/') {
         return new Response(ADMIN_HTML, {

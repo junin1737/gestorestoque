@@ -35,6 +35,7 @@ function defaultRows() {
   }
   return [
     { cfop_origem: '5102', cfop_conv: '1102', csosn: '102', cfop_saida_nfe: '5102', csosn_saida_nfe: '102', cst_saida_nfe: '', cfop_saida_cfe: '5102', csosn_saida_cfe: '102', cst_saida_cfe: '' },
+    { cfop_origem: '5403', cfop_conv: '1403', csosn: '202', cfop_saida_nfe: '5405', csosn_saida_nfe: '500', cst_saida_nfe: '060', cfop_saida_cfe: '5405', csosn_saida_cfe: '500', cst_saida_cfe: '060', id_cti: 'FFF', id_cti_cfe: 'FFF', cti_label: 'Substituição Tributária (FFF)', cti_cfe_label: 'Substituição Tributária (FFF)' },
     { cfop_origem: '5405', cfop_conv: '1403', csosn: '102', cfop_saida_nfe: '5405', csosn_saida_nfe: '500', cst_saida_nfe: '', cfop_saida_cfe: '5405', csosn_saida_cfe: '500', cst_saida_cfe: '' },
     { cfop_origem: '6102', cfop_conv: '2102', csosn: '102', cfop_saida_nfe: '6102', csosn_saida_nfe: '102', cst_saida_nfe: '', cfop_saida_cfe: '6102', csosn_saida_cfe: '102', cst_saida_cfe: '' },
     { cfop_origem: '6403', cfop_conv: '2403', csosn: '102', cfop_saida_nfe: '6403', csosn_saida_nfe: '500', cst_saida_nfe: '', cfop_saida_cfe: '6403', csosn_saida_cfe: '500', cst_saida_cfe: '' },

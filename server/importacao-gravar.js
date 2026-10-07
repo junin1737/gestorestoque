@@ -1340,6 +1340,34 @@ async function gravarNfCompra(sessao, {
       // então ficam presas pela transação o menor tempo possível.
       for (const p of pendentesEstoque) {
         await atualizarCadastroProduto(db, appCfg, p.it.sistema || {}, p.it.xml || {});
+        try {
+          await query(db, `
+            UPDATE ${writeTargets(appCfg)[0]?.tables?.produto || 'TB_EST_PRODUTO'}
+            SET ULT_COMPRA = ? WHERE ID_IDENTIFICADOR = ?`, [dtEntrada, p.idIdent]);
+        } catch (e) {
+          try {
+            for (const target of writeTargets(appCfg)) {
+              await query(db, `
+                UPDATE ${target.tables.produto} SET ULT_COMPRA = ? WHERE ID_IDENTIFICADOR = ?`, [
+                dtEntrada, p.idIdent,
+              ]);
+            }
+          } catch (e2) {
+            console.warn('ULT_COMPRA:', e2.message || e.message);
+          }
+        }
+        try {
+          const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
+          await salvarConversaoGestor({
+            id_identificador: p.idIdent,
+            id_fornec: sessao.fornecedor?.id_fornec,
+            uni_xml: p.it.sistema?.uni_medida_xml || p.it.xml?.uCom || '',
+            uni_estoque: p.it.sistema?.uni_medida || 'UN',
+            conversor: p.it.sistema?.conversor ?? 1,
+          }, db);
+        } catch (e) {
+          console.warn('TB_MT_CONVERSAO:', e.message);
+        }
         if (!(p.qtd > 0)) continue;
         // Atualiza QTD_ATUAL sem gravar em TB_EST_SALDO_ALTERADO — a movimentação
         // no relatório do Clipp já vem como "NF Compra" pelo item da nota.

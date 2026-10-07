@@ -46,6 +46,7 @@ const ROTAS_SERVIDOR_LOCAL = [
   /^\/licenca\/solicitar$/,
   /^\/database\//,
   /^\/fiscal\//,
+  /^\/dispositivos/,
 ];
 
 let chave = null;
@@ -153,6 +154,7 @@ function usuarioDaSessao(req) {
     id: Number(user.id),
     nome: user.nome,
     supervisor: !!user.supervisor,
+    mtEntradas: !!(user.mtEntradas || Number(user.id) === 900001),
     permissoes: user.supervisor ? fullPermissoes() : user.permissoes,
     sessao: { nonce: dados.n, exp: dados.exp },
   };
@@ -276,6 +278,7 @@ async function login(req, res) {
       id: Number(user.id),
       nome: user.nome,
       supervisor: !!user.supervisor,
+      mtEntradas: !!(user.mtEntradas || Number(user.id) === 900001),
       permissoes: user.supervisor ? fullPermissoes() : user.permissoes,
       temSenha: true,
     },
@@ -334,6 +337,19 @@ function exigirSessao(req, res, next) {
   }
   if (!viaTunel(req)) {
     req.usuario = u;
+    const deviceId = String(req.headers['x-device-id'] || '').trim();
+    if (deviceId) {
+      const r = require('./dispositivos').registrar(deviceId, {
+        userAgent: req.headers['user-agent'],
+      });
+      if (r.vencido) {
+        return res.status(403).json({
+          ok: false,
+          code: 'DISPOSITIVO',
+          error: 'O prazo deste dispositivo acabou. Renove o tempo na aba Dispositivos do servidor.',
+        });
+      }
+    }
     return next();
   }
   bloqueioOnline(u).then((b) => {

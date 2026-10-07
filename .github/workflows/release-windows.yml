@@ -3,7 +3,7 @@ name: Release Windows
 on:
   workflow_dispatch:
   push:
-    branches: [main]
+    branches: [online]
     paths:
       - 'package.json'
       - '.github/workflows/release-windows.yml'
@@ -46,11 +46,12 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: ${{ steps.ver.outputs.tag }}
           body: |
-            Instalador automático do Gestor Estoque ${{ steps.ver.outputs.version }}.
+            Instalador do Gestor Estoque Online ${{ steps.ver.outputs.version }}.
 
             No app: **Sobre → Verificar atualização agora**.
-          files: dist/GestorEstoque-Setup-*.exe
+          files: dist/gestorestoque-online-*.exe
           fail_on_unmatched_files: true
-          make_latest: true
+          make_latest: false
+          prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

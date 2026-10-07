@@ -302,7 +302,7 @@ router.get('/funcionarios', async (req, res) => {
     if (changed) saveUsersConfig(appCfg, usersCfg);
 
     const list = loadUsersConfig(appCfg).usuarios
-      .filter((u) => u.supervisor || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id)))
+      .filter((u) => u.supervisor || u.mtEntradas || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id)))
       .filter(podeOnline)
       .map(usuarioLogin);
 
@@ -2073,6 +2073,65 @@ router.post('/importacao/sessoes/:id/fornecedor/cadastrar', async (req, res) => 
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
+});
+
+router.get('/importacao/conversao-gestor', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const item = await require('./importacao-conversao-gestor').buscarConversaoGestor({
+      idIdentificador: req.query.id_identificador,
+      idFornec: req.query.id_fornec,
+      uniXml: req.query.uni_xml,
+    });
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/conversao-gestor', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const out = await require('./importacao-conversao-gestor').salvarConversaoGestor(req.body || {});
+    res.json({ ok: true, ...(out || {}) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/mt/empresas', async (req, res) => {
+  if (!req.usuario?.mtEntradas) {
+    return res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
+  }
+  try {
+    res.json(await require('./mt-empresas').listarEmpresas());
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.post('/mt/empresas/registrar', async (req, res) => {
+  if (!req.usuario?.mtEntradas) {
+    return res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
+  }
+  try {
+    res.json(await require('./mt-empresas').registrarEmpresaAtual(req.body?.url));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/dispositivos', somenteServidorLocal, (_req, res) => {
+  res.json({ ok: true, itens: require('./dispositivos').listar() });
+});
+
+router.put('/dispositivos/:id', somenteServidorLocal, (req, res) => {
+  const disp = require('./dispositivos');
+  let item = null;
+  if (req.body?.nome != null) item = disp.renomear(req.params.id, req.body.nome);
+  if (req.body?.dias != null) item = disp.definirDias(req.params.id, req.body.dias);
+  if (!item) return res.json({ ok: false, error: 'Dispositivo não encontrado.' });
+  res.json({ ok: true, item, itens: disp.listar() });
 });
 
 router.put('/importacao/sessoes/:id/itens/:nItem', (req, res) => {
