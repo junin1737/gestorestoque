@@ -131,8 +131,15 @@ function fullPermissoes() {
     if (key === 'importacao') out[key] = { acesso: true };
     if (key === 'compras') out[key] = { acesso: true };
     if (key === 'condicionais') out[key] = { acesso: true };
+    if (key === 'online') out[key] = { acesso: false };
   }
   return out;
+}
+
+/** Supervisor e MT Entradas têm permissões fixas; só o acesso online é liberado (ou não) em Usuários. */
+function comAcessoOnline(u, permissoes) {
+  if (!MODULOS.online) return permissoes;
+  return { ...permissoes, online: { acesso: u.acessoOnline === true } };
 }
 
 function ensureModulos(permissoes) {
@@ -197,7 +204,7 @@ function loadUsersConfig(appCfg) {
         ...u,
         id: 0,
         nome: u.nome || 'SUPERVISOR',
-        permissoes: fullPermissoes(),
+        permissoes: comAcessoOnline(u, fullPermissoes()),
       };
     }
     return { ...u, permissoes: ensureModulos(u.permissoes) };
@@ -220,11 +227,11 @@ function ensureUsuarioMtEntradas(cfg) {
     if (atual.nome !== 'MT Entradas') { atual.nome = 'MT Entradas'; mudou = true; }
     if (Number(atual.id) !== MT_ENTRADAS_ID) { atual.id = MT_ENTRADAS_ID; mudou = true; }
     if (atual.senhaHash || atual.senha) { delete atual.senhaHash; delete atual.senha; mudou = true; }
-    atual.permissoes = ensureModulos({
+    atual.permissoes = comAcessoOnline(atual, ensureModulos({
       importacao: { acesso: true },
       compras: { acesso: true },
       estoque: { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'visualizar' },
-    });
+    }));
     return mudou;
   }
   cfg.usuarios.push({
@@ -232,11 +239,12 @@ function ensureUsuarioMtEntradas(cfg) {
     nome: 'MT Entradas',
     mtEntradas: true,
     senhaVer: 1,
-    permissoes: ensureModulos({
+    acessoOnline: false,
+    permissoes: comAcessoOnline({}, ensureModulos({
       importacao: { acesso: true },
       compras: { acesso: true },
       estoque: { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'visualizar' },
-    }),
+    })),
   });
   return true;
 }

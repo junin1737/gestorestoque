@@ -51,6 +51,7 @@ function publicUser(u) {
     id: u.id,
     nome: u.nome,
     supervisor: !!u.supervisor,
+    mtEntradas: isMtEntradas(u),
     permissoes: u.permissoes,
     temSenha: temSenha(u),
   };
@@ -270,7 +271,7 @@ router.get('/emitente', async (_req, res) => {
 
 router.get('/funcionarios', async (req, res) => {
   const online = viaTunel(req);
-  const podeOnline = (u) => !online || u.supervisor || !!u.permissoes?.online?.acesso;
+  const podeOnline = (u) => !online || !!u.permissoes?.online?.acesso;
   try {
     const appCfg = loadAppConfig();
     const usersCfg = loadUsersConfig(appCfg);
@@ -327,7 +328,7 @@ router.get('/sessao', auth.sessao);
 router.get('/usuarios', exigirModulo('usuarios'), (req, res) => {
   const appCfg = loadAppConfig();
   const cfg = loadUsersConfig(appCfg);
-  res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser), modulos: MODULOS });
+  res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser), modulos: MODULOS, mudaOnline: !viaTunel(req) });
 });
 
 router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
@@ -340,16 +341,25 @@ router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
   }
   const currentById = new Map(cfg.usuarios.map((u) => [Number(u.id), u]));
   const enviados = new Map((Array.isArray(usuarios) ? usuarios : []).map((u) => [Number(u.id), u]));
+  // Liberar ou tirar o acesso online (de qualquer usuário, inclusive supervisor e MT) só pela rede da loja.
+  const mudaOnline = !viaTunel(req);
+  const onlinePedido = (prev) => {
+    const v = enviados.get(Number(prev.id))?.permissoes?.online?.acesso;
+    return mudaOnline && typeof v === 'boolean' ? v : prev.permissoes?.online?.acesso === true;
+  };
   // Só altera usuários já existentes (vindos do TB_FUNCIONARIO); a lista não cria nem apaga ninguém.
   cfg.usuarios = cfg.usuarios.map((prev) => {
-    if (prev.supervisor) return { id: 0, nome: prev.nome || 'SUPERVISOR', supervisor: true, permissoes: fullPermissoes() };
-    if (isMtEntradas(prev)) return prev;
+    if (prev.supervisor) {
+      return { id: 0, nome: prev.nome || 'SUPERVISOR', supervisor: true, acessoOnline: onlinePedido(prev), permissoes: fullPermissoes() };
+    }
+    if (isMtEntradas(prev)) return { ...prev, acessoOnline: onlinePedido(prev) };
     const u = enviados.get(Number(prev.id));
     if (!u) return prev;
     const next = {
       ...prev,
       permissoes: ensureModulos(u.permissoes),
     };
+    if (MODULOS.online) next.permissoes.online = { acesso: onlinePedido(prev) };
     if (u.senha !== undefined && u.senha !== null && String(u.senha) !== '') {
       next.senhaHash = gerarHashSenha(String(u.senha));
       next.senhaVer = Number(prev.senhaVer || 0) + 1;
@@ -360,7 +370,8 @@ router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
     cfg.usuarios.unshift({ id: 0, nome: 'SUPERVISOR', supervisor: true, permissoes: fullPermissoes() });
   }
   saveUsersConfig(appCfg, cfg);
-  res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser) });
+  const salvo = loadUsersConfig(appCfg);
+  res.json({ ok: true, usuarios: salvo.usuarios.map(publicUser), mudaOnline });
 });
 
 function descricaoExibicao(descricao, grade, cor, tamanho) {

@@ -2048,6 +2048,7 @@ async function loadUsuarios() {
   const res = await api('/usuarios');
   state.usuarios = res.usuarios || [];
   state.modulos = res.modulos || state.modulos;
+  state.mudaOnline = res.mudaOnline;
   renderUsuarios();
 }
 
@@ -2057,62 +2058,62 @@ function renderUsuarios() {
     <div class="user-card" data-idx="${idx}">
       <div class="grid-2">
         <label>Nome<input value="${escapeAttr(u.nome)}" disabled /></label>
-        <label>Nova senha<input type="text" class="senha-mascarada" data-field="senha" autocomplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="${u.supervisor ? 'Definida pela MT Automações' : (u.temSenha ? '••••••' : 'Definir senha')}" ${u.supervisor ? 'disabled' : ''} /></label>
+        <label>Nova senha<input type="text" class="senha-mascarada" data-field="senha" autocomplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="${u.mtEntradas ? 'Conferida pela MT Automações' : u.supervisor ? 'Definida pela MT Automações' : (u.temSenha ? '••••••' : 'Definir senha')}" ${u.supervisor || u.mtEntradas ? 'disabled' : ''} /></label>
       </div>
       <div class="perm-grid">
         <label>Acesso Estoque
-          <select data-perm="estoque.acesso" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="estoque.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.estoque?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.estoque?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
         <label>Ficha
-          <select data-perm="estoque.ficha" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="estoque.ficha" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             ${permOptions(['nenhum', 'visualizar', 'editar'], u.permissoes?.estoque?.ficha || 'nenhum')}
           </select>
         </label>
         <label>Preços
-          <select data-perm="estoque.precos" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="estoque.precos" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             ${permOptions(['nenhum', 'visualizar', 'editar', 'total'], u.permissoes?.estoque?.precos || 'nenhum')}
           </select>
         </label>
         <label>Quantidades
-          <select data-perm="estoque.quantidades" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="estoque.quantidades" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             ${permOptions(['nenhum', 'visualizar', 'editar'], u.permissoes?.estoque?.quantidades || 'nenhum')}
           </select>
         </label>
         <label>Relatório Alterações
-          <select data-perm="alteracoes.acesso" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="alteracoes.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.alteracoes?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.alteracoes?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
         <label>Usuários
-          <select data-perm="usuarios.acesso" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="usuarios.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.usuarios?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.usuarios?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
         <label>Notas de entrada
-          <select data-perm="importacao.acesso" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="importacao.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.importacao?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.importacao?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
         ${state.modulos?.online ? `<label>Acesso online
-          <select data-perm="online.acesso" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="online.acesso" ${state.mudaOnline === false ? 'disabled title="Só na rede da loja"' : ''}>
             <option value="true" ${u.permissoes?.online?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.online?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>` : ''}
         <label>Consultar Compras
-          <select data-perm="compras.acesso" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="compras.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.compras?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.compras?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
         <label>Condicionais
-          <select data-perm="condicionais.acesso" ${u.supervisor ? 'disabled' : ''}>
+          <select data-perm="condicionais.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.condicionais?.acesso !== false ? 'selected' : ''}>Sim</option>
             <option value="false" ${u.permissoes?.condicionais?.acesso === false ? 'selected' : ''}>Não</option>
           </select>
@@ -2196,6 +2197,7 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
   });
   if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
   state.usuarios = res.usuarios;
+  state.mudaOnline = res.mudaOnline;
   renderUsuarios();
   showToast('Usuários atualizados.');
 });

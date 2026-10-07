@@ -174,7 +174,7 @@ function usuarioDaSessao(req) {
     nome: user.nome,
     supervisor: !!user.supervisor,
     mtEntradas: mt,
-    permissoes: user.supervisor ? fullPermissoes() : user.permissoes,
+    permissoes: user.permissoes,
     sessao: { nonce: dados.n, exp: dados.exp },
   };
 }
@@ -244,9 +244,11 @@ function funcionarioAtivo(id) {
 
 /** Motivo para barrar o usuário pela internet ({ status, error }) ou null se pode entrar. */
 async function bloqueioOnline(user) {
-  if (!user.supervisor && !user.permissoes?.online?.acesso) {
-    return { status: 401, error: 'Este usuário não tem permissão de acesso online. Peça ao supervisor para liberar em Usuários.' };
+  if (!user.permissoes?.online?.acesso) {
+    return { status: 401, error: 'Este usuário não tem permissão de acesso online. Libere em Usuários, na rede da loja.' };
   }
+  // O MT Entradas não é funcionário do Clipp; a senha dele já foi conferida no servidor de licenças.
+  if (isMtEntradas(user)) return null;
   const ativo = await funcionarioAtivo(user.id);
   if (ativo === null) return { status: 503, error: 'Não foi possível conferir o cadastro do funcionário. Tente de novo.' };
   if (!ativo) return { status: 401, error: 'Funcionário inativo no cadastro. Acesso online bloqueado.' };
@@ -318,7 +320,7 @@ async function login(req, res) {
       nome: user.nome,
       supervisor: !!user.supervisor,
       mtEntradas: mt,
-      permissoes: user.supervisor ? fullPermissoes() : user.permissoes,
+      permissoes: user.permissoes,
       temSenha: true,
     },
   });
