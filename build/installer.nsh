@@ -8,12 +8,14 @@
   ExecWait 'netsh advfirewall firewall delete rule name="Gestor Estoque Online"'
 !macroend
 
+!ifndef BUILD_UNINSTALLER
 Function .onInstSuccess
-  ${StdUtils.ExecShellAsUser} $0 "$INSTDIR\${PRODUCT_FILENAME}.exe" "open" ""
+  Exec '"$INSTDIR\${PRODUCT_FILENAME}.exe"'
 FunctionEnd
 
 Function .onInstFailed
   IfFileExists "$INSTDIR\${PRODUCT_FILENAME}.exe" 0 semApp
-  ${StdUtils.ExecShellAsUser} $0 "$INSTDIR\${PRODUCT_FILENAME}.exe" "open" ""
+  Exec '"$INSTDIR\${PRODUCT_FILENAME}.exe"'
   semApp:
 FunctionEnd
+!endif
