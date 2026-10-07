@@ -62,6 +62,23 @@
       "gera_financeiro": "S"
     },
     {
+      "cfop_origem": "5403",
+      "cfop_conv": "1403",
+      "csosn": "202",
+      "cfop_saida_nfe": "5405",
+      "csosn_saida_nfe": "500",
+      "cst_saida_nfe": "060",
+      "cfop_saida_cfe": "5405",
+      "csosn_saida_cfe": "500",
+      "cst_saida_cfe": "060",
+      "id_cti": "FFF",
+      "id_cti_cfe": "FFF",
+      "cti_label": "Substituição Tributária (FFF)",
+      "cti_cfe_label": "Substituição Tributária (FFF)",
+      "gera_estoque": "S",
+      "gera_financeiro": "S"
+    },
+    {
       "cfop_origem": "5405",
       "cfop_conv": "1403",
       "csosn": "202",
