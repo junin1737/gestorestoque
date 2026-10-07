@@ -10,12 +10,12 @@
 
 !ifndef BUILD_UNINSTALLER
 Function .onInstSuccess
-  Exec '"$INSTDIR\${PRODUCT_FILENAME}.exe"'
+  ${StdUtils.ExecShellAsUser} $0 "$INSTDIR\${PRODUCT_FILENAME}.exe" "open" ""
 FunctionEnd
 
 Function .onInstFailed
   IfFileExists "$INSTDIR\${PRODUCT_FILENAME}.exe" 0 semApp
-  Exec '"$INSTDIR\${PRODUCT_FILENAME}.exe"'
+  ${StdUtils.ExecShellAsUser} $0 "$INSTDIR\${PRODUCT_FILENAME}.exe" "open" ""
   semApp:
 FunctionEnd
 !endif
