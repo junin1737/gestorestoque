@@ -169,11 +169,97 @@ function desbloquearDownload(arquivo) {
   try { fs.unlinkSync(`${arquivo}:Zone.Identifier`); } catch { /* sem marca de download */ }
 }
 
+function psQuote(valor) {
+  return `'${String(valor).replace(/'/g, "''")}'`;
+}
+
+function scriptInstalando({ pid, setup, exe, nome, log }) {
+  return `
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Drawing
+$pidApp = ${Number(pid)}
+$setup = ${psQuote(setup)}
+$exe = ${psQuote(exe)}
+$log = ${psQuote(log)}
+$nomeApp = ${psQuote(nome)}
+function Log([string]$m) {
+  Add-Content -LiteralPath $log -Value ((Get-Date -Format o) + ' ' + $m) -ErrorAction SilentlyContinue
+}
+$sync = [hashtable]::Synchronized(@{ status = "Instalando a atualização…\`r\`nAceite a permissão do Windows, se ela aparecer."; done = $false })
+$trabalho = [powershell]::Create()
+[void]$trabalho.AddScript({
+  param($pidApp, $setup, $exe, $sync)
+  try {
+    Wait-Process -Id $pidApp -Timeout 180 -ErrorAction SilentlyContinue
+    Start-Sleep -Seconds 2
+    $sync.status = "Instalando a atualização…\`r\`nAceite a permissão do Windows, se ela aparecer."
+    Unblock-File -LiteralPath $setup -ErrorAction SilentlyContinue
+    $p = Start-Process -FilePath $setup -ArgumentList '/S','--force-run' -Verb RunAs -PassThru -Wait
+    if ($null -ne $p.ExitCode -and $p.ExitCode -ne 0) {
+      $sync.status = "A instalação não concluiu (código $($p.ExitCode)).\`r\`nO aplicativo será aberto de novo."
+      Start-Sleep -Seconds 3
+    } else {
+      $sync.status = "Instalação concluída.\`r\`nAbrindo a versão nova…"
+    }
+  } catch {
+    $sync.status = "Não foi possível instalar.\`r\`n$($_.Exception.Message)"
+    Start-Sleep -Seconds 4
+  }
+  Start-Sleep -Seconds 2
+  $nomeExe = [IO.Path]::GetFileNameWithoutExtension($exe)
+  if (-not (Get-Process -Name $nomeExe -ErrorAction SilentlyContinue)) {
+    Start-Process -FilePath $exe
+    Start-Sleep -Seconds 2
+  }
+  $sync.done = $true
+}).AddArgument($pidApp).AddArgument($setup).AddArgument($exe).AddArgument($sync)
+$async = $trabalho.BeginInvoke()
+$form = New-Object System.Windows.Forms.Form
+$form.Text = 'Instalando'
+$form.Size = New-Object System.Drawing.Size(460, 170)
+$form.StartPosition = 'CenterScreen'
+$form.FormBorderStyle = 'FixedDialog'
+$form.MaximizeBox = $false
+$form.MinimizeBox = $false
+$form.TopMost = $true
+$form.Font = New-Object System.Drawing.Font('Segoe UI', 11)
+$label = New-Object System.Windows.Forms.Label
+$label.Text = $sync.status
+$label.AutoSize = $false
+$label.Size = New-Object System.Drawing.Size(410, 90)
+$label.Location = New-Object System.Drawing.Point(20, 24)
+$form.Controls.Add($label)
+$timer = New-Object System.Windows.Forms.Timer
+$timer.Interval = 400
+$timer.Add_Tick({
+  $label.Text = [string]$sync.status
+  if ($sync.done) { $timer.Stop(); $form.Close() }
+})
+$form.Add_Shown({ $timer.Start(); $form.Activate() })
+Log "janela aberta $nomeApp"
+[void]$form.ShowDialog()
+try { $trabalho.EndInvoke($async) } catch { Log $_.Exception.Message }
+$trabalho.Dispose()
+Log 'fim'
+`.trim();
+}
+
 function aplicarAtualizacaoSilenciosa(setupPath) {
   desbloquearDownload(setupPath);
-  // cmd start tira o instalador do processo do Electron. Sem isso o app fecha e mata o instalador junto.
-  const exe = `"${String(setupPath).replace(/"/g, '')}"`;
-  const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/c', `start "" ${exe} /S --force-run`], {
+  const scriptPath = path.join(app.getPath('temp'), 'gestor-atualizar.ps1');
+  const logPath = path.join(app.getPath('temp'), 'gestor-atualizar.log');
+  const ps = scriptInstalando({
+    pid: process.pid,
+    setup: setupPath,
+    exe: process.execPath,
+    nome: edicao.NOME,
+    log: logPath,
+  });
+  fs.writeFileSync(scriptPath, `\uFEFF${ps}`, 'utf8');
+  // start solta a janela do processo do Electron, que precisa fechar para os arquivos serem trocados.
+  const child = spawn(process.env.ComSpec || 'cmd.exe', [
+    '/d', '/c', `start "" powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${scriptPath}"`,
+  ], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
@@ -404,7 +490,7 @@ async function promptAndUpdate(parentWindow) {
   progressWin.setMenuBarVisibility(false);
   const html = encodeURIComponent(`<!doctype html><html><body style="font-family:Segoe UI,sans-serif;padding:20px;color:#152033">
     <h3 style="margin:0 0 10px">Baixando atualização…</h3>
-    <p style="margin:8px 0 0;font-size:13px">Se o Windows pedir permissão, aceite. O aplicativo fecha, instala e reabre sozinho.</p>
+    <p style="margin:8px 0 0;font-size:13px">Em seguida abre a janela Instalando. O aplicativo reabre na versão nova.</p>
     <div id="p">0%</div>
     <div style="height:10px;background:#e5eaf1;border-radius:6px;overflow:hidden;margin-top:10px">
       <div id="b" style="height:100%;width:0;background:#2f6fed"></div>
@@ -439,7 +525,7 @@ async function promptAndUpdate(parentWindow) {
       aplicarAtualizacaoSilenciosa(dest);
       setTimeout(() => {
         try { app.quit(); } catch { /* ignore */ }
-      }, 1500);
+      }, 2000);
       return { ok: true, updated: true, silent: true, info, path: dest };
     } catch (err) {
       await dialog.showMessageBox(win || undefined, {
