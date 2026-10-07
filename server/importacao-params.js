@@ -5,7 +5,7 @@ const path = require('path');
 const { withDb, query } = require('./db');
 const { loadAppConfig, saveAppConfig, getAppDataDir } = require('./config');
 
-const SEED_VERSION = 2;
+const SEED_VERSION = 3;
 /** Remessa/devolução de bonificação, doação ou brinde: não geram financeiro (seed 2). */
 const CFOP_SEM_FINANCEIRO_V2 = ['5910', '6910'];
 
@@ -232,6 +232,14 @@ function ensureImportacaoParamsDefaults() {
         }
       }
       local.saida.zerar_negativo = 'N';
+    }
+    if (Number(local.seed_version || 0) < 3) {
+      for (const it of local.itens) {
+        const origem = String(it.cfop_origem || '').replace(/\D/g, '').slice(0, 4);
+        if (origem === '5401' && String(it.csosn || '').replace(/\D/g, '') === '102') {
+          it.csosn = '202';
+        }
+      }
     }
     local.seed_version = SEED_VERSION;
     changed = true;

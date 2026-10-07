@@ -450,3 +450,6 @@ button, input, select, textarea {
   .svc-action-bar .btn-teal { width: 100%; }
   .banco-form .row-2 { grid-template-columns: 1fr; }
 }
+
+.senha-mascarada { -webkit-text-security: disc; }
+.senha-visivel { -webkit-text-security: none; }

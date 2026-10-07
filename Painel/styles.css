@@ -385,6 +385,8 @@ input, select, textarea {
 }
 .login-card .input-row { position: relative; gap: 0; }
 .login-card .input-row input { padding-right: 2.75rem; }
+.senha-mascarada { -webkit-text-security: disc; }
+.senha-visivel { -webkit-text-security: none; }
 .login-card #toggle-senha {
   position: absolute;
   right: 0.2rem;

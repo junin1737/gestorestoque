@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=208" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=208" />
+  <link rel="stylesheet" href="styles.css?v=209" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=209" />
 </head>
 <body>
   <div id="app">
@@ -69,7 +69,7 @@
             </label>
             <label>Senha
               <div class="input-row">
-                <input id="login-senha" type="password" placeholder="Digite sua senha" required />
+                <input id="login-senha" type="text" class="senha-mascarada" name="acesso-painel" placeholder="Digite sua senha" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" />
                 <button type="button" id="toggle-senha" class="icon-btn" title="Mostrar senha" aria-label="Mostrar senha">
                   <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="1.75"/><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
                 </button>
@@ -629,9 +629,9 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=208"></script>
-  <script src="importacao-nfe.js?v=208"></script>
-  <script src="compras.js?v=208"></script>
-  <script src="app.js?v=208"></script>
+  <script src="vendor/zxing-browser.min.js?v=209"></script>
+  <script src="importacao-nfe.js?v=209"></script>
+  <script src="compras.js?v=209"></script>
+  <script src="app.js?v=209"></script>
 </body>
 </html>
