@@ -8,6 +8,7 @@ const {
   loadAppConfig,
   loadUsersConfig,
   fullPermissoes,
+  isMtEntradas,
   SUPERVISOR_SENHA_LEGADA,
 } = require('./config');
 const { conferirHashSenha } = require('./senha');
@@ -35,7 +36,6 @@ const ROTAS_PUBLICAS = [
   /^\/licenca$/,
   /^\/licenca\/verificar$/,
   /^\/mt\/grupo$/,
-  /^\/mt\/presenca$/,
 ];
 
 /** Tela de serviço (sem login de usuário): só no próprio computador servidor. */
@@ -100,6 +100,18 @@ const revogados = new Map();
 function limparRevogados() {
   const agora = Date.now();
   for (const [n, exp] of revogados) if (exp < agora) revogados.delete(n);
+  for (const [n, t] of tokensMt) if (t.exp < agora) tokensMt.delete(n);
+}
+
+/**
+ * Token do servidor de licenças do login MT Entradas, por sessão. Só em memória: reiniciar o Gestor
+ * (ou o token vencer) encerra a sessão MT e pede a senha de novo.
+ */
+const tokensMt = new Map();
+
+function tokenMtDaSessao(u) {
+  const t = u?.sessao?.nonce ? tokensMt.get(u.sessao.nonce) : null;
+  return t && t.exp > Date.now() ? t.token : null;
 }
 
 function lerToken(token) {
@@ -150,11 +162,16 @@ function usuarioDaSessao(req) {
   const user = cfg.usuarios.find((u) => Number(u.id) === Number(dados.u));
   if (!user) return null;
   if (dados.c !== versaoCredencial(user)) return null;
+  const mt = isMtEntradas(user);
+  if (mt) {
+    const t = tokensMt.get(dados.n);
+    if (!t || t.exp <= Date.now()) return null;
+  }
   return {
     id: Number(user.id),
     nome: user.nome,
     supervisor: !!user.supervisor,
-    mtEntradas: !!(user.mtEntradas || Number(user.id) === 900001),
+    mtEntradas: mt,
     permissoes: user.supervisor ? fullPermissoes() : user.permissoes,
     sessao: { nonce: dados.n, exp: dados.exp },
   };
@@ -198,7 +215,19 @@ function limparFalhas(req, id) {
 
 async function conferirSenhaUsuario(user, senha) {
   if (user.supervisor) return licenca.conferirSenhaSupervisor(senha, SUPERVISOR_SENHA_LEGADA);
+  if (isMtEntradas(user)) return false;
   return conferirHashSenha(senha, user.senhaHash);
+}
+
+async function falhaLogin(req, res, id) {
+  const restam = anotarFalha(req, id);
+  await new Promise((r) => setTimeout(r, 400));
+  return res.json({
+    ok: false,
+    error: restam > 0 && restam <= 2
+      ? `Senha incorreta. Mais ${restam} tentativa(s) antes de bloquear por 15 minutos.`
+      : 'Senha incorreta.',
+  });
 }
 
 /** POST /login { id, senha } */
@@ -213,21 +242,29 @@ async function login(req, res) {
   const cfg = loadUsersConfig(loadAppConfig());
   const user = Number.isFinite(id) ? cfg.usuarios.find((u) => Number(u.id) === id) : null;
   if (!user) return res.json({ ok: false, error: 'Usuário não encontrado.' });
-  if (!user.supervisor && !user.senhaHash) {
-    return res.json({ ok: false, error: 'Defina a senha deste usuário em Usuários.' });
-  }
-  if (!(await conferirSenhaUsuario(user, senha))) {
-    const restam = anotarFalha(req, id);
-    await new Promise((r) => setTimeout(r, 400));
-    return res.json({
-      ok: false,
-      error: restam > 0 && restam <= 2
-        ? `Senha incorreta. Mais ${restam} tentativa(s) antes de bloquear por 15 minutos.`
-        : 'Senha incorreta.',
-    });
+  const mt = isMtEntradas(user);
+  let tokenMt = null;
+  if (mt) {
+    const r = await require('./mt-empresas').loginMt(senha);
+    if (r.ok === false && r.status === 401) return falhaLogin(req, res, id);
+    if (r.ok === false || !r.token) {
+      return res.json({ ok: false, error: `Não foi possível conferir a senha MT: ${r.error || 'servidor de licenças indisponível.'}` });
+    }
+    tokenMt = { token: r.token, horas: Number(r.horas) || 12 };
+  } else {
+    if (!user.supervisor && !user.senhaHash) {
+      return res.json({ ok: false, error: 'Defina a senha deste usuário em Usuários.' });
+    }
+    if (!(await conferirSenhaUsuario(user, senha))) return falhaLogin(req, res, id);
   }
   limparFalhas(req, id);
   const { token, dados } = emitirToken(user);
+  if (tokenMt) {
+    // Um pouco antes do token do servidor de licenças vencer, para a sessão não ficar sem ele.
+    const exp = Math.min(dados.exp, Date.now() + tokenMt.horas * 3600000 - 5 * 60000);
+    tokensMt.set(dados.n, { token: tokenMt.token, exp });
+    limparRevogados();
+  }
   definirCookie(res, token);
   res.json({
     ok: true,
@@ -236,7 +273,7 @@ async function login(req, res) {
       id: Number(user.id),
       nome: user.nome,
       supervisor: !!user.supervisor,
-      mtEntradas: !!(user.mtEntradas || Number(user.id) === 900001),
+      mtEntradas: mt,
       permissoes: user.supervisor ? fullPermissoes() : user.permissoes,
       temSenha: true,
     },
@@ -247,6 +284,7 @@ function logout(req, res) {
   const dados = lerToken(tokenDaRequisicao(req));
   if (dados) {
     revogados.set(dados.n, Number(dados.exp));
+    tokensMt.delete(dados.n);
     limparRevogados();
   }
   definirCookie(res, '', 0);
@@ -342,4 +380,5 @@ module.exports = {
   nivel,
   podeVerCusto,
   conferirSenhaUsuario,
+  tokenMtDaSessao,
 };

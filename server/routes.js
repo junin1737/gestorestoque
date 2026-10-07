@@ -8,6 +8,7 @@ const {
   MODULOS,
   ensureModulos,
   fullPermissoes,
+  isMtEntradas,
 } = require('./config');
 const {
   withDb,
@@ -51,13 +52,18 @@ function publicUser(u) {
     nome: u.nome,
     supervisor: !!u.supervisor,
     permissoes: u.permissoes,
-    temSenha: u.supervisor ? true : !!u.senhaHash,
+    temSenha: temSenha(u),
   };
+}
+
+/** Supervisor e MT Entradas têm a senha conferida fora da lista de usuários. */
+function temSenha(u) {
+  return u.supervisor || isMtEntradas(u) ? true : !!u.senhaHash;
 }
 
 /** Lista da tela de login: sem permissões. */
 function usuarioLogin(u) {
-  return { id: u.id, nome: u.nome, supervisor: !!u.supervisor, temSenha: u.supervisor ? true : !!u.senhaHash };
+  return { id: u.id, nome: u.nome, supervisor: !!u.supervisor, temSenha: temSenha(u) };
 }
 
 router.get('/health', (_req, res) => {
@@ -314,6 +320,7 @@ router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
   // Só altera usuários já existentes (vindos do TB_FUNCIONARIO); a lista não cria nem apaga ninguém.
   cfg.usuarios = cfg.usuarios.map((prev) => {
     if (prev.supervisor) return { id: 0, nome: prev.nome || 'SUPERVISOR', supervisor: true, permissoes: fullPermissoes() };
+    if (isMtEntradas(prev)) return prev;
     const u = enviados.get(Number(prev.id));
     if (!u) return prev;
     const next = {
@@ -2103,45 +2110,41 @@ router.post('/importacao/conversao-gestor', async (req, res) => {
   }
 });
 
-router.get('/mt/empresas', async (req, res) => {
+/** Token do login MT no servidor de licenças; sem ele (ou vencido lá) a sessão MT acabou. */
+function tokenMt(req, res) {
   if (!req.usuario?.mtEntradas) {
-    return res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
+    res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
+    return null;
   }
+  const token = auth.tokenMtDaSessao(req.usuario);
+  if (!token) {
+    res.status(401).json({ ok: false, code: 'AUTH', error: 'Sessão MT expirada. Entre novamente.' });
+    return null;
+  }
+  return token;
+}
+
+function respostaMt(res, data) {
+  if (data?.status === 401) {
+    return res.status(401).json({ ok: false, code: 'AUTH', error: 'Sessão MT expirada. Entre novamente.' });
+  }
+  const { status: _s, ...resto } = data || {};
+  return res.json(resto);
+}
+
+router.get('/mt/empresas', async (req, res) => {
+  const token = tokenMt(req, res);
+  if (!token) return;
   try {
-    res.json(await require('./mt-empresas').listarEmpresas());
+    respostaMt(res, await require('./mt-empresas').listarEmpresas(token));
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }
 });
 
-router.post('/mt/empresas/registrar', async (req, res) => {
-  if (!req.usuario?.mtEntradas) {
-    return res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
-  }
-  try {
-    res.json(await require('./mt-empresas').registrarEmpresaAtual(req.body?.url));
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
-
-function exigeMt(req, res) {
-  if (req.usuario?.mtEntradas) return true;
-  res.status(403).json({ ok: false, error: 'Somente o usuário MT Entradas.' });
-  return false;
-}
-
 function podeAutorizarVinculo(req) {
   return !!(req.usuario && (req.usuario.supervisor || req.usuario.mtEntradas));
 }
-
-router.post('/mt/presenca', async (req, res) => {
-  try {
-    res.json(await require('./mt-empresas').registrarEmpresaAtual(req.body?.url));
-  } catch (err) {
-    res.json({ ok: false, error: err.message });
-  }
-});
 
 router.get('/mt/grupo', async (_req, res) => {
   try {
@@ -2152,27 +2155,30 @@ router.get('/mt/grupo', async (_req, res) => {
 });
 
 router.get('/mt/empresas/cadastro', async (req, res) => {
-  if (!exigeMt(req, res)) return;
+  const token = tokenMt(req, res);
+  if (!token) return;
   try {
-    res.json(await require('./mt-empresas').listarCadastro());
+    respostaMt(res, await require('./mt-empresas').listarCadastro(token));
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }
 });
 
 router.get('/mt/vinculos', async (req, res) => {
-  if (!exigeMt(req, res)) return;
+  const token = tokenMt(req, res);
+  if (!token) return;
   try {
-    res.json(await require('./mt-empresas').listarVinculos());
+    respostaMt(res, await require('./mt-empresas').listarVinculos(token));
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }
 });
 
 router.post('/mt/vinculos', async (req, res) => {
-  if (!exigeMt(req, res)) return;
+  const token = tokenMt(req, res);
+  if (!token) return;
   try {
-    res.json(await require('./mt-empresas').criarVinculo(req.body?.cnpjMatriz, req.body?.cnpjFilial));
+    respostaMt(res, await require('./mt-empresas').criarVinculo(token, req.body?.cnpjMatriz, req.body?.cnpjFilial));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

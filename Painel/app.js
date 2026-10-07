@@ -196,13 +196,6 @@ function setCfgTab(tab) {
   }
 }
 
-async function registrarEmpresaMt() {
-  if (!state.usuario?.mtEntradas) return;
-  try {
-    await api('/mt/empresas/registrar', { method: 'POST', body: { url: location.origin } });
-  } catch { /* lista segue com o que o servidor já tiver */ }
-}
-
 async function loadEmpresas() {
   const box = $('#empresas-lista');
   if (!box) return;
@@ -214,7 +207,7 @@ async function loadEmpresas() {
     return;
   }
   if (!itens.length) {
-    box.innerHTML = '<p class="empty">Nenhuma empresa gravada ainda. Entre em cada cliente com MT Entradas para ela aparecer aqui.</p>';
+    box.innerHTML = '<p class="empty">Nenhuma empresa online agora. A empresa aparece aqui quando o Gestor online dela está aberto e atualizado.</p>';
     return;
   }
   box.innerHTML = itens.map((e) => `
@@ -404,11 +397,44 @@ $('#btn-vincular-empresas')?.addEventListener('click', async () => {
 $('#vinculo-aceitar')?.addEventListener('click', () => responderVinculo('aceito'));
 $('#vinculo-recusar')?.addEventListener('click', () => responderVinculo('recusado'));
 
+/**
+ * No acesso online todas as lojas usam o mesmo endereço: ler o QR Code (ou "Entrar") de outra loja em outra aba
+ * troca a loja do navegador inteiro. Cada resposta traz o identificador da loja; se mudar, nada desta tela continua.
+ */
+let lojaDoPainel = '';
+function mesmaLoja(res) {
+  const loja = res.headers.get('X-Gestor-Loja') || '';
+  if (!loja) return true;
+  if (!lojaDoPainel) lojaDoPainel = loja;
+  if (loja === lojaDoPainel) return true;
+  fecharTelaDeOutraLoja();
+  return false;
+}
+
+function fecharTelaDeOutraLoja() {
+  if (document.body.dataset.lojaTrocada) return;
+  document.body.dataset.lojaTrocada = '1';
+  document.body.innerHTML = `
+    <main class="loja-trocada">
+      <h1>Outra loja foi aberta neste navegador</h1>
+      <p>Em outra aba foi lido o QR Code ou usado o "Entrar" de outra empresa. Para não misturar os dados, esta tela foi fechada.</p>
+      <p>Para voltar a esta loja, leia de novo o QR Code dela. Para usar a loja aberta agora, recarregue.</p>
+      <button type="button" class="btn primary" id="loja-trocada-recarregar">Recarregar</button>
+    </main>`;
+  document.getElementById('loja-trocada-recarregar').addEventListener('click', () => location.reload());
+}
+
+// Voltar pelo histórico restaura a tela antiga da memória, que pode ser de outra loja.
+window.addEventListener('pageshow', (ev) => {
+  if (ev.persisted) location.reload();
+});
+
 async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const grava = method !== 'GET' && method !== 'HEAD';
   const headers = { 'Content-Type': 'application/json', 'X-Device-Id': deviceId(), ...(options.headers || {}) };
   if (state.usuario) headers['X-Gestor-Usuario'] = String(state.usuario.id);
+  if (lojaDoPainel) headers['X-Gestor-Loja'] = lojaDoPainel;
   // Mesma chave nas repetições: se a resposta se perdeu na rede, o servidor não grava duas vezes.
   if (grava) headers['Idempotency-Key'] = novaChaveIdempotencia();
   const init = {
@@ -431,6 +457,7 @@ async function api(path, options = {}) {
       return { ok: false, offline: true, error };
     }
   }
+  if (!mesmaLoja(res)) return { ok: false, code: 'LOJA_TROCADA', error: 'Este navegador passou a acessar outra loja.' };
   let data;
   try {
     data = await res.json();
@@ -789,7 +816,6 @@ async function bootstrap() {
     applyTheme(state.config.tema, conn.emitente?.logo);
     await loadFuncionarios();
     await api('/logout', { method: 'POST', body: {} });
-    api('/mt/presenca', { method: 'POST', body: { url: location.origin } });
     await carregarLojasLogin();
   } else {
     setServiceStatus(true, `Painel online, base offline: ${conn.error || 'falha Firebird'}`);
@@ -797,16 +823,6 @@ async function bootstrap() {
     $('#login-usuario').innerHTML = '<option value="">Selecione o usuário</option><option value="0">SUPERVISOR (Supervisor)</option>';
   }
 }
-
-window.addEventListener('pageshow', (ev) => {
-  if (!ev.persisted) return;
-  state.usuario = null;
-  const app = $('#view-app');
-  const login = $('#view-login');
-  if (app) app.hidden = true;
-  if (login) login.hidden = false;
-  api('/logout', { method: 'POST', body: {} });
-});
 
 async function loadUnidades() {
   const res = await api('/unidades');
@@ -946,7 +962,6 @@ function enterApp() {
   const showEmp = !!state.usuario?.mtEntradas;
   if ($('#nav-empresas')) $('#nav-empresas').hidden = !showEmp;
   if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = !showEmp;
-  if (showEmp) registrarEmpresaMt();
   showPage('dashboard');
   loadUnidades();
   carregarPedidoVinculo();

@@ -174,6 +174,54 @@ const MSG_REVENDA = 'CNPJ da revenda não cadastrado. Confira com a MT Automaç�
 
 // ─── Rota pública: consulta do Gestor ─────────────────────────────────────────
 
+async function sha256Hex(textoClaro) {
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(textoClaro))));
+  return [...h].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+function iguaisTempoConstante(a, b) {
+  const x = enc.encode(String(a || ''));
+  const y = enc.encode(String(b || ''));
+  if (!x.length || x.length !== y.length) return false;
+  let diff = 0;
+  for (let i = 0; i < x.length; i++) diff |= x[i] ^ y[i];
+  return diff === 0;
+}
+
+const SEGREDO_RE = /^[a-f0-9]{64}$/;
+
+/**
+ * A primeira instalação que apresenta um segredo fica sendo a da empresa (CNPJ + aplicação).
+ * Outra máquina com o mesmo CNPJ continua com licença, mas não registra endereço nem responde por matriz/filial
+ * até a MT liberar a troca de computador no painel.
+ */
+async function confirmarInstalacao(env, cli, segredo, detalhe) {
+  if (!cli || !SEGREDO_RE.test(String(segredo || ''))) return false;
+  const hash = await sha256Hex(segredo);
+  if (!cli.segredo_hash) {
+    const r = await env.DB.prepare('UPDATE clientes SET segredo_hash = ? WHERE cnpj = ? AND aplicacao = ? AND segredo_hash IS NULL')
+      .bind(hash, cli.cnpj, cli.aplicacao).run();
+    if (r?.meta?.changes) {
+      await registrarEvento(env, cli.cnpj, cli.aplicacao, 'instalacao', `Instalação da empresa confirmada: ${detalhe}`);
+    }
+    const atual = await env.DB.prepare('SELECT segredo_hash FROM clientes WHERE cnpj = ? AND aplicacao = ?')
+      .bind(cli.cnpj, cli.aplicacao).first();
+    return iguaisTempoConstante(atual?.segredo_hash, hash);
+  }
+  return iguaisTempoConstante(cli.segredo_hash, hash);
+}
+
+/** Chamada feita pelo Gestor da própria empresa: CNPJ + segredo da instalação confirmada. */
+async function instalacaoDaRequisicao(request, env, app) {
+  const cnpj = soDigitos(request.headers.get('X-Gestor-Cnpj'));
+  const segredo = String(request.headers.get('X-Gestor-Segredo') || '');
+  if (cnpj.length < 11 || !SEGREDO_RE.test(segredo)) return null;
+  const cli = await env.DB.prepare('SELECT cnpj, aplicacao, segredo_hash FROM clientes WHERE cnpj = ? AND aplicacao = ?')
+    .bind(cnpj, app).first();
+  if (!cli?.segredo_hash) return null;
+  return iguaisTempoConstante(cli.segredo_hash, await sha256Hex(segredo)) ? cnpj : null;
+}
+
 async function check(request, env) {
   let body;
   try {
@@ -253,7 +301,10 @@ async function check(request, env) {
     await registrarEvento(env, cnpj, app, 'versao', `${texto(body.maquina, 80) || nse}: ${inst.versao_gestor} → ${versao}`);
   }
 
-  const urlTunel = urlTunelValida(body.url);
+  const instalacaoConfirmada = await confirmarInstalacao(
+    env, cli, body.segredo, `NSE ${nse || '—'} · ${texto(body.maquina, 80) || '?'}`
+  );
+  const urlTunel = instalacaoConfirmada ? urlTunelValida(body.url) : '';
   if (urlTunel) {
     await garantirTabelaMt(env);
     const nome = texto(body.fantasia, 120) || texto(body.razao, 120);
@@ -288,7 +339,12 @@ async function check(request, env) {
     valido_ate: validoAte.toISOString(),
     sup: sit.status === 'liberado' ? await supDoCliente(env, cli) : null,
   });
-  return json({ ok: true, licenca, solicitado_em: cli.status === 'pendente' ? cli.criado_em : null });
+  return json({
+    ok: true,
+    licenca,
+    solicitado_em: cli.status === 'pendente' ? cli.criado_em : null,
+    instalacao_confirmada: instalacaoConfirmada,
+  });
 }
 
 // ─── Admin ────────────────────────────────────────────────────────────────────
@@ -298,7 +354,15 @@ async function chaveSessao(env) {
   return crypto.subtle.importKey('raw', material, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
 }
 
-const SENHA_MT_ENTRADAS = '18321937';
+/** Compara pelo hash (mesmo tamanho) para não vazar o tamanho nem o conteúdo pelo tempo de resposta. */
+async function senhaConfere(senha, esperada) {
+  if (!senha || !esperada) return false;
+  const a = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(senha))));
+  const b = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(esperada))));
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+  return diff === 0;
+}
 
 async function emitirToken(env, papel = 'admin') {
   const corpo = b64url(enc.encode(JSON.stringify({
@@ -333,14 +397,8 @@ async function login(request, env) {
   try { body = await request.json(); } catch { /* vazio */ }
   const senha = String(body.senha || '');
   let papel = null;
-  if (senha && senha === SENHA_MT_ENTRADAS) papel = 'entradas';
-  else {
-    const a = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(senha)));
-    const b = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(env.ADMIN_PASSWORD || ''))));
-    let diff = env.ADMIN_PASSWORD ? 0 : 1;
-    for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-    if (diff === 0) papel = 'admin';
-  }
+  if (await senhaConfere(senha, env.ADMIN_PASSWORD)) papel = 'admin';
+  else if (await senhaConfere(senha, env.MT_ENTRADAS_PASSWORD)) papel = 'entradas';
   if (!papel) {
     await new Promise((r) => setTimeout(r, 800));
     return json({ ok: false, error: 'Senha incorreta.' }, 401);
@@ -411,10 +469,24 @@ async function listarClientes(url, env) {
   });
 }
 
-/** Nunca devolve o hash da senha do supervisor ao painel. */
+/** Nunca devolve o hash da senha do supervisor nem o do segredo da instalação ao painel. */
 function clientePublico(c, agora = new Date()) {
-  const { sup_hash: supHash, ...resto } = c;
-  return { ...resto, sup_propria: !!supHash, situacao: situacaoCliente(c, agora).status };
+  const { sup_hash: supHash, segredo_hash: segredoHash, ...resto } = c;
+  return {
+    ...resto,
+    sup_propria: !!supHash,
+    instalacao_confirmada: !!segredoHash,
+    situacao: situacaoCliente(c, agora).status,
+  };
+}
+
+async function liberarTrocaInstalacao(cnpj, app, env) {
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  await env.DB.prepare('UPDATE clientes SET segredo_hash = NULL, atualizado_em = ? WHERE cnpj = ? AND aplicacao = ?')
+    .bind(agoraIso(), cnpj, app).run();
+  await registrarEvento(env, cnpj, app, 'instalacao', 'Troca de computador liberada: o próximo Gestor que se conectar passa a ser o da empresa');
+  return detalheCliente(cnpj, app, env);
 }
 
 async function detalheCliente(cnpj, app, env) {
@@ -689,27 +761,6 @@ async function garantirTabelaMt(env) {
   )`).run();
 }
 
-async function registrarEmpresaMt(request, env) {
-  const b = await request.json().catch(() => ({}));
-  const cnpj = soDigitos(b.cnpj);
-  const app = nomeApp(b.aplicacao) || APP_PADRAO;
-  if (cnpj.length < 11) return json({ ok: false, error: 'CNPJ inválido.' }, 400);
-  await garantirTabelaMt(env);
-  const nome = texto(b.nome, 120);
-  const nse = texto(b.nse, 40);
-  const urlPainel = urlTunelValida(b.url) || null;
-  await env.DB.prepare(
-    `INSERT INTO mt_empresas (cnpj, aplicacao, nse, nome, url, atualizado_em)
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT(cnpj, aplicacao) DO UPDATE SET
-       nse = excluded.nse,
-       nome = COALESCE(excluded.nome, mt_empresas.nome),
-       url = COALESCE(excluded.url, mt_empresas.url),
-       atualizado_em = excluded.atualizado_em`
-  ).bind(cnpj, app, nse, nome, urlPainel, agoraIso()).run();
-  return json({ ok: true });
-}
-
 /** O check grava o contato no máximo a cada 10 min. Janela um pouco maior para o Gestor aberto aparecer. */
 const JANELA_ONLINE_MS = 15 * 60 * 1000;
 
@@ -906,8 +957,7 @@ async function criarVinculoMt(request, env) {
   return json({ ok: true, vinculo: await enriquecerVinculo(env, app, row) });
 }
 
-async function aceitarVinculoMt(request, env) {
-  const b = await request.json().catch(() => ({}));
+async function aceitarVinculoMt(b, env) {
   const app = nomeApp(b.aplicacao) || APP_PADRAO;
   const cnpj = soDigitos(b.cnpj);
   const id = Number(b.id);
@@ -984,7 +1034,67 @@ async function grupoEmpresaMt(url, env) {
   return json({ ok: true, empresas });
 }
 
-const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor)?$`);
+async function loginMt(request, env) {
+  let body = {};
+  try { body = await request.json(); } catch { /* vazio */ }
+  if (!(await senhaConfere(String(body.senha || ''), env.MT_ENTRADAS_PASSWORD))) {
+    await new Promise((r) => setTimeout(r, 800));
+    return json({ ok: false, error: 'Senha incorreta.' }, 401);
+  }
+  return json({ ok: true, token: await emitirToken(env, 'entradas'), horas: SESSAO_HORAS });
+}
+
+const SEM_SESSAO_MT = { ok: false, error: 'Sessão MT expirada. Entre novamente.', code: 'AUTH' };
+const SEM_INSTALACAO = {
+  ok: false,
+  error: 'Esta instalação do Gestor não foi confirmada para a empresa. Peça à MT para liberar a troca de computador.',
+  code: 'INSTALACAO',
+};
+
+/**
+ * Lado MT (lista de empresas, cadastro de vínculos): token do login MT.
+ * Lado da loja (grupo, vínculos e aceite da própria empresa): CNPJ + segredo da instalação, e só a própria empresa.
+ */
+async function rotaMt(request, env, url) {
+  const p = url.pathname;
+  if (p === '/api/mt/login' && request.method === 'POST') return loginMt(request, env);
+
+  const sess = await sessaoToken(env, request);
+  const appQuery = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
+
+  if (p === '/api/mt/empresas' && request.method === 'GET') {
+    return sess ? listarEmpresasMt(url, env) : json(SEM_SESSAO_MT, 401);
+  }
+  if (p === '/api/mt/empresas/cadastro' && request.method === 'GET') {
+    return sess ? listarCadastroMt(url, env) : json(SEM_SESSAO_MT, 401);
+  }
+  if (p === '/api/mt/vinculos' && request.method === 'POST') {
+    return sess ? criarVinculoMt(request, env) : json(SEM_SESSAO_MT, 401);
+  }
+  if (p === '/api/mt/vinculos' && request.method === 'GET') {
+    if (sess) return listarVinculosMt(url, env);
+    const cnpj = await instalacaoDaRequisicao(request, env, appQuery);
+    if (!cnpj) return json(SEM_INSTALACAO, 403);
+    url.searchParams.set('cnpj', cnpj);
+    return listarVinculosMt(url, env);
+  }
+  if (p === '/api/mt/grupo' && request.method === 'GET') {
+    const cnpj = await instalacaoDaRequisicao(request, env, appQuery);
+    if (!cnpj) return json(SEM_INSTALACAO, 403);
+    url.searchParams.set('cnpj', cnpj);
+    return grupoEmpresaMt(url, env);
+  }
+  if (p === '/api/mt/vinculos/aceite' && request.method === 'POST') {
+    const b = await request.json().catch(() => ({}));
+    const app = nomeApp(b.aplicacao) || APP_PADRAO;
+    const cnpj = await instalacaoDaRequisicao(request, env, app);
+    if (!cnpj) return json(SEM_INSTALACAO, 403);
+    return aceitarVinculoMt({ ...b, aplicacao: app, cnpj }, env);
+  }
+  return json({ ok: false, error: 'Rota não encontrada.' }, 404);
+}
+
+const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao)?$`);
 const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
 async function rotaAdmin(request, env, url) {
@@ -1020,6 +1130,7 @@ async function rotaAdmin(request, env, url) {
     const [, app, cnpj, sub] = m;
     if (sub === '/licenca-offline' && request.method === 'POST') return licencaOffline(cnpj, app, request, env);
     if (sub === '/supervisor' && request.method === 'PUT') return definirSupCliente(cnpj, app, request, env);
+    if (sub === '/instalacao' && request.method === 'DELETE') return liberarTrocaInstalacao(cnpj, app, env);
     if (!sub && request.method === 'GET') return detalheCliente(cnpj, app, env);
     if (!sub && request.method === 'PUT') return atualizarCliente(cnpj, app, request, env);
     if (!sub && request.method === 'DELETE') return excluirCliente(cnpj, app, env);
@@ -1032,13 +1143,7 @@ export default {
     const url = new URL(request.url);
     try {
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
-      if (url.pathname === '/api/mt/empresa' && request.method === 'POST') return await registrarEmpresaMt(request, env);
-      if (url.pathname === '/api/mt/empresas' && request.method === 'GET') return await listarEmpresasMt(url, env);
-      if (url.pathname === '/api/mt/empresas/cadastro' && request.method === 'GET') return await listarCadastroMt(url, env);
-      if (url.pathname === '/api/mt/vinculos' && request.method === 'GET') return await listarVinculosMt(url, env);
-      if (url.pathname === '/api/mt/vinculos' && request.method === 'POST') return await criarVinculoMt(request, env);
-      if (url.pathname === '/api/mt/vinculos/aceite' && request.method === 'POST') return await aceitarVinculoMt(request, env);
-      if (url.pathname === '/api/mt/grupo' && request.method === 'GET') return await grupoEmpresaMt(url, env);
+      if (url.pathname.startsWith('/api/mt/')) return await rotaMt(request, env, url);
       if (url.pathname.startsWith('/api/admin/')) return await rotaAdmin(request, env, url);
       if (url.pathname === '/' || url.pathname === '/admin' || url.pathname === '/admin/') {
         return new Response(ADMIN_HTML, {

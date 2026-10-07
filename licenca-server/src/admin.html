@@ -274,6 +274,10 @@
     </div>
 
     <h3>Instalações</h3>
+    <div class="linha">
+      <div id="d-inst-info" class="sub"></div>
+      <button class="btn ghost sm" id="d-inst-liberar" type="button">Liberar troca de computador</button>
+    </div>
     <div class="mini"><table>
       <thead><tr><th>NSE Clipp</th><th>Máquina</th><th>Versão</th><th class="col-hide">Clipp</th><th>Último contato</th></tr></thead>
       <tbody id="d-inst"></tbody>
@@ -426,7 +430,7 @@ const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloquea
 const EVENTO = {
   novo_cliente: 'Solicitou cadastro', nova_instalacao: 'Nova instalação', versao: 'Atualizou versão',
   status: 'Situação alterada', edicao: 'Dados alterados', licenca_offline: 'Licença offline gerada', cadastro_manual: 'Cadastro manual',
-  senha_supervisor: 'Senha do supervisor', revenda: 'Revenda', config: 'Configuração',
+  senha_supervisor: 'Senha do supervisor', revenda: 'Revenda', config: 'Configuração', instalacao: 'Computador da empresa',
 };
 
 /** Data local de hoje (AAAA-MM-DD) no horário de Brasília. */
@@ -826,6 +830,10 @@ function preencherCliente(r) {
   $('#d-sup-info').textContent = c.sup_propria
     ? `Usa senha própria (definida em ${fmtData(c.sup_atualizado_em)}).`
     : (st.supPadrao?.definida ? 'Usa a senha padrão.' : 'Usa a senha padrão — que ainda não foi definida (Gestor aceita 1020).');
+  $('#d-inst-liberar').hidden = !c.instalacao_confirmada;
+  $('#d-inst-info').textContent = c.instalacao_confirmada
+    ? 'Computador da empresa confirmado: só ele registra o acesso online e responde por matriz/filial.'
+    : 'O próximo Gestor que se conectar passa a ser o computador da empresa.';
   $('#d-inst').innerHTML = r.instalacoes.length
     ? r.instalacoes.map((i) => `<tr><td>${esc(i.nse || '—')}</td><td>${esc(i.maquina || '—')}</td><td>${esc(i.versao_gestor || '—')}</td><td class="col-hide">${esc(i.versao_clipp || '—')}</td><td>${fmtData(i.ultimo_contato)}</td></tr>`).join('')
     : '<tr><td colspan="5" class="sub">Ainda não conectou.</td></tr>';
@@ -902,6 +910,13 @@ $('#d-sup-padrao').addEventListener('click', async () => {
   if (!r.ok) { toast(r.error || 'Falha.', true); return; }
   preencherCliente(r);
   toast('Cliente voltou a usar a senha padrão.');
+});
+$('#d-inst-liberar').addEventListener('click', async () => {
+  if (!confirm('Liberar a troca de computador? O próximo Gestor deste CNPJ que se conectar passa a ser o da empresa (acesso online e matriz/filial).')) return;
+  const r = await api(`${rotaCliente(st.atual)}/instalacao`, { method: 'DELETE' });
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  preencherCliente(r);
+  toast('Troca de computador liberada.');
 });
 $('#d-excluir').addEventListener('click', async () => {
   if (!confirm('Excluir este cliente e todo o histórico? Se o Gestor dele pedir a liberação de novo, entra como cliente novo.')) return;

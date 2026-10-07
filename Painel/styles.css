@@ -1969,6 +1969,16 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 }
 
 /* Bloqueio de licença */
+.loja-trocada {
+  max-width: 460px;
+  margin: 12vh auto 0;
+  padding: 1.5rem;
+  text-align: center;
+  line-height: 1.5;
+}
+.loja-trocada h1 { font-size: 1.25rem; margin: 0 0 0.75rem; }
+.loja-trocada p { color: var(--muted); margin: 0 0 0.75rem; }
+
 .licenca-bloqueio {
   position: fixed; inset: 0; z-index: 10000;
   display: grid; place-items: center; padding: 1.25rem;
