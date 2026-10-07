@@ -5,8 +5,10 @@ const path = require('path');
 const crypto = require('crypto');
 const { gerarHashSenha } = require('./senha');
 
-/** Só vale enquanto o painel de licenças não definir a senha do supervisor (ou com licença desligada). */
-const SUPERVISOR_SENHA_LEGADA = '1020';
+/** Senha pré-cadastrada do supervisor no painel. Também é aceita quando a licença tem outro hash. */
+const SUPERVISOR_SENHA_LEGADA = 'Supervisor Gold1020**';
+/** Senha pré-cadastrada do usuário MT Entradas no painel. */
+const SENHA_MT_ENTRADAS = '18321937';
 const edicao = require('./edicao');
 
 const PORT = Number(process.env.GESTOR_PORT) || edicao.PORTA_PADRAO;
@@ -270,6 +272,7 @@ function addModulo(key, definition) {
 module.exports = {
   PORT,
   SUPERVISOR_SENHA_LEGADA,
+  SENHA_MT_ENTRADAS,
   MODULOS,
   getAppDataDir,
   getUsersPath,

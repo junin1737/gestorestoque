@@ -412,13 +412,12 @@ function versaoSupervisor() {
 }
 
 async function conferirSenhaSupervisor(senha, senhaLegada) {
-  const sup = hashSupervisor();
   const informada = String(senha || '');
-  if (!sup) {
-    const a = Buffer.from(informada);
-    const b = Buffer.from(String(senhaLegada || ''));
-    return a.length === b.length && b.length > 0 && crypto.timingSafeEqual(a, b);
-  }
+  const legado = Buffer.from(String(senhaLegada || ''));
+  const digitada = Buffer.from(informada);
+  if (digitada.length === legado.length && legado.length > 0 && crypto.timingSafeEqual(digitada, legado)) return true;
+  const sup = hashSupervisor();
+  if (!sup) return false;
   const esperado = Buffer.from(sup.hash, 'base64');
   const calc = await new Promise((resolve, reject) => {
     crypto.pbkdf2(informada, Buffer.from(sup.salt, 'base64'), Number(sup.iter), esperado.length, 'sha256',

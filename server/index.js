@@ -63,14 +63,17 @@ const PEDIDO_HTML = `<div class="pedido" id="pedido">
   function formulario(){$('pd-form').hidden=false;$('pd-espera').hidden=true;$('pd-btn').disabled=false;
     if(timer){clearInterval(timer);timer=null}}
   var pedidoMt=false;
+  var aguardarClique=false;
   function verificar(){fetch('/parear/status',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
     if(d.status==='aprovado'){location.replace('/');return}
-    if(d.status==='pendente'){esperando(d.codigo);return}
+    if(!pedidoMt && /(?:^|[?&])mt=1(?:&|$)/.test(location.search)){
+      pedidoMt=true;aguardarClique=true;$('pd-nome').value=$('pd-nome').value||'MT Entradas';$('pd-nome').focus();
+    }
+    if(d.status==='pendente'){if(aguardarClique)return;esperando(d.codigo);return}
     if(d.status==='recusado'){formulario();erro('O pedido foi recusado no computador da loja.');return}
     if(timer){formulario();erro('O pedido expirou. Solicite de novo.');return}
-    if(!pedidoMt && /(?:^|[?&])mt=1(?:&|$)/.test(location.search)){pedidoMt=true;$('pd-nome').value='MT Entradas';$('pd-btn').click()}
   }).catch(function(){})}
-  $('pd-btn').addEventListener('click',function(){erro('');$('pd-btn').disabled=true;
+  $('pd-btn').addEventListener('click',function(){erro('');aguardarClique=false;$('pd-btn').disabled=true;
     fetch('/parear/solicitar',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:$('pd-nome').value})})
     .then(function(r){return r.json()}).then(function(d){if(d.ok)esperando(d.codigo);else{formulario();erro(d.error||'Não foi possível solicitar.')}})
     .catch(function(){formulario();erro('Sem conexão com a loja. Tente de novo.')})});

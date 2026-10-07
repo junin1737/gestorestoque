@@ -13,6 +13,7 @@ const state = {
   buscaAplicada: '',
   buscaAnterior: '',
   estoqueStatus: 'A',
+  filtroCondicional: false,
   buscaBarras: false,
   scanTarget: 'search',
   alteracoesLista: [],
@@ -937,7 +938,7 @@ function enterApp() {
   $('#view-login').hidden = true;
   $('#view-app').hidden = false;
   fillUserChrome();
-  const canUsers = can('usuarios', 'acesso');
+  const canUsers = !!state.usuario?.supervisor;
   const canAlt = can('alteracoes', 'acesso');
   const canEst = can('estoque', 'acesso');
   $('#nav-usuarios').hidden = !canUsers;
@@ -1134,6 +1135,10 @@ async function showPage(page) {
     showMsg('Somente o usuário MT Entradas troca de empresa.');
     page = 'dashboard';
   }
+  if (page === 'usuarios' && !state.usuario?.supervisor) {
+    showMsg('Só o supervisor cadastra os usuários do painel.');
+    page = 'dashboard';
+  }
 
   const saiaCompras = $('#page-compras') && !$('#page-compras').hidden && page !== 'compras';
   if (saiaCompras) window.Compras?.onPageLeave?.();
@@ -1238,6 +1243,11 @@ $$('#estoque-status-seg .seg-btn').forEach((btn) => {
   });
 });
 $('#estoque-grupo-filtro')?.addEventListener('change', () => renderEstoqueLista());
+$('#btn-filtro-condicional')?.addEventListener('click', () => {
+  state.filtroCondicional = !state.filtroCondicional;
+  $('#btn-filtro-condicional').classList.toggle('primary', state.filtroCondicional);
+  loadEstoque();
+});
 $('#btn-exportar-estoque')?.addEventListener('click', () => exportarEstoqueCsv());
 
 function exportarEstoqueCsv() {
@@ -1307,7 +1317,8 @@ async function loadEstoque() {
   const q = state.buscaAplicada || $('#estoque-busca').value.trim();
   const status = state.estoqueStatus || 'A';
   const barras = state.buscaBarras && String(q).length > 5 ? '&barras=1' : '';
-  const res = await api(`/estoque?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}${barras}`);
+  const cond = state.filtroCondicional ? '&condicional=1' : '';
+  const res = await api(`/estoque?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}${barras}${cond}`);
   state.estoqueLista = res.itens || [];
   renderEstoqueLista();
 }
@@ -1337,7 +1348,7 @@ function qtdClass(qtd) {
 function codigoEstoque(it) {
   const cod = String(it.id_estoque ?? '').padStart(6, '0');
   const ident = it.id_identificador == null ? '' : String(it.id_identificador);
-  return `<div class="prod-cod"><strong>${escapeHtml(cod)}</strong><span>${escapeHtml(ident)}</span></div>`;
+  return `<div class="prod-cod"><strong>${escapeHtml(ident)}</strong><span>${escapeHtml(cod)}</span></div>`;
 }
 
 function botaoCondicional(it) {
@@ -1786,15 +1797,16 @@ function renderDetalhe() {
         <label>ID Identificador<input value="${it.id_identificador ?? 'Novo'}" disabled /></label>
         <label class="full">Descrição<input id="f-descricao" maxlength="120" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
         ${!state.isNovo ? `<div class="full"><button type="button" class="btn small" id="btn-condicionais-prod" ${Number(it.qtd_reserv) > 0 ? '' : 'disabled'}>Condicionais${Number(it.qtd_reserv) > 0 ? ` (${fmtNum(it.qtd_reserv)})` : ''}</button></div>` : ''}
-        <label>Grupo
+        <label class="full grupo-field">Grupo
           <div class="input-row">
             <select id="f-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>
-              <option value="">—</option>
+              <option value="">Selecione o grupo</option>
               ${state.grupos.map((g) => `<option value="${g.id_grupo}" ${Number(g.id_grupo) === Number(it.id_grupo) ? 'selected' : ''}>${escapeHtml(g.descricao)}</option>`).join('')}
             </select>
-            <button type="button" class="btn small" id="btn-novo-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>+</button>
+            <button type="button" class="btn small" id="btn-novo-grupo" title="Cadastrar grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>+</button>
           </div>
         </label>
+        ${state.isNovo ? '<p class="hint full">Escolha um grupo já cadastrado ou use + para cadastrar na hora.</p>' : ''}
         <label>Unid. medida
           <select id="f-un" ${editarFicha || state.isNovo ? '' : 'disabled'}>
             ${optionsUnidades(it.uni_medida)}

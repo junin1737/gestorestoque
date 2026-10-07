@@ -189,15 +189,18 @@ function codigoCurto() {
 /** Cria um pedido de acesso; devolve { token, codigo } ou { erro }. */
 function solicitar(req, nome) {
   limparPedidos();
+  const nomeLimpo = String(nome || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40);
   const atual = pedidoDaRequisicao(req);
-  if (atual && atual.p.status === 'pendente') return { token: null, codigo: atual.p.codigo };
+  if (atual && atual.p.status === 'pendente') {
+    if (nomeLimpo) atual.p.nome = nomeLimpo;
+    return { token: null, codigo: atual.p.codigo };
+  }
   const ip = ipRemoto(req);
   const doIp = [...pedidos.values()].filter((p) => p.ip === ip && p.status === 'pendente').length;
   if (doIp >= MAX_PEDIDOS_POR_IP) return { erro: 'Muitos pedidos deste endereço. Aguarde alguns minutos.' };
   if (pedidos.size >= MAX_PEDIDOS) return { erro: 'Muitos pedidos aguardando. Tente de novo mais tarde.' };
   const token = crypto.randomBytes(32).toString('base64url');
   const navegador = String(req.headers['user-agent'] || '').slice(0, 300);
-  const nomeLimpo = String(nome || '').replace(/[\u0000-\u001f\u007f]/g, '').trim().slice(0, 40);
   const p = {
     id: crypto.randomBytes(8).toString('hex'),
     codigo: codigoCurto(),

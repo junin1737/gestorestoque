@@ -1996,3 +1996,19 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 .licenca-card h2 { margin: 0 0 .6rem; font-size: var(--fs-xl); }
 .licenca-card p { margin: 0 0 .9rem; }
 .licenca-card .btn { width: 100%; margin: .2rem 0 .9rem; }
+
+.grupo-field .input-row { align-items: center; }
+.grupo-field .input-row select { flex: 1 1 auto; min-width: 0; }
+.grupo-field #btn-novo-grupo { flex: 0 0 auto; min-width: 2.6rem; font-size: 1.15rem; font-weight: 700; }
+
+.cond-toolbar { display: flex; align-items: flex-end; justify-content: space-between; gap: 0.75rem; flex-wrap: wrap; }
+.cond-novo {
+  margin: 0.75rem 0 1rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--card);
+}
+.cond-lista .item-row { width: 100%; text-align: left; }
+#dlg-cond-pdf .dlg-card { display: grid; gap: 0.75rem; min-width: min(420px, 92vw); }
+#dlg-cond-pdf label { display: grid; gap: 0.3rem; font-weight: 600; }
