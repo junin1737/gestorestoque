@@ -548,7 +548,7 @@ async function carregarEmpresas() {
   const r = await api('/empresas-online');
   if (!r.ok) { wrap.innerHTML = `<p>${esc(r.error || 'Falha ao listar empresas.')}</p>`; return; }
   const itens = r.itens || [];
-  if (!itens.length) { wrap.innerHTML = '<p>Nenhuma empresa registrada ainda. O Gestor precisa estar aberto no cliente.</p>'; return; }
+  if (!itens.length) { wrap.innerHTML = '<p>Nenhum Gestor com internet neste momento. O contato é gravado a cada poucos minutos — se acabou de abrir, aguarde e clique em Atualizar.</p>'; return; }
   wrap.innerHTML = `<table><thead><tr><th>Empresa</th><th>NSE</th><th>CNPJ</th><th>Status</th><th></th></tr></thead><tbody>${
     itens.map((e) => `<tr>
       <td>${esc(e.nome || '—')}</td>

@@ -695,30 +695,48 @@ async function registrarEmpresaMt(request, env) {
   return json({ ok: true });
 }
 
+/** O check grava o contato no máximo a cada 10 min. Janela um pouco maior para o Gestor aberto aparecer. */
+const JANELA_ONLINE_MS = 15 * 60 * 1000;
+
+function urlPublicaEmpresa(nse, urlGravada) {
+  const gravada = String(urlGravada || '').trim();
+  if (/^https:\/\//i.test(gravada) && !/localhost|127\.0\.0\.1/i.test(gravada)) return gravada;
+  const a = String(nse || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  const reservados = new Set(['www', 'acesso', 'painel', 'api', 'admin', 'mail', 'smtp', 'ftp', 'webmail', 'cpanel', 'ns1', 'ns2']);
+  if (!/^(?=[a-z]*[0-9])[a-z0-9]{4,40}$/.test(a) || reservados.has(a)) return '';
+  return `https://${a}.smsjrdeveloper.com.br`;
+}
+
 async function listarEmpresasMt(url, env) {
   const app = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
   await garantirTabelaMt(env);
+  const desde = new Date(Date.now() - JANELA_ONLINE_MS).toISOString();
   const { results } = await env.DB.prepare(
-    `SELECT m.cnpj, m.nse, m.nome, m.url, m.atualizado_em,
-            (SELECT MAX(i.ultimo_contato) FROM instalacoes i
-              WHERE i.cnpj = m.cnpj AND i.aplicacao = m.aplicacao) AS ultimo_contato
-     FROM mt_empresas m
-     WHERE m.aplicacao = ?
-     ORDER BY m.nome`
-  ).bind(app).all();
-  const agora = Date.now();
-  const itens = (results || []).map((r) => {
-    const t = new Date(r.ultimo_contato || 0).getTime();
-    const online = Number.isFinite(t) && agora - t < 6 * 60 * 1000;
-    return {
+    `SELECT c.cnpj,
+            COALESCE(NULLIF(m.nome, ''), NULLIF(c.fantasia, ''), NULLIF(c.razao, '')) AS nome,
+            i.nse, i.ultimo_contato, m.url
+     FROM clientes c
+     JOIN instalacoes i ON i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao
+     LEFT JOIN mt_empresas m ON m.cnpj = c.cnpj AND m.aplicacao = c.aplicacao
+     WHERE c.aplicacao = ?
+       AND i.ultimo_contato >= ?
+     ORDER BY i.ultimo_contato DESC`
+  ).bind(app, desde).all();
+  const vistos = new Set();
+  const itens = [];
+  for (const r of results || []) {
+    if (vistos.has(r.cnpj)) continue;
+    vistos.add(r.cnpj);
+    itens.push({
       cnpj: r.cnpj,
       nse: r.nse || '',
       nome: r.nome || '',
-      url: r.url || '',
-      online,
+      url: urlPublicaEmpresa(r.nse, r.url),
+      online: true,
       ultimo_contato: r.ultimo_contato || null,
-    };
-  });
+    });
+  }
+  itens.sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
   return json({ ok: true, itens });
 }
 
