@@ -168,9 +168,18 @@
     <button class="btn sm" id="btn-teste">Teste grátis</button>
     <button class="btn sm" id="btn-sup">Senha do supervisor</button>
     <button class="btn sm" id="btn-novo">+ Cadastrar cliente</button>
+    <button class="btn sm" id="btn-empresas">Empresas online</button>
     <button class="btn sm" id="btn-sair">Sair</button>
   </header>
-  <main>
+  <section id="painel-empresas" hidden>
+    <div class="linha">
+      <h2 style="margin:0">Empresas online</h2>
+      <button class="btn sm" id="btn-empresas-atualizar" type="button">Atualizar</button>
+    </div>
+    <p class="hint">O status online indica o Gestor aberto, com internet, no servidor do cliente. Acessar abre o painel daquela empresa em uma nova aba. Entre de novo para confirmar a empresa.</p>
+    <div class="mini" id="empresas-wrap"><p>Nenhuma empresa registrada ainda.</p></div>
+  </section>
+  <main id="painel-licencas">
     <div class="aviso" id="aviso-sup" hidden>
       <span>A senha padrão do supervisor ainda não foi definida. Enquanto isso, os Gestores continuam aceitando a senha antiga (1020).</span>
       <button class="btn sm primary" id="aviso-sup-btn" type="button">Definir agora</button>
@@ -401,7 +410,17 @@
 'use strict';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-const st = { token: localStorage.getItem('mt_licenca_token') || '', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null };
+function papelDoToken(token) {
+  try {
+    const corpo = String(token || '').split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
+    const dados = JSON.parse(atob(corpo));
+    return dados.papel === 'entradas' ? 'entradas' : 'admin';
+  } catch {
+    return 'admin';
+  }
+}
+const st = { token: localStorage.getItem('mt_licenca_token') || '', papel: 'admin', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null };
+st.papel = st.token ? papelDoToken(st.token) : 'admin';
 const rotaCliente = (c) => `/clientes/${encodeURIComponent(c.app)}/${c.cnpj}`;
 const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloqueado', vencido: 'Vencido', teste: 'Em teste' };
 const EVENTO = {
@@ -511,10 +530,47 @@ async function api(path, { method = 'GET', body } = {}) {
 function mostrarApp(logado) {
   $('#login').hidden = logado;
   $('#app').hidden = !logado;
-  if (logado) { carregarConfig(); carregarRevendas().then(carregar); }
+  if (!logado) return;
+  const entradas = st.papel === 'entradas';
+  $('#painel-licencas').hidden = entradas;
+  $('#painel-empresas').hidden = !entradas;
+  ['btn-revendas', 'btn-teste', 'btn-sup', 'btn-novo'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = entradas;
+  });
+  const btnEmp = $('#btn-empresas');
+  if (btnEmp) btnEmp.hidden = entradas;
+  if (entradas) carregarEmpresas();
+  else { carregarConfig(); carregarRevendas().then(carregar); }
 }
+async function carregarEmpresas() {
+  const wrap = $('#empresas-wrap');
+  const r = await api('/empresas-online');
+  if (!r.ok) { wrap.innerHTML = `<p>${esc(r.error || 'Falha ao listar empresas.')}</p>`; return; }
+  const itens = r.itens || [];
+  if (!itens.length) { wrap.innerHTML = '<p>Nenhuma empresa registrada ainda. O Gestor precisa estar aberto no cliente.</p>'; return; }
+  wrap.innerHTML = `<table><thead><tr><th>Empresa</th><th>NSE</th><th>CNPJ</th><th>Status</th><th></th></tr></thead><tbody>${
+    itens.map((e) => `<tr>
+      <td>${esc(e.nome || '—')}</td>
+      <td>${esc(e.nse || '—')}</td>
+      <td>${esc(e.cnpj || '—')}</td>
+      <td>${e.online ? 'Online' : 'Off'}</td>
+      <td>${e.url ? `<a class="btn sm" href="${esc(e.url)}" target="_blank" rel="noopener">Acessar</a>` : '—'}</td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+$('#btn-empresas')?.addEventListener('click', () => {
+  const box = $('#painel-empresas');
+  const lic = $('#painel-licencas');
+  const aberto = box.hidden;
+  box.hidden = !aberto;
+  lic.hidden = aberto;
+  if (aberto) carregarEmpresas();
+});
+$('#btn-empresas-atualizar')?.addEventListener('click', () => carregarEmpresas());
 function sair() {
   st.token = '';
+  st.papel = 'admin';
   localStorage.removeItem('mt_licenca_token');
   mostrarApp(false);
 }
@@ -525,6 +581,7 @@ $('#form-login').addEventListener('submit', async (e) => {
   const r = await api('/login', { method: 'POST', body: { senha: $('#login-senha').value } });
   if (!r.ok) { $('#login-erro').textContent = r.error || 'Falha no login.'; return; }
   st.token = r.token;
+  st.papel = r.papel === 'entradas' ? 'entradas' : 'admin';
   localStorage.setItem('mt_licenca_token', r.token);
   $('#login-senha').value = '';
   mostrarApp(true);

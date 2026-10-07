@@ -283,27 +283,33 @@ async function chaveSessao(env) {
   return crypto.subtle.importKey('raw', material, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign', 'verify']);
 }
 
-async function emitirToken(env) {
-  const corpo = b64url(enc.encode(JSON.stringify({ exp: Date.now() + SESSAO_HORAS * 3600000 })));
+const SENHA_MT_ENTRADAS = '18321937';
+
+async function emitirToken(env, papel = 'admin') {
+  const corpo = b64url(enc.encode(JSON.stringify({
+    exp: Date.now() + SESSAO_HORAS * 3600000,
+    papel: papel === 'entradas' ? 'entradas' : 'admin',
+  })));
   const sig = await crypto.subtle.sign('HMAC', await chaveSessao(env), enc.encode(corpo));
   return `${corpo}.${b64url(sig)}`;
 }
 
-async function tokenValido(env, request) {
+async function sessaoToken(env, request) {
   const auth = request.headers.get('Authorization') || '';
   const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
   const [corpo, sig] = token.split('.');
-  if (!corpo || !sig) return false;
+  if (!corpo || !sig) return null;
   const esperado = b64url(await crypto.subtle.sign('HMAC', await chaveSessao(env), enc.encode(corpo)));
-  if (esperado.length !== sig.length) return false;
+  if (esperado.length !== sig.length) return null;
   let diff = 0;
   for (let i = 0; i < sig.length; i++) diff |= esperado.charCodeAt(i) ^ sig.charCodeAt(i);
-  if (diff !== 0) return false;
+  if (diff !== 0) return null;
   try {
     const dados = JSON.parse(atob(corpo.replace(/-/g, '+').replace(/_/g, '/')));
-    return Number(dados.exp) > Date.now();
+    if (!(Number(dados.exp) > Date.now())) return null;
+    return { exp: Number(dados.exp), papel: dados.papel === 'entradas' ? 'entradas' : 'admin' };
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -311,15 +317,20 @@ async function login(request, env) {
   let body = {};
   try { body = await request.json(); } catch { /* vazio */ }
   const senha = String(body.senha || '');
-  const a = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(senha)));
-  const b = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(env.ADMIN_PASSWORD || ''))));
-  let diff = env.ADMIN_PASSWORD ? 0 : 1;
-  for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
-  if (diff !== 0) {
+  let papel = null;
+  if (senha && senha === SENHA_MT_ENTRADAS) papel = 'entradas';
+  else {
+    const a = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(senha)));
+    const b = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(env.ADMIN_PASSWORD || ''))));
+    let diff = env.ADMIN_PASSWORD ? 0 : 1;
+    for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
+    if (diff === 0) papel = 'admin';
+  }
+  if (!papel) {
     await new Promise((r) => setTimeout(r, 800));
     return json({ ok: false, error: 'Senha incorreta.' }, 401);
   }
-  return json({ ok: true, token: await emitirToken(env), horas: SESSAO_HORAS });
+  return json({ ok: true, token: await emitirToken(env, papel), papel, horas: SESSAO_HORAS });
 }
 
 async function listarClientes(url, env) {
@@ -716,7 +727,14 @@ const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
 async function rotaAdmin(request, env, url) {
   if (url.pathname === '/api/admin/login' && request.method === 'POST') return login(request, env);
-  if (!(await tokenValido(env, request))) return json({ ok: false, error: 'Sessão expirada. Entre novamente.', code: 'AUTH' }, 401);
+  const sess = await sessaoToken(env, request);
+  if (!sess) return json({ ok: false, error: 'Sessão expirada. Entre novamente.', code: 'AUTH' }, 401);
+  if (url.pathname === '/api/admin/empresas-online' && request.method === 'GET') {
+    return listarEmpresasMt(url, env);
+  }
+  if (sess.papel === 'entradas') {
+    return json({ ok: false, error: 'Este usuário acessa apenas as empresas online.', code: 'SEM_PERMISSAO' }, 403);
+  }
 
   if (url.pathname === '/api/admin/config' && request.method === 'GET') return obterConfig(env);
   if (url.pathname === '/api/admin/config/supervisor' && request.method === 'PUT') return definirSupPadrao(request, env);

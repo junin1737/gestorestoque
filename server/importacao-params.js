@@ -315,6 +315,9 @@ function getSaidaPadrao() {
     zerar_negativo: (s.zerar_negativo === true || s.zerar_negativo === 'S') ? 'S' : 'N',
     // S = só avança de etapa da conferência do item ao confirmar
     conferir_etapas: (s.conferir_etapas === true || s.conferir_etapas === 'S') ? 'S' : 'N',
+    id_natope_padrao: Number(s.id_natope_padrao) > 0 ? Number(s.id_natope_padrao) : null,
+    nat_padrao_descricao: String(s.nat_padrao_descricao || '').trim(),
+    nat_padrao_cfop: String(s.nat_padrao_cfop || '').replace(/\D/g, '').slice(0, 4),
   };
 }
 
@@ -336,6 +339,15 @@ function setSaidaPadrao(saida) {
       : (saida?.conferir_etapas === false || saida?.conferir_etapas === 'N')
         ? 'N'
         : ((prev.conferir_etapas === true || prev.conferir_etapas === 'S') ? 'S' : 'N'),
+    id_natope_padrao: saida && Object.prototype.hasOwnProperty.call(saida, 'id_natope_padrao')
+      ? (Number(saida.id_natope_padrao) > 0 ? Number(saida.id_natope_padrao) : null)
+      : (Number(prev.id_natope_padrao) > 0 ? Number(prev.id_natope_padrao) : null),
+    nat_padrao_descricao: saida && Object.prototype.hasOwnProperty.call(saida, 'nat_padrao_descricao')
+      ? String(saida.nat_padrao_descricao || '').trim().slice(0, 120)
+      : String(prev.nat_padrao_descricao || '').trim(),
+    nat_padrao_cfop: saida && Object.prototype.hasOwnProperty.call(saida, 'nat_padrao_cfop')
+      ? String(saida.nat_padrao_cfop || '').replace(/\D/g, '').slice(0, 4)
+      : String(prev.nat_padrao_cfop || '').replace(/\D/g, '').slice(0, 4),
   };
   saveLocalParams(local);
   return local.saida;

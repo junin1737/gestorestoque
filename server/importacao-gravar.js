@@ -121,6 +121,23 @@ function toDateSql(v) {
 
 const nextId = nextGenId;
 
+async function lerFotoProduto(db, appCfg, idIdent) {
+  const t = writeTargets(appCfg)[0]?.tables;
+  if (!t || !idIdent) return null;
+  try {
+    const rows = await query(db, `
+      SELECT FIRST 1 P.QTD_ATUAL, P.PRC_MEDIO, E.DESCRICAO, E.PRC_VENDA, E.PRC_CUSTO
+      FROM ${t.produto} P
+      JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
+      JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+      WHERE P.ID_IDENTIFICADOR = ?`, [idIdent]);
+    return rows[0] || null;
+  } catch (e) {
+    console.warn('Foto produto:', e.message);
+    return null;
+  }
+}
+
 async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   const targets = writeTargets(appCfg);
   if (!targets.length) throw new Error('Tabelas de estoque não encontradas.');
@@ -129,7 +146,8 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   const idIdentificador = await nextId(db, tPrimary.genIdentificador, tPrimary.identificador, 'ID_IDENTIFICADOR');
   const descricao = String(sistema.descricao || xmlItem?.xProd || 'PRODUTO NF-e').trim().slice(0, 120);
   const uni = String(sistema.uni_medida_saida || sistema.uni_medida || xmlItem?.uCom || 'UN').trim().slice(0, 6) || 'UN';
-  const margem = Number(sistema.margem_lb || 0) || 0;
+  const margemNum = Number(sistema.margem_lb);
+  const margem = Number.isFinite(margemNum) && margemNum > 0 ? margemNum : 0;
   const custoCalc = calcCustoUnitarioItem(sistema, xmlItem);
   let prcCusto = Number(sistema.prc_custo);
   if (!Number.isFinite(prcCusto) || prcCusto <= 0) {
@@ -159,6 +177,7 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   const cfopNf = aplicarSaida ? (String(sistema.cfop_nf || '').trim() || null) : null;
   const idCti = aplicarSaida ? (String(sistema.id_cti || '').trim() || null) : null;
   const idCtiCfe = aplicarSaida ? (String(sistema.id_cti_cfe || '').trim() || null) : null;
+  const idGrupo = Number(sistema.id_grupo) > 0 ? Number(sistema.id_grupo) : null;
   const cst = aplicarSaida
     ? (String(sistema.cst_saida || sistema.tributos?.cst_icms || sistema.cst_icms || '').trim() || null)
     : null;
@@ -173,8 +192,8 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
     await query(db, `
       INSERT INTO ${t.estoque}
         (ID_ESTOQUE, DESCRICAO, STATUS, ID_GRUPO, UNI_MEDIDA, PRC_VENDA, PRC_CUSTO, GRADE_SERIE, ID_TIPOITEM, FRACIONADO)
-      VALUES (?, ?, 'A', NULL, ?, ?, ?, 'N', '0', 'N')`, [
-      idEstoque, descricao, uni, prcVenda, prcCusto,
+      VALUES (?, ?, 'A', ?, ?, ?, ?, 'N', '0', 'N')`, [
+      idEstoque, descricao, idGrupo, uni, prcVenda, prcCusto,
     ]);
     try {
       await query(db, `
@@ -289,6 +308,26 @@ async function entradaEstoque(db, appCfg, {
       `UPDATE ${t.produto} SET QTD_ATUAL = COALESCE(QTD_ATUAL, 0) + ? WHERE ID_IDENTIFICADOR = ?`,
       [delta, idIdentificador]
     );
+    // O Clipp recalcula PRC_MEDIO no movimento da NF. A entrada grava EST_BX='N'
+    // para o trigger não duplicar a quantidade, então o médio é aplicado aqui:
+    // (saldo anterior × médio anterior + entrada × custo desta nota) ÷ saldo novo.
+    // Saldo zerado ou negativo: o custo desta entrada passa a ser o médio.
+    if (delta > 0) {
+      const custoEnt = Number(prcCusto || 0);
+      const medioAnt = prcMedio > 0 ? prcMedio : custoEnt;
+      const qtdNova = qtdAtual + delta;
+      const medioNovo = qtdAtual > 0 && qtdNova > 0
+        ? Number(((qtdAtual * medioAnt + delta * custoEnt) / qtdNova).toFixed(4))
+        : Number(custoEnt.toFixed(4));
+      try {
+        await query(db, `
+          UPDATE ${t.produto} SET PRC_MEDIO = ? WHERE ID_IDENTIFICADOR = ?`, [
+          medioNovo, idIdentificador,
+        ]);
+      } catch (e) {
+        console.warn('PRC_MEDIO:', e.message);
+      }
+    }
     if (registrarAlteracao) {
       await insertSaldoAlterado(db, t, {
         idIdentificador,
@@ -426,7 +465,11 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
     }
     if (Number.isFinite(margem)) {
       sets.push('MARGEM_LB = ?');
-      vals.push(margem);
+      vals.push(margem > 0 ? margem : null);
+    }
+    if (Number(sistema.id_grupo) > 0) {
+      sets.push('ID_GRUPO = ?');
+      vals.push(Number(sistema.id_grupo));
     }
     if (uni) {
       sets.push('UNI_MEDIDA = ?');
@@ -1163,12 +1206,14 @@ async function gravarNfCompra(sessao, {
       let itensGravados = 0;
       let itensComEstoque = 0;
       const pendentesEstoque = [];
+      const relatorio = [];
       await gravarTransportadorNf(db, idNf, sessao, idTransportador);
 
       for (let idx = 0; idx < itens.length; idx++) {
         const it = itens[idx];
         const flags = itemFlags[idx] || { gera_estoque: 'S', gera_financeiro: 'S' };
         let idIdent = it.sistema?.id_identificador ? Number(it.sistema.id_identificador) : null;
+        const produtoNovo = !idIdent && !!it.sistema?.criar_novo;
         if (!idIdent && it.sistema?.criar_novo) {
           const created = await criarProdutoBasico(db, appCfg, it.sistema, it.xml);
           idIdent = created.id_identificador;
@@ -1328,6 +1373,7 @@ async function gravarNfCompra(sessao, {
           it,
           idItem,
           idIdent,
+          produtoNovo,
           qtd: flags.gera_estoque === 'S' && qtdEstoque > 0 ? qtdEstoque : 0,
           prcCusto: vUnitEstoque,
         });
@@ -1339,6 +1385,7 @@ async function gravarNfCompra(sessao, {
       // TB_ESTOQUE / TB_EST_PRODUTO por último: são as linhas que o caixa também trava ao vender,
       // então ficam presas pela transação o menor tempo possível.
       for (const p of pendentesEstoque) {
+        const fotoAntes = await lerFotoProduto(db, appCfg, p.idIdent);
         await atualizarCadastroProduto(db, appCfg, p.it.sistema || {}, p.it.xml || {});
         try {
           await query(db, `
@@ -1368,20 +1415,35 @@ async function gravarNfCompra(sessao, {
         } catch (e) {
           console.warn('TB_MT_CONVERSAO:', e.message);
         }
-        if (!(p.qtd > 0)) continue;
-        // Atualiza QTD_ATUAL sem gravar em TB_EST_SALDO_ALTERADO — a movimentação
-        // no relatório do Clipp já vem como "NF Compra" pelo item da nota.
-        await entradaEstoque(db, appCfg, {
-          idIdentificador: p.idIdent,
-          qtd: p.qtd,
-          prcCusto: p.prcCusto,
-          usuario,
-          idFuncionario,
-          nfLabel,
-          registrarAlteracao: false,
+        if (p.qtd > 0) {
+          // Atualiza QTD_ATUAL sem gravar em TB_EST_SALDO_ALTERADO — a movimentação
+          // no relatório do Clipp já vem como "NF Compra" pelo item da nota.
+          await entradaEstoque(db, appCfg, {
+            idIdentificador: p.idIdent,
+            qtd: p.qtd,
+            prcCusto: p.prcCusto,
+            usuario,
+            idFuncionario,
+            nfLabel,
+            registrarAlteracao: false,
+          });
+          await query(db, `UPDATE TB_NFC_ITEM SET EST_BX = 'S' WHERE ID_NFCITEM = ?`, [p.idItem]);
+          itensComEstoque += 1;
+        }
+        const fotoDepois = await lerFotoProduto(db, appCfg, p.idIdent);
+        const numFoto = (foto, col) => Number(foto?.[col] || 0);
+        relatorio.push({
+          status: p.produtoNovo ? 'Novo' : 'Reposição',
+          id_identificador: p.idIdent,
+          descricao: String(fotoDepois?.DESCRICAO || p.it.sistema?.descricao || p.it.xml?.xProd || '').trim(),
+          qtd_anterior: p.produtoNovo ? 0 : numFoto(fotoAntes, 'QTD_ATUAL'),
+          qtd_atual: numFoto(fotoDepois, 'QTD_ATUAL'),
+          venda_anterior: p.produtoNovo ? null : numFoto(fotoAntes, 'PRC_VENDA'),
+          venda_atual: numFoto(fotoDepois, 'PRC_VENDA'),
+          custo_anterior: p.produtoNovo ? null : numFoto(fotoAntes, 'PRC_CUSTO'),
+          custo_atual: numFoto(fotoDepois, 'PRC_CUSTO'),
+          custo_medio: numFoto(fotoDepois, 'PRC_MEDIO'),
         });
-        await query(db, `UPDATE TB_NFC_ITEM SET EST_BX = 'S' WHERE ID_NFCITEM = ?`, [p.idItem]);
-        itensComEstoque += 1;
       }
 
       return {
@@ -1392,6 +1454,7 @@ async function gravarNfCompra(sessao, {
         itens_estoque: itensComEstoque,
         parcelas: parcelasGeradas,
         gera_financeiro: geraFinanceiroNota ? 'S' : 'N',
+        relatorio,
       };
     });
   });

@@ -93,18 +93,7 @@
               <label class="online-aparelhos-titulo">Pedidos de acesso aguardando</label>
               <ul id="online-pedidos" class="online-aparelhos online-pedidos"></ul>
             </div>
-            <div id="online-aparelhos-box" hidden>
-              <div class="online-validade">
-                <label class="online-aparelhos-titulo" for="online-validade">Dispositivos confiáveis</label>
-                <span class="online-validade-sel">
-                  Validade
-                  <select id="online-validade" title="Prazo para novos dispositivos e renovações"></select>
-                </span>
-              </div>
-              <ul id="online-aparelhos" class="online-aparelhos"></ul>
-              <p class="hint">Cada dispositivo autorizado fica válido pelo prazo escolhido; depois precisa ler o QR Code (ou pedir acesso) de novo. Remova a qualquer momento para bloquear na hora.</p>
-            </div>
-            <p class="hint">O computador da loja conecta para fora; nenhuma porta é aberta e o banco de dados não fica exposto. Pela internet só entram aparelhos autorizados pelo QR Code ao lado. Configuração de banco e certificado continua só neste computador.</p>
+            <p class="hint">O computador da loja conecta para fora; nenhuma porta é aberta e o banco de dados não fica exposto. Aqui aparecem só os pedidos pendentes. Os aparelhos já autorizados ficam na aba Dispositivos.</p>
             <div class="banco-actions left">
               <button type="button" id="btn-online-novo" class="btn-outline small" hidden>Gerar novo endereço</button>
             </div>
@@ -289,7 +278,18 @@
         </div>
 
         <div id="config-tab-dispositivos" class="config-tab-pane" hidden>
-          <p class="svc-lead">Cada aparelho que abre o painel fica liberado pelo tempo definido aqui. Vale na edição local e na online.</p>
+          <div id="online-aparelhos-box" hidden>
+            <div class="online-validade">
+              <label class="online-aparelhos-titulo" for="online-validade">Dispositivos autorizados</label>
+              <span class="online-validade-sel">
+                Validade
+                <select id="online-validade" title="Prazo para novos dispositivos e renovações"></select>
+              </span>
+            </div>
+            <ul id="online-aparelhos" class="online-aparelhos"></ul>
+            <p class="hint">Cada dispositivo autorizado fica válido pelo prazo escolhido; depois precisa ler o QR Code (ou pedir acesso) de novo. Remova a qualquer momento para bloquear na hora.</p>
+          </div>
+          <p class="svc-lead">Aparelhos que abrem o painel neste computador, com o prazo de cada um.</p>
           <div id="disp-lista"></div>
           <p class="hint" id="disp-msg" hidden></p>
         </div>

@@ -818,6 +818,21 @@ async function createSessao(opts = {}) {
     }
   } catch (_) { /* ignore */ }
 
+  try {
+    const idPadrao = Number(importacaoParams.getSaidaPadrao().id_natope_padrao || 0);
+    if (idPadrao) {
+      const { getNaturezaById } = require('./importacao-notas');
+      const padrao = await getNaturezaById(idPadrao);
+      if (padrao) {
+        natureza = padrao;
+        idNatope = padrao.id_natope;
+        if (xml.ide) xml.ide.natOp = padrao.descricao || xml.ide.natOp;
+      }
+    }
+  } catch (e) {
+    console.warn('Natureza padrão:', e.message);
+  }
+
   const sessao = {
     id: newId(),
     chave,
@@ -969,6 +984,22 @@ async function createSessaoManual(body = {}) {
     fornecedor: body.fornecedor || null,
     _sync: { version: 1, pendingCloud: true },
   };
+  if (!sessao.natureza) {
+    try {
+      const idPadrao = Number(importacaoParams.getSaidaPadrao().id_natope_padrao || 0);
+      if (idPadrao) {
+        const { getNaturezaById } = require('./importacao-notas');
+        const padrao = await getNaturezaById(idPadrao);
+        if (padrao) {
+          sessao.natureza = padrao;
+          sessao.id_natope = padrao.id_natope;
+          sessao.xml.ide.natOp = padrao.descricao || sessao.xml.ide.natOp;
+        }
+      }
+    } catch (e) {
+      console.warn('Natureza padrão:', e.message);
+    }
+  }
   store.sessoes.unshift(sessao);
   saveStore(store);
   return { ok: true, sessao: mapSessaoForClient(sessao) };
