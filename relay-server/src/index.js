@@ -163,12 +163,34 @@ async function registrarApelido(env, apelido, tunel, cnpj) {
   } catch { /* o Gestor continua usando o link /t/ */ }
 }
 
-function encaminharAoTunel(env, request, id) {
+/**
+ * Todas as lojas dividem o mesmo endereço (acesso.<domínio>): o painel compara este identificador
+ * a cada resposta e recarrega se o navegador passou a falar com outra loja (outra aba leu outro QR Code).
+ * Se o painel já conhece a sua loja e manda X-Gestor-Loja, a requisição de outra loja nem chega ao Gestor.
+ */
+async function encaminharAoTunel(env, request, id) {
+  const loja = (await sha256Hex(`loja:${id}`)).slice(0, 16);
+  const esperada = request.headers.get('X-Gestor-Loja');
+  if (esperada && esperada !== loja) {
+    return new Response(JSON.stringify({
+      ok: false,
+      code: 'LOJA_TROCADA',
+      error: 'Este navegador passou a acessar outra loja.',
+    }), {
+      status: 409,
+      headers: { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'X-Gestor-Loja': loja },
+    });
+  }
   // Cabeçalhos internos nunca vêm do cliente.
   const headers = new Headers(request.headers);
   for (const k of [...headers.keys()]) if (k.startsWith('x-relay-')) headers.delete(k);
+  headers.delete('x-gestor-loja');
   const stub = env.TUNEL.get(env.TUNEL.idFromName(id));
-  return stub.fetch(new Request(request, { headers }));
+  const resp = await stub.fetch(new Request(request, { headers }));
+  if (resp.status === 101) return resp;
+  const marcada = new Response(resp.body, resp);
+  marcada.headers.set('X-Gestor-Loja', loja);
+  return marcada;
 }
 
 export default {
