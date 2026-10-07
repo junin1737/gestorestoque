@@ -97,12 +97,25 @@ const Condicionais = (() => {
   async function abrirLista() {
     const lista = $('#cond-lista');
     const aviso = $('#cond-aviso');
+    const sel = $('#cond-status');
     if (!lista) return;
+    const filtro = sel?.value || 'reservado';
     lista.innerHTML = '<p class="hint">Carregando…</p>';
-    const res = await api('/condicionais');
+    const res = await api(`/condicionais?status=${encodeURIComponent(filtro)}`);
     if (!res.ok) {
       lista.innerHTML = `<p class="hint">${esc(res.error || 'Falha ao listar')}</p>`;
       return;
+    }
+    if (sel && res.statuses && sel.dataset.pronto !== '1') {
+      const atual = sel.value || 'reservado';
+      const opts = ['<option value="reservado">Reservados (seguram estoque)</option>'];
+      for (const st of res.statuses) {
+        opts.push(`<option value="${st.id}">${esc(st.descricao)}${st.reserva ? ' · reserva' : ''}</option>`);
+      }
+      opts.push('<option value="todos">Todos</option>');
+      sel.innerHTML = opts.join('');
+      sel.value = [...sel.options].some((o) => o.value === atual) ? atual : 'reservado';
+      sel.dataset.pronto = '1';
     }
     if (aviso) {
       aviso.hidden = !res.aviso;
@@ -110,13 +123,13 @@ const Condicionais = (() => {
     }
     const itens = res.itens || [];
     if (!itens.length) {
-      lista.innerHTML = '<p class="empty">Nenhum condicional nesta base.</p>';
+      lista.innerHTML = '<p class="empty">Nenhum condicional nesta situação.</p>';
       return;
     }
     lista.innerHTML = itens.map((it) => `
       <button type="button" class="item-row" data-cond="${esc(it.id)}">
         <strong>Nº ${esc(it.id)} · ${esc(it.cliente || 'Sem cliente')}</strong>
-        <span class="hint">${esc(it.data)} ${esc(it.horario)} · ${esc(it.vendedor || 'sem vendedor')} · ${esc(it.status_label)} · ${money(it.total)}</span>
+        <span class="hint">${esc(it.data)} ${esc(it.horario)} · ${esc(it.vendedor || 'sem vendedor')} · ${esc(it.status_label)}${it.reserva ? ' · reserva estoque' : ''} · ${money(it.total)}</span>
       </button>`).join('');
     ligarAcoes(lista);
   }
@@ -140,7 +153,7 @@ const Condicionais = (() => {
       return;
     }
     const blocos = [];
-    for (const c of conds) blocos.push(fichaHtml(c, '<p class="hint">Condicional de peças</p>'));
+    for (const c of conds) blocos.push(fichaHtml(c));
     for (const r of reservas) {
       blocos.push(`<div class="cond-ficha">
         <p class="hint">Reserva que compõe a quantidade reservada</p>
@@ -245,6 +258,7 @@ const Condicionais = (() => {
       abrirLista();
       mostrarDetalhe(res.id);
     });
+    $('#cond-status')?.addEventListener('change', () => abrirLista());
     $('#dlg-condicional-fechar')?.addEventListener('click', () => {
       const dlg = $('#dlg-condicional');
       if (dlg?.close) dlg.close();

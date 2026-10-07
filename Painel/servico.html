@@ -247,23 +247,20 @@
         </div>
 
         <div id="config-tab-rotinas" class="config-tab-pane" hidden>
-          <p class="svc-lead">No dia e na hora marcados, o Gestor encerra e o Windows desliga este computador.</p>
+          <p class="svc-lead">Cada dia pode desligar num horário. No minuto marcado, o Gestor encerra e o Windows desliga este computador.</p>
           <form id="form-rotinas" class="banco-form">
             <label class="switch-row">
               <input type="checkbox" id="rot-ativo" />
               <span>Desligar automaticamente</span>
             </label>
-            <label>Hora
-              <input id="rot-hora" type="time" value="22:00" required />
-            </label>
-            <div class="perm-grid" id="rot-dias">
-              <label><input type="checkbox" value="1" /> Segunda</label>
-              <label><input type="checkbox" value="2" /> Terça</label>
-              <label><input type="checkbox" value="3" /> Quarta</label>
-              <label><input type="checkbox" value="4" /> Quinta</label>
-              <label><input type="checkbox" value="5" /> Sexta</label>
-              <label><input type="checkbox" value="6" /> Sábado</label>
-              <label><input type="checkbox" value="0" /> Domingo</label>
+            <div class="rot-dias" id="rot-dias">
+              <label class="rot-dia"><input type="checkbox" data-dia="1" /><span>Segunda</span><input type="time" data-hora="1" value="22:00" /></label>
+              <label class="rot-dia"><input type="checkbox" data-dia="2" /><span>Terça</span><input type="time" data-hora="2" value="22:00" /></label>
+              <label class="rot-dia"><input type="checkbox" data-dia="3" /><span>Quarta</span><input type="time" data-hora="3" value="22:00" /></label>
+              <label class="rot-dia"><input type="checkbox" data-dia="4" /><span>Quinta</span><input type="time" data-hora="4" value="22:00" /></label>
+              <label class="rot-dia"><input type="checkbox" data-dia="5" /><span>Sexta</span><input type="time" data-hora="5" value="22:00" /></label>
+              <label class="rot-dia"><input type="checkbox" data-dia="6" /><span>Sábado</span><input type="time" data-hora="6" value="22:00" /></label>
+              <label class="rot-dia"><input type="checkbox" data-dia="0" /><span>Domingo</span><input type="time" data-hora="0" value="22:00" /></label>
             </div>
             <p id="rot-msg" class="hint msg-line" hidden></p>
             <div class="banco-actions">

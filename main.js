@@ -48,13 +48,15 @@ function checarRotinaDesligamento() {
   let cfg;
   try { cfg = require('./server/config').loadAppConfig(); } catch { return; }
   const r = cfg.rotinas || {};
-  if (r.ativo !== true || !/^\d{2}:\d{2}$/.test(String(r.hora || ''))) return;
+  if (r.ativo !== true) return;
   const agora = new Date();
-  const dias = Array.isArray(r.dias) ? r.dias.map(Number) : [];
-  if (!dias.includes(agora.getDay())) return;
-  const [hh, mm] = String(r.hora).split(':').map(Number);
+  let hora = '';
+  if (r.horas && typeof r.horas === 'object') hora = String(r.horas[String(agora.getDay())] || '');
+  else if (Array.isArray(r.dias) && r.dias.map(Number).includes(agora.getDay())) hora = String(r.hora || '');
+  if (!/^\d{2}:\d{2}$/.test(hora)) return;
+  const [hh, mm] = hora.split(':').map(Number);
   if (agora.getHours() !== hh || agora.getMinutes() !== mm) return;
-  const chave = `${agora.getFullYear()}-${agora.getMonth()}-${agora.getDate()} ${r.hora}`;
+  const chave = `${agora.getFullYear()}-${agora.getMonth()}-${agora.getDate()} ${hora}`;
   if (rotinaDisparada === chave) return;
   rotinaDisparada = chave;
   try {

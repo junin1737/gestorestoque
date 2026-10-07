@@ -69,24 +69,31 @@ async function loadRotinas() {
   const res = await api('/rotinas');
   const r = res.rotinas || {};
   const ativo = $('#rot-ativo');
-  const hora = $('#rot-hora');
   if (ativo) ativo.checked = r.ativo === true;
-  if (hora) hora.value = r.hora || '22:00';
-  const dias = new Set((r.dias || []).map(String));
-  $$('#rot-dias input').forEach((el) => { el.checked = dias.has(el.value); });
+  const horas = r.horas || {};
+  $$('#rot-dias [data-dia]').forEach((el) => {
+    const hora = horas[el.dataset.dia];
+    el.checked = !!hora;
+    const campo = $(`#rot-dias [data-hora="${el.dataset.dia}"]`);
+    if (campo && hora) campo.value = hora;
+  });
 }
 
 $('#form-rotinas')?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const msg = $('#rot-msg');
-  const dias = $$('#rot-dias input:checked').map((el) => Number(el.value));
+  const horas = {};
+  $$('#rot-dias [data-dia]:checked').forEach((el) => {
+    const campo = $(`#rot-dias [data-hora="${el.dataset.dia}"]`);
+    horas[el.dataset.dia] = campo?.value || '';
+  });
   const res = await api('/rotinas', {
     method: 'POST',
-    body: { ativo: $('#rot-ativo')?.checked === true, hora: $('#rot-hora')?.value || '', dias },
+    body: { ativo: $('#rot-ativo')?.checked === true, horas },
   });
   if (msg) {
     msg.hidden = false;
-    msg.textContent = res.ok ? 'Rotina salva. Neste horário o computador desliga.' : (res.error || 'Não foi possível salvar.');
+    msg.textContent = res.ok ? 'Rotina salva. Cada dia desliga no horário marcado.' : (res.error || 'Não foi possível salvar.');
   }
 });
 

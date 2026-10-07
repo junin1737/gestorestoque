@@ -18,17 +18,18 @@ function dataBr(v) {
 
 function horaBr(v) {
   if (!v) return '';
-  if (v instanceof Date) return v.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  if (v instanceof Date) {
+    const h = String(v.getUTCHours()).padStart(2, '0');
+    const m = String(v.getUTCMinutes()).padStart(2, '0');
+    return `${h}:${m}`;
+  }
   const s = String(v);
   const m = s.match(/(\d{2}:\d{2})/);
   return m ? m[1] : s.slice(0, 5);
 }
 
-function statusLabel(s) {
-  const c = String(s || 'A').trim().toUpperCase();
-  if (c === 'C') return 'Cancelado';
-  if (c === 'F' || c === 'B') return 'Finalizado';
-  return 'Aberto';
+function reservaSim(v) {
+  return String(v || '').trim().toUpperCase() === 'S';
 }
 
 function nomeGrade(descricao, grade, cor, tamanho) {
@@ -41,99 +42,124 @@ function foneCliente(row) {
   return String(row?.FONE_CELUL || row?.FONE_RESID || row?.FONE_COMER || '').trim();
 }
 
-async function tabelaCondicional(db) {
-  return hasTable('TB_CONDICIONAL_PECAS') && hasTable('TB_CONDICIONAL_PECAS_ITENS');
-}
-
-async function triggerAtualizaReserva(db) {
-  const rows = await query(
-    db,
-    `SELECT CAST(RDB$TRIGGER_SOURCE AS VARCHAR(4000)) S
-     FROM RDB$TRIGGERS
-     WHERE RDB$SYSTEM_FLAG = 0 AND TRIM(RDB$RELATION_NAME) = 'TB_CONDICIONAL_PECAS_ITENS'`
-  );
-  return rows.some((r) => /QTD_RESERV/i.test(String(r.S || '')));
-}
-
-function mapCab(r) {
+function mapPedido(r) {
   return {
-    id: num(r.GAR_CODIGO),
-    id_cliente: r.GAR_CLIENTE == null ? null : num(r.GAR_CLIENTE),
+    id: num(r.ID_PEDIDO),
+    id_cliente: r.ID_CLIENTE == null ? null : num(r.ID_CLIENTE),
     cliente: String(r.CLIENTE || '').trim(),
     telefone: foneCliente(r),
-    data: dataBr(r.GAR_DATA),
-    horario: horaBr(r.GAR_HORARIO),
-    id_funcionario: r.GAR_FUNCIONARIO == null ? null : num(r.GAR_FUNCIONARIO),
+    data: dataBr(r.DT_PEDIDO),
+    horario: horaBr(r.HR_PEDIDO),
+    id_funcionario: r.ID_VENDEDOR == null ? null : num(r.ID_VENDEDOR),
     vendedor: String(r.VENDEDOR || '').trim(),
-    status: String(r.STATUS || 'A').trim().toUpperCase() || 'A',
-    status_label: statusLabel(r.STATUS),
+    status: String(r.ID_STATUS ?? ''),
+    status_label: String(r.STATUS || '').trim() || 'Sem status',
+    reserva: reservaSim(r.RESERVA),
     obs: String(r.OBS || '').trim(),
-    unidades: num(r.UNIDADES),
-    qt_itens: num(r.QT_ITEMS),
-    total: num(r.TOTALNOTA),
-    origem: 'condicional',
+    total: num(r.TOTAL),
+    origem: 'pedido',
   };
 }
 
-async function listar() {
+const SQL_PEDIDO = `
+  SELECT P.ID_PEDIDO, P.DT_PEDIDO, P.HR_PEDIDO, P.ID_STATUS, P.ID_CLIENTE, P.ID_VENDEDOR,
+         CAST(P.OBSERVACAO AS VARCHAR(300)) AS OBS,
+         S.DESCRICAO AS STATUS, S.RESERVA,
+         CL.NOME AS CLIENTE, CL.FONE_CELUL, CL.FONE_RESID, CL.FONE_COMER,
+         F.NOME AS VENDEDOR
+  FROM TB_PEDIDO_VENDA P
+  LEFT JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
+  LEFT JOIN TB_CLIENTE CL ON CL.ID_CLIENTE = P.ID_CLIENTE
+  LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = P.ID_VENDEDOR`;
+
+async function listarStatus(db) {
+  const rows = await query(db, `
+    SELECT ID_STATUS, DESCRICAO, RESERVA
+    FROM TB_PED_VENDA_STATUS
+    WHERE COALESCE(STATUS, 'A') = 'A'
+    ORDER BY DESCRICAO`);
+  return rows.map((r) => ({
+    id: num(r.ID_STATUS),
+    descricao: String(r.DESCRICAO || '').trim(),
+    reserva: reservaSim(r.RESERVA),
+  }));
+}
+
+async function listar(statusFiltro) {
   return withDb(async (db) => {
-    if (!(await tabelaCondicional(db))) {
-      return { disponivel: false, itens: [], aviso: 'Esta base não tem a tabela de condicionais de peças.' };
+    if (!hasTable('TB_PEDIDO_VENDA') || !hasTable('TB_PED_VENDA_ITEM')) {
+      return { disponivel: false, itens: [], statuses: [], aviso: 'Esta base não tem pedido de venda.' };
     }
+    const filtro = String(statusFiltro || 'reservado').trim().toLowerCase();
+    const where = [];
+    const params = [];
+    if (filtro === 'todos') {
+      /* sem filtro de status */
+    } else if (filtro === 'reservado' || filtro === '') {
+      where.push(`TRIM(S.RESERVA) = 'S'`);
+    } else if (/^\d+$/.test(filtro)) {
+      where.push('P.ID_STATUS = ?');
+      params.push(Number(filtro));
+    }
+    const corpo = SQL_PEDIDO.replace(/^\s*SELECT\s*/i, '');
     const rows = await query(db, `
-      SELECT FIRST 200
-        C.GAR_CODIGO, C.GAR_CLIENTE, C.GAR_DATA, C.GAR_HORARIO, C.GAR_FUNCIONARIO,
-        C.STATUS, C.OBS, C.UNIDADES, C.QT_ITEMS, C.TOTALNOTA,
-        CL.NOME AS CLIENTE, CL.FONE_CELUL, CL.FONE_RESID, CL.FONE_COMER,
-        F.NOME AS VENDEDOR
-      FROM TB_CONDICIONAL_PECAS C
-      LEFT JOIN TB_CLIENTE CL ON CL.ID_CLIENTE = C.GAR_CLIENTE
-      LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = C.GAR_FUNCIONARIO
-      ORDER BY C.GAR_DATA DESC, C.GAR_CODIGO DESC`);
-    return { disponivel: true, itens: rows.map(mapCab), aviso: '' };
+      SELECT FIRST 200 ${corpo}
+      ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+      ORDER BY P.DT_PEDIDO DESC, P.HR_PEDIDO DESC, P.ID_PEDIDO DESC`, params);
+    const totais = await query(db, `
+      SELECT I.ID_PEDIDO, SUM(COALESCE(I.VLR_TOTAL, 0)) AS TOTAL
+      FROM TB_PED_VENDA_ITEM I
+      WHERE I.ID_PEDIDO IN (${rows.length ? rows.map(() => '?').join(',') : '0'})
+        AND COALESCE(TRIM(I.ITEM_CANCEL), 'N') <> 'S'
+      GROUP BY I.ID_PEDIDO`, rows.map((r) => num(r.ID_PEDIDO)));
+    const porId = new Map(totais.map((r) => [num(r.ID_PEDIDO), num(r.TOTAL)]));
+    return {
+      disponivel: true,
+      filtro,
+      aviso: '',
+      statuses: await listarStatus(db),
+      itens: rows.map((r) => ({ ...mapPedido(r), total: porId.get(num(r.ID_PEDIDO)) || 0 })),
+    };
   });
+}
+
+async function itensDoPedido(db, appCfg, idPedido) {
+  const t = activeTargets(appCfg)[0]?.tables;
+  if (!t) throw new Error('Estoque não encontrado nesta base.');
+  const itens = await query(db, `
+    SELECT I.ID_ITEMPED, I.ID_IDENTIFICADOR, I.QTD_ITEM, I.VLR_UNIT, I.VLR_DESC, I.VLR_TOTAL, I.ITEM_CANCEL,
+           E.DESCRICAO, E.GRADE_SERIE, E.UNI_MEDIDA, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
+    FROM TB_PED_VENDA_ITEM I
+    LEFT JOIN ${t.identificador} IDN ON IDN.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+    LEFT JOIN ${t.estoque} E ON E.ID_ESTOQUE = IDN.ID_ESTOQUE
+    LEFT JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+    LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
+    LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
+    WHERE I.ID_PEDIDO = ?
+      AND COALESCE(TRIM(I.ITEM_CANCEL), 'N') <> 'S'
+    ORDER BY I.ID_ITEMPED`, [idPedido]);
+  return itens.map((r) => ({
+    id: num(r.ID_ITEMPED),
+    id_identificador: num(r.ID_IDENTIFICADOR),
+    descricao: nomeGrade(r.DESCRICAO, r.GRADE_SERIE, r.COR, r.TAMANHO),
+    qtd: num(r.QTD_ITEM),
+    prc_unit: num(r.VLR_UNIT),
+    desconto: num(r.VLR_DESC),
+    total: num(r.VLR_TOTAL),
+    uni_medida: String(r.UNI_MEDIDA || '').trim(),
+  }));
 }
 
 async function detalhe(id) {
   const codigo = num(id);
   if (!codigo) throw new Error('Condicional inválido.');
   return withDb(async (db, appCfg) => {
-    if (!(await tabelaCondicional(db))) throw new Error('Esta base não tem condicionais de peças.');
-    const t = activeTargets(appCfg)[0]?.tables;
-    if (!t) throw new Error('Estoque não encontrado nesta base.');
-    const cab = await query(db, `
-      SELECT FIRST 1
-        C.GAR_CODIGO, C.GAR_CLIENTE, C.GAR_DATA, C.GAR_HORARIO, C.GAR_FUNCIONARIO,
-        C.STATUS, C.OBS, C.UNIDADES, C.QT_ITEMS, C.TOTALNOTA,
-        CL.NOME AS CLIENTE, CL.FONE_CELUL, CL.FONE_RESID, CL.FONE_COMER,
-        F.NOME AS VENDEDOR
-      FROM TB_CONDICIONAL_PECAS C
-      LEFT JOIN TB_CLIENTE CL ON CL.ID_CLIENTE = C.GAR_CLIENTE
-      LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = C.GAR_FUNCIONARIO
-      WHERE C.GAR_CODIGO = ?`, [codigo]);
+    if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
+    const cab = await query(db, `${SQL_PEDIDO} WHERE P.ID_PEDIDO = ?`, [codigo]);
     if (!cab.length) throw new Error('Condicional não encontrado.');
-    const itens = await query(db, `
-      SELECT I.ID, I.ID_ITEM, I.QT, I.VLR_UNIT, I.VLR_DESC, I.TOTAL, I.UNI_MEDIDA,
-             E.DESCRICAO, E.GRADE_SERIE, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
-      FROM TB_CONDICIONAL_PECAS_ITENS I
-      LEFT JOIN ${t.identificador} IDN ON IDN.ID_IDENTIFICADOR = I.ID_ITEM
-      LEFT JOIN ${t.estoque} E ON E.ID_ESTOQUE = IDN.ID_ESTOQUE
-      LEFT JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_ITEM
-      LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
-      LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
-      WHERE I.ID_PAI = ?
-      ORDER BY I.ID`, [codigo]);
-    const doc = mapCab(cab[0]);
-    doc.itens = itens.map((r) => ({
-      id: num(r.ID),
-      id_identificador: num(r.ID_ITEM),
-      descricao: nomeGrade(r.DESCRICAO, r.GRADE_SERIE, r.COR, r.TAMANHO),
-      qtd: num(r.QT),
-      prc_unit: num(r.VLR_UNIT),
-      desconto: num(r.VLR_DESC),
-      total: num(r.TOTAL),
-      uni_medida: String(r.UNI_MEDIDA || '').trim(),
-    }));
+    const doc = mapPedido(cab[0]);
+    doc.itens = await itensDoPedido(db, appCfg, codigo);
+    doc.total = doc.itens.reduce((s, it) => s + num(it.total), 0);
     return doc;
   });
 }
@@ -159,29 +185,33 @@ async function reservasDoProduto(db, id) {
 async function doProduto(idIdentificador) {
   const id = num(idIdentificador);
   if (!id) throw new Error('Produto inválido.');
-  return withDb(async (db) => {
+  return withDb(async (db, appCfg) => {
     const reservas = await reservasDoProduto(db, id);
-    let condicionais = [];
-    if (await tabelaCondicional(db)) {
-      const rows = await query(db, `
-        SELECT C.GAR_CODIGO, C.GAR_DATA, C.GAR_HORARIO, C.STATUS, C.OBS,
-               I.QT, I.VLR_UNIT, I.TOTAL,
-               CL.NOME AS CLIENTE, CL.FONE_CELUL, CL.FONE_RESID, CL.FONE_COMER,
-               F.NOME AS VENDEDOR
-        FROM TB_CONDICIONAL_PECAS_ITENS I
-        JOIN TB_CONDICIONAL_PECAS C ON C.GAR_CODIGO = I.ID_PAI
-        LEFT JOIN TB_CLIENTE CL ON CL.ID_CLIENTE = C.GAR_CLIENTE
-        LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = C.GAR_FUNCIONARIO
-        WHERE I.ID_ITEM = ?
-        ORDER BY C.GAR_DATA DESC, C.GAR_CODIGO DESC`, [id]);
-      condicionais = rows.map((r) => ({
-        ...mapCab(r),
-        qtd: num(r.QT),
-        prc_unit: num(r.VLR_UNIT),
-        total_item: num(r.TOTAL),
-      }));
+    if (!hasTable('TB_PEDIDO_VENDA')) return { reservas, condicionais: [] };
+    const rows = await query(db, `
+      ${SQL_PEDIDO}
+      WHERE EXISTS (
+        SELECT 1 FROM TB_PED_VENDA_ITEM I
+        WHERE I.ID_PEDIDO = P.ID_PEDIDO
+          AND I.ID_IDENTIFICADOR = ?
+          AND COALESCE(TRIM(I.ITEM_CANCEL), 'N') <> 'S'
+      )
+        AND TRIM(S.RESERVA) = 'S'
+      ORDER BY P.DT_PEDIDO DESC, P.ID_PEDIDO DESC`, [id]);
+    const condicionais = [];
+    for (const r of rows) {
+      const doc = mapPedido(r);
+      doc.itens = await itensDoPedido(db, appCfg, doc.id);
+      const desta = doc.itens.find((it) => it.id_identificador === id);
+      doc.qtd = desta ? desta.qtd : 0;
+      doc.total = doc.itens.reduce((s, it) => s + num(it.total), 0);
+      condicionais.push(doc);
     }
-    return { reservas, condicionais };
+    const numeros = new Set(condicionais.map((c) => c.id));
+    return {
+      condicionais,
+      reservas: reservas.filter((r) => !/ped/i.test(r.tipo) || !numeros.has(r.numero)),
+    };
   });
 }
 
@@ -212,59 +242,73 @@ async function listarVendedores() {
   });
 }
 
-async function criar({ idCliente, idFuncionario, obs, itens, usuario }) {
+async function criar({ idCliente, idFuncionario, obs, itens }) {
   const itensOk = (itens || []).map((it) => ({
     id: num(it.id_identificador || it.id),
     qtd: num(it.qtd),
     prc: num(it.prc_venda != null ? it.prc_venda : it.prc_unit),
   })).filter((it) => it.id > 0 && it.qtd > 0);
   if (!num(idCliente)) throw new Error('Informe o cliente.');
+  if (!num(idFuncionario)) throw new Error('Informe o vendedor.');
   if (!itensOk.length) throw new Error('Informe ao menos uma peça.');
   return withDb(async (db, appCfg) => {
-    if (!(await tabelaCondicional(db))) throw new Error('Esta base não tem condicionais de peças.');
+    if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
     const t = writeTargets(appCfg)[0]?.tables;
     if (!t) throw new Error('Estoque não encontrado nesta base.');
-    const atualizaSozinho = await triggerAtualizaReserva(db);
-    const agora = new Date();
-    const totalQtd = itensOk.reduce((s, it) => s + it.qtd, 0);
-    const totalValor = itensOk.reduce((s, it) => s + (it.qtd * it.prc), 0);
-    return withTransaction(db, async (tx) => {
-      const id = await nextGenId(tx, 'GEN_ID_TB_CONDICIONAL_ID', 'TB_CONDICIONAL_PECAS', 'GAR_CODIGO');
-      await query(tx, `
-        INSERT INTO TB_CONDICIONAL_PECAS (
-          GAR_CODIGO, GAR_CLIENTE, GAR_DATA, GAR_HORARIO, GAR_FUNCIONARIO, STATUS, OBS,
-          UNIDADES, QT_ITEMS, TOTALPRODUTOS, TOTALNOTA
-        ) VALUES (?, ?, ?, ?, ?, 'A', ?, ?, ?, ?, ?)`, [
-        id, num(idCliente), agora, agora, num(idFuncionario) || null,
-        String(obs || usuario || '').slice(0, 300),
-        totalQtd, itensOk.length, totalValor, totalValor,
-      ]);
-      for (const it of itensOk) {
-        const prod = await query(tx, `
-          SELECT FIRST 1 E.UNI_MEDIDA, P.PRC_CUSTO
-          FROM ${t.produto} P
-          JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
-          JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
-          WHERE P.ID_IDENTIFICADOR = ?`, [it.id]);
-        if (!prod.length) throw new Error(`Produto ${it.id} não encontrado.`);
-        const idItem = await nextGenId(tx, 'GEN_ID_TB_CONDICIONAL_ITENS_ID', 'TB_CONDICIONAL_PECAS_ITENS', 'ID');
-        const total = it.qtd * it.prc;
-        await query(tx, `
-          INSERT INTO TB_CONDICIONAL_PECAS_ITENS (
-            ID, ID_PAI, ID_ITEM, VLR_UNIT, QT, VLR_DESC, VLR_CUSTO, VLR_DESPESA, TOTAL, UNI_MEDIDA, PRC_CUSTO
-          ) VALUES (?, ?, ?, ?, ?, 0, ?, 0, ?, ?, ?)`, [
-          idItem, id, it.id, it.prc, it.qtd, num(prod[0].PRC_CUSTO), total,
-          String(prod[0].UNI_MEDIDA || 'UN').slice(0, 10), num(prod[0].PRC_CUSTO),
-        ]);
-        if (!atualizaSozinho) {
+    const st = await query(db, `
+      SELECT FIRST 1 ID_STATUS FROM TB_PED_VENDA_STATUS
+      WHERE TRIM(RESERVA) = 'S' AND COALESCE(STATUS, 'A') = 'A'
+      ORDER BY CASE WHEN UPPER(DESCRICAO) CONTAINING 'RESERV' THEN 0 ELSE 1 END, ID_STATUS`);
+    if (!st.length) throw new Error('Não há status de pedido configurado para reservar estoque.');
+    const idStatus = num(st[0].ID_STATUS);
+    const mod = await query(db, `
+      SELECT FIRST 1 P.ID_MODULO
+      FROM TB_PEDIDO_VENDA P
+      JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
+      WHERE TRIM(S.RESERVA) = 'S' AND P.ID_MODULO IS NOT NULL`);
+    const idModulo = num(mod[0]?.ID_MODULO) || 4;
+    let ultimoErro = null;
+    for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+      try {
+        return await withTransaction(db, async (tx) => {
+          const seq = await query(tx, 'SELECT COALESCE(MAX(ID_PEDIDO), 0) + 1 AS ID FROM TB_PEDIDO_VENDA');
+          const id = num(seq[0]?.ID);
           await query(tx, `
-            UPDATE ${t.produto}
-            SET QTD_RESERV = COALESCE(QTD_RESERV, 0) + ?
-            WHERE ID_IDENTIFICADOR = ?`, [it.qtd, it.id]);
-        }
+            INSERT INTO TB_PEDIDO_VENDA (
+              ID_CLIENTE, ID_VENDEDOR, ID_PEDIDO, DT_PEDIDO, HR_PEDIDO,
+              ID_PARCELA, ID_FMAPGTO, ID_STATUS, ID_MODULO, ORIGEM,
+              UPDATED_INTEGRADORA, ENVIAR_INTEGRADORA, OBSERVACAO
+            ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, 1, 1, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?)`, [
+            num(idCliente), num(idFuncionario), id, idStatus, idModulo,
+            String(obs || '').slice(0, 300) || null,
+          ]);
+          for (const it of itensOk) {
+            const prod = await query(tx, `
+              SELECT FIRST 1 E.PRC_VENDA, P.PRC_CUSTO, P.COD_BARRA
+              FROM ${t.produto} P
+              JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
+              JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+              WHERE P.ID_IDENTIFICADOR = ?`, [it.id]);
+            if (!prod.length) throw new Error(`Produto ${it.id} não encontrado.`);
+            const prc = it.prc > 0 ? it.prc : num(prod[0].PRC_VENDA);
+            const idItem = await nextGenId(tx, 'GEN_TB_PED_VENDA_ITEM_ID', 'TB_PED_VENDA_ITEM', 'ID_ITEMPED');
+            await query(tx, `
+              INSERT INTO TB_PED_VENDA_ITEM (
+                ID_ITEMPED, QTD_ITEM, VLR_TOTAL, PRC_CUSTO, PRC_LISTA, VLR_DESC,
+                ID_IDENTIFICADOR, ID_PEDIDO, ITEM_CANCEL, VLR_UNIT, COD_BARRA, UPDATED_INTEGRADORA
+              ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'N', ?, ?, CURRENT_TIMESTAMP)`, [
+              idItem, it.qtd, it.qtd * prc, num(prod[0].PRC_CUSTO), prc,
+              it.id, id, prc, String(prod[0].COD_BARRA || '').slice(0, 20) || null,
+            ]);
+          }
+          return { id };
+        });
+      } catch (err) {
+        ultimoErro = err;
+        if (!/UNIQUE|PRIMARY|violation/i.test(String(err.message || '')) || tentativa === 2) throw err;
       }
-      return { id };
-    });
+    }
+    throw ultimoErro || new Error('Não foi possível lançar o condicional.');
   });
 }
 

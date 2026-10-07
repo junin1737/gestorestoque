@@ -2405,7 +2405,7 @@ const LANCAR_CONDICIONAL = exigirModulo('condicionais');
 
 router.get('/condicionais', VER_CONDICIONAL, async (req, res) => {
   try {
-    res.json({ ok: true, ...(await condicionais.listar()) });
+    res.json({ ok: true, ...(await condicionais.listar(req.query.status)) });
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }
@@ -2476,29 +2476,44 @@ router.post('/condicionais', LANCAR_CONDICIONAL, async (req, res) => {
 
 const DIAS_ROTINA = [0, 1, 2, 3, 4, 5, 6];
 
+function horaValida(v) {
+  if (!/^\d{2}:\d{2}$/.test(String(v || ''))) return '';
+  const [hh, mm] = String(v).split(':').map(Number);
+  if (hh > 23 || mm > 59) return '';
+  return String(v);
+}
+
+function normalizarRotinas(r) {
+  const horas = {};
+  const bruto = r?.horas && typeof r.horas === 'object' ? r.horas : null;
+  if (bruto) {
+    for (const [dia, hora] of Object.entries(bruto)) {
+      const d = Number(dia);
+      const h = horaValida(hora);
+      if (DIAS_ROTINA.includes(d) && h) horas[String(d)] = h;
+    }
+  } else if (Array.isArray(r?.dias)) {
+    const h = horaValida(r.hora) || '22:00';
+    for (const dia of r.dias) {
+      const d = Number(dia);
+      if (DIAS_ROTINA.includes(d)) horas[String(d)] = h;
+    }
+  }
+  return { ativo: r?.ativo === true, horas };
+}
+
 router.get('/rotinas', somenteServidorLocal, (_req, res) => {
   const cfg = loadAppConfig();
-  const r = cfg.rotinas || {};
-  res.json({
-    ok: true,
-    rotinas: {
-      ativo: r.ativo === true,
-      hora: /^\d{2}:\d{2}$/.test(String(r.hora || '')) ? r.hora : '22:00',
-      dias: Array.isArray(r.dias) ? r.dias.map(Number).filter((d) => DIAS_ROTINA.includes(d)) : [1, 2, 3, 4, 5],
-    },
-  });
+  res.json({ ok: true, rotinas: normalizarRotinas(cfg.rotinas || {}) });
 });
 
 router.post('/rotinas', somenteServidorLocal, (req, res) => {
   const body = req.body || {};
-  const hora = String(body.hora || '');
-  if (!/^\d{2}:\d{2}$/.test(hora)) return res.json({ ok: false, error: 'Informe a hora no formato HH:MM.' });
-  const [hh, mm] = hora.split(':').map(Number);
-  if (hh > 23 || mm > 59) return res.json({ ok: false, error: 'Hora inválida.' });
-  const dias = (Array.isArray(body.dias) ? body.dias : []).map(Number).filter((d) => DIAS_ROTINA.includes(d));
-  if (body.ativo === true && !dias.length) return res.json({ ok: false, error: 'Marque ao menos um dia da semana.' });
+  const rotinas = normalizarRotinas({ ativo: body.ativo === true, horas: body.horas });
+  if (rotinas.ativo && !Object.keys(rotinas.horas).length) {
+    return res.json({ ok: false, error: 'Marque ao menos um dia e o horário dele.' });
+  }
   const current = loadAppConfig();
-  const rotinas = { ativo: body.ativo === true, hora, dias };
   saveAppConfig({ ...current, rotinas });
   res.json({ ok: true, rotinas });
 });

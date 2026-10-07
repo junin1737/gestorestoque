@@ -398,7 +398,9 @@ input, select, textarea {
   color: #8b97ab;
 }
 .login-card #toggle-senha svg { color: #8b97ab; }
-.login-lojas { margin-bottom: 0.85rem; }
+.prod-cod { display: flex; flex-direction: column; line-height: 1.15; min-width: 4.5rem; }
+.prod-cod strong { font-variant-numeric: tabular-nums; }
+.prod-cod span { color: var(--muted); font-size: 0.75rem; }
 .login-lojas-titulo {
   margin: 0 0 0.45rem;
   color: #8b97ab;

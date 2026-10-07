@@ -1315,6 +1315,17 @@ function qtdClass(qtd) {
   return '';
 }
 
+function codigoEstoque(it) {
+  const cod = String(it.id_estoque ?? '').padStart(6, '0');
+  const ident = it.id_identificador == null ? '' : String(it.id_identificador);
+  return `<div class="prod-cod"><strong>${escapeHtml(cod)}</strong><span>${escapeHtml(ident)}</span></div>`;
+}
+
+function botaoCondicional(it) {
+  if (!(Number(it.qtd_reserv) > 0)) return '';
+  return `<button type="button" class="btn small" data-cond-prod="${it.id_identificador}">Condicional</button>`;
+}
+
 function renderEstoqueLista() {
   const box = $('#estoque-lista');
   if (!box) return;
@@ -1365,10 +1376,11 @@ function renderEstoqueLista() {
         <tbody>
           ${rows.map(({ it, qtd, cls, active, uni, barras }) => `
             <tr class="${active}" data-id="${it.id_identificador}">
-              <td>${escapeHtml(String(it.id_estoque ?? it.id_identificador).padStart(6, '0'))}</td>
+              <td>${codigoEstoque(it)}</td>
               <td>
                 <div class="prod-name">${escapeHtml(it.descricao_exibicao || it.descricao)}</div>
                 ${barras ? `<div class="prod-sub">${escapeHtml(barras)}</div>` : ''}
+                ${botaoCondicional(it)}
               </td>
               <td>${escapeHtml(it.grupo || '—')}</td>
               <td class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</td>
@@ -1388,13 +1400,20 @@ function renderEstoqueLista() {
           </div>
           <div>
             <strong>${escapeHtml(it.descricao_exibicao || it.descricao)}</strong>
-            <div class="prod-sub">${escapeHtml(String(it.id_estoque ?? '').padStart(6, '0'))}${barras ? ` · ${escapeHtml(barras)}` : ''}${it.prc_venda != null ? ` · ${fmtMoney(it.prc_venda)}` : ''}</div>
+            <div class="prod-sub">${codigoEstoque(it)}${barras ? ` · ${escapeHtml(barras)}` : ''}${it.prc_venda != null ? ` · ${fmtMoney(it.prc_venda)}` : ''}</div>
+            ${botaoCondicional(it)}
           </div>
           <span class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</span>
         </div>`).join('')}
     </div>`;
 
   box.innerHTML = table + cards;
+  box.querySelectorAll('[data-cond-prod]').forEach((btn) => {
+    btn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      window.Condicionais?.abrirDoProduto(Number(btn.dataset.condProd));
+    });
+  });
   box.querySelectorAll('[data-id]').forEach((row) => {
     row.addEventListener('click', () => openProduto(Number(row.dataset.id)));
   });
