@@ -1772,15 +1772,22 @@
   padding: 0.65rem 0.85rem;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
+  position: relative;
+  z-index: 3;
+  flex: 0 0 auto;
 }
 
 .dlg-danfe-actions {
   display: flex;
   gap: 0.4rem;
+  position: relative;
+  z-index: 4;
 }
+.dlg-danfe-actions .btn { pointer-events: auto; }
 
 #dlg-danfe-frame {
-  flex: 1;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
   border: 0;
   background: #fff;

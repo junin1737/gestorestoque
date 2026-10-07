@@ -3237,6 +3237,58 @@ window.Compras?.init({
 
 window.Condicionais?.init({ api });
 
+(function ligarQuadroPdf() {
+  const dlg = $('#dlg-danfe');
+  const frame = $('#dlg-danfe-frame');
+  if (!dlg || !frame || dlg.dataset.gestorPdf === '1') return;
+  dlg.dataset.gestorPdf = '1';
+
+  const fechar = () => {
+    frame.removeAttribute('srcdoc');
+    frame.src = 'about:blank';
+    try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
+  };
+
+  const imprimir = () => {
+    const html = frame.getAttribute('srcdoc') || '';
+    const src = frame.getAttribute('src') || '';
+    const tmp = document.createElement('iframe');
+    tmp.setAttribute('aria-hidden', 'true');
+    tmp.style.cssText = 'position:fixed;width:0;height:0;border:0;left:0;bottom:0';
+    const disparar = () => {
+      try {
+        tmp.contentWindow.focus();
+        tmp.contentWindow.print();
+      } catch { /* ignore */ }
+      setTimeout(() => tmp.remove(), 1500);
+    };
+    tmp.addEventListener('load', disparar, { once: true });
+    document.body.appendChild(tmp);
+    if (html) tmp.srcdoc = html;
+    else if (src && src !== 'about:blank') tmp.src = src;
+    else {
+      tmp.remove();
+      try { frame.contentWindow?.focus(); frame.contentWindow?.print(); } catch { /* ignore */ }
+    }
+  };
+
+  $('#dlg-danfe-fechar')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    fechar();
+  });
+  $('#dlg-danfe-print')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    imprimir();
+  });
+  window.addEventListener('message', (ev) => {
+    if (ev.origin !== location.origin) return;
+    if (ev.data?.tipo === 'gestor-imprimir') imprimir();
+    if (ev.data?.tipo === 'gestor-fechar-pdf') fechar();
+  });
+})();
+
 /** Botão Voltar do Android: uma tela atrás no app (não sair para conexão). */
 window.gestorHardwareBack = () => {
   const dlgDanfe = $('#dlg-danfe');

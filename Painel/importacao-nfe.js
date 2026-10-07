@@ -906,7 +906,10 @@ const ImportacaoNfe = (() => {
     if (danfeDlgBound) return;
     const dlg = $('#dlg-danfe');
     const frame = $('#dlg-danfe-frame');
-    if (!dlg || !frame) return;
+    if (!dlg || !frame || dlg.dataset.gestorPdf === '1') {
+      danfeDlgBound = true;
+      return;
+    }
     danfeDlgBound = true;
     const fechar = () => {
       try {
