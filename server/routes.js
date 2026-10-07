@@ -301,13 +301,18 @@ router.post('/login', auth.login);
 router.post('/logout', auth.logout);
 router.get('/sessao', auth.sessao);
 
-router.get('/usuarios', exigirModulo('usuarios'), (req, res) => {
+function somenteSupervisor(req, res, next) {
+  if (req.usuario?.supervisor) return next();
+  return res.status(403).json({ ok: false, error: 'Só o supervisor cadastra os usuários do painel.' });
+}
+
+router.get('/usuarios', somenteSupervisor, (req, res) => {
   const appCfg = loadAppConfig();
   const cfg = loadUsersConfig(appCfg);
   res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser), modulos: MODULOS });
 });
 
-router.post('/usuarios', exigirModulo('usuarios'), async (req, res) => {
+router.post('/usuarios', somenteSupervisor, async (req, res) => {
   const appCfg = loadAppConfig();
   const cfg = loadUsersConfig(appCfg);
   const { supervisorSenha, usuarios } = req.body || {};
@@ -494,6 +499,9 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
         /* todos */
       } else {
         where.push(`(E.STATUS = 'A' OR E.STATUS IS NULL)`);
+      }
+      if (String(req.query.condicional || '') === '1') {
+        where.push('COALESCE(P.QTD_RESERV, 0) > 0');
       }
       const orderBy = busca && /^\d+$/.test(busca) && busca.length <= 5
         ? 'I.ID_IDENTIFICADOR ASC'
@@ -2450,7 +2458,9 @@ router.get('/condicionais/:id/pdf', VER_CONDICIONAL, async (req, res) => {
       const rows = await withDb((db) => query(db, 'SELECT FIRST 1 NOME_FANTA FROM TB_EMITENTE'));
       empresa = String(rows[0]?.NOME_FANTA || '').trim();
     } catch { /* ignore */ }
-    res.type('html').send(condicionais.htmlPdf(doc, empresa || cfg.database));
+    const formato = String(req.query.formato || 'a4');
+    const validade = String(req.query.validade || '');
+    res.type('html').send(condicionais.htmlPdf(doc, empresa || cfg.database, { formato, validade }));
   } catch (err) {
     res.status(400).type('html').send(`<p>${err.message}</p>`);
   }

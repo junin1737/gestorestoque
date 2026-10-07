@@ -42,6 +42,16 @@ function foneCliente(row) {
   return String(row?.FONE_CELUL || row?.FONE_RESID || row?.FONE_COMER || '').trim();
 }
 
+function isoData(v) {
+  if (!v) return '';
+  const d = v instanceof Date ? v : new Date(v);
+  if (Number.isNaN(d.getTime())) return '';
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 function mapPedido(r) {
   return {
     id: num(r.ID_PEDIDO),
@@ -50,6 +60,8 @@ function mapPedido(r) {
     telefone: foneCliente(r),
     data: dataBr(r.DT_PEDIDO),
     horario: horaBr(r.HR_PEDIDO),
+    validade: dataBr(r.DT_VALIDA),
+    validade_iso: isoData(r.DT_VALIDA),
     id_funcionario: r.ID_VENDEDOR == null ? null : num(r.ID_VENDEDOR),
     vendedor: String(r.VENDEDOR || '').trim(),
     status: String(r.ID_STATUS ?? ''),
@@ -61,8 +73,10 @@ function mapPedido(r) {
   };
 }
 
-const SQL_PEDIDO = `
-  SELECT P.ID_PEDIDO, P.DT_PEDIDO, P.HR_PEDIDO, P.ID_STATUS, P.ID_CLIENTE, P.ID_VENDEDOR,
+async function sqlPedido(db) {
+  const temValidade = await columnExists(db, 'TB_PEDIDO_VENDA', 'DT_VALIDA');
+  return `
+  SELECT P.ID_PEDIDO, P.DT_PEDIDO, P.HR_PEDIDO, ${temValidade ? 'P.DT_VALIDA,' : ''} P.ID_STATUS, P.ID_CLIENTE, P.ID_VENDEDOR,
          CAST(P.OBSERVACAO AS VARCHAR(300)) AS OBS,
          S.DESCRICAO AS STATUS, S.RESERVA,
          CL.NOME AS CLIENTE, CL.FONE_CELUL, CL.FONE_RESID, CL.FONE_COMER,
@@ -71,6 +85,7 @@ const SQL_PEDIDO = `
   LEFT JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
   LEFT JOIN TB_CLIENTE CL ON CL.ID_CLIENTE = P.ID_CLIENTE
   LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = P.ID_VENDEDOR`;
+}
 
 async function listarStatus(db) {
   const rows = await query(db, `
@@ -101,7 +116,7 @@ async function listar(statusFiltro) {
       where.push('P.ID_STATUS = ?');
       params.push(Number(filtro));
     }
-    const corpo = SQL_PEDIDO.replace(/^\s*SELECT\s*/i, '');
+    const corpo = (await sqlPedido(db)).replace(/^\s*SELECT\s*/i, '');
     const rows = await query(db, `
       SELECT FIRST 200 ${corpo}
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
@@ -155,7 +170,7 @@ async function detalhe(id) {
   if (!codigo) throw new Error('Condicional inválido.');
   return withDb(async (db, appCfg) => {
     if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
-    const cab = await query(db, `${SQL_PEDIDO} WHERE P.ID_PEDIDO = ?`, [codigo]);
+    const cab = await query(db, `${await sqlPedido(db)} WHERE P.ID_PEDIDO = ?`, [codigo]);
     if (!cab.length) throw new Error('Condicional não encontrado.');
     const doc = mapPedido(cab[0]);
     doc.itens = await itensDoPedido(db, appCfg, codigo);
@@ -189,7 +204,7 @@ async function doProduto(idIdentificador) {
     const reservas = await reservasDoProduto(db, id);
     if (!hasTable('TB_PEDIDO_VENDA')) return { reservas, condicionais: [] };
     const rows = await query(db, `
-      ${SQL_PEDIDO}
+      ${await sqlPedido(db)}
       WHERE EXISTS (
         SELECT 1 FROM TB_PED_VENDA_ITEM I
         WHERE I.ID_PEDIDO = P.ID_PEDIDO
@@ -312,35 +327,70 @@ async function criar({ idCliente, idFuncionario, obs, itens }) {
   });
 }
 
-function htmlPdf(doc, empresa) {
-  const linhas = (doc.itens || []).map((it) => `
-    <tr>
-      <td>${it.id_identificador}</td>
-      <td>${esc(it.descricao)}</td>
-      <td class="num">${fmt(it.qtd)}</td>
-      <td class="num">${money(it.prc_unit)}</td>
-      <td class="num">${money(it.total)}</td>
-    </tr>`).join('');
+function textoValidade(valor, doc) {
+  const bruto = String(valor || '').trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(bruto)) {
+    const [y, m, d] = bruto.split('-');
+    return `${d}/${m}/${y}`;
+  }
+  return bruto || doc.validade || '____/____/________';
+}
+
+function htmlPdf(doc, empresa, opcoes = {}) {
+  const formato = ['a4', 'meia', '80'].includes(opcoes.formato) ? opcoes.formato : 'a4';
+  const validade = textoValidade(opcoes.validade, doc);
+  const termico = formato === '80';
+  const page = termico
+    ? '@page { size: 80mm auto; margin: 3mm; }'
+    : formato === 'meia'
+      ? '@page { size: 148mm 210mm portrait; margin: 8mm; }'
+      : '@page { size: A4 portrait; margin: 14mm; }';
+  const itens = doc.itens || [];
+  const corpo = termico
+    ? itens.map((it) => `
+      <div class="item">
+        <strong>${it.id_identificador} · ${esc(it.descricao)}</strong>
+        <div>${fmt(it.qtd)} ${esc(it.uni_medida || 'UN')} × ${money(it.prc_unit)}</div>
+        <div class="num">Total ${money(it.total)}</div>
+      </div>`).join('')
+    : `<table><thead><tr>
+        <th>Identificador</th><th>Descrição</th><th>Qtd</th><th>Un</th><th>Unitário</th><th>Total</th>
+      </tr></thead><tbody>${itens.map((it) => `
+        <tr>
+          <td>${it.id_identificador}</td>
+          <td>${esc(it.descricao)}</td>
+          <td class="num">${fmt(it.qtd)}</td>
+          <td>${esc(it.uni_medida || 'UN')}</td>
+          <td class="num">${money(it.prc_unit)}</td>
+          <td class="num">${money(it.total)}</td>
+        </tr>`).join('')}</tbody></table>`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Condicional ${doc.id}</title>
 <style>
-  body{font-family:Segoe UI,sans-serif;color:#152033;margin:24px}
-  h1{font-size:20px;margin:0 0 4px} table{width:100%;border-collapse:collapse;margin-top:16px}
-  th,td{border-bottom:1px solid #d5dbe3;padding:6px 8px;text-align:left;font-size:13px}
-  .num{text-align:right} .muted{color:#5c6b7a;font-size:13px}
-  button{margin-top:18px;padding:8px 14px}
+  ${page}
+  body{font-family:Segoe UI,sans-serif;color:#152033;margin:0;${termico ? 'width:74mm;font-size:12px;' : ''}}
+  h1{font-size:${termico ? '16px' : '20px'};margin:0 0 4px}
+  table{width:100%;border-collapse:collapse;margin-top:12px}
+  th,td{border-bottom:1px solid #d5dbe3;padding:6px 8px;text-align:left;font-size:12px}
+  .num{text-align:right} .muted{color:#5c6b7a;font-size:12px}
+  .item{border-bottom:1px dashed #c5ced8;padding:6px 0}
+  .total{margin-top:12px;font-size:${termico ? '14px' : '16px'}}
+  .assina{margin-top:28px}
+  .linha{border-bottom:1px solid #152033;height:32px;width:${termico ? '100%' : '240px'}}
+  button{margin:12px 0;padding:8px 14px}
   @media print { button{display:none} }
 </style></head><body>
+  <button onclick="window.print()">Imprimir / Salvar PDF</button>
   <h1>Condicional ${doc.id}</h1>
   <div class="muted">${esc(empresa || '')}</div>
   <p>Cliente: <strong>${esc(doc.cliente || '—')}</strong><br>
   Data: ${esc(doc.data)} ${esc(doc.horario)}<br>
+  Validade: <strong>${esc(validade)}</strong><br>
   Vendedor: ${esc(doc.vendedor || '—')}<br>
   Situação: ${esc(doc.status_label)}</p>
   ${doc.obs ? `<p>Obs.: ${esc(doc.obs)}</p>` : ''}
-  <table><thead><tr><th>Código</th><th>Descrição</th><th>Qtd</th><th>Unitário</th><th>Total</th></tr></thead>
-  <tbody>${linhas}</tbody></table>
-  <p><strong>Total: ${money(doc.total)}</strong></p>
-  <button onclick="window.print()">Imprimir / Salvar PDF</button>
+  ${corpo}
+  <p class="total"><strong>Valor total: ${money(doc.total)}</strong></p>
+  <div class="assina"><div class="linha"></div><span>Assinatura do cliente</span></div>
 </body></html>`;
 }
 

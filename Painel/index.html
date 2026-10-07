@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=214" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=214" />
+  <link rel="stylesheet" href="styles.css?v=215" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=215" />
 </head>
 <body>
   <div id="app">
@@ -269,6 +269,7 @@
                   <select id="estoque-grupo-filtro" class="toolbar-select-plain" title="Grupo">
                     <option value="">Grupo</option>
                   </select>
+                  <button type="button" id="btn-filtro-condicional" class="btn small">Com condicional</button>
                 </div>
               </div>
               <div class="panel list-panel list-panel-full">
@@ -450,41 +451,44 @@
         </div>
 
         <div id="page-condicionais" class="page" hidden>
-          <div class="toolbar">
+          <div class="toolbar cond-toolbar">
             <label>Situação
               <select id="cond-status">
                 <option value="reservado">Reservados</option>
               </select>
             </label>
-            <p class="hint" id="cond-aviso" hidden></p>
+            <button type="button" class="btn primary" id="cond-novo-btn">Novo</button>
           </div>
-          <div class="form-grid">
+          <p class="hint" id="cond-aviso">Reservado mantém a quantidade reservada no estoque. Aprovado e reprovado saem desta lista: a baixa já foi feita na venda.</p>
+          <div id="cond-novo" class="cond-novo" hidden>
             <h3 class="section-title">Novo condicional</h3>
-            <label class="full">Cliente
-              <input id="cond-cliente" type="search" placeholder="Nome do cliente" autocomplete="off" />
-            </label>
-            <div id="cond-cliente-lista"></div>
-            <label>Vendedor
-              <select id="cond-vendedor"></select>
-            </label>
-            <label>Observação
-              <input id="cond-obs" maxlength="300" />
-            </label>
-            <label>Identificador da peça
-              <input id="cond-peca" inputmode="numeric" placeholder="ID identificador" />
-            </label>
-            <label>Quantidade
-              <input id="cond-qtd" type="number" min="0.001" step="1" value="1" />
-            </label>
-            <div class="banco-actions">
-              <button type="button" class="btn" id="cond-add-peca">Incluir peça</button>
-              <button type="button" class="btn primary" id="cond-salvar">Lançar condicional</button>
+            <div class="form-grid">
+              <label class="full">Cliente
+                <input id="cond-cliente" type="search" placeholder="Nome do cliente" autocomplete="off" />
+              </label>
+              <div id="cond-cliente-lista" class="full"></div>
+              <label>Vendedor
+                <select id="cond-vendedor"></select>
+              </label>
+              <label>Observação
+                <input id="cond-obs" maxlength="300" />
+              </label>
+              <label>Identificador da peça
+                <input id="cond-peca" inputmode="numeric" placeholder="ID identificador" />
+              </label>
+              <label>Quantidade
+                <input id="cond-qtd" type="number" min="0.001" step="1" value="1" />
+              </label>
+              <div class="banco-actions full">
+                <button type="button" class="btn" id="cond-add-peca">Incluir peça</button>
+                <button type="button" class="btn primary" id="cond-salvar">Lançar condicional</button>
+                <button type="button" class="btn" id="cond-cancelar">Cancelar</button>
+              </div>
+              <p class="hint full" id="cond-form-msg"></p>
+              <div id="cond-novos-itens" class="full"></div>
             </div>
-            <p class="hint" id="cond-form-msg"></p>
-            <div id="cond-novos-itens"></div>
           </div>
-          <h3 class="section-title">Condicionais</h3>
-          <div id="cond-lista" class="item-list"></div>
+          <div id="cond-lista" class="item-list cond-lista"></div>
           <div id="cond-detalhe" hidden></div>
         </div>
 
@@ -529,7 +533,7 @@
 
         <div id="page-usuarios" class="page" hidden>
           <div class="toolbar">
-            <p class="hint">Permissões por módulo. Supervisor sempre tem acesso total (senha definida pela MT Automações).</p>
+            <p class="hint">Só o supervisor cadastra os usuários do painel. Supervisor e MT Entradas já entram com a senha pré-cadastrada.</p>
             <button id="btn-salvar-usuarios" class="btn primary">Salvar usuários</button>
           </div>
           <div class="toolbar users-filters">
@@ -707,12 +711,33 @@
       </div>
     </dialog>
 
+    <dialog id="dlg-cond-pdf" class="dlg">
+      <form method="dialog" class="dlg-card">
+        <h3>Gerar PDF do condicional</h3>
+        <label>Papel
+          <select id="cond-pdf-formato">
+            <option value="a4">A4 retrato</option>
+            <option value="meia">A4 meia folha retrato</option>
+            <option value="80">80 mm (impressora gerencial)</option>
+          </select>
+        </label>
+        <label>Validade
+          <input type="date" id="cond-pdf-validade" />
+        </label>
+        <p class="hint">A4 e meia folha saem em retrato, com linha para o cliente assinar. 80 mm é o cupom da impressora gerencial. O valor total e a validade vão no final.</p>
+        <div class="dlg-actions">
+          <button type="submit" class="btn" value="cancel">Cancelar</button>
+          <button type="submit" class="btn primary" value="ok">Gerar</button>
+        </div>
+      </form>
+    </dialog>
+
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=214"></script>
-  <script src="importacao-nfe.js?v=214"></script>
-  <script src="compras.js?v=214"></script>
-  <script src="condicionais.js?v=214"></script>
-  <script src="app.js?v=214"></script>
+  <script src="vendor/zxing-browser.min.js?v=215"></script>
+  <script src="importacao-nfe.js?v=215"></script>
+  <script src="compras.js?v=215"></script>
+  <script src="condicionais.js?v=215"></script>
+  <script src="app.js?v=215"></script>
 </body>
 </html>

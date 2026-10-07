@@ -10,6 +10,7 @@ const {
   fullPermissoes,
   isMtEntradas,
   SUPERVISOR_SENHA_LEGADA,
+  SENHA_MT_ENTRADAS,
 } = require('./config');
 const { conferirHashSenha } = require('./senha');
 const { isServidorLocal, clientIp } = require('./origem');
@@ -245,12 +246,17 @@ async function login(req, res) {
   const mt = isMtEntradas(user);
   let tokenMt = null;
   if (mt) {
+    const senhaLocal = String(senha) === String(SENHA_MT_ENTRADAS || '');
     const r = await require('./mt-empresas').loginMt(senha);
-    if (r.ok === false && r.status === 401) return falhaLogin(req, res, id);
-    if (r.ok === false || !r.token) {
+    if (r.ok && r.token) {
+      tokenMt = { token: r.token, horas: Number(r.horas) || 12 };
+    } else if (senhaLocal) {
+      tokenMt = null;
+    } else if (r.ok === false && r.status === 401) {
+      return falhaLogin(req, res, id);
+    } else {
       return res.json({ ok: false, error: `Não foi possível conferir a senha MT: ${r.error || 'servidor de licenças indisponível.'}` });
     }
-    tokenMt = { token: r.token, horas: Number(r.horas) || 12 };
   } else {
     if (!user.supervisor && !user.senhaHash) {
       return res.json({ ok: false, error: 'Defina a senha deste usuário em Usuários.' });

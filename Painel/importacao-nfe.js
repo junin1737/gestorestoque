@@ -937,6 +937,9 @@ const ImportacaoNfe = (() => {
     const dlg = $('#dlg-danfe');
     const frame = $('#dlg-danfe-frame');
     if (dlg && frame) {
+      const barra = dlg.querySelector('.dlg-danfe-bar strong');
+      if (barra) barra.textContent = 'Visualizar nota';
+      frame.removeAttribute('srcdoc');
       frame.src = url;
       if (!dlg.open) dlg.showModal();
       return;
@@ -965,15 +968,16 @@ const ImportacaoNfe = (() => {
       </tr>`).join('');
     const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Entrada NF ${esc(gravacao.nf_numero || '')}</title>
       <style>
-        body { font-family: Segoe UI, sans-serif; color: #1c2430; margin: 24px; }
+        @page { size: A4 portrait; margin: 12mm; }
+        body { font-family: Segoe UI, sans-serif; color: #1c2430; margin: 16px; }
         h1 { font-size: 18px; margin: 0 0 4px; }
         p { margin: 0 0 16px; color: #5c6b80; }
-        table { width: 100%; border-collapse: collapse; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; font-size: 11px; }
         th, td { border-bottom: 1px solid #d7dee8; padding: 6px 8px; text-align: left; vertical-align: top; }
         th { background: #f4f7fb; }
         td.num, th.num { text-align: right; white-space: nowrap; }
         button { margin-bottom: 12px; }
-        @media print { button { display: none; } }
+        @media print { button { display: none; } body { margin: 0; } }
       </style></head><body>
       <button onclick="window.print()">Imprimir / Salvar PDF</button>
       <h1>Entrada NF ${esc(gravacao.nf_numero || '—')}/${esc(gravacao.nf_serie || '—')}</h1>
@@ -989,6 +993,17 @@ const ImportacaoNfe = (() => {
         <tbody>${rows}</tbody>
       </table>
       </body></html>`;
+    bindDanfeDialog();
+    const dlg = $('#dlg-danfe');
+    const frame = $('#dlg-danfe-frame');
+    const barra = dlg?.querySelector('.dlg-danfe-bar strong');
+    if (dlg && frame && typeof dlg.showModal === 'function') {
+      if (barra) barra.textContent = 'Relatório da entrada';
+      frame.removeAttribute('src');
+      frame.srcdoc = html;
+      if (!dlg.open) dlg.showModal();
+      return;
+    }
     const win = window.open('', '_blank');
     if (!win) {
       deps.showMsg?.('Permita pop-ups para abrir o relatório da entrada.');
@@ -1009,6 +1024,9 @@ const ImportacaoNfe = (() => {
     const dlg = $('#dlg-danfe');
     const frame = $('#dlg-danfe-frame');
     if (dlg && frame) {
+      const barra = dlg.querySelector('.dlg-danfe-bar strong');
+      if (barra) barra.textContent = 'Visualizar nota';
+      frame.removeAttribute('srcdoc');
       frame.src = url;
       if (!dlg.open) dlg.showModal();
       return;

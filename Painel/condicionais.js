@@ -41,6 +41,7 @@ const Condicionais = (() => {
         <p><strong>Cliente:</strong> ${esc(doc.cliente || '—')}</p>
         <p><strong>Número:</strong> ${esc(doc.id)}</p>
         <p><strong>Emissão:</strong> ${esc(doc.data || '—')} ${esc(doc.horario || '')}</p>
+        <p><strong>Validade:</strong> ${esc(doc.validade || '—')}</p>
         <p><strong>Vendedor:</strong> ${esc(doc.vendedor || '—')}</p>
         <p><strong>Situação:</strong> ${esc(doc.status_label || '')}</p>
         ${doc.obs ? `<p><strong>Obs.:</strong> ${esc(doc.obs)}</p>` : ''}
@@ -54,7 +55,42 @@ const Condicionais = (() => {
       </div>`;
   }
 
+  function abrirNoDialogo(url, titulo) {
+    const dlg = $('#dlg-danfe');
+    const frame = $('#dlg-danfe-frame');
+    const barra = dlg?.querySelector('.dlg-danfe-bar strong');
+    if (dlg && frame && typeof dlg.showModal === 'function') {
+      if (barra) barra.textContent = titulo || 'PDF';
+      frame.removeAttribute('srcdoc');
+      frame.src = url;
+      if (!dlg.open) dlg.showModal();
+      return;
+    }
+    window.open(url, '_blank', 'noopener');
+  }
+
   async function abrirPdf(id) {
+    const escolha = $('#dlg-cond-pdf');
+    const campo = $('#cond-pdf-validade');
+    if (campo) {
+      const res = await api(`/condicionais/${encodeURIComponent(id)}`);
+      campo.value = res.condicional?.validade_iso || '';
+    }
+    if (escolha && typeof escolha.showModal === 'function') {
+      const formato = await new Promise((resolve) => {
+        const fechar = () => {
+          escolha.removeEventListener('close', fechar);
+          resolve(escolha.returnValue === 'ok' ? ($('#cond-pdf-formato')?.value || 'a4') : '');
+        };
+        escolha.addEventListener('close', fechar);
+        escolha.showModal();
+      });
+      if (!formato) return;
+      const validade = campo?.value || '';
+      const url = `/api/condicionais/${encodeURIComponent(id)}/pdf?formato=${encodeURIComponent(formato)}&validade=${encodeURIComponent(validade)}`;
+      abrirNoDialogo(url, 'Condicional');
+      return;
+    }
     window.open(`/api/condicionais/${encodeURIComponent(id)}/pdf`, '_blank', 'noopener');
   }
 
@@ -80,7 +116,13 @@ const Condicionais = (() => {
     });
   }
 
+  function fecharNovo() {
+    const box = $('#cond-novo');
+    if (box) box.hidden = true;
+  }
+
   async function mostrarDetalhe(id) {
+    fecharNovo();
     const box = $('#cond-detalhe');
     if (!box) return;
     box.hidden = false;
@@ -117,10 +159,7 @@ const Condicionais = (() => {
       sel.value = [...sel.options].some((o) => o.value === atual) ? atual : 'reservado';
       sel.dataset.pronto = '1';
     }
-    if (aviso) {
-      aviso.hidden = !res.aviso;
-      aviso.textContent = res.aviso || '';
-    }
+    if (aviso && res.aviso) aviso.textContent = res.aviso;
     const itens = res.itens || [];
     if (!itens.length) {
       lista.innerHTML = '<p class="empty">Nenhum condicional nesta situação.</p>';
@@ -254,10 +293,25 @@ const Condicionais = (() => {
       if ($('#cond-cliente')) $('#cond-cliente').value = '';
       if ($('#cond-obs')) $('#cond-obs').value = '';
       renderItensNovos();
-      if (msg) msg.textContent = `Condicional ${res.id} lançado.`;
+      if (msg) msg.textContent = '';
+      const aviso = $('#cond-aviso');
+      if (aviso) aviso.textContent = `Condicional ${res.id} lançado como reservado. A quantidade fica reservada no estoque.`;
+      fecharNovo();
+      const sel = $('#cond-status');
+      if (sel) sel.value = 'reservado';
       abrirLista();
-      mostrarDetalhe(res.id);
     });
+    $('#cond-novo-btn')?.addEventListener('click', () => {
+      const box = $('#cond-novo');
+      const det = $('#cond-detalhe');
+      if (det) det.hidden = true;
+      if (box) {
+        box.hidden = false;
+        $('#cond-cliente')?.focus();
+      }
+      carregarVendedores();
+    });
+    $('#cond-cancelar')?.addEventListener('click', () => fecharNovo());
     $('#cond-status')?.addEventListener('change', () => abrirLista());
     $('#dlg-condicional-fechar')?.addEventListener('click', () => {
       const dlg = $('#dlg-condicional');
@@ -275,6 +329,9 @@ const Condicionais = (() => {
   }
 
   function onPageEnter() {
+    fecharNovo();
+    const det = $('#cond-detalhe');
+    if (det) det.hidden = true;
     carregarVendedores();
     abrirLista();
     renderItensNovos();
