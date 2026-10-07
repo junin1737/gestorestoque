@@ -3,7 +3,7 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const { app, dialog, BrowserWindow, shell } = require('electron');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const edicao = require('./edicao');
 
@@ -246,25 +246,29 @@ Log 'fim'
 
 function aplicarAtualizacaoSilenciosa(setupPath) {
   desbloquearDownload(setupPath);
-  const scriptPath = path.join(app.getPath('temp'), 'gestor-atualizar.ps1');
-  const logPath = path.join(app.getPath('temp'), 'gestor-atualizar.log');
-  const ps = scriptInstalando({
+  const dir = app.getPath('temp');
+  const scriptPath = path.join(dir, 'gestor-atualizar.ps1');
+  const cmdPath = path.join(dir, 'gestor-atualizar.cmd');
+  const logPath = path.join(dir, 'gestor-atualizar.log');
+  const task = 'GestorEstoqueAtualizar';
+  fs.writeFileSync(scriptPath, `\uFEFF${scriptInstalando({
     pid: process.pid,
     setup: setupPath,
     exe: process.execPath,
     nome: edicao.NOME,
     log: logPath,
-  });
-  fs.writeFileSync(scriptPath, `\uFEFF${ps}`, 'utf8');
-  // start solta a janela do processo do Electron, que precisa fechar para os arquivos serem trocados.
-  const child = spawn(process.env.ComSpec || 'cmd.exe', [
-    '/d', '/c', `start "" powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${scriptPath}"`,
-  ], {
-    detached: true,
-    stdio: 'ignore',
-    windowsHide: true,
-  });
-  child.unref();
+  })}`, 'utf8');
+  fs.writeFileSync(cmdPath, [
+    '@echo off',
+    `powershell.exe -STA -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "${scriptPath}"`,
+    `schtasks /Delete /F /TN ${task}`,
+  ].join('\r\n'), 'utf8');
+  // A tarefa do Windows não morre quando o Gestor fecha. Sem isso a janela Instalando some junto com o aplicativo.
+  const criar = spawnSync('schtasks', ['/Create', '/F', '/TN', task, '/SC', 'ONCE', '/ST', '00:00', '/IT', '/TR', cmdPath], { windowsHide: true });
+  const rodar = spawnSync('schtasks', ['/Run', '/TN', task], { windowsHide: true });
+  if ((criar.status !== 0) || (rodar.status !== 0)) {
+    throw new Error('Não foi possível abrir a janela Instalando.');
+  }
 }
 
 async function launchInstaller(exePath) {
