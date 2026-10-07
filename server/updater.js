@@ -165,21 +165,15 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
+function desbloquearDownload(arquivo) {
+  try { fs.unlinkSync(`${arquivo}:Zone.Identifier`); } catch { /* sem marca de download */ }
+}
+
 function aplicarAtualizacaoSilenciosa(setupPath) {
-  const exe = process.execPath;
-  const pid = process.pid;
-  const scriptPath = path.join(app.getPath('temp'), 'gestor-atualizar.ps1');
-  const ps = [
-    "$ErrorActionPreference = 'SilentlyContinue'",
-    `Wait-Process -Id ${pid} -Timeout 180`,
-    `Start-Process -FilePath ${JSON.stringify(setupPath)} -ArgumentList '/S' -Wait`,
-    'Start-Sleep -Seconds 2',
-    `Start-Process -FilePath ${JSON.stringify(exe)}`,
-  ].join('\r\n');
-  fs.writeFileSync(scriptPath, ps, 'utf8');
-  const child = spawn('powershell.exe', [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', scriptPath,
-  ], {
+  desbloquearDownload(setupPath);
+  // cmd start tira o instalador do processo do Electron. Sem isso o app fecha e mata o instalador junto.
+  const exe = `"${String(setupPath).replace(/"/g, '')}"`;
+  const child = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/c', `start "" ${exe} /S --force-run`], {
     detached: true,
     stdio: 'ignore',
     windowsHide: true,
@@ -397,7 +391,7 @@ async function promptAndUpdate(parentWindow) {
 
   const progressWin = new BrowserWindow({
     width: 420,
-    height: 140,
+    height: 180,
     resizable: false,
     minimizable: false,
     maximizable: false,
@@ -410,6 +404,7 @@ async function promptAndUpdate(parentWindow) {
   progressWin.setMenuBarVisibility(false);
   const html = encodeURIComponent(`<!doctype html><html><body style="font-family:Segoe UI,sans-serif;padding:20px;color:#152033">
     <h3 style="margin:0 0 10px">Baixando atualização…</h3>
+    <p style="margin:8px 0 0;font-size:13px">Se o Windows pedir permissão, aceite. O aplicativo fecha, instala e reabre sozinho.</p>
     <div id="p">0%</div>
     <div style="height:10px;background:#e5eaf1;border-radius:6px;overflow:hidden;margin-top:10px">
       <div id="b" style="height:100%;width:0;background:#2f6fed"></div>
@@ -444,7 +439,7 @@ async function promptAndUpdate(parentWindow) {
       aplicarAtualizacaoSilenciosa(dest);
       setTimeout(() => {
         try { app.quit(); } catch { /* ignore */ }
-      }, 600);
+      }, 1500);
       return { ok: true, updated: true, silent: true, info, path: dest };
     } catch (err) {
       await dialog.showMessageBox(win || undefined, {
