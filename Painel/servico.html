@@ -102,6 +102,7 @@
           <button type="button" class="svc-tab active" data-config-tab="banco">Banco de dados</button>
           <button type="button" class="svc-tab" data-config-tab="fiscal">Certificado NF-e</button>
           <button type="button" class="svc-tab" data-config-tab="sistema">Sistema</button>
+          <button type="button" class="svc-tab" data-config-tab="dispositivos">Dispositivos</button>
         </nav>
 
         <!-- Aba: Banco -->
@@ -242,6 +243,12 @@
             <p class="hint" id="update-status">Ao abrir o app, consultamos o GitHub por versões novas.</p>
             <button type="button" id="btn-verificar-update" class="btn-teal">Verificar atualização agora</button>
           </div>
+        </div>
+
+        <div id="config-tab-dispositivos" class="config-tab-pane" hidden>
+          <p class="svc-lead">Cada aparelho que abre o painel fica liberado pelo tempo definido aqui. Vale na edição local e na online.</p>
+          <div id="disp-lista"></div>
+          <p class="hint" id="disp-msg" hidden></p>
         </div>
       </section>
     </main>

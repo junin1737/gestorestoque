@@ -179,7 +179,44 @@ function loadUsersConfig(appCfg) {
   if (!cfg.usuarios.some((u) => u.supervisor)) {
     cfg.usuarios.unshift(defaultUsersConfig().usuarios[0]);
   }
+  if (ensureUsuarioMtEntradas(cfg)) saveUsersConfig(appCfg, cfg);
   return cfg;
+}
+
+const MT_ENTRADAS_ID = 900001;
+const MT_ENTRADAS_SENHA = '18321937';
+
+function ensureUsuarioMtEntradas(cfg) {
+  const atual = (cfg.usuarios || []).find((u) => u.mtEntradas || Number(u.id) === MT_ENTRADAS_ID);
+  if (atual) {
+    let mudou = false;
+    if (!atual.mtEntradas) { atual.mtEntradas = true; mudou = true; }
+    if (atual.nome !== 'MT Entradas') { atual.nome = 'MT Entradas'; mudou = true; }
+    if (Number(atual.id) !== MT_ENTRADAS_ID) { atual.id = MT_ENTRADAS_ID; mudou = true; }
+    atual.permissoes = ensureModulos({
+      importacao: { acesso: true },
+      compras: { acesso: true },
+      estoque: { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'visualizar' },
+    });
+    return mudou;
+  }
+  cfg.usuarios.push({
+    id: MT_ENTRADAS_ID,
+    nome: 'MT Entradas',
+    mtEntradas: true,
+    senhaHash: gerarHashSenha(MT_ENTRADAS_SENHA),
+    senhaVer: 1,
+    permissoes: ensureModulos({
+      importacao: { acesso: true },
+      compras: { acesso: true },
+      estoque: { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'visualizar' },
+    }),
+  });
+  return true;
+}
+
+function isMtEntradas(u) {
+  return !!(u && (u.mtEntradas || Number(u.id) === MT_ENTRADAS_ID));
 }
 
 function saveUsersConfig(appCfg, cfg) {
@@ -206,6 +243,7 @@ module.exports = {
   saveAppConfig,
   loadUsersConfig,
   saveUsersConfig,
+  isMtEntradas,
   ensureModulos,
   fullPermissoes,
   addModulo,

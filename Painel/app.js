@@ -161,10 +161,92 @@ function novaChaveIdempotencia() {
 
 const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
 
+function deviceId() {
+  const key = 'gestor-device-id';
+  try {
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = (crypto.randomUUID && crypto.randomUUID()) || novaChaveIdempotencia();
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return 'navegador';
+  }
+}
+
+let stateCfgTab = 'tema';
+let cfgMontada = false;
+
+function setCfgTab(tab) {
+  stateCfgTab = tab || 'tema';
+  state.cfgTab = stateCfgTab;
+  $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
+  ['tema', 'tributos', 'saida'].forEach((id) => {
+    const pane = $(`#cfg-tab-${id}`);
+    if (pane) pane.hidden = id !== stateCfgTab;
+  });
+  const salvar = $('#cfg-params-salvar');
+  if (salvar) salvar.hidden = stateCfgTab === 'tema';
+  if (stateCfgTab !== 'tema' && !cfgMontada) {
+    cfgMontada = true;
+    window.ImportacaoNfe?.mountConfig?.();
+  }
+}
+
+async function registrarEmpresaMt() {
+  if (!state.usuario?.mtEntradas) return;
+  try {
+    await api('/mt/empresas/registrar', { method: 'POST', body: { url: location.origin } });
+  } catch { /* lista segue com o que o servidor já tiver */ }
+}
+
+async function loadEmpresas() {
+  const box = $('#empresas-lista');
+  if (!box) return;
+  box.innerHTML = '<p class="empty">Carregando empresas…</p>';
+  const res = await api('/mt/empresas');
+  const itens = res.itens || [];
+  if (!res.ok && res.error) {
+    box.innerHTML = `<p class="empty">${escapeHtml(res.error)}</p>`;
+    return;
+  }
+  if (!itens.length) {
+    box.innerHTML = '<p class="empty">Nenhuma empresa gravada ainda. Entre em cada cliente com MT Entradas para ela aparecer aqui.</p>';
+    return;
+  }
+  box.innerHTML = itens.map((e) => `
+    <article class="imp-item-row">
+      <div class="imp-item-main">
+        <strong>${escapeHtml(e.nome || 'Empresa')}</strong>
+        <span class="hint">NSE ${escapeHtml(e.nse || '—')} · CNPJ ${escapeHtml(e.cnpj || '—')}</span>
+      </div>
+      <span class="chip ${e.online ? 'ok' : 'pending'}">${e.online ? 'Online' : 'Off'}</span>
+      <button type="button" class="btn small" data-empresa-url="${escapeAttr(e.url || '')}" data-empresa-nome="${escapeAttr(e.nome || '')}" ${e.url ? '' : 'disabled'}>Entrar</button>
+    </article>
+  `).join('');
+  $$('[data-empresa-url]', box).forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const url = btn.dataset.empresaUrl;
+      const nome = btn.dataset.empresaNome || 'esta empresa';
+      if (!url) {
+        showMsg('Esta empresa ainda não tem o endereço de acesso.');
+        return;
+      }
+      const ok = await showConfirm(
+        `Entrar em ${nome}? O login será pedido de novo para confirmar que você está na empresa certa.`,
+        { okLabel: 'Entrar', cancelLabel: 'Cancelar' }
+      );
+      if (!ok) return;
+      location.href = url.endsWith('/') ? url : `${url}/`;
+    });
+  });
+}
+
 async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const grava = method !== 'GET' && method !== 'HEAD';
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  const headers = { 'Content-Type': 'application/json', 'X-Device-Id': deviceId(), ...(options.headers || {}) };
   if (state.usuario) headers['X-Gestor-Usuario'] = String(state.usuario.id);
   // Mesma chave nas repetições: se a resposta se perdeu na rede, o servidor não grava duas vezes.
   if (grava) headers['Idempotency-Key'] = novaChaveIdempotencia();
@@ -195,6 +277,7 @@ async function api(path, options = {}) {
     return { ok: false, error: `Resposta inválida da API (${res.status})` };
   }
   if (data && data.code === 'LICENCA_BLOQUEADA') mostrarBloqueioLicenca(data.licenca);
+  if (data && data.code === 'DISPOSITIVO') showMsg(data.error || 'Dispositivo fora do prazo.');
   if (res.status === 401 && (data?.code === 'AUTH' || data?.code === 'SESSAO_TROCADA') && state.usuario) {
     sessaoEncerrada(data.error);
   }
@@ -623,7 +706,9 @@ function fillUserChrome() {
   if ($('#user-nome')) $('#user-nome').textContent = nome;
   if ($('#side-user-nome')) $('#side-user-nome').textContent = nome;
   if ($('#side-user-role')) {
-    $('#side-user-role').textContent = state.usuario?.supervisor ? 'Supervisor' : 'Usuário';
+    $('#side-user-role').textContent = state.usuario?.mtEntradas
+      ? 'MT Entradas'
+      : (state.usuario?.supervisor ? 'Supervisor' : 'Usuário');
   }
   if ($('#side-user-avatar')) $('#side-user-avatar').textContent = initialsFromName(nome);
 }
@@ -655,6 +740,10 @@ function enterApp() {
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
   if (cfgMais) cfgMais.hidden = !isNativeApk();
+  const showEmp = !!state.usuario?.mtEntradas;
+  if ($('#nav-empresas')) $('#nav-empresas').hidden = !showEmp;
+  if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = !showEmp;
+  if (showEmp) registrarEmpresaMt();
   showPage('dashboard');
   loadUnidades();
 }
@@ -742,6 +831,11 @@ $('#tema-rapido').addEventListener('change', async (e) => {
 $('#ui-scale')?.addEventListener('change', (e) => {
   applyUiScale(e.target.value);
 });
+$$('#cfg-tabs .tab').forEach((btn) => {
+  btn.addEventListener('click', () => setCfgTab(btn.dataset.cfgTab));
+});
+$('#cfg-params-salvar')?.addEventListener('click', () => window.ImportacaoNfe?.saveConfig?.());
+$('#btn-empresas-atualizar')?.addEventListener('click', () => loadEmpresas());
 initUiScale();
 
 function setNavActive(page) {
@@ -809,6 +903,10 @@ async function showPage(page) {
     showMsg('Sem permissão para consultar compras.');
     page = 'dashboard';
   }
+  if (page === 'empresas' && !state.usuario?.mtEntradas) {
+    showMsg('Somente o usuário MT Entradas troca de empresa.');
+    page = 'dashboard';
+  }
 
   const saiaCompras = $('#page-compras') && !$('#page-compras').hidden && page !== 'compras';
   if (saiaCompras) window.Compras?.onPageLeave?.();
@@ -821,6 +919,7 @@ async function showPage(page) {
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
   if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
+  if ($('#page-empresas')) $('#page-empresas').hidden = page !== 'empresas';
   const estActions = $('#topbar-estoque-actions');
   if (estActions) estActions.hidden = page !== 'estoque';
 
@@ -832,8 +931,13 @@ async function showPage(page) {
     $('#page-sub').textContent = 'Permissões por módulo';
     loadUsuarios();
   } else if (page === 'preferencias') {
-    $('#page-title').textContent = 'Preferências';
-    $('#page-sub').textContent = 'Tema e tamanho da tela';
+    $('#page-title').textContent = 'Configurações';
+    $('#page-sub').textContent = 'Tema, tributos e saída';
+    setCfgTab(state.cfgTab || 'tema');
+  } else if (page === 'empresas') {
+    $('#page-title').textContent = 'Empresas';
+    $('#page-sub').textContent = 'Troca de empresa do usuário MT Entradas';
+    loadEmpresas();
   } else if (page === 'alteracoes') {
     $('#page-title').textContent = 'Alterações';
     $('#page-sub').textContent = 'Histórico de saldos editados no painel';
@@ -2841,6 +2945,14 @@ window.ImportacaoNfe?.init({
   fmtNum,
   scrollAppTop,
   startScanner,
+  openConfig: (tab) => {
+    showPage('preferencias');
+    setCfgTab(tab || 'tributos');
+    if (!cfgMontada) {
+      cfgMontada = true;
+      window.ImportacaoNfe?.mountConfig?.();
+    }
+  },
   isSupervisor: () => !!state.usuario?.supervisor,
   getUsuario: () => state.usuario,
 });

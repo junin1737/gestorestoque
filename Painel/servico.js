@@ -47,6 +47,7 @@ function setConfigTab(tab) {
   if (tab === 'fiscal') loadFiscal();
   if (tab === 'banco') refreshDbMaintenance();
   if (tab === 'sistema') loadSobre();
+  if (tab === 'dispositivos') loadDispositivos();
 }
 
 $$('.svc-tab[data-config-tab]').forEach((btn) => {
@@ -56,6 +57,71 @@ $$('.svc-tab[data-config-tab]').forEach((btn) => {
 $$('.svc-nav[data-panel]').forEach((btn) => {
   btn.addEventListener('click', () => setPanel(btn.dataset.panel));
 });
+
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+async function loadDispositivos() {
+  const box = $('#disp-lista');
+  const msg = $('#disp-msg');
+  if (!box) return;
+  const res = await api('/dispositivos');
+  if (!res.ok) {
+    box.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível listar os dispositivos.')}</p>`;
+    return;
+  }
+  const itens = res.itens || [];
+  if (!itens.length) {
+    box.innerHTML = '<p class="hint">Nenhum dispositivo abriu o painel ainda.</p>';
+    return;
+  }
+  box.innerHTML = itens.map((d) => `
+    <div class="sobre-box" data-disp="${esc(d.id)}">
+      <strong>${esc(d.nome)}</strong>
+      <p class="hint">${d.vencido ? 'Prazo encerrado' : 'Liberado'} · último acesso ${esc(d.ultimo_acesso || '—')}</p>
+      <label>Nome
+        <input class="disp-nome" type="text" value="${esc(d.nome)}" maxlength="60" />
+      </label>
+      <label>Dias de acesso
+        <input class="disp-dias" type="number" min="1" max="3650" value="${Number(d.dias || 30)}" />
+      </label>
+      <div class="banco-actions left">
+        <button type="button" class="btn-outline disp-renomear">Renomear</button>
+        <button type="button" class="btn-teal disp-dias-btn">Salvar prazo</button>
+      </div>
+    </div>
+  `).join('');
+  $$('[data-disp]', box).forEach((card) => {
+    const id = card.dataset.disp;
+    card.querySelector('.disp-renomear')?.addEventListener('click', async () => {
+      const nome = card.querySelector('.disp-nome')?.value || '';
+      const out = await api(`/dispositivos/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: { nome },
+      });
+      if (msg) {
+        msg.hidden = false;
+        msg.textContent = out.ok ? 'Nome atualizado.' : (out.error || 'Falha ao renomear.');
+      }
+      if (out.ok) loadDispositivos();
+    });
+    card.querySelector('.disp-dias-btn')?.addEventListener('click', async () => {
+      const dias = Number(card.querySelector('.disp-dias')?.value || 30);
+      const out = await api(`/dispositivos/${encodeURIComponent(id)}`, {
+        method: 'PUT',
+        body: { dias },
+      });
+      if (msg) {
+        msg.hidden = false;
+        msg.textContent = out.ok ? `Prazo de ${dias} dia(s) salvo.` : (out.error || 'Falha ao salvar o prazo.');
+      }
+      if (out.ok) loadDispositivos();
+    });
+  });
+}
 
 async function refreshNetwork() {
   const net = await api('/network');

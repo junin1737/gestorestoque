@@ -147,16 +147,25 @@ function createWindow() {
     esconderNaBandeja();
   });
 
+  function pedirAtualizacao() {
+    if (updateCheckStarted) return;
+    updateCheckStarted = true;
+    setTimeout(() => {
+      const alvo = mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() ? mainWindow : null;
+      promptAndUpdate(alvo).catch((err) => {
+        console.warn('Falha na verificação de atualização:', err?.message || err);
+      });
+    }, 800);
+  }
+
   mainWindow.once('ready-to-show', () => {
-    if (!iniciouOculto) mainWindow.show();
-    if (!updateCheckStarted) {
-      updateCheckStarted = true;
-      setTimeout(() => {
-        promptAndUpdate(mainWindow.isVisible() ? mainWindow : null).catch((err) => {
-          console.warn('Falha na verificação de atualização:', err?.message || err);
-        });
-      }, 1800);
+    if (!iniciouOculto) {
+      mainWindow.show();
+      pedirAtualizacao();
     }
+  });
+  mainWindow.on('show', () => {
+    if (iniciouOculto) pedirAtualizacao();
   });
 
   const serviceUrl = `http://127.0.0.1:${PORT}/servico.html`;

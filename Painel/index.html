@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=207" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=207" />
+  <link rel="stylesheet" href="styles.css?v=208" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=208" />
 </head>
 <body>
   <div id="app">
@@ -140,9 +140,13 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M4 19c.4-3 2.4-5 5-5s4.6 2 5 5M16.5 8.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM20 19c-.3-2.2-1.6-3.7-3.5-3.7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Usuários
           </button>
+          <button class="nav-btn" data-page="empresas" id="nav-empresas" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V6.5L12 3l8 3.5V20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M9 20v-6h6v6" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
+            Empresas
+          </button>
           <button class="nav-btn" data-page="preferencias" id="nav-preferencias">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M12 3.5v2.2M12 18.3V20.5M4.6 6.5l1.6 1.6M17.8 16l1.6 1.6M3.5 12h2.2M18.3 12H20.5M4.6 17.5l1.6-1.6M17.8 8.1l1.6-1.6" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
-            Preferências
+            Configurações
           </button>
         </nav>
         <div class="side-bottom">
@@ -342,10 +346,6 @@
                 <button type="button" class="btn" id="imp-btn-manual">Lançamento manual</button>
               </div>
             </div>
-            <button type="button" class="imp-params-card" id="imp-btn-params">
-              <strong>Parâmetros CFOP / tributos</strong>
-              <span>Conversão de CFOP de entrada, CSOSN e padrões de saída.</span>
-            </button>
             <div class="imp-sessoes-panel">
               <h3>Em conferência</h3>
               <div id="imp-sessoes-lista"></div>
@@ -397,7 +397,6 @@
             <div class="imp-sessao-toolbar">
               <button type="button" class="btn" id="imp-voltar-inicio">Lista</button>
               <button type="button" class="btn" id="imp-btn-ver-pdf" title="Visualizar nota">DANFE</button>
-              <button type="button" class="btn" id="imp-btn-params-sessao" title="Parâmetros CFOP">CFOP</button>
               <button type="button" class="btn primary is-disabled" id="imp-btn-confirmar" aria-disabled="true">Gravar nota</button>
             </div>
             <div class="imp-tabs" id="imp-tabs">
@@ -415,6 +414,7 @@
                 <div class="imp-itens-filter">
                   <button type="button" class="seg-btn active" id="imp-itens-todos">Todos</button>
                   <button type="button" class="seg-btn" id="imp-itens-pendentes">Pendentes</button>
+                  <button type="button" class="seg-btn" id="imp-itens-verificados">Verificados</button>
                 </div>
                 <div class="imp-itens-actions">
                   <button type="button" class="btn small" id="imp-btn-conferir-todos">Verificar todos</button>
@@ -485,24 +485,48 @@
         </div>
 
         <div id="page-preferencias" class="page" hidden>
-          <div class="pref-card">
-            <h3>Aparência</h3>
-            <label>Tema
-              <select id="tema-rapido">
-                <option value="claro">Claro</option>
-                <option value="escuro">Escuro</option>
-                <option value="empresa">Empresa</option>
-              </select>
-            </label>
-            <label>Tamanho da tela
-              <select id="ui-scale">
-                <option value="compacto">Compacto</option>
-                <option value="padrao" selected>Padrão</option>
-                <option value="confortavel">Confortável</option>
-                <option value="grande">Grande</option>
-              </select>
-            </label>
+          <div class="tabs cfg-tabs" id="cfg-tabs">
+            <button type="button" class="tab active" data-cfg-tab="tema">Tema</button>
+            <button type="button" class="tab" data-cfg-tab="tributos">Conversão de Tributos</button>
+            <button type="button" class="tab" data-cfg-tab="saida">Saída</button>
           </div>
+          <div id="cfg-tab-tema" class="cfg-tab">
+            <div class="pref-card">
+              <h3>Tema</h3>
+              <label>Tema
+                <select id="tema-rapido">
+                  <option value="claro">Claro</option>
+                  <option value="escuro">Escuro</option>
+                  <option value="empresa">Empresa</option>
+                </select>
+              </label>
+              <label>Tamanho da tela
+                <select id="ui-scale">
+                  <option value="compacto">Compacto</option>
+                  <option value="padrao" selected>Padrão</option>
+                  <option value="confortavel">Confortável</option>
+                  <option value="grande">Grande</option>
+                </select>
+              </label>
+            </div>
+          </div>
+          <div id="cfg-tab-tributos" class="cfg-tab" hidden>
+            <div id="cfg-tributos-host"></div>
+          </div>
+          <div id="cfg-tab-saida" class="cfg-tab" hidden>
+            <div id="cfg-saida-host"></div>
+          </div>
+          <div class="toolbar">
+            <button type="button" class="btn primary" id="cfg-params-salvar">Salvar parâmetros</button>
+          </div>
+        </div>
+
+        <div id="page-empresas" class="page" hidden>
+          <div class="toolbar">
+            <p class="hint">Empresas em que o usuário MT Entradas já entrou. Online quando o Gestor do cliente está aberto e com internet.</p>
+            <button type="button" class="btn" id="btn-empresas-atualizar">Atualizar</button>
+          </div>
+          <div id="empresas-lista" class="item-list"></div>
         </div>
 
         <nav class="mobile-nav" id="mobile-nav">
@@ -530,7 +554,8 @@
             <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
             <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
-            <button type="button" data-page="preferencias">Preferências</button>
+            <button type="button" data-page="empresas" id="nav-empresas-mobile" hidden>Empresas</button>
+            <button type="button" data-page="preferencias">Configurações</button>
             <button type="button" id="btn-config-servidor-mais" hidden>Configurar servidor</button>
             <button type="button" id="btn-trocar-mobile">Trocar usuário / Sair</button>
           </div>
@@ -604,9 +629,9 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=207"></script>
-  <script src="importacao-nfe.js?v=207"></script>
-  <script src="compras.js?v=207"></script>
-  <script src="app.js?v=207"></script>
+  <script src="vendor/zxing-browser.min.js?v=208"></script>
+  <script src="importacao-nfe.js?v=208"></script>
+  <script src="compras.js?v=208"></script>
+  <script src="app.js?v=208"></script>
 </body>
 </html>

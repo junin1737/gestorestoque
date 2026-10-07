@@ -141,7 +141,7 @@ async function withTransaction(db, fn, { waitTimeout = 15 } = {}) {
 }
 
 /** Tabelas criadas pelo Gestor: só nelas o MAX+1 é aceitável (o Clipp não insere nelas). */
-const TABELAS_GESTOR = new Set(['GESTOR_EST_ALTERACAO', 'TB_MT_REGRA_TRIBUTO']);
+const TABELAS_GESTOR = new Set(['GESTOR_EST_ALTERACAO', 'TB_MT_REGRA_TRIBUTO', 'TB_MT_CONVERSAO']);
 
 async function nextGenId(db, generatorName, tableName, idColumn) {
   const tabela = String(tableName || '').toUpperCase();
@@ -233,6 +233,13 @@ async function ensureSchema(db) {
     await ensureMtRegraTributo(db);
   } catch (err) {
     console.warn('TB_MT_REGRA_TRIBUTO:', err.message);
+  }
+
+  try {
+    const { ensureConversaoGestor } = require('./importacao-conversao-gestor');
+    await ensureConversaoGestor(db);
+  } catch (err) {
+    console.warn('TB_MT_CONVERSAO:', err.message);
   }
 
   schemaReady = true;
