@@ -134,7 +134,9 @@ function showPrompt({ message, password = false, defaultValue = '' } = {}) {
       return;
     }
     text.textContent = String(message || '');
-    input.type = password ? 'password' : 'text';
+    input.type = 'text';
+    mascararSenha(input, !!password);
+    input.setAttribute('autocomplete', 'off');
     input.value = password ? '' : String(defaultValue || '');
     const finish = (value) => {
       btnOk.onclick = null;
@@ -670,19 +672,32 @@ async function loadFuncionarios() {
   }
 }
 
+function mascararSenha(input, mascarar = true) {
+  if (!input) return;
+  if (input.type === 'password') input.type = 'text';
+  input.classList.toggle('senha-mascarada', mascarar);
+  input.classList.toggle('senha-visivel', !mascarar);
+  input.setAttribute('autocomplete', 'off');
+}
+
 $('#toggle-senha').addEventListener('click', () => {
   const input = $('#login-senha');
-  input.type = input.type === 'password' ? 'text' : 'password';
+  mascararSenha(input, !input.classList.contains('senha-mascarada'));
 });
 
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#login-erro').hidden = true;
   const id = Number($('#login-usuario').value);
-  const senha = $('#login-senha').value;
+  const senhaEl = $('#login-senha');
+  const senha = senhaEl.value;
+  senhaEl.value = '';
+  mascararSenha(senhaEl, true);
   state.usuario = null;
   const res = await api('/login', { method: 'POST', body: { id, senha } });
   if (!res.ok) {
+    senhaEl.value = senha;
+    mascararSenha(senhaEl, true);
     $('#login-erro').hidden = false;
     $('#login-erro').textContent = res.error || 'Falha no login';
     return;
@@ -714,6 +729,11 @@ function fillUserChrome() {
 }
 
 function enterApp() {
+  const senhaEl = $('#login-senha');
+  if (senhaEl) {
+    senhaEl.value = '';
+    mascararSenha(senhaEl, true);
+  }
   $('#view-login').hidden = true;
   $('#view-app').hidden = false;
   fillUserChrome();
@@ -1802,7 +1822,7 @@ function renderUsuarios() {
     <div class="user-card" data-idx="${idx}">
       <div class="grid-2">
         <label>Nome<input value="${escapeAttr(u.nome)}" disabled /></label>
-        <label>Nova senha<input type="password" data-field="senha" placeholder="${u.supervisor ? 'Definida pela MT Automações' : (u.temSenha ? '••••••' : 'Definir senha')}" ${u.supervisor ? 'disabled' : ''} /></label>
+        <label>Nova senha<input type="text" class="senha-mascarada" data-field="senha" autocomplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="${u.supervisor ? 'Definida pela MT Automações' : (u.temSenha ? '••••••' : 'Definir senha')}" ${u.supervisor ? 'disabled' : ''} /></label>
       </div>
       <div class="perm-grid">
         <label>Acesso Estoque

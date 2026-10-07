@@ -1,5 +1,5 @@
 {
-  "seed_version": 2,
+  "seed_version": 3,
   "csosn_padrao": "102",
   "saida": {
     "cfop_saida": "",
@@ -47,7 +47,7 @@
     {
       "cfop_origem": "5401",
       "cfop_conv": "1403",
-      "csosn": "102",
+      "csosn": "202",
       "cfop_saida_nfe": "5405",
       "csosn_saida_nfe": "500",
       "cst_saida_nfe": "060",
