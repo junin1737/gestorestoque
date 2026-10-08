@@ -283,6 +283,24 @@
       <tbody id="d-inst"></tbody>
     </table></div>
 
+    <h3>Empresas ligadas</h3>
+    <p class="sub" style="margin-top:0">Cada loja continua no próprio servidor. Ao ligar, os dois CNPJs passam a aparecer juntos na escolha de empresa do login, nos dois Gestores. Uma matriz pode ter várias filiais. Uma filial fica ligada a uma matriz só.</p>
+    <div class="mini"><table>
+      <thead><tr><th>Papel</th><th>Empresa</th><th>Situação</th><th></th></tr></thead>
+      <tbody id="d-vinc-lista"></tbody>
+    </table></div>
+    <div class="linha" style="margin-top:.6rem">
+      <label>Esta empresa é
+        <select id="d-vinc-papel">
+          <option value="matriz">a matriz — adicionar filial</option>
+          <option value="filial">a filial — informar a matriz</option>
+        </select>
+      </label>
+      <label>CNPJ da outra empresa<input id="d-vinc-cnpj" inputmode="numeric" placeholder="00.000.000/0000-00" /></label>
+      <button class="btn ghost" id="d-vinc-ligar" type="button">Ligar</button>
+    </div>
+    <div class="erro" id="d-vinc-erro"></div>
+
     <h3>Licença offline (cliente sem internet)</h3>
     <div class="linha">
       <label>Dias<input type="number" id="d-off-dias" min="1" max="365" value="30" /></label>
@@ -837,6 +855,7 @@ function preencherCliente(r) {
   $('#d-inst').innerHTML = r.instalacoes.length
     ? r.instalacoes.map((i) => `<tr><td>${esc(i.nse || '—')}</td><td>${esc(i.maquina || '—')}</td><td>${esc(i.versao_gestor || '—')}</td><td class="col-hide">${esc(i.versao_clipp || '—')}</td><td>${fmtData(i.ultimo_contato)}</td></tr>`).join('')
     : '<tr><td colspan="5" class="sub">Ainda não conectou.</td></tr>';
+  carregarVinculosCliente();
   $('#d-ev').innerHTML = r.eventos.length
     ? r.eventos.map((ev) => `<tr><td>${fmtData(ev.criado_em)}</td><td>${esc(EVENTO[ev.tipo] || ev.tipo)}</td><td>${esc(ev.detalhe || '')}</td></tr>`).join('')
     : '<tr><td colspan="3" class="sub">Sem eventos.</td></tr>';
@@ -847,9 +866,80 @@ async function abrirCliente(cli) {
   if (!r.ok) { toast(r.error || 'Falha.', true); return; }
   $('#d-off-box').hidden = true;
   $('#d-off-nse').value = '';
+  $('#d-vinc-cnpj').value = '';
+  $('#d-vinc-erro').textContent = '';
   preencherCliente(r);
   if (!$('#dlg-cliente').open) $('#dlg-cliente').showModal();
 }
+
+const SIT_VINC = {
+  ativo: 'Ligadas',
+  aguardando: 'Aguardando as duas lojas',
+  aguardando_matriz: 'Aguardando a matriz',
+  aguardando_filial: 'Aguardando a filial',
+  recusado: 'Recusado',
+};
+
+async function carregarVinculosCliente() {
+  const c = st.atual;
+  const box = $('#d-vinc-lista');
+  if (!c || !box) return;
+  const r = await api(`/vinculos?aplicacao=${encodeURIComponent(c.app)}&cnpj=${c.cnpj}`);
+  if (!r.ok) {
+    box.innerHTML = `<tr><td colspan="4" class="sub">${esc(r.error || 'Falha ao carregar.')}</td></tr>`;
+    return;
+  }
+  const itens = r.itens || [];
+  box.innerHTML = itens.length
+    ? itens.map((v) => {
+      const euMatriz = v.cnpj_matriz === c.cnpj;
+      const outro = euMatriz ? v.nome_filial : v.nome_matriz;
+      const outroCnpj = euMatriz ? v.cnpj_filial : v.cnpj_matriz;
+      const url = euMatriz ? v.url_filial : v.url_matriz;
+      const papel = euMatriz ? 'Filial' : 'Matriz';
+      return `<tr>
+        <td>${papel}</td>
+        <td>${esc(outro || '—')}<div class="sub">${fmtCnpj(outroCnpj)}${url ? '' : ' · ainda sem servidor'}</div></td>
+        <td>${esc(SIT_VINC[v.status] || v.status || '')}</td>
+        <td><button type="button" class="btn sm ghost" data-vinc-del="${v.id}">Remover</button></td>
+      </tr>`;
+    }).join('')
+    : '<tr><td colspan="4" class="sub">Nenhuma empresa ligada.</td></tr>';
+}
+
+$('#d-vinc-ligar').addEventListener('click', async () => {
+  const c = st.atual;
+  const erro = $('#d-vinc-erro');
+  erro.textContent = '';
+  if (!c) return;
+  const outro = String($('#d-vinc-cnpj').value || '').replace(/\D/g, '');
+  if (outro.length !== 14 && outro.length !== 11) {
+    erro.textContent = 'Informe o CNPJ da outra empresa.';
+    return;
+  }
+  const estaEhMatriz = $('#d-vinc-papel').value === 'matriz';
+  const r = await api('/vinculos', {
+    method: 'POST',
+    body: {
+      aplicacao: c.app,
+      cnpjMatriz: estaEhMatriz ? c.cnpj : outro,
+      cnpjFilial: estaEhMatriz ? outro : c.cnpj,
+    },
+  });
+  if (!r.ok) { erro.textContent = r.error || 'Falha ao ligar.'; return; }
+  $('#d-vinc-cnpj').value = '';
+  toast('Empresas ligadas. As duas aparecem na escolha do login.');
+  carregarVinculosCliente();
+});
+
+$('#d-vinc-lista').addEventListener('click', async (e) => {
+  const btn = e.target.closest('button[data-vinc-del]');
+  if (!btn) return;
+  const r = await api(`/vinculos/${btn.dataset.vincDel}`, { method: 'DELETE' });
+  if (!r.ok) { toast(r.error || 'Falha ao remover.', true); return; }
+  toast('Vínculo removido.');
+  carregarVinculosCliente();
+});
 
 /** Prévia da validade com o que está na tela (antes de salvar). */
 function atualizarTextoValidade() {
