@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=222" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=222" />
+  <link rel="stylesheet" href="styles.css?v=223" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=223" />
 </head>
 <body>
   <div id="app">
@@ -67,11 +67,12 @@
               <p class="hint">A senha é a da empresa escolhida. Clique em Entrar para abrir.</p>
             </div>
             <h2>Entrar</h2>
-            <label>Usuário
+            <div class="login-field">
+              <label for="login-usuario">Usuário</label>
               <select id="login-usuario" required>
                 <option value="">Selecione o usuário</option>
               </select>
-            </label>
+            </div>
             <label>Senha
               <div class="input-row">
                 <input id="login-senha" type="text" class="senha-mascarada" name="acesso-painel" placeholder="Digite sua senha" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" />
@@ -747,10 +748,10 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=222"></script>
-  <script src="importacao-nfe.js?v=222"></script>
-  <script src="compras.js?v=222"></script>
-  <script src="condicionais.js?v=222"></script>
-  <script src="app.js?v=222"></script>
+  <script src="vendor/zxing-browser.min.js?v=223"></script>
+  <script src="importacao-nfe.js?v=223"></script>
+  <script src="compras.js?v=223"></script>
+  <script src="condicionais.js?v=223"></script>
+  <script src="app.js?v=223"></script>
 </body>
 </html>
