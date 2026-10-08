@@ -207,7 +207,39 @@ const Condicionais = (() => {
   }
 
   let clienteId = 0;
+  let clienteNome = '';
   let itensNovos = [];
+
+  function marcarCliente(id, nome) {
+    clienteId = Number(id) || 0;
+    clienteNome = clienteId ? String(nome || '') : '';
+    const aviso = $('#cond-cliente-escolhido');
+    if (aviso) aviso.textContent = clienteId ? `Cliente selecionado: ${clienteNome}` : 'Nenhum cliente selecionado.';
+  }
+
+  function botaoSugestao(texto, attrs) {
+    return `<button type="button" class="cond-pick" ${attrs}>${texto}</button>`;
+  }
+
+  function incluirPeca(item) {
+    const qtd = Number($('#cond-qtd')?.value || 0);
+    const msg = $('#cond-form-msg');
+    if (!(qtd > 0)) {
+      if (msg) msg.textContent = 'Informe a quantidade.';
+      return;
+    }
+    itensNovos.push({
+      id_identificador: Number(item.id_identificador),
+      descricao: item.descricao,
+      qtd,
+      prc_venda: Number(item.prc_venda || 0),
+    });
+    if ($('#cond-peca')) $('#cond-peca').value = '';
+    const lista = $('#cond-peca-lista');
+    if (lista) lista.innerHTML = '';
+    if (msg) msg.textContent = '';
+    renderItensNovos();
+  }
 
   function renderItensNovos() {
     const box = $('#cond-novos-itens');
@@ -217,7 +249,7 @@ const Condicionais = (() => {
       return;
     }
     box.innerHTML = itensNovos.map((it, i) => `
-      <div class="item-row">
+      <div class="cond-item">
         <strong>${esc(it.descricao)}</strong>
         <span class="hint">Qtd ${esc(it.qtd)} · ${money(it.prc_venda)}</span>
         <button type="button" class="btn small" data-rm="${i}">Tirar</button>
@@ -231,47 +263,90 @@ const Condicionais = (() => {
   }
 
   function ligarFormulario() {
-    let timer = null;
+    let timerCliente = null;
+    let timerPeca = null;
     $('#cond-cliente')?.addEventListener('input', () => {
-      clienteId = 0;
-      clearTimeout(timer);
-      timer = setTimeout(async () => {
+      marcarCliente(0, '');
+      clearTimeout(timerCliente);
+      timerCliente = setTimeout(async () => {
         const q = $('#cond-cliente').value.trim();
         const box = $('#cond-cliente-lista');
-        if (!box || q.length < 2) {
-          if (box) box.innerHTML = '';
+        if (!box) return;
+        if (q.length < 2) {
+          box.innerHTML = '';
           return;
         }
         const res = await api(`/condicionais/clientes?q=${encodeURIComponent(q)}`);
-        box.innerHTML = (res.itens || []).map((c) => `
-          <button type="button" class="item-row" data-cli="${c.id_cliente}" data-nome="${esc(c.nome)}">${esc(c.nome)}</button>`).join('');
+        if (!res.ok) {
+          box.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível buscar clientes.')}</p>`;
+          return;
+        }
+        const itens = res.itens || [];
+        if (!itens.length) {
+          box.innerHTML = '<p class="hint">Nenhum cliente com esse nome. Escolha um já cadastrado.</p>';
+          return;
+        }
+        box.innerHTML = itens.map((c) => botaoSugestao(esc(c.nome), `data-cli="${c.id_cliente}" data-nome="${esc(c.nome)}"`)).join('');
         box.querySelectorAll('[data-cli]').forEach((btn) => {
           btn.addEventListener('click', () => {
-            clienteId = Number(btn.dataset.cli);
+            marcarCliente(btn.dataset.cli, btn.dataset.nome);
             $('#cond-cliente').value = btn.dataset.nome;
             box.innerHTML = '';
           });
         });
       }, 250);
     });
+    $('#cond-peca')?.addEventListener('input', () => {
+      clearTimeout(timerPeca);
+      timerPeca = setTimeout(async () => {
+        const q = String($('#cond-peca')?.value || '').trim();
+        const box = $('#cond-peca-lista');
+        if (!box) return;
+        if (q.length < 1) {
+          box.innerHTML = '';
+          return;
+        }
+        const res = await api(`/condicionais/produtos?q=${encodeURIComponent(q)}`);
+        if (!res.ok) {
+          box.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível buscar peças.')}</p>`;
+          return;
+        }
+        const itens = res.itens || [];
+        if (!itens.length) {
+          box.innerHTML = '<p class="hint">Nenhuma peça encontrada.</p>';
+          return;
+        }
+        box.innerHTML = itens.map((p) => botaoSugestao(
+          `<strong>${esc(p.id_identificador)}</strong> ${esc(p.descricao)}<span class="hint"> · cód. ${esc(p.id_estoque)} · ${money(p.prc_venda)}</span>`,
+          `data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-prc="${p.prc_venda}"`
+        )).join('');
+        box.querySelectorAll('[data-id]').forEach((btn) => {
+          btn.addEventListener('click', () => incluirPeca({
+            id_identificador: Number(btn.dataset.id),
+            descricao: btn.dataset.desc,
+            prc_venda: Number(btn.dataset.prc || 0),
+          }));
+        });
+      }, 250);
+    });
     $('#cond-add-peca')?.addEventListener('click', async () => {
       const codigo = String($('#cond-peca')?.value || '').trim();
-      const qtd = Number($('#cond-qtd')?.value || 0);
-      if (!codigo || qtd <= 0) return;
-      const res = await api(`/estoque/${encodeURIComponent(codigo)}`);
-      const item = res.item;
-      if (!res.ok || !item) {
-        alert(res.error || 'Produto não encontrado. Use o identificador.');
+      const box = $('#cond-peca-lista');
+      if (!codigo) {
+        if (box) box.innerHTML = '<p class="hint">Informe o nome, o identificador ou o código da peça.</p>';
         return;
       }
-      itensNovos.push({
-        id_identificador: item.id_identificador,
-        descricao: item.descricao_exibicao || item.descricao,
-        qtd,
-        prc_venda: Number(item.prc_venda || 0),
-      });
-      $('#cond-peca').value = '';
-      renderItensNovos();
+      const res = await api(`/condicionais/produtos?q=${encodeURIComponent(codigo)}`);
+      const itens = res.itens || [];
+      if (!res.ok || !itens.length) {
+        if (box) box.innerHTML = `<p class="hint">${esc(res.error || 'Nenhuma peça encontrada.')}</p>`;
+        return;
+      }
+      if (itens.length === 1) {
+        incluirPeca(itens[0]);
+        return;
+      }
+      if (box) box.innerHTML = '<p class="hint">Há mais de uma peça. Toque na lista para incluir.</p>';
     });
     $('#cond-salvar')?.addEventListener('click', async () => {
       const msg = $('#cond-form-msg');
@@ -281,6 +356,7 @@ const Condicionais = (() => {
           id_cliente: clienteId,
           id_funcionario: Number($('#cond-vendedor')?.value || 0),
           obs: $('#cond-obs')?.value || '',
+          validade: $('#cond-validade')?.value || '',
           itens: itensNovos,
         },
       });
@@ -288,10 +364,13 @@ const Condicionais = (() => {
         if (msg) msg.textContent = res.error || 'Não foi possível lançar.';
         return;
       }
-      clienteId = 0;
+      marcarCliente(0, '');
       itensNovos = [];
       if ($('#cond-cliente')) $('#cond-cliente').value = '';
       if ($('#cond-obs')) $('#cond-obs').value = '';
+      if ($('#cond-validade')) $('#cond-validade').value = '';
+      if ($('#cond-peca-lista')) $('#cond-peca-lista').innerHTML = '';
+      if ($('#cond-cliente-lista')) $('#cond-cliente-lista').innerHTML = '';
       renderItensNovos();
       if (msg) msg.textContent = '';
       const aviso = $('#cond-aviso');
@@ -307,6 +386,7 @@ const Condicionais = (() => {
       if (det) det.hidden = true;
       if (box) {
         box.hidden = false;
+        box.scrollIntoView({ block: 'start' });
         $('#cond-cliente')?.focus();
       }
       carregarVendedores();
