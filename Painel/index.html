@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=225" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=225" />
+  <link rel="stylesheet" href="styles.css?v=226" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=226" />
 </head>
 <body>
   <div id="app">
@@ -456,50 +456,72 @@
         </div>
 
         <div id="page-condicionais" class="page" hidden>
-          <div class="toolbar cond-toolbar">
-            <label>Situação
-              <select id="cond-status">
-                <option value="reservado">Reservados</option>
-              </select>
-            </label>
-            <button type="button" class="btn primary" id="cond-novo-btn">Novo</button>
-          </div>
-          <p class="hint" id="cond-aviso">Reservado mantém a quantidade reservada no estoque. Aprovado e reprovado saem desta lista: a baixa já foi feita na venda.</p>
-          <div id="cond-novo" class="cond-novo" hidden>
-            <h3 class="section-title">Novo condicional</h3>
-            <div class="form-grid">
-              <label class="full">Cliente
-                <input id="cond-cliente" type="search" placeholder="Nome do cliente" autocomplete="off" />
-              </label>
-              <p class="hint full" id="cond-cliente-escolhido">Nenhum cliente selecionado.</p>
-              <div id="cond-cliente-lista" class="full cond-sugestoes"></div>
-              <label>Vendedor
-                <select id="cond-vendedor"></select>
-              </label>
-              <label>Validade
-                <input id="cond-validade" type="date" />
-              </label>
-              <label class="full">Observação
-                <input id="cond-obs" maxlength="300" />
-              </label>
-              <label class="full">Peça
-                <input id="cond-peca" type="search" placeholder="Nome, identificador, código, barras ou referência" autocomplete="off" />
-              </label>
-              <div id="cond-peca-lista" class="full cond-sugestoes"></div>
-              <label>Quantidade
-                <input id="cond-qtd" type="number" min="0.001" step="1" value="1" />
-              </label>
-              <div class="banco-actions full">
-                <button type="button" class="btn" id="cond-add-peca">Incluir peça</button>
-                <button type="button" class="btn primary" id="cond-salvar">Lançar condicional</button>
-                <button type="button" class="btn" id="cond-cancelar">Cancelar</button>
+          <div class="cond-split" id="cond-split">
+            <section class="cond-col cond-col-lista">
+              <div class="cond-col-head">
+                <div>
+                  <h2>Condicionais</h2>
+                  <p class="hint" id="cond-aviso">Reservado segura o estoque. Sem quantidade disponível o lançamento não entra.</p>
+                </div>
+                <button type="button" class="btn primary" id="cond-novo-btn">Novo</button>
               </div>
-              <p class="hint full" id="cond-form-msg"></p>
-              <div id="cond-novos-itens" class="full"></div>
-            </div>
+              <label class="cond-filtro">Situação
+                <select id="cond-status">
+                  <option value="reservado">Reservados</option>
+                </select>
+              </label>
+              <div id="cond-lista" class="cond-lista"></div>
+            </section>
+            <section class="cond-col cond-col-painel">
+              <div id="cond-painel-vazio" class="cond-vazio">
+                <strong>Nenhum condicional aberto</strong>
+                <p>Escolha um à esquerda ou clique em Novo para lançar.</p>
+              </div>
+              <div id="cond-novo" class="cond-form" hidden>
+                <div class="cond-form-head">
+                  <h3>Novo condicional</h3>
+                  <button type="button" class="btn small" id="cond-cancelar">Fechar</button>
+                </div>
+                <div class="cond-form-grid">
+                  <label class="full">Cliente
+                    <input id="cond-cliente" type="search" placeholder="Nome do cliente" autocomplete="off" />
+                  </label>
+                  <p class="hint full" id="cond-cliente-escolhido">Nenhum cliente selecionado.</p>
+                  <div id="cond-cliente-lista" class="full cond-sugestoes"></div>
+                  <label>Vendedor
+                    <select id="cond-vendedor"></select>
+                  </label>
+                  <label>Validade
+                    <input id="cond-validade" type="date" />
+                  </label>
+                  <label class="full">Situação
+                    <select id="cond-lanc-status"></select>
+                  </label>
+                  <label class="full">Observação
+                    <input id="cond-obs" maxlength="300" placeholder="Opcional" />
+                  </label>
+                  <label class="full">Peça
+                    <input id="cond-peca" type="search" placeholder="Nome, identificador, código, barras ou referência" autocomplete="off" />
+                  </label>
+                  <p class="hint full" id="cond-peca-estoque"></p>
+                  <div id="cond-peca-lista" class="full cond-sugestoes"></div>
+                  <label>Quantidade
+                    <input id="cond-qtd" type="number" min="0.001" step="1" value="1" />
+                  </label>
+                  <label>Preço
+                    <input id="cond-preco" type="number" min="0.01" step="0.01" placeholder="0,00" />
+                  </label>
+                  <div class="banco-actions full">
+                    <button type="button" class="btn" id="cond-add-peca">Incluir peça</button>
+                    <button type="button" class="btn primary" id="cond-salvar">Lançar condicional</button>
+                  </div>
+                  <p class="hint full" id="cond-form-msg"></p>
+                  <div id="cond-novos-itens" class="full"></div>
+                </div>
+              </div>
+              <div id="cond-detalhe" class="cond-form" hidden></div>
+            </section>
           </div>
-          <div id="cond-lista" class="item-list cond-lista"></div>
-          <div id="cond-detalhe" hidden></div>
         </div>
 
         <!-- ALTERAÇÕES -->
@@ -748,10 +770,10 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=225"></script>
-  <script src="importacao-nfe.js?v=225"></script>
-  <script src="compras.js?v=225"></script>
-  <script src="condicionais.js?v=225"></script>
-  <script src="app.js?v=225"></script>
+  <script src="vendor/zxing-browser.min.js?v=226"></script>
+  <script src="importacao-nfe.js?v=226"></script>
+  <script src="compras.js?v=226"></script>
+  <script src="condicionais.js?v=226"></script>
+  <script src="app.js?v=226"></script>
 </body>
 </html>

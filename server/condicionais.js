@@ -281,9 +281,10 @@ async function buscarPecas(q) {
       )`).join(' AND ');
       params = lista.flatMap((p) => [p, p, p]);
     }
+    const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
     const rows = await query(db, `
       SELECT FIRST 20 I.ID_IDENTIFICADOR, E.ID_ESTOQUE, E.DESCRICAO, E.PRC_VENDA,
-             P.COD_BARRA, P.REFERENCIA,
+             P.COD_BARRA, P.REFERENCIA, P.QTD_ATUAL${temReserv ? ', P.QTD_RESERV' : ''},
              E.GRADE_SERIE, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
       FROM ${t.estoque} E
       JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
@@ -299,6 +300,8 @@ async function buscarPecas(q) {
       cod_barras: String(r.COD_BARRA || '').trim(),
       referencia: String(r.REFERENCIA || '').trim(),
       prc_venda: num(r.PRC_VENDA),
+      qtd_atual: num(r.QTD_ATUAL),
+      qtd_disponivel: disponivelDe(r, temReserv),
     }));
   });
 }
@@ -320,7 +323,33 @@ async function listarVendedores() {
   });
 }
 
-async function criar({ idCliente, idFuncionario, obs, itens, validade }) {
+function disponivelDe(row, temReserv) {
+  const atual = num(row?.QTD_ATUAL);
+  const reserv = temReserv ? num(row?.QTD_RESERV) : 0;
+  return Math.round((atual - reserv) * 1000) / 1000;
+}
+
+function textoQtd(n) {
+  return num(n).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+}
+
+async function resolverStatus(db, idStatus) {
+  if (num(idStatus)) {
+    const row = await query(db, `
+      SELECT ID_STATUS FROM TB_PED_VENDA_STATUS
+      WHERE ID_STATUS = ? AND COALESCE(STATUS, 'A') = 'A'`, [num(idStatus)]);
+    if (!row.length) throw new Error('Situação do condicional inválida.');
+    return num(row[0].ID_STATUS);
+  }
+  const st = await query(db, `
+    SELECT FIRST 1 ID_STATUS FROM TB_PED_VENDA_STATUS
+    WHERE TRIM(RESERVA) = 'S' AND COALESCE(STATUS, 'A') = 'A'
+    ORDER BY CASE WHEN UPPER(DESCRICAO) CONTAINING 'RESERV' THEN 0 ELSE 1 END, ID_STATUS`);
+  if (!st.length) throw new Error('Não há status de pedido configurado para reservar estoque.');
+  return num(st[0].ID_STATUS);
+}
+
+async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus }) {
   const itensOk = (itens || []).map((it) => ({
     id: num(it.id_identificador || it.id),
     qtd: num(it.qtd),
@@ -337,12 +366,8 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade }) {
     if (!temValidade) throw new Error('Esta base não tem o campo de validade no pedido.');
     const t = writeTargets(appCfg)[0]?.tables;
     if (!t) throw new Error('Estoque não encontrado nesta base.');
-    const st = await query(db, `
-      SELECT FIRST 1 ID_STATUS FROM TB_PED_VENDA_STATUS
-      WHERE TRIM(RESERVA) = 'S' AND COALESCE(STATUS, 'A') = 'A'
-      ORDER BY CASE WHEN UPPER(DESCRICAO) CONTAINING 'RESERV' THEN 0 ELSE 1 END, ID_STATUS`);
-    if (!st.length) throw new Error('Não há status de pedido configurado para reservar estoque.');
-    const idStatus = num(st[0].ID_STATUS);
+    const idStatusPedido = await resolverStatus(db, idStatus);
+    const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
     const mod = await query(db, `
       SELECT FIRST 1 P.ID_MODULO
       FROM TB_PEDIDO_VENDA P
@@ -358,7 +383,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade }) {
           const colsValidade = temValidade ? ', DT_VALIDA' : '';
           const valValidade = temValidade ? ', ?' : '';
           const paramsPedido = [
-            num(idCliente), num(idFuncionario), id, idStatus, idModulo,
+            num(idCliente), num(idFuncionario), id, idStatusPedido, idModulo,
             String(obs || '').slice(0, 300) || null,
           ];
           if (temValidade) paramsPedido.push(dtValidade);
@@ -368,15 +393,30 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade }) {
               ID_PARCELA, ID_FMAPGTO, ID_STATUS, ID_MODULO, ORIGEM,
               UPDATED_INTEGRADORA, ENVIAR_INTEGRADORA, OBSERVACAO${colsValidade}
             ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, 1, 1, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?${valValidade})`, paramsPedido);
+          const pedidoPorId = new Map();
+          for (const it of itensOk) pedidoPorId.set(it.id, (pedidoPorId.get(it.id) || 0) + it.qtd);
+          const estoqueVisto = new Set();
           for (const it of itensOk) {
             const prod = await query(tx, `
-              SELECT FIRST 1 E.PRC_VENDA, P.PRC_CUSTO, P.COD_BARRA
+              SELECT FIRST 1 E.DESCRICAO, E.PRC_VENDA, E.PRC_CUSTO, P.COD_BARRA, P.QTD_ATUAL
+                     ${temReserv ? ', P.QTD_RESERV' : ''}
               FROM ${t.produto} P
               JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
               JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
               WHERE P.ID_IDENTIFICADOR = ?`, [it.id]);
             if (!prod.length) throw new Error(`Produto ${it.id} não encontrado.`);
+            const nome = String(prod[0].DESCRICAO || it.id).trim();
+            if (!estoqueVisto.has(it.id)) {
+              estoqueVisto.add(it.id);
+              const disponivel = disponivelDe(prod[0], temReserv);
+              const pedido = pedidoPorId.get(it.id) || it.qtd;
+              if (!(disponivel > 0)) throw new Error(`${nome} está sem estoque. Não é possível lançar.`);
+              if (pedido > disponivel + 0.0001) {
+                throw new Error(`${nome} tem ${textoQtd(disponivel)} em estoque. Não é possível lançar ${textoQtd(pedido)}.`);
+              }
+            }
             const prc = it.prc > 0 ? it.prc : num(prod[0].PRC_VENDA);
+            if (!(prc > 0)) throw new Error(`Informe o preço de ${nome}.`);
             const idItem = await nextGenId(tx, 'GEN_TB_PED_VENDA_ITEM_ID', 'TB_PED_VENDA_ITEM', 'ID_ITEMPED');
             await query(tx, `
               INSERT INTO TB_PED_VENDA_ITEM (
@@ -547,6 +587,29 @@ function money(n) {
   return num(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
+async function alterarStatus(id, idStatus) {
+  const codigo = num(id);
+  const status = num(idStatus);
+  if (!codigo) throw new Error('Condicional inválido.');
+  if (!status) throw new Error('Informe a situação.');
+  return withDb(async (db) => {
+    const st = await query(db, `
+      SELECT ID_STATUS, DESCRICAO, RESERVA
+      FROM TB_PED_VENDA_STATUS
+      WHERE ID_STATUS = ? AND COALESCE(STATUS, 'A') = 'A'`, [status]);
+    if (!st.length) throw new Error('Situação inválida.');
+    const existe = await query(db, 'SELECT ID_PEDIDO FROM TB_PEDIDO_VENDA WHERE ID_PEDIDO = ?', [codigo]);
+    if (!existe.length) throw new Error('Condicional não encontrado.');
+    await query(db, 'UPDATE TB_PEDIDO_VENDA SET ID_STATUS = ? WHERE ID_PEDIDO = ?', [status, codigo]);
+    return {
+      id: codigo,
+      id_status: status,
+      status_label: String(st[0].DESCRICAO || '').trim(),
+      reserva: reservaSim(st[0].RESERVA),
+    };
+  });
+}
+
 function textoWhatsapp(doc) {
   const linhas = (doc.itens || []).map((it) => `${it.descricao} · qtd ${fmt(it.qtd)} · ${money(it.total)}`);
   return [
@@ -567,6 +630,7 @@ module.exports = {
   buscarPecas,
   listarVendedores,
   criar,
+  alterarStatus,
   htmlPdf,
   lojaEmitente,
   textoWhatsapp,

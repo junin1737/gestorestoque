@@ -2542,9 +2542,19 @@ router.post('/condicionais', LANCAR_CONDICIONAL, async (req, res) => {
       obs: req.body?.obs,
       validade: req.body?.validade,
       itens: req.body?.itens,
+      idStatus: req.body?.id_status,
       usuario: req.usuario?.nome || '',
     });
     res.json({ ok: true, ...criado });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/condicionais/:id/status', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    const atualizado = await condicionais.alterarStatus(req.params.id, req.body?.id_status);
+    res.json({ ok: true, ...atualizado });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
