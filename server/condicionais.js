@@ -257,16 +257,33 @@ async function buscarPecas(q) {
     let where;
     let params;
     if (soNumero) {
-      where = `(I.ID_IDENTIFICADOR = ? OR E.ID_ESTOQUE = ? OR TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) = ?)`;
-      params = [Number(termo), Number(termo), termo];
+      const n = Number(termo);
+      const cabeInteiro = Number.isSafeInteger(n) && n <= 2147483647;
+      const longo = termo.length > 5;
+      where = `(
+        ${cabeInteiro ? 'I.ID_IDENTIFICADOR = ? OR E.ID_ESTOQUE = ? OR ' : ''}
+        TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) = ?
+        OR TRIM(CAST(P.REFERENCIA AS VARCHAR(60))) = ?
+        ${longo ? `OR TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) CONTAINING ?
+        OR TRIM(CAST(P.REFERENCIA AS VARCHAR(60))) CONTAINING ?` : ''}
+      )`;
+      params = [];
+      if (cabeInteiro) params.push(n, n);
+      params.push(termo, termo);
+      if (longo) params.push(termo, termo);
     } else {
       const termos = termo.split(/\s+/).map((p) => p.trim()).filter((p) => p.length >= 2);
       const lista = termos.length ? termos : [termo];
-      where = lista.map(() => 'UPPER(E.DESCRICAO) CONTAINING UPPER(?)').join(' AND ');
-      params = lista;
+      where = lista.map(() => `(
+        UPPER(E.DESCRICAO) CONTAINING UPPER(?)
+        OR UPPER(COALESCE(P.COD_BARRA, '')) CONTAINING UPPER(?)
+        OR UPPER(COALESCE(P.REFERENCIA, '')) CONTAINING UPPER(?)
+      )`).join(' AND ');
+      params = lista.flatMap((p) => [p, p, p]);
     }
     const rows = await query(db, `
       SELECT FIRST 20 I.ID_IDENTIFICADOR, E.ID_ESTOQUE, E.DESCRICAO, E.PRC_VENDA,
+             P.COD_BARRA, P.REFERENCIA,
              E.GRADE_SERIE, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
       FROM ${t.estoque} E
       JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
@@ -279,6 +296,8 @@ async function buscarPecas(q) {
       id_identificador: num(r.ID_IDENTIFICADOR),
       id_estoque: num(r.ID_ESTOQUE),
       descricao: nomeGrade(r.DESCRICAO, r.GRADE_SERIE, r.COR, r.TAMANHO),
+      cod_barras: String(r.COD_BARRA || '').trim(),
+      referencia: String(r.REFERENCIA || '').trim(),
       prc_venda: num(r.PRC_VENDA),
     }));
   });

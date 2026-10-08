@@ -316,10 +316,13 @@ const Condicionais = (() => {
           box.innerHTML = '<p class="hint">Nenhuma peça encontrada.</p>';
           return;
         }
-        box.innerHTML = itens.map((p) => botaoSugestao(
-          `<strong>${esc(p.id_identificador)}</strong> ${esc(p.descricao)}<span class="hint"> · cód. ${esc(p.id_estoque)} · ${money(p.prc_venda)}</span>`,
-          `data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-prc="${p.prc_venda}"`
-        )).join('');
+        box.innerHTML = itens.map((p) => {
+          const extra = [p.cod_barras ? `barras ${p.cod_barras}` : '', p.referencia ? `ref. ${p.referencia}` : ''].filter(Boolean).join(' · ');
+          return botaoSugestao(
+            `<strong>${esc(p.id_identificador)}</strong> ${esc(p.descricao)}<span class="hint"> · cód. ${esc(p.id_estoque)}${extra ? ` · ${esc(extra)}` : ''} · ${money(p.prc_venda)}</span>`,
+            `data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-prc="${p.prc_venda}"`
+          );
+        }).join('');
         box.querySelectorAll('[data-id]').forEach((btn) => {
           btn.addEventListener('click', () => incluirPeca({
             id_identificador: Number(btn.dataset.id),
@@ -333,7 +336,7 @@ const Condicionais = (() => {
       const codigo = String($('#cond-peca')?.value || '').trim();
       const box = $('#cond-peca-lista');
       if (!codigo) {
-        if (box) box.innerHTML = '<p class="hint">Informe o nome, o identificador ou o código da peça.</p>';
+        if (box) box.innerHTML = '<p class="hint">Informe o nome, o identificador, o código, as barras ou a referência.</p>';
         return;
       }
       const res = await api(`/condicionais/produtos?q=${encodeURIComponent(codigo)}`);

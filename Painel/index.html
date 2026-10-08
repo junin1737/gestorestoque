@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=220" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=220" />
+  <link rel="stylesheet" href="styles.css?v=221" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=221" />
 </head>
 <body>
   <div id="app">
@@ -478,7 +478,7 @@
                 <input id="cond-obs" maxlength="300" />
               </label>
               <label class="full">Peça
-                <input id="cond-peca" type="search" placeholder="Nome, identificador ou código" autocomplete="off" />
+                <input id="cond-peca" type="search" placeholder="Nome, identificador, código, barras ou referência" autocomplete="off" />
               </label>
               <div id="cond-peca-lista" class="full cond-sugestoes"></div>
               <label>Quantidade
@@ -593,7 +593,7 @@
           <div id="empresas-lista" class="item-list"></div>
           <section class="vinculo-painel">
             <h3>Matriz e filial</h3>
-            <p class="hint">O vínculo é manual. As duas lojas precisam aceitar, cada uma no próprio Gestor, antes de aparecerem juntas no login.</p>
+            <p class="hint">O vínculo é feito no painel de licenças da MT. Cada loja continua no próprio servidor e as duas aparecem na escolha de empresa do login. Um pedido antigo, feito daqui, só entra depois que as duas lojas aceitam.</p>
             <div class="vinculo-form">
               <label>Matriz
                 <select id="vinculo-matriz"><option value="">Selecione</option></select>
@@ -739,10 +739,10 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=220"></script>
-  <script src="importacao-nfe.js?v=220"></script>
-  <script src="compras.js?v=220"></script>
-  <script src="condicionais.js?v=220"></script>
-  <script src="app.js?v=220"></script>
+  <script src="vendor/zxing-browser.min.js?v=221"></script>
+  <script src="importacao-nfe.js?v=221"></script>
+  <script src="compras.js?v=221"></script>
+  <script src="condicionais.js?v=221"></script>
+  <script src="app.js?v=221"></script>
 </body>
 </html>
