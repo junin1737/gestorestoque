@@ -2414,12 +2414,20 @@ router.post('/compras/notas/:chave/xml', async (req, res) => {
 });
 
 const condicionais = require('./condicionais');
-const VER_CONDICIONAL = exigirModulo('condicionais', 'estoque');
+const VER_CONDICIONAL = exigirModulo('condicionais');
 const LANCAR_CONDICIONAL = exigirModulo('condicionais');
 
 router.get('/condicionais', VER_CONDICIONAL, async (req, res) => {
   try {
     res.json({ ok: true, ...(await condicionais.listar(req.query.status)) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/condicionais/produtos', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, itens: await condicionais.buscarPecas(req.query.q || '') });
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }
@@ -2479,6 +2487,7 @@ router.post('/condicionais', LANCAR_CONDICIONAL, async (req, res) => {
       idCliente: req.body?.id_cliente,
       idFuncionario: req.body?.id_funcionario,
       obs: req.body?.obs,
+      validade: req.body?.validade,
       itens: req.body?.itens,
       usuario: req.usuario?.nome || '',
     });

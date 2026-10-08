@@ -953,7 +953,7 @@ function enterApp() {
   if ($('#nav-compras')) $('#nav-compras').hidden = !showCompras;
   if ($('#nav-compras-mobile')) $('#nav-compras-mobile').hidden = !showCompras;
   if ($('#dash-compras')) $('#dash-compras').hidden = !showCompras;
-  const showCond = can('condicionais', 'acesso') || can('estoque', 'acesso');
+  const showCond = can('condicionais', 'acesso');
   if ($('#nav-condicionais')) $('#nav-condicionais').hidden = !showCond;
   if ($('#nav-condicionais-mobile')) $('#nav-condicionais-mobile').hidden = !showCond;
   const cfgSrv = $('#btn-config-servidor');
@@ -1123,7 +1123,7 @@ async function showPage(page) {
     showMsg('Sem permissão para consultar compras.');
     page = 'dashboard';
   }
-  if (page === 'condicionais' && !(can('condicionais', 'acesso') || can('estoque', 'acesso'))) {
+  if (page === 'condicionais' && !can('condicionais', 'acesso')) {
     showMsg('Sem permissão para condicionais.');
     page = 'dashboard';
   }
@@ -1792,7 +1792,7 @@ function renderDetalhe() {
         <label>ID Estoque<input value="${it.id_estoque ?? 'Novo'}" disabled /></label>
         <label>ID Identificador<input value="${it.id_identificador ?? 'Novo'}" disabled /></label>
         <label class="full">Descrição<input id="f-descricao" maxlength="120" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
-        ${!state.isNovo ? `<div class="full"><button type="button" class="btn small" id="btn-condicionais-prod" ${Number(it.qtd_reserv) > 0 ? '' : 'disabled'}>Condicionais${Number(it.qtd_reserv) > 0 ? ` (${fmtNum(it.qtd_reserv)})` : ''}</button></div>` : ''}
+        ${!state.isNovo && can('condicionais', 'acesso') ? `<div class="full"><button type="button" class="btn small" id="btn-condicionais-prod" ${Number(it.qtd_reserv) > 0 ? '' : 'disabled'}>Condicionais${Number(it.qtd_reserv) > 0 ? ` (${fmtNum(it.qtd_reserv)})` : ''}</button></div>` : ''}
         <label class="full grupo-field">Grupo
           <div class="input-row">
             <select id="f-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>

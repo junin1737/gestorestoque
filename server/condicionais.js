@@ -247,6 +247,50 @@ async function buscarClientes(q) {
   });
 }
 
+async function buscarPecas(q) {
+  const termo = String(q || '').trim();
+  if (termo.length < 1) return [];
+  return withDb(async (db, appCfg) => {
+    const t = activeTargets(appCfg)[0]?.tables;
+    if (!t) return [];
+    const soNumero = /^\d+$/.test(termo);
+    let where;
+    let params;
+    if (soNumero) {
+      where = `(I.ID_IDENTIFICADOR = ? OR E.ID_ESTOQUE = ? OR TRIM(CAST(P.COD_BARRA AS VARCHAR(60))) = ?)`;
+      params = [Number(termo), Number(termo), termo];
+    } else {
+      const termos = termo.split(/\s+/).map((p) => p.trim()).filter((p) => p.length >= 2);
+      const lista = termos.length ? termos : [termo];
+      where = lista.map(() => 'UPPER(E.DESCRICAO) CONTAINING UPPER(?)').join(' AND ');
+      params = lista;
+    }
+    const rows = await query(db, `
+      SELECT FIRST 20 I.ID_IDENTIFICADOR, E.ID_ESTOQUE, E.DESCRICAO, E.PRC_VENDA,
+             E.GRADE_SERIE, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
+      FROM ${t.estoque} E
+      JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
+      JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+      LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
+      LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
+      WHERE (E.STATUS = 'A' OR E.STATUS IS NULL) AND ${where}
+      ORDER BY I.ID_IDENTIFICADOR`, params);
+    return rows.map((r) => ({
+      id_identificador: num(r.ID_IDENTIFICADOR),
+      id_estoque: num(r.ID_ESTOQUE),
+      descricao: nomeGrade(r.DESCRICAO, r.GRADE_SERIE, r.COR, r.TAMANHO),
+      prc_venda: num(r.PRC_VENDA),
+    }));
+  });
+}
+
+function dataInformada(iso) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || '').trim());
+  if (!m) return null;
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12, 0, 0);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 async function listarVendedores() {
   return withDb(async (db) => {
     const temStatus = await columnExists(db, 'TB_FUNCIONARIO', 'STATUS');
@@ -257,17 +301,21 @@ async function listarVendedores() {
   });
 }
 
-async function criar({ idCliente, idFuncionario, obs, itens }) {
+async function criar({ idCliente, idFuncionario, obs, itens, validade }) {
   const itensOk = (itens || []).map((it) => ({
     id: num(it.id_identificador || it.id),
     qtd: num(it.qtd),
     prc: num(it.prc_venda != null ? it.prc_venda : it.prc_unit),
   })).filter((it) => it.id > 0 && it.qtd > 0);
-  if (!num(idCliente)) throw new Error('Informe o cliente.');
+  if (!num(idCliente)) throw new Error('Selecione o cliente na lista.');
   if (!num(idFuncionario)) throw new Error('Informe o vendedor.');
-  if (!itensOk.length) throw new Error('Informe ao menos uma peça.');
+  if (!itensOk.length) throw new Error('Inclua ao menos uma peça.');
+  const dtValidade = dataInformada(validade);
+  if (!dtValidade) throw new Error('Informe a validade.');
   return withDb(async (db, appCfg) => {
     if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
+    const temValidade = await columnExists(db, 'TB_PEDIDO_VENDA', 'DT_VALIDA');
+    if (!temValidade) throw new Error('Esta base não tem o campo de validade no pedido.');
     const t = writeTargets(appCfg)[0]?.tables;
     if (!t) throw new Error('Estoque não encontrado nesta base.');
     const st = await query(db, `
@@ -288,15 +336,19 @@ async function criar({ idCliente, idFuncionario, obs, itens }) {
         return await withTransaction(db, async (tx) => {
           const seq = await query(tx, 'SELECT COALESCE(MAX(ID_PEDIDO), 0) + 1 AS ID FROM TB_PEDIDO_VENDA');
           const id = num(seq[0]?.ID);
+          const colsValidade = temValidade ? ', DT_VALIDA' : '';
+          const valValidade = temValidade ? ', ?' : '';
+          const paramsPedido = [
+            num(idCliente), num(idFuncionario), id, idStatus, idModulo,
+            String(obs || '').slice(0, 300) || null,
+          ];
+          if (temValidade) paramsPedido.push(dtValidade);
           await query(tx, `
             INSERT INTO TB_PEDIDO_VENDA (
               ID_CLIENTE, ID_VENDEDOR, ID_PEDIDO, DT_PEDIDO, HR_PEDIDO,
               ID_PARCELA, ID_FMAPGTO, ID_STATUS, ID_MODULO, ORIGEM,
-              UPDATED_INTEGRADORA, ENVIAR_INTEGRADORA, OBSERVACAO
-            ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, 1, 1, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?)`, [
-            num(idCliente), num(idFuncionario), id, idStatus, idModulo,
-            String(obs || '').slice(0, 300) || null,
-          ]);
+              UPDATED_INTEGRADORA, ENVIAR_INTEGRADORA, OBSERVACAO${colsValidade}
+            ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, 1, 1, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?${valValidade})`, paramsPedido);
           for (const it of itensOk) {
             const prod = await query(tx, `
               SELECT FIRST 1 E.PRC_VENDA, P.PRC_CUSTO, P.COD_BARRA
@@ -493,6 +545,7 @@ module.exports = {
   detalhe,
   doProduto,
   buscarClientes,
+  buscarPecas,
   listarVendedores,
   criar,
   htmlPdf,
