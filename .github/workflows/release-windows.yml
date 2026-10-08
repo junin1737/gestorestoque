@@ -39,13 +39,33 @@ jobs:
           java-version: '17'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        shell: pwsh
+        run: |
+          $sdk = Join-Path $env:RUNNER_TEMP "android-sdk"
+          $zip = Join-Path $env:RUNNER_TEMP "cmdtools.zip"
+          Invoke-WebRequest -Uri "https://dl.google.com/android/repository/commandlinetools-win-11076708_latest.zip" -OutFile $zip
+          Expand-Archive $zip -DestinationPath (Join-Path $sdk "tmp")
+          New-Item -ItemType Directory -Force -Path (Join-Path $sdk "cmdline-tools\latest") | Out-Null
+          Move-Item (Join-Path $sdk "tmp\cmdline-tools\*") (Join-Path $sdk "cmdline-tools\latest")
+          $mgr = Join-Path $sdk "cmdline-tools\latest\bin\sdkmanager.bat"
+          1..40 | ForEach-Object { "y" } | & $mgr --sdk_root=$sdk --licenses
+          & $mgr --sdk_root=$sdk "platforms;android-34" "build-tools;34.0.0"
+          "ANDROID_HOME=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
+          "ANDROID_SDK_ROOT=$sdk" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8NoBOM
 
-      - name: Install Android SDK packages
-        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+      - name: Decode keystore
+        shell: pwsh
+        env:
+          KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          $bytes = [Convert]::FromBase64String($env:KEYSTORE_B64)
+          [IO.File]::WriteAllBytes("$pwd\android-app\gestor-online.jks", $bytes)
 
       - name: Build APK
         working-directory: android-app
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: .\gradlew.bat assembleRelease --no-daemon
 
       - name: Read version

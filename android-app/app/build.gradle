@@ -9,6 +9,13 @@ def numerosVersao = (versaoGit =~ /\d+/).collect { it.toInteger() }
 while (numerosVersao.size() < 4) numerosVersao << 0
 def codigoVersao = numerosVersao[0] * 1000000 + numerosVersao[1] * 10000 + numerosVersao[2] * 10 + numerosVersao[3]
 
+def chaveProps = new Properties()
+def chaveArquivo = rootProject.file("keystore.properties")
+if (chaveArquivo.exists()) chaveProps.load(new FileInputStream(chaveArquivo))
+def chaveSenha = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: chaveProps.getProperty("storePassword")
+def chaveKey = System.getenv("ANDROID_KEY_PASSWORD") ?: chaveProps.getProperty("keyPassword") ?: chaveSenha
+def chaveCaminho = System.getenv("ANDROID_KEYSTORE_FILE") ?: chaveProps.getProperty("storeFile") ?: "gestor-online.jks"
+
 android {
     namespace 'com.mtautomacoes.gestorestoque'
     compileSdk 34
@@ -26,12 +33,20 @@ android {
         }
     }
 
+    signingConfigs {
+        release {
+            storeFile rootProject.file(chaveCaminho)
+            storePassword chaveSenha
+            keyAlias "gestor"
+            keyPassword chaveKey
+        }
+    }
+
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
-            // Assinatura debug: permite instalar o APK de piloto sem keystore próprio
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
         }
     }
 

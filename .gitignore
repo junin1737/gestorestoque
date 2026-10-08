@@ -5,6 +5,8 @@ dist/
 AppData/
 .cursor/
 android-app/local.properties
+android-app/gestor-online.jks
+android-app/keystore.properties
 android-app/.gradle/
 android-app/app/build/
 android-app/build/
