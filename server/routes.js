@@ -270,8 +270,6 @@ router.get('/emitente', async (_req, res) => {
 });
 
 router.get('/funcionarios', async (req, res) => {
-  const online = viaTunel(req);
-  const podeOnline = (u) => !online || !!u.permissoes?.online?.acesso;
   try {
     const appCfg = loadAppConfig();
     const usersCfg = loadUsersConfig(appCfg);
@@ -308,15 +306,16 @@ router.get('/funcionarios', async (req, res) => {
     }
     if (changed) saveUsersConfig(appCfg, usersCfg);
 
+    // Mesma lista na loja e pela internet: dá para achar o nome no combo.
+    // Quem não tem "Acesso online" continua barrado no POST /login.
     const list = loadUsersConfig(appCfg).usuarios
       .filter((u) => u.supervisor || u.mtEntradas || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id)))
-      .filter(podeOnline)
       .map(usuarioLogin);
 
     res.json({ ok: true, funcionarios: list });
   } catch (err) {
     const appCfg = loadAppConfig();
-    const list = loadUsersConfig(appCfg).usuarios.filter(podeOnline).map(usuarioLogin);
+    const list = loadUsersConfig(appCfg).usuarios.map(usuarioLogin);
     res.json({ ok: false, error: err.message, funcionarios: list });
   }
 });

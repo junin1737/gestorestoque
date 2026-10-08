@@ -917,12 +917,17 @@ async function loadFuncionarios() {
   const res = await api('/funcionarios');
   state.funcionarios = res.funcionarios || [];
   const sel = $('#login-usuario');
+  const erro = $('#login-erro');
   sel.innerHTML = '<option value="">Selecione o usuário</option>';
   for (const f of state.funcionarios) {
     const opt = document.createElement('option');
     opt.value = f.id;
     opt.textContent = f.nome + (f.supervisor ? ' (Supervisor)' : '');
     sel.appendChild(opt);
+  }
+  if (!state.funcionarios.length && erro) {
+    erro.hidden = false;
+    erro.textContent = res.error || 'Nenhum usuário encontrado.';
   }
 }
 
