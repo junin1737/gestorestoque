@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=219" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=219" />
+  <link rel="stylesheet" href="styles.css?v=220" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=220" />
 </head>
 <body>
   <div id="app">
@@ -159,6 +159,10 @@
           </button>
         </nav>
         <div class="side-bottom">
+          <div id="trocar-empresa" class="trocar-empresa" hidden>
+            <p class="trocar-empresa-titulo">Trocar empresa</p>
+            <div id="trocar-empresa-lista"></div>
+          </div>
           <div class="side-user">
             <div class="side-user-avatar" id="side-user-avatar">—</div>
             <div class="side-user-meta">
@@ -629,6 +633,10 @@
         <div id="mais-sheet" class="mais-sheet" hidden>
           <button type="button" class="mais-sheet-back" id="mais-sheet-back" aria-label="Fechar"></button>
           <div class="mais-sheet-card">
+            <div id="trocar-empresa-mobile" class="trocar-empresa" hidden>
+              <p class="trocar-empresa-titulo">Trocar empresa</p>
+              <div id="trocar-empresa-lista-mobile"></div>
+            </div>
             <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
@@ -739,10 +747,10 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=219"></script>
-  <script src="importacao-nfe.js?v=219"></script>
-  <script src="compras.js?v=219"></script>
-  <script src="condicionais.js?v=219"></script>
-  <script src="app.js?v=219"></script>
+  <script src="vendor/zxing-browser.min.js?v=220"></script>
+  <script src="importacao-nfe.js?v=220"></script>
+  <script src="compras.js?v=220"></script>
+  <script src="condicionais.js?v=220"></script>
+  <script src="app.js?v=220"></script>
 </body>
 </html>

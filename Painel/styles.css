@@ -591,6 +591,47 @@ input, select, textarea {
 }
 .nav-btn.active .nav-badge { background: var(--accent); }
 .side-bottom { margin-top: auto; display: grid; gap: 0.6rem; }
+.trocar-empresa { display: grid; gap: 0.35rem; }
+.trocar-empresa-titulo {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.sidebar .trocar-empresa-titulo { color: rgba(255, 255, 255, 0.62); }
+.troca-loja {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
+  padding: 0.4rem 0.55rem;
+  border-radius: 8px;
+  border: 1px solid var(--line, #d5deea);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+}
+.troca-loja strong { font-size: 0.84rem; }
+.troca-loja span { font-size: 0.72rem; color: var(--muted); }
+.sidebar .troca-loja { border-color: rgba(255, 255, 255, 0.16); color: #fff; }
+.sidebar .troca-loja span { color: rgba(255, 255, 255, 0.68); }
+.troca-loja.is-atual { border-color: #2f6fed; }
+.troca-loja:disabled { opacity: 0.55; cursor: default; }
+.troca-loja-linha { display: flex; align-items: stretch; gap: 0.35rem; }
+.troca-remover {
+  border: 1px solid var(--line, #d5deea);
+  background: transparent;
+  color: inherit;
+  border-radius: 8px;
+  padding: 0 0.55rem;
+  font-size: 0.72rem;
+}
+.sidebar .troca-remover { border-color: rgba(255, 255, 255, 0.16); color: #fff; }
+.mais-sheet .trocar-empresa { margin-bottom: 0.35rem; }
 .side-user {
   display: grid;
   grid-template-columns: auto 1fr auto;

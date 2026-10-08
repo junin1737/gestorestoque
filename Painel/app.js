@@ -371,8 +371,74 @@ async function carregarVinculosPainel() {
         <span class="hint">${escapeHtml(formatCnpj(v.cnpj_matriz))} · ${escapeHtml(formatCnpj(v.cnpj_filial))}</span>
       </div>
       <span class="chip ${v.status === 'ativo' ? 'ok' : 'pending'}">${escapeHtml(ROTULO_VINCULO[v.status] || v.status || '')}</span>
+      <button type="button" class="btn small" data-vinc-del="${v.id}">Remover</button>
     </article>
   `).join('');
+}
+
+function htmlTrocaLoja(e) {
+  const podeRemover = !!(state.usuario?.supervisor || state.usuario?.mtEntradas) && e.vinculo_id && !e.atual;
+  return `
+    <div class="troca-loja-linha">
+      <button type="button" class="troca-loja${e.atual ? ' is-atual' : ''}" data-loja-url="${escapeAttr(e.url || '')}" data-loja-atual="${e.atual ? '1' : ''}" ${e.atual || e.url ? '' : 'disabled'}>
+        <strong>${escapeHtml(e.nome || 'Empresa')}</strong>
+        <span>${e.papel === 'matriz' ? 'Matriz' : 'Filial'} · ${escapeHtml(formatCnpj(e.cnpj))}${e.atual ? ' · esta' : ''}</span>
+      </button>
+      ${podeRemover ? `<button type="button" class="troca-remover" data-vinc-del="${e.vinculo_id}">Remover</button>` : ''}
+    </div>`;
+}
+
+async function carregarTrocaEmpresa() {
+  const blocos = [
+    [$('#trocar-empresa'), $('#trocar-empresa-lista')],
+    [$('#trocar-empresa-mobile'), $('#trocar-empresa-lista-mobile')],
+  ].filter(([box, lista]) => box && lista);
+  if (!blocos.length) return;
+  const res = await api('/mt/grupo');
+  const empresas = (res.empresas || []).filter((e) => e && e.cnpj);
+  const html = empresas.length >= 2 ? empresas.map(htmlTrocaLoja).join('') : '';
+  blocos.forEach(([box, lista]) => {
+    box.hidden = empresas.length < 2;
+    lista.innerHTML = html;
+  });
+}
+
+async function abrirOutraLoja(btn) {
+  if (!btn || btn.dataset.lojaAtual === '1') return;
+  const url = btn.dataset.lojaUrl;
+  if (!url) {
+    showMsg('Esta loja ainda não tem o endereço de acesso. Abra o Gestor dela uma vez.');
+    return;
+  }
+  await api('/logout', { method: 'POST', body: {} });
+  location.href = urlLoginEmpresa(url);
+}
+
+document.addEventListener('click', (e) => {
+  const loja = e.target.closest('.troca-loja');
+  if (loja) {
+    abrirOutraLoja(loja);
+    return;
+  }
+  const del = e.target.closest('[data-vinc-del]');
+  if (!del || (!del.closest('#vinculos-lista') && !del.classList.contains('troca-remover'))) return;
+  removerVinculoPainel(del.dataset.vincDel);
+});
+
+async function removerVinculoPainel(id) {
+  const ok = await showConfirm('Remover este vínculo? As duas lojas deixam de aparecer juntas na escolha de empresa.', {
+    okLabel: 'Remover',
+    cancelLabel: 'Cancelar',
+  });
+  if (!ok) return;
+  const res = await api(`/mt/vinculos/${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    showMsg(res.error || 'Não foi possível remover o vínculo.');
+    return;
+  }
+  showMsg('Vínculo removido.');
+  await carregarVinculosPainel();
+  await carregarTrocaEmpresa();
 }
 
 $('#btn-vincular-empresas')?.addEventListener('click', async () => {
@@ -966,6 +1032,7 @@ function enterApp() {
   showPage('dashboard');
   loadUnidades();
   carregarPedidoVinculo();
+  carregarTrocaEmpresa();
 }
 
 function trocarUsuario() {

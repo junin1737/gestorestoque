@@ -1030,6 +1030,19 @@ async function excluirVinculoAdmin(id, env) {
   return json({ ok: true });
 }
 
+async function excluirVinculoDaLoja(id, cnpj, app, env) {
+  await garantirTabelaVinculos(env);
+  const row = await env.DB.prepare(
+    'SELECT id, cnpj_matriz, cnpj_filial FROM mt_vinculos WHERE id = ? AND aplicacao = ?'
+  ).bind(id, app).first();
+  if (!row) return json({ ok: false, error: 'Vínculo não encontrado.' }, 404);
+  if (row.cnpj_matriz !== cnpj && row.cnpj_filial !== cnpj) {
+    return json({ ok: false, error: 'Este vínculo não é desta empresa.' }, 403);
+  }
+  await env.DB.prepare('DELETE FROM mt_vinculos WHERE id = ?').bind(id).run();
+  return json({ ok: true });
+}
+
 async function aceitarVinculoMt(b, env) {
   const app = nomeApp(b.aplicacao) || APP_PADRAO;
   const cnpj = soDigitos(b.cnpj);
@@ -1068,7 +1081,7 @@ async function grupoEmpresaMt(url, env) {
   if (cnpj.length < 11) return json({ ok: true, empresas: [] });
   await garantirTabelaVinculos(env);
   const { results } = await env.DB.prepare(
-    `SELECT cnpj_matriz, cnpj_filial FROM mt_vinculos
+    `SELECT id, cnpj_matriz, cnpj_filial FROM mt_vinculos
      WHERE aplicacao = ? AND aceite_matriz = 'aceito' AND aceite_filial = 'aceito'
        AND (cnpj_matriz = ? OR cnpj_filial = ?)`
   ).bind(app, cnpj, cnpj).all();
@@ -1077,13 +1090,14 @@ async function grupoEmpresaMt(url, env) {
   const matrizes = [...new Set(diretos.map((r) => r.cnpj_matriz))];
   const marcas = matrizes.map(() => '?').join(',');
   const irmas = await env.DB.prepare(
-    `SELECT cnpj_matriz, cnpj_filial FROM mt_vinculos
+    `SELECT id, cnpj_matriz, cnpj_filial FROM mt_vinculos
      WHERE aplicacao = ? AND aceite_matriz = 'aceito' AND aceite_filial = 'aceito'
        AND cnpj_matriz IN (${marcas})`
   ).bind(app, ...matrizes).all();
+  const linhas = irmas.results || [];
   const ehMatriz = new Set();
   const cnpjs = new Set([cnpj]);
-  for (const r of irmas.results || []) {
+  for (const r of linhas) {
     ehMatriz.add(r.cnpj_matriz);
     cnpjs.add(r.cnpj_matriz);
     cnpjs.add(r.cnpj_filial);
@@ -1092,12 +1106,17 @@ async function grupoEmpresaMt(url, env) {
   const empresas = [];
   for (const c of cnpjs) {
     const f = await fichaEmpresaMt(env, app, c);
+    const ligacao = linhas.find((r) => (
+      (r.cnpj_matriz === cnpj && r.cnpj_filial === c)
+      || (r.cnpj_filial === cnpj && r.cnpj_matriz === c)
+    ));
     empresas.push({
       cnpj: f.cnpj,
       nome: f.nome,
       url: f.url,
       papel: ehMatriz.has(c) ? 'matriz' : 'filial',
       atual: c === cnpj,
+      vinculo_id: ligacao?.id || null,
     });
   }
   empresas.sort((a, b) => {
@@ -1143,6 +1162,14 @@ async function rotaMt(request, env, url) {
   }
   if (p === '/api/mt/vinculos' && request.method === 'POST') {
     return sess ? criarVinculoMt(request, env) : json(SEM_SESSAO_MT, 401);
+  }
+  const delMt = p.match(/^\/api\/mt\/vinculos\/(\d+)$/);
+  if (delMt && request.method === 'DELETE') {
+    const id = Number(delMt[1]);
+    if (sess) return excluirVinculoAdmin(id, env);
+    const cnpj = await instalacaoDaRequisicao(request, env, appQuery);
+    if (!cnpj) return json(SEM_INSTALACAO, 403);
+    return excluirVinculoDaLoja(id, cnpj, appQuery, env);
   }
   if (p === '/api/mt/vinculos' && request.method === 'GET') {
     if (sess) return listarVinculosMt(url, env);

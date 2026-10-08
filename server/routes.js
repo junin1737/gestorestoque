@@ -2182,6 +2182,25 @@ router.get('/mt/vinculos', async (req, res) => {
   }
 });
 
+router.delete('/mt/vinculos/:id', async (req, res) => {
+  const id = Number(req.params.id);
+  if (!id) return res.json({ ok: false, error: 'Vínculo inválido.' });
+  const mt = req.usuario?.mtEntradas;
+  const supervisor = req.usuario?.supervisor;
+  if (!mt && !supervisor) {
+    return res.status(403).json({ ok: false, error: 'Somente o supervisor pode remover o vínculo.' });
+  }
+  try {
+    const token = mt ? auth.tokenMtDaSessao(req.usuario) : '';
+    const data = token
+      ? await require('./mt-empresas').excluirVinculo(token, id)
+      : await require('./mt-empresas').excluirVinculoDaLoja(id);
+    respostaMt(res, data);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.post('/mt/vinculos', async (req, res) => {
   const token = tokenMt(req, res);
   if (!token) return;
