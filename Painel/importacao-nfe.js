@@ -654,7 +654,7 @@ const ImportacaoNfe = (() => {
       </button>
       <div class="imp-chrome-title">
         <strong>NF-e ${esc(ide.nNF || '—')} · ${esc(fornNome)}</strong>
-        <span>Série ${esc(ide.serie || '—')} · ${esc(ide.natOp || s.natureza?.descricao || '')}</span>
+        <span>Série ${esc(ide.serie || '—')} · ${esc(rotuloNatureza(s) || ide.natOp || '')}</span>
       </div>
       <div class="imp-chrome-progress" title="${conferidos} de ${total} itens">
         <div style="width:${pct}%"></div>
@@ -682,6 +682,13 @@ const ImportacaoNfe = (() => {
     });
     $('#imp-chrome-gravar')?.addEventListener('click', () => $('#imp-btn-confirmar')?.click());
     $('#imp-chrome-sair')?.addEventListener('click', () => leaveSessaoToHome());
+  }
+
+  function rotuloNatureza(s) {
+    const n = s?.natureza;
+    if (!n?.descricao) return '';
+    const cfop = String(n.cfop || '').trim();
+    return `${n.descricao}${cfop ? ` · CFOP ${cfop}` : ''}`;
   }
 
   function kv(label, value) {
@@ -732,7 +739,7 @@ const ImportacaoNfe = (() => {
         <div class="imp-nf-head">
           <div>
             <h3>NF-e ${esc(ide.nNF || '—')} · Série ${esc(ide.serie || '—')} · Modelo ${esc(ide.modelo || '55')}</h3>
-            <p class="hint">${esc(ide.natOp || s.natureza?.descricao || '')}</p>
+            <p class="hint">${esc(rotuloNatureza(s) || ide.natOp || '')}</p>
             <p class="hint mono">${esc(s.chave || '')}</p>
             ${s.fonte === 'demo' ? '<p class="hint" style="color:#b45309">Demonstração — anexe o XML real ou configure o certificado SEFAZ.</p>' : ''}
             ${s.fonte === 'sefaz' ? `<p class="hint">Consultada na SEFAZ · ${esc(String(s.resumo?.total || s.itens?.length || 0))} itens</p>` : ''}
@@ -773,9 +780,7 @@ const ImportacaoNfe = (() => {
           <div class="imp-fields">
             ${comboField('Natureza (TB_NAT_OPERACAO)', 'imp-natope', 'imp-natope-list', s.id_natope || '', {
     full: true,
-    displayLabel: s.natureza
-      ? `${s.natureza.descricao}${s.natureza.cfop ? ` · CFOP ${s.natureza.cfop}` : ''}`
-      : (ide.natOp || ''),
+    displayLabel: rotuloNatureza(s),
     placeholder: 'Pesquisar natureza por descrição ou CFOP…',
   })}
           </div>
@@ -936,6 +941,8 @@ const ImportacaoNfe = (() => {
       return;
     }
     const url = `/api/importacao/sessoes/${encodeURIComponent(id)}/danfe`;
+    state.relatorioTexto = '';
+    syncBotaoWhatsapp(false);
     bindDanfeDialog();
     const dlg = $('#dlg-danfe');
     const frame = $('#dlg-danfe-frame');
@@ -951,18 +958,61 @@ const ImportacaoNfe = (() => {
     if (!win) deps.showMsg?.('Permita pop-ups para visualizar o PDF da nota.');
   }
 
+  function textoQtdRelatorio(r) {
+    const ant = Number(r.qtd_anterior || 0);
+    const ent = r.qtd_entrada != null && r.qtd_entrada !== ''
+      ? Number(r.qtd_entrada || 0)
+      : Number(r.qtd_atual || 0) - ant;
+    const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+    return `QTD.ANTERIOR ${fmt(ant)} ENTRADA ${fmt(ent)} QTD ATUAL ${fmt(ant + ent)}`;
+  }
+
+  function textoWhatsappRelatorio(gravacao) {
+    const linhas = gravacao?.relatorio || [];
+    const cab = `Entrada NF ${gravacao.nf_numero || '—'}/${gravacao.nf_serie || '—'}`;
+    const corpo = linhas.slice(0, 40).map((r) => `${r.descricao || 'Item'}\n${textoQtdRelatorio(r)}`).join('\n\n');
+    const resto = linhas.length > 40 ? `\n\n… e mais ${linhas.length - 40} produto(s) no relatório.` : '';
+    return `${cab}\n\n${corpo}${resto}`;
+  }
+
+  function abrirWhatsappTexto(texto) {
+    const q = encodeURIComponent(texto || '');
+    const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || '');
+    const url = mobile
+      ? `https://wa.me/?text=${q}`
+      : `https://web.whatsapp.com/send?text=${q}`;
+    const win = window.open(url, '_blank', 'noopener');
+    if (!win) deps.showMsg?.('Permita pop-ups para abrir o WhatsApp.');
+  }
+
+  function syncBotaoWhatsapp(visivel) {
+    let btn = $('#dlg-danfe-wa');
+    const barra = document.querySelector('#dlg-danfe .dlg-danfe-actions');
+    if (!btn && barra) {
+      btn = document.createElement('button');
+      btn.type = 'button';
+      btn.id = 'dlg-danfe-wa';
+      btn.className = 'btn small';
+      btn.textContent = 'Enviar WhatsApp';
+      barra.prepend(btn);
+      btn.addEventListener('click', () => {
+        if (state.relatorioTexto) abrirWhatsappTexto(state.relatorioTexto);
+      });
+    }
+    if (btn) btn.hidden = !visivel;
+  }
+
   function abrirRelatorioEntrada(gravacao) {
     const linhas = gravacao?.relatorio || [];
     if (!linhas.length) return;
+    state.relatorioTexto = textoWhatsappRelatorio(gravacao);
     const moneyBr = (v) => (v == null || v === '' ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
-    const qtdBr = (v) => Number(v || 0).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
     const rows = linhas.map((r) => `
       <tr>
         <td>${esc(r.status || '')}</td>
         <td>${esc(r.id_identificador ?? '')}</td>
         <td>${esc(r.descricao || '')}</td>
-        <td class="num">${qtdBr(r.qtd_anterior)}</td>
-        <td class="num">${qtdBr(r.qtd_atual)}</td>
+        <td>${esc(textoQtdRelatorio(r))}</td>
         <td class="num">${moneyBr(r.venda_anterior)}</td>
         <td class="num">${moneyBr(r.venda_atual)}</td>
         <td class="num">${moneyBr(r.custo_anterior)}</td>
@@ -979,16 +1029,17 @@ const ImportacaoNfe = (() => {
         th, td { border-bottom: 1px solid #d7dee8; padding: 6px 8px; text-align: left; vertical-align: top; }
         th { background: #f4f7fb; }
         td.num, th.num { text-align: right; white-space: nowrap; }
-        button { margin-bottom: 12px; }
-        @media print { button { display: none; } body { margin: 0; } }
+        button, a { margin-bottom: 12px; }
+        @media print { button, a { display: none; } body { margin: 0; } }
       </style></head><body>
       <button onclick="window.print()">Imprimir / Salvar PDF</button>
+      <a id="rel-wa" href="https://wa.me/?text=${encodeURIComponent(state.relatorioTexto || '')}" target="_blank" rel="noopener" style="margin-left:8px">Enviar WhatsApp</a>
       <h1>Entrada NF ${esc(gravacao.nf_numero || '—')}/${esc(gravacao.nf_serie || '—')}</h1>
       <p>Código ${esc(gravacao.id_nfcompra || '—')} · ${linhas.length} produto(s)</p>
       <table>
         <thead><tr>
           <th>Status</th><th>ID</th><th>Descrição</th>
-          <th class="num">Qtd anterior</th><th class="num">Qtd atual</th>
+          <th>Quantidade</th>
           <th class="num">Venda anterior</th><th class="num">Venda atual</th>
           <th class="num">Custo anterior</th><th class="num">Custo atual</th>
           <th class="num">Custo médio</th>
@@ -1002,6 +1053,7 @@ const ImportacaoNfe = (() => {
     const barra = dlg?.querySelector('.dlg-danfe-bar strong');
     if (dlg && frame && typeof dlg.showModal === 'function') {
       if (barra) barra.textContent = 'Relatório da entrada';
+      syncBotaoWhatsapp(true);
       frame.removeAttribute('src');
       frame.srcdoc = html;
       if (!dlg.open) dlg.showModal();
@@ -1607,6 +1659,26 @@ const ImportacaoNfe = (() => {
       state.saidaParams = {};
     }
     return state.saidaParams;
+  }
+
+  async function aplicarCclassSeNovo(sys) {
+    if (!sys) return;
+    const saida = await ensureSaidaParams();
+    if (String(saida.cclass_trib_novos || 'N').toUpperCase() !== 'S') return;
+    if (sys.trib_nfe?.id_class_trib && sys.trib_nfce?.id_class_trib) return;
+    try {
+      const res = await api('/importacao/class-trib?q=000001');
+      const c = (res.itens || []).find((x) => String(x.cod_class_trib || '').replace(/\D/g, '').padStart(6, '0').slice(-6) === '000001');
+      if (!c?.id_class_trib) return;
+      const base = {
+        id_class_trib: c.id_class_trib,
+        _class_cod: c.cod_class_trib,
+        _class_label: `${c.cod_class_trib || '000001'} — ${c.desc_class_trib || c.descricao || ''}`.trim(),
+        cst_class_trib: c.cst_class_trib || '',
+      };
+      if (!sys.trib_nfe?.id_class_trib) sys.trib_nfe = { ...(sys.trib_nfe || {}), ...base };
+      if (!sys.trib_nfce?.id_class_trib) sys.trib_nfce = { ...(sys.trib_nfce || {}), ...base };
+    } catch (_) { /* a gravação ainda tenta aplicar */ }
   }
 
   function conferirEtapasAtivo() {
@@ -2390,27 +2462,18 @@ const ImportacaoNfe = (() => {
     else if (tab === 'lote') panelHtml = `${panelLote(it, sys, xml)}${panelAnp(sys)}`;
     else panelHtml = panelAnp(sys);
 
-    const tabIdx = ITEM_TABS.findIndex((t) => t.id === tab);
     const footerHtml = tab === 'ficha'
-      ? `<button type="button" class="btn primary" id="imp-salvar-ficha">Salvar ficha</button>`
-      : isLastTab
-      ? `
-        <button type="button" class="btn" id="imp-etapa-anterior">Etapa anterior</button>
-        <button type="button" class="btn outline" id="imp-salvar-item">Salvar item</button>
-        ${conferirEtapasAtivo()
-    ? ''
-    : `<label class="imp-check">
+      ? `<button type="button" class="btn small primary" id="imp-salvar-ficha">Salvar ficha</button>`
+      : `
+        <button type="button" class="btn small" id="imp-etapa-cancelar">Cancelar</button>
+        ${isLastTab ? `<button type="button" class="btn small outline" id="imp-salvar-item">Salvar item</button>` : ''}
+        ${isLastTab && !conferirEtapasAtivo()
+    ? `<label class="imp-check">
           <input type="checkbox" id="imp-conferido" ${it.conferido ? 'checked' : ''} />
           Item verificado
-        </label>`}
-        <button type="button" class="btn primary" id="imp-salvar-proximo">
-          ${state.itemIndex < total - 1 ? 'Confirmar' : 'Confirmar'}
-        </button>`
-      : `
-        <button type="button" class="btn" id="imp-etapa-anterior" ${tabIdx <= 0 ? 'disabled' : ''}>Etapa anterior</button>
-        <button type="button" class="btn primary" id="imp-proxima-etapa">${
-          conferirEtapasAtivo() ? 'Confirmar' : 'Confirmar'
-        }</button>`;
+        </label>`
+    : ''}
+        <button type="button" class="btn small primary" id="${isLastTab ? 'imp-salvar-proximo' : 'imp-proxima-etapa'}">Confirmar</button>`;
 
     host.innerHTML = `
       <div class="imp-item-toolbar">
@@ -2428,9 +2491,7 @@ const ImportacaoNfe = (() => {
       ${tab === 'ficha' ? '' : itemTabNav()}
       <div class="imp-item-scroll">
         ${panelHtml}
-      </div>
-      <div class="imp-item-footer">
-        ${footerHtml}
+        <div class="imp-item-footer">${footerHtml}</div>
       </div>
     `;
 
@@ -2991,7 +3052,8 @@ const ImportacaoNfe = (() => {
       it.sistema.qtd = Number(qtdXml.toFixed(6));
     }
     state.buscaProduto = patch.id_identificador ? patch.descricao : state.buscaProduto;
-    state.itemTab = patch.criar_novo ? 'ficha' : 'entrada';
+    if (patch.criar_novo) await aplicarCclassSeNovo(it.sistema);
+    state.itemTab = patch.criar_novo ? 'ficha' : 'vinculo';
     renderItemScreen();
   }
 
@@ -3727,6 +3789,16 @@ const ImportacaoNfe = (() => {
     });
     $('#imp-proxima-etapa')?.addEventListener('click', () => avancarEtapa());
     $('#imp-etapa-anterior')?.addEventListener('click', () => voltarEtapa());
+    $('#imp-etapa-cancelar')?.addEventListener('click', () => {
+      const idx = ITEM_TABS_ETAPA.findIndex((t) => t.id === state.itemTab);
+      if (idx <= 0) {
+        showView('sessao');
+        renderSessao();
+        setTab('itens');
+        return;
+      }
+      voltarEtapa();
+    });
     $('#imp-usar-custo-nota')?.addEventListener('click', () => {
       const cur = itemAt(state.itemIndex);
       if (!cur) return;
@@ -4140,20 +4212,20 @@ const ImportacaoNfe = (() => {
     if (!host) return;
     state.paramsNaConfig = paraConfig;
     const itens = res.itens || [];
-    const csosn = res.csosn_padrao || '102';
     const saida = res.saida || {};
+    const sugerida = !saida.id_natope_padrao ? (res.natureza_sugerida || null) : null;
+    const natDesc = saida.nat_padrao_descricao || sugerida?.descricao || '';
+    const natCfop = saida.nat_padrao_cfop || sugerida?.cfop || '';
+    const natId = saida.id_natope_padrao || sugerida?.id_natope || '';
     const conversoes = res.conversoes || [];
     host.innerHTML = `
       <section class="imp-section">
-        <header class="imp-section-head"><h4>Parâmetros CFOP / CSOSN</h4></header>
-        <p class="hint">O 1º dígito do CFOP de entrada é ajustado automaticamente pela UF do fornecedor × UF do emitente (1=mesmo estado, 2=interestadual). O CSOSN é definido por linha; CST permanece o da nota.</p>
-        <div class="imp-fields">
-          ${field('CSOSN padrão (fallback)', 'imp-params-csosn', csosn, { third: true })}
-        </div>
+        <header class="imp-section-head"><h4>Parâmetros da nota de entrada</h4></header>
+        <p class="hint">O 1º dígito do CFOP de entrada é ajustado automaticamente pela UF do fornecedor × UF do emitente (1=mesmo estado, 2=interestadual). CST permanece o da nota.</p>
         <div class="imp-field">
           <span>Natureza padrão de entrada</span>
-          <input type="hidden" id="imp-params-nat-id" value="${esc(saida.id_natope_padrao || '')}" />
-          <input id="imp-params-nat-busca" type="search" autocomplete="off" placeholder="Pesquisar natureza…" data-descricao="${esc(saida.nat_padrao_descricao || '')}" data-cfop="${esc(saida.nat_padrao_cfop || '')}" value="${esc(saida.nat_padrao_descricao ? `${saida.nat_padrao_descricao}${saida.nat_padrao_cfop ? ` · CFOP ${saida.nat_padrao_cfop}` : ''}` : '')}" />
+          <input type="hidden" id="imp-params-nat-id" value="${esc(natId)}" />
+          <input id="imp-params-nat-busca" type="search" autocomplete="off" placeholder="Pesquisar por descrição ou CFOP…" data-descricao="${esc(natDesc)}" data-cfop="${esc(natCfop)}" value="${esc(natDesc ? `${natDesc}${natCfop ? ` · CFOP ${natCfop}` : ''}` : '')}" />
           <div id="imp-params-nat-list" class="imp-combo-list" hidden></div>
           <p class="hint">Todas as notas abrem com esta natureza. Se você trocar na nota, a gravação usa a que foi alterada.</p>
         </div>
@@ -4187,6 +4259,16 @@ const ImportacaoNfe = (() => {
         <div class="imp-vinc-btns" style="margin-top:.65rem">
           <button type="button" class="btn small outline" id="imp-params-add">Adicionar linha</button>
         </div>
+        <div class="imp-check-list">
+          <label class="imp-check">
+            <input type="checkbox" id="imp-params-cclass-novos" ${ynChecked(saida.cclass_trib_novos === 'S') ? 'checked' : ''} />
+            <span>Definir o cClassTrib 000001 em todos os itens novos</span>
+          </label>
+        </div>
+        <div class="imp-vinc-btns">
+          <button type="button" class="btn small" id="imp-params-cclass-existentes">Atribuir 000001 nos itens existentes</button>
+        </div>
+        <p class="hint">O botão lê TB_CLASS_TRIB e grava essa classificação na NF-e e na NFC-e dos produtos já cadastrados. Lojas que só usam o 000001 podem marcar o parâmetro. Ele começa desmarcado.</p>
       </section>
       <section class="imp-section" id="imp-params-saida-sec">
         <header class="imp-section-head"><h4>Dados de saída (padrão / fallback)</h4></header>
@@ -4256,6 +4338,19 @@ const ImportacaoNfe = (() => {
     bindParamsRowEvents();
     bindParamsConvEvents();
     wireNaturezaPadrao();
+    $('#imp-params-cclass-existentes')?.addEventListener('click', async () => {
+      const ok = await askConfirm(
+        'Atribuir o cClassTrib 000001 na NF-e e na NFC-e de todos os produtos já cadastrados?',
+        { okLabel: 'Atribuir', cancelLabel: 'Cancelar' }
+      );
+      if (!ok) return;
+      const resClass = await api('/importacao/params/cclass-000001', { method: 'POST', body: {} });
+      if (!resClass.ok) {
+        deps.showMsg?.(resClass.error || 'Não foi possível atribuir o cClassTrib.');
+        return;
+      }
+      deps.showToast?.(`cClassTrib ${resClass.cod_class_trib || '000001'} aplicado em ${resClass.produtos || 0} produto(s).`);
+    });
     $('#imp-params-conv-add')?.addEventListener('click', () => {
       const tbody = $('#imp-params-conv-table tbody');
       if (!tbody) return;
@@ -4540,7 +4635,6 @@ const ImportacaoNfe = (() => {
       deps.showMsg?.('Aguarde o carregamento dos parâmetros.');
       return;
     }
-    const csosn = $('#imp-params-csosn')?.value || '102';
     const itens = $$('#imp-params-table tbody tr').map((tr) => ({
       cfop_origem: tr.querySelector('.imp-cfop-origem')?.value || '',
       cfop_conv: tr.querySelector('.imp-cfop-conv')?.value || '',
@@ -4565,6 +4659,7 @@ const ImportacaoNfe = (() => {
       obrigar_financeiro: $('#imp-params-obrigar-fin')?.checked ? 'S' : 'N',
       zerar_negativo: $('#imp-params-zerar-neg')?.checked ? 'S' : 'N',
       conferir_etapas: $('#imp-params-conferir-etapas')?.checked ? 'S' : 'N',
+      cclass_trib_novos: $('#imp-params-cclass-novos')?.checked ? 'S' : 'N',
       id_natope_padrao: Number($('#imp-params-nat-id')?.value || 0) || null,
       nat_padrao_descricao: String($('#imp-params-nat-busca')?.dataset.descricao || $('#imp-params-nat-busca')?.value || '').replace(/\s·\sCFOP\s\d+$/i, '').trim(),
       nat_padrao_cfop: $('#imp-params-nat-busca')?.dataset.cfop || '',
@@ -4577,7 +4672,7 @@ const ImportacaoNfe = (() => {
     })).filter((c) => c.uni_xml && c.uni_estoque);
     const res = await api('/importacao/params/cfop', {
       method: 'PUT',
-      body: { itens, csosn_padrao: csosn, saida, conversoes },
+      body: { itens, saida, conversoes },
     });
     if (!res.ok) {
       deps.showMsg?.(res.error || 'Erro ao salvar parâmetros');

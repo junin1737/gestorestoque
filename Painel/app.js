@@ -888,6 +888,19 @@ async function bootstrap() {
     await loadFuncionarios();
     await api('/logout', { method: 'POST', body: {} });
     await carregarLojasLogin();
+    const sessCont = await api('/contador/sessao');
+    if (sessCont.ok && sessCont.contador) {
+      state.usuario = {
+        id: 0,
+        nome: sessCont.contador.nome || 'Contador',
+        email: sessCont.contador.email || '',
+        contador: true,
+        supervisor: false,
+        permissoes: {},
+      };
+      enterApp();
+      return;
+    }
   } else {
     setServiceStatus(true, `Painel online, base offline: ${conn.error || 'falha Firebird'}`);
     setEmitenteUI({ nome_fanta: 'Gestor Estoque', logo: null });
@@ -955,6 +968,19 @@ $('#login-usuario')?.addEventListener('keydown', (e) => {
   if (e.key === 'Enter') loginCliqueEm = Date.now();
 });
 
+let loginModoContador = false;
+$('#login-modo-contador')?.addEventListener('click', () => {
+  loginModoContador = !loginModoContador;
+  const box = $('#login-contador');
+  const campoUsuario = $('#login-usuario')?.closest('.login-field');
+  if (box) box.hidden = !loginModoContador;
+  if (campoUsuario) campoUsuario.hidden = loginModoContador;
+  const sel = $('#login-usuario');
+  if (sel) sel.required = !loginModoContador;
+  const btn = $('#login-modo-contador');
+  if (btn) btn.textContent = loginModoContador ? 'Entrar como funcionário' : 'Entrar como contador';
+});
+
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
   if (Date.now() - loginCliqueEm > 1500) return;
@@ -966,6 +992,29 @@ $('#form-login').addEventListener('submit', async (e) => {
   senhaEl.value = '';
   mascararSenha(senhaEl, true);
   state.usuario = null;
+  if (loginModoContador) {
+    const resCont = await api('/contador/login', {
+      method: 'POST',
+      body: { email: $('#login-contador-email')?.value || '', senha },
+    });
+    if (!resCont.ok) {
+      senhaEl.value = senha;
+      mascararSenha(senhaEl, true);
+      $('#login-erro').hidden = false;
+      $('#login-erro').textContent = resCont.error || 'Falha no login';
+      return;
+    }
+    state.usuario = {
+      id: 0,
+      nome: resCont.contador?.nome || 'Contador',
+      email: resCont.contador?.email || '',
+      contador: true,
+      supervisor: false,
+      permissoes: {},
+    };
+    enterApp();
+    return;
+  }
   const res = await api('/login', { method: 'POST', body: { id, senha } });
   if (!res.ok) {
     senhaEl.value = senha;
@@ -1035,9 +1084,17 @@ function enterApp() {
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
   if (cfgMais) cfgMais.hidden = !isNativeApk();
+  const showContador = !!state.usuario?.supervisor || !!state.usuario?.contador;
+  if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
+  if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
   const showEmp = !!state.usuario?.mtEntradas;
   if ($('#nav-empresas')) $('#nav-empresas').hidden = !showEmp;
   if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = !showEmp;
+  if (state.usuario?.contador) {
+    document.querySelectorAll('.nav-btn, #mobile-nav [data-page], #mais-sheet [data-page]').forEach((btn) => {
+      btn.hidden = btn.dataset.page !== 'contador';
+    });
+  }
   showPage('dashboard');
   loadUnidades();
   carregarPedidoVinculo();
@@ -1046,6 +1103,7 @@ function enterApp() {
 
 function trocarUsuario() {
   api('/logout', { method: 'POST', body: {} });
+  api('/contador/logout', { method: 'POST', body: {} });
   voltarAoLogin();
 }
 
@@ -1211,6 +1269,11 @@ async function showPage(page) {
     showMsg('Só o supervisor cadastra os usuários do painel.');
     page = 'dashboard';
   }
+  if (page === 'contador' && !(state.usuario?.supervisor || state.usuario?.contador)) {
+    showMsg('Entre como contador para abrir esta tela.');
+    page = 'dashboard';
+  }
+  if (state.usuario?.contador && page !== 'contador') page = 'contador';
 
   const saiaCompras = $('#page-compras') && !$('#page-compras').hidden && page !== 'compras';
   if (saiaCompras) window.Compras?.onPageLeave?.();
@@ -1223,6 +1286,7 @@ async function showPage(page) {
   if ($('#page-condicionais')) $('#page-condicionais').hidden = page !== 'condicionais';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
+  if ($('#page-contador')) $('#page-contador').hidden = page !== 'contador';
   if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
   if ($('#page-empresas')) $('#page-empresas').hidden = page !== 'empresas';
   const estActions = $('#topbar-estoque-actions');
@@ -1231,6 +1295,10 @@ async function showPage(page) {
   if (page === 'dashboard') {
     $('#page-title').textContent = 'Início';
     $('#page-sub').textContent = 'Escolha um módulo';
+  } else if (page === 'contador') {
+    $('#page-title').textContent = 'Contador';
+    $('#page-sub').textContent = 'Clientes, itens e relação das alterações';
+    window.Contador?.onPageEnter();
   } else if (page === 'usuarios') {
     $('#page-title').textContent = 'Usuários';
     $('#page-sub').textContent = 'Permissões por módulo';
@@ -3288,6 +3356,13 @@ function fmtDate(d) {
   if (Number.isNaN(dt.getTime())) return String(d).slice(0, 10);
   return dt.toLocaleDateString('pt-BR');
 }
+
+window.Contador?.init({
+  api,
+  showMsg,
+  showToast,
+  supervisor: () => !!state.usuario?.supervisor,
+});
 
 window.ImportacaoNfe?.init({
   api,

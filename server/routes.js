@@ -1603,15 +1603,31 @@ router.get('/importacao/params/cfop', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const itens = await importacaoParams.listCfopConv();
+    let natureza_sugerida = null;
+    try {
+      natureza_sugerida = await importacaoNotas.resolverNaturezaPadrao();
+    } catch (e) {
+      console.warn('Natureza sugerida:', e.message);
+    }
     res.json({
       ok: true,
       itens,
-      csosn_padrao: importacaoParams.getCsosnPadrao(),
       saida: importacaoParams.getSaidaPadrao(),
       conversoes: importacaoParams.listConversoes(),
+      natureza_sugerida,
     });
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [], csosn_padrao: '102', saida: null });
+  }
+});
+
+router.post('/importacao/params/cclass-000001', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const out = await importacaoNotas.atribuirCclassTodos('000001');
+    res.json(out);
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
   }
 });
 
@@ -1619,14 +1635,13 @@ router.put('/importacao/params/cfop', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
     const itens = await importacaoParams.saveCfopConv(req.body?.itens || []);
-    const csosn = importacaoParams.setCsosnPadrao(req.body?.csosn_padrao);
     const saida = req.body?.saida != null
       ? importacaoParams.setSaidaPadrao(req.body.saida)
       : importacaoParams.getSaidaPadrao();
     const conversoes = req.body?.conversoes != null
       ? importacaoParams.saveConversoes(req.body.conversoes)
       : importacaoParams.listConversoes();
-    res.json({ ok: true, itens, csosn_padrao: csosn, saida, conversoes });
+    res.json({ ok: true, itens, saida, conversoes });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -2602,6 +2617,115 @@ router.post('/rotinas', somenteServidorLocal, (req, res) => {
   const current = loadAppConfig();
   saveAppConfig({ ...current, rotinas });
   res.json({ ok: true, rotinas });
+});
+
+const contador = require('./contador');
+
+function autorContador(req) {
+  if (req.contador) return req.contador;
+  if (req.usuario?.supervisor) return { email: '', nome: req.usuario.nome || 'Supervisor' };
+  return null;
+}
+
+function exigeContador(req, res) {
+  const autor = autorContador(req);
+  if (autor) return autor;
+  res.status(401).json({ ok: false, error: 'Entre como contador.' });
+  return null;
+}
+
+router.post('/contador/login', (req, res) => contador.responderLogin(req, res));
+
+router.post('/contador/logout', (req, res) => contador.logout(req, res));
+
+router.get('/contador/sessao', (req, res) => {
+  const c = contador.daRequisicao(req);
+  if (!c) return res.json({ ok: false });
+  res.json({ ok: true, contador: c });
+});
+
+router.get('/contador/contas', (req, res) => {
+  if (!req.usuario?.supervisor) {
+    return res.status(403).json({ ok: false, error: 'Só o supervisor cadastra o contador.' });
+  }
+  res.json({ ok: true, contas: contador.listarContas() });
+});
+
+router.post('/contador/contas', (req, res) => {
+  if (!req.usuario?.supervisor) {
+    return res.status(403).json({ ok: false, error: 'Só o supervisor cadastra o contador.' });
+  }
+  res.json(contador.cadastrarConta(req.body || {}));
+});
+
+router.delete('/contador/contas', (req, res) => {
+  if (!req.usuario?.supervisor) {
+    return res.status(403).json({ ok: false, error: 'Só o supervisor cadastra o contador.' });
+  }
+  res.json(contador.removerConta(req.body?.email || req.query.email));
+});
+
+router.get('/contador/clientes', async (req, res) => {
+  if (!exigeContador(req, res)) return;
+  try {
+    res.json({ ok: true, clientes: await contador.listarClientes() });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, clientes: [] });
+  }
+});
+
+router.get('/contador/itens', async (req, res) => {
+  if (!exigeContador(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await contador.buscarItens(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/contador/class-trib', async (req, res) => {
+  if (!exigeContador(req, res)) return;
+  try {
+    res.json({ ok: true, itens: await contador.listarClassTrib(req.query.q) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/contador/relacao', (req, res) => {
+  if (!exigeContador(req, res)) return;
+  res.json({ ok: true, itens: contador.relacao() });
+});
+
+router.post('/contador/desfazer', async (req, res) => {
+  const autor = exigeContador(req, res);
+  if (!autor) return;
+  try {
+    res.json(await contador.desfazer(req.body?.id, autor));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/contador/itens/:id', async (req, res) => {
+  if (!exigeContador(req, res)) return;
+  try {
+    const item = await contador.obterItem(req.params.id);
+    if (!item) return res.json({ ok: false, error: 'Produto não encontrado.' });
+    res.json({ ok: true, item });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.put('/contador/itens/:id', async (req, res) => {
+  const autor = exigeContador(req, res);
+  if (!autor) return;
+  try {
+    res.json(await contador.salvarItem(req.params.id, req.body || {}, autor));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
 });
 
 module.exports = router;

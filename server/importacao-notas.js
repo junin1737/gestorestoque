@@ -970,6 +970,95 @@ async function getSugestaoTributoEstoque(idIdentificador) {
   return { atual, ultima_entrada: ultima, sugestao, regra };
 }
 
+function normTexto(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Natureza da nota de entrada: a dos parâmetros, senão compra para comercialização. */
+async function resolverNaturezaPadrao() {
+  const saida = importacaoParams.getSaidaPadrao();
+  if (saida.id_natope_padrao) {
+    const porId = await getNaturezaById(saida.id_natope_padrao);
+    if (porId) return porId;
+  }
+  if (saida.nat_padrao_cfop) {
+    const porCfop = await getNaturezaByCfop(saida.nat_padrao_cfop);
+    if (porCfop) return porCfop;
+  }
+  const textos = [];
+  if (saida.nat_padrao_descricao) textos.push(saida.nat_padrao_descricao);
+  textos.push('COMPRA PARA COMERCIALIZACAO');
+  for (const texto of textos) {
+    const list = await listNaturezas(texto);
+    const alvo = normTexto(texto);
+    const hit = list.find((n) => normTexto(n.descricao) === alvo)
+      || list.find((n) => {
+        const d = normTexto(n.descricao);
+        return d.includes(alvo) || alvo.includes(d);
+      })
+      || list[0];
+    if (hit) return hit;
+  }
+  return null;
+}
+
+async function classTribPorCodigoDb(db, codigo) {
+  const bruto = String(codigo || '').trim();
+  const digitos = bruto.replace(/\D/g, '');
+  const pad = digitos.padStart(6, '0').slice(-6);
+  const rows = await query(db, `
+    SELECT FIRST 1
+      ID_CLASS_TRIB, COD_CLASS_TRIB, DESC_CLASS_TRIB,
+      PERCENT_RED_ALIQ_CBS, PERCENT_RED_ALIQ_IBS, CST_CLASS_TRIB
+    FROM TB_CLASS_TRIB
+    WHERE TRIM(COD_CLASS_TRIB) = ?
+       OR TRIM(COD_CLASS_TRIB) = ?
+       OR RIGHT('000000' || TRIM(COD_CLASS_TRIB), 6) = ?`, [bruto, digitos, pad]);
+  return rows[0] ? mapClassTribRow(rows[0]) : null;
+}
+
+/** Grava o cClassTrib informado na NF-e e na NFC-e de todos os produtos. */
+async function atribuirCclassTodos(codigo = '000001') {
+  return withDb(async (db) => {
+    const classe = await classTribPorCodigoDb(db, codigo);
+    if (!classe?.id_class_trib) {
+      return { ok: false, error: `A classificação ${codigo} não está em TB_CLASS_TRIB.` };
+    }
+    const id = classe.id_class_trib;
+    await query(db, `UPDATE TB_EST_TRIBUTOS SET ID_CLASS_TRIB = ?`, [id]);
+    await query(db, `UPDATE TB_EST_TRIBUTOS_NFCE SET ID_CLASS_TRIB = ?`, [id]);
+    await query(db, `
+      INSERT INTO TB_EST_TRIBUTOS (
+        ID_ESTOQUE, ID_CLASS_TRIB, DIFERIMENTO_CBS, COD_CRED_PRESU_CBS, ALIQ_CRED_PRESU_CBS,
+        DIFERIMENTO_IBS_UF, DIFERIMENTO_IBS_MUN, COD_CRED_PRESU_IBS, ALIQ_CRED_PRESU_IBS,
+        ID_CLASS_TRIB_REGULAR, DEDUZ_CRED_PRESU_CBS, DEDUZ_CRED_PRESU_IBS, IND_BEM_MOVEL_USADO
+      )
+      SELECT E.ID_ESTOQUE, ?, 0, NULL, 0, 0, 0, NULL, 0, NULL, 'N', 'N', 'N'
+      FROM TB_ESTOQUE E
+      WHERE NOT EXISTS (SELECT 1 FROM TB_EST_TRIBUTOS T WHERE T.ID_ESTOQUE = E.ID_ESTOQUE)`, [id]);
+    await query(db, `
+      INSERT INTO TB_EST_TRIBUTOS_NFCE (
+        ID_ESTOQUE, ID_CLASS_TRIB, DIFERIMENTO_CBS, DIFERIMENTO_IBS_UF, DIFERIMENTO_IBS_MUN
+      )
+      SELECT E.ID_ESTOQUE, ?, 0, 0, 0
+      FROM TB_ESTOQUE E
+      WHERE NOT EXISTS (SELECT 1 FROM TB_EST_TRIBUTOS_NFCE N WHERE N.ID_ESTOQUE = E.ID_ESTOQUE)`, [id]);
+    const cnt = await query(db, `SELECT COUNT(*) AS N FROM TB_ESTOQUE`);
+    return {
+      ok: true,
+      id_class_trib: id,
+      cod_class_trib: classe.cod_class_trib,
+      descricao: classe.desc_class_trib,
+      produtos: Number(cnt[0]?.N || 0),
+    };
+  });
+}
+
 module.exports = {
   carregarAliquotasPadrao,
   listNotasCadastradas,
@@ -997,4 +1086,7 @@ module.exports = {
   getProdutoFiscal,
   getSugestaoTributoEstoque,
   toDateOnly,
+  resolverNaturezaPadrao,
+  classTribPorCodigoDb,
+  atribuirCclassTodos,
 };

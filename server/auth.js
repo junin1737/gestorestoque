@@ -34,6 +34,9 @@ const ROTAS_PUBLICAS = [
   /^\/login$/,
   /^\/logout$/,
   /^\/sessao$/,
+  /^\/contador\/login$/,
+  /^\/contador\/logout$/,
+  /^\/contador\/sessao$/,
   /^\/licenca$/,
   /^\/licenca\/verificar$/,
   /^\/mt\/grupo$/,
@@ -373,6 +376,13 @@ function exigirSessao(req, res, next) {
     return res.status(403).json({ ok: false, error: 'Origem da requisição não permitida.' });
   }
   if (ROTAS_PUBLICAS.some((re) => re.test(req.path))) return next();
+  if (req.path.startsWith('/contador/')) {
+    const contador = require('./contador').daRequisicao(req);
+    if (contador) {
+      req.contador = contador;
+      return next();
+    }
+  }
   if (ROTAS_SERVIDOR_LOCAL.some((re) => re.test(req.path)) && isServidorLocal(req)) return next();
   const u = usuarioDaSessao(req);
   if (!u) {

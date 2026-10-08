@@ -1,7 +1,7 @@
 'use strict';
 
 const { withDb, withTransaction, query, writeTargets, hasTable, columnExists, nextGenId } = require('./db');
-const { findNfDuplicada, getNaturezaById, getNaturezaByCfop } = require('./importacao-notas');
+const { findNfDuplicada, getNaturezaById, getNaturezaByCfop, classTribPorCodigoDb } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
 const { round2, calcCustoUnitarioItem, valorProdutoItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
@@ -498,8 +498,30 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
 }
 
 /** Reforma tributária do cadastro: TB_EST_TRIBUTOS / TB_EST_TRIBUTOS_NFCE (por ID_ESTOQUE). */
+async function preencherCclassNovo(db, sistema) {
+  const nfe = sistema.trib_nfe || {};
+  const nfce = sistema.trib_nfce || {};
+  if (nfe.id_class_trib && nfce.id_class_trib) return;
+  let classe = null;
+  try {
+    classe = await classTribPorCodigoDb(db, '000001');
+  } catch (e) {
+    console.warn('cClassTrib 000001:', e.message);
+    return;
+  }
+  if (!classe?.id_class_trib) return;
+  const base = {
+    id_class_trib: classe.id_class_trib,
+    _class_cod: classe.cod_class_trib,
+    cst_class_trib: classe.cst_class_trib || '',
+  };
+  if (!nfe.id_class_trib) sistema.trib_nfe = { ...nfe, ...base };
+  if (!nfce.id_class_trib) sistema.trib_nfce = { ...(sistema.trib_nfce || {}), ...base };
+}
+
 async function upsertEstTributosReforma(db, idIdent, sistema = {}) {
-  const nfe = sistema.trib_nfe || sistema.trib_nfe || {};
+  if (sistema._aplicar_cclass_novo) await preencherCclassNovo(db, sistema);
+  const nfe = sistema.trib_nfe || {};
   const nfce = sistema.trib_nfce || {};
   const idClassNfe = nfe.id_class_trib != null && nfe.id_class_trib !== '' ? Number(nfe.id_class_trib) : null;
   const idClassNfce = nfce.id_class_trib != null && nfce.id_class_trib !== ''
@@ -1386,6 +1408,10 @@ async function gravarNfCompra(sessao, {
       // então ficam presas pela transação o menor tempo possível.
       for (const p of pendentesEstoque) {
         const fotoAntes = await lerFotoProduto(db, appCfg, p.idIdent);
+        if (p.produtoNovo && String(importacaoParams.getSaidaPadrao().cclass_trib_novos || 'N') === 'S') {
+          p.it.sistema = p.it.sistema || {};
+          p.it.sistema._aplicar_cclass_novo = true;
+        }
         await atualizarCadastroProduto(db, appCfg, p.it.sistema || {}, p.it.xml || {});
         try {
           await query(db, `
@@ -1437,6 +1463,7 @@ async function gravarNfCompra(sessao, {
           id_identificador: p.idIdent,
           descricao: String(fotoDepois?.DESCRICAO || p.it.sistema?.descricao || p.it.xml?.xProd || '').trim(),
           qtd_anterior: p.produtoNovo ? 0 : numFoto(fotoAntes, 'QTD_ATUAL'),
+          qtd_entrada: Number(p.qtd || 0),
           qtd_atual: numFoto(fotoDepois, 'QTD_ATUAL'),
           venda_anterior: p.produtoNovo ? null : numFoto(fotoAntes, 'PRC_VENDA'),
           venda_atual: numFoto(fotoDepois, 'PRC_VENDA'),

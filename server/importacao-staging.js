@@ -805,31 +805,9 @@ async function createSessao(opts = {}) {
   let idNatope = null;
   let natureza = null;
   try {
-    const { listNaturezas } = require('./importacao-notas');
-    const natOpTxt = String(xml.ide?.natOp || '').trim();
-    if (natOpTxt) {
-      const candidatos = await listNaturezas(natOpTxt);
-      const upper = natOpTxt.toUpperCase();
-      natureza = candidatos.find((n) => String(n.descricao || '').toUpperCase() === upper)
-        || candidatos.find((n) => String(n.descricao || '').toUpperCase().includes(upper)
-          || upper.includes(String(n.descricao || '').toUpperCase()))
-        || candidatos[0]
-        || null;
-      if (natureza) idNatope = natureza.id_natope;
-    }
-  } catch (_) { /* ignore */ }
-
-  try {
-    const idPadrao = Number(importacaoParams.getSaidaPadrao().id_natope_padrao || 0);
-    if (idPadrao) {
-      const { getNaturezaById } = require('./importacao-notas');
-      const padrao = await getNaturezaById(idPadrao);
-      if (padrao) {
-        natureza = padrao;
-        idNatope = padrao.id_natope;
-        if (xml.ide) xml.ide.natOp = padrao.descricao || xml.ide.natOp;
-      }
-    }
+    const { resolverNaturezaPadrao } = require('./importacao-notas');
+    natureza = await resolverNaturezaPadrao();
+    if (natureza) idNatope = natureza.id_natope;
   } catch (e) {
     console.warn('Natureza padrão:', e.message);
   }
@@ -988,15 +966,11 @@ async function createSessaoManual(body = {}) {
   };
   if (!sessao.natureza) {
     try {
-      const idPadrao = Number(importacaoParams.getSaidaPadrao().id_natope_padrao || 0);
-      if (idPadrao) {
-        const { getNaturezaById } = require('./importacao-notas');
-        const padrao = await getNaturezaById(idPadrao);
-        if (padrao) {
-          sessao.natureza = padrao;
-          sessao.id_natope = padrao.id_natope;
-          sessao.xml.ide.natOp = padrao.descricao || sessao.xml.ide.natOp;
-        }
+      const { resolverNaturezaPadrao } = require('./importacao-notas');
+      const padrao = await resolverNaturezaPadrao();
+      if (padrao) {
+        sessao.natureza = padrao;
+        sessao.id_natope = padrao.id_natope;
       }
     } catch (e) {
       console.warn('Natureza padrão:', e.message);

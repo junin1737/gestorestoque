@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=227" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=227" />
+  <link rel="stylesheet" href="styles.css?v=228" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=228" />
 </head>
 <body>
   <div id="app">
@@ -73,6 +73,11 @@
                 <option value="">Selecione o usuário</option>
               </select>
             </div>
+            <div id="login-contador" hidden>
+              <label>E-mail
+                <input id="login-contador-email" type="email" autocomplete="username" placeholder="contador@escritorio.com" />
+              </label>
+            </div>
             <label>Senha
               <div class="input-row">
                 <input id="login-senha" type="text" class="senha-mascarada" name="acesso-painel" placeholder="Digite sua senha" required autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" data-1p-ignore="true" data-lpignore="true" />
@@ -84,6 +89,7 @@
             <p id="login-erro" class="erro" hidden></p>
             <div class="login-actions">
               <button type="submit" class="btn primary block">Entrar</button>
+              <button type="button" id="login-modo-contador" class="btn small block">Entrar como contador</button>
             </div>
             <p id="svc-status" class="hint login-svc">Verificando serviço…</p>
           </form>
@@ -146,6 +152,10 @@
             Alterações
           </button>
           <p class="nav-section">Administração</p>
+          <button class="nav-btn" data-page="contador" id="nav-contador" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10A1.5 1.5 0 0 1 18.5 6v13l-6.5-3.2L5.5 19V6A1.5 1.5 0 0 1 7 4.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Contador
+          </button>
           <button class="nav-btn" data-page="usuarios" id="nav-usuarios">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M4 19c.4-3 2.4-5 5-5s4.6 2 5 5M16.5 8.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM20 19c-.3-2.2-1.6-3.7-3.5-3.7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Usuários
@@ -563,6 +573,10 @@
           </div>
         </div>
 
+        <div id="page-contador" class="page" hidden>
+          <div id="contador-host"></div>
+        </div>
+
         <div id="page-usuarios" class="page" hidden>
           <div class="toolbar">
             <p class="hint">Só o supervisor cadastra os usuários do painel. Supervisor e MT Entradas já entram com a senha pré-cadastrada.</p>
@@ -663,6 +677,7 @@
             <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
+            <button type="button" data-page="contador" id="nav-contador-mobile" hidden>Contador</button>
             <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
             <button type="button" data-page="empresas" id="nav-empresas-mobile" hidden>Empresas</button>
             <button type="button" data-page="preferencias">Configurações</button>
@@ -770,10 +785,11 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
-  <script src="vendor/zxing-browser.min.js?v=227"></script>
-  <script src="importacao-nfe.js?v=227"></script>
-  <script src="compras.js?v=227"></script>
-  <script src="condicionais.js?v=227"></script>
-  <script src="app.js?v=227"></script>
+  <script src="vendor/zxing-browser.min.js?v=228"></script>
+  <script src="importacao-nfe.js?v=228"></script>
+  <script src="compras.js?v=228"></script>
+  <script src="condicionais.js?v=228"></script>
+  <script src="contador.js?v=228"></script>
+  <script src="app.js?v=228"></script>
 </body>
 </html>

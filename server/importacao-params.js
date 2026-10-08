@@ -318,6 +318,7 @@ function getSaidaPadrao() {
     id_natope_padrao: Number(s.id_natope_padrao) > 0 ? Number(s.id_natope_padrao) : null,
     nat_padrao_descricao: String(s.nat_padrao_descricao || '').trim(),
     nat_padrao_cfop: String(s.nat_padrao_cfop || '').replace(/\D/g, '').slice(0, 4),
+    cclass_trib_novos: (s.cclass_trib_novos === true || s.cclass_trib_novos === 'S') ? 'S' : 'N',
   };
 }
 
@@ -348,6 +349,9 @@ function setSaidaPadrao(saida) {
     nat_padrao_cfop: saida && Object.prototype.hasOwnProperty.call(saida, 'nat_padrao_cfop')
       ? String(saida.nat_padrao_cfop || '').replace(/\D/g, '').slice(0, 4)
       : String(prev.nat_padrao_cfop || '').replace(/\D/g, '').slice(0, 4),
+    cclass_trib_novos: saida && Object.prototype.hasOwnProperty.call(saida, 'cclass_trib_novos')
+      ? ((saida.cclass_trib_novos === true || saida.cclass_trib_novos === 'S') ? 'S' : 'N')
+      : ((prev.cclass_trib_novos === true || prev.cclass_trib_novos === 'S') ? 'S' : 'N'),
   };
   saveLocalParams(local);
   return local.saida;
@@ -464,7 +468,7 @@ async function mapCfopEntrada(cfopOrigem, ufFornecedor) {
   const found = rows.find((r) => r.cfop_origem === origem);
   const baseConv = found?.cfop_conv || (origem ? applyUfDigit(origem, useSame) : '');
   const cfopEntrada = baseConv ? applyUfDigit(baseConv, useSame) : '';
-  const csosn = found?.csosn || getCsosnPadrao();
+  const csosn = found?.csosn || '';
   const saidaPad = getSaidaPadrao();
 
   return {
