@@ -251,7 +251,9 @@ async function login(req, res) {
     if (r.ok && r.token) {
       tokenMt = { token: r.token, horas: Number(r.horas) || 12 };
     } else if (senhaLocal) {
-      tokenMt = null;
+      // A senha do painel vale mesmo quando o servidor de licenças recusa.
+      // Sem o token de lá a lista de empresas não abre, mas a sessão do painel permanece.
+      tokenMt = { token: '', horas: 12 };
     } else if (r.ok === false && r.status === 401) {
       return falhaLogin(req, res, id);
     } else {

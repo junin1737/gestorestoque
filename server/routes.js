@@ -2126,7 +2126,7 @@ function tokenMt(req, res) {
   }
   const token = auth.tokenMtDaSessao(req.usuario);
   if (!token) {
-    res.status(401).json({ ok: false, code: 'AUTH', error: 'Sessão MT expirada. Entre novamente.' });
+    res.status(403).json({ ok: false, error: 'O servidor de licenças não confirmou o acesso às empresas.' });
     return null;
   }
   return token;
