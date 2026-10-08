@@ -67,6 +67,14 @@ function esc(s) {
 
 async function loadRotinas() {
   const res = await api('/rotinas');
+  const msg = $('#rot-msg');
+  if (!res.ok && !res.rotinas) {
+    if (msg) {
+      msg.hidden = false;
+      msg.textContent = res.error || 'Não foi possível ler a rotina.';
+    }
+    return;
+  }
   const r = res.rotinas || {};
   const ativo = $('#rot-ativo');
   if (ativo) ativo.checked = r.ativo === true;
@@ -78,6 +86,13 @@ async function loadRotinas() {
     if (campo && hora) campo.value = hora;
   });
 }
+
+$$('#rot-dias [data-hora]').forEach((campo) => {
+  campo.addEventListener('change', () => {
+    const dia = $(`#rot-dias [data-dia="${campo.dataset.hora}"]`);
+    if (dia && campo.value) dia.checked = true;
+  });
+});
 
 $('#form-rotinas')?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
@@ -93,7 +108,9 @@ $('#form-rotinas')?.addEventListener('submit', async (ev) => {
   });
   if (msg) {
     msg.hidden = false;
-    msg.textContent = res.ok ? 'Rotina salva. Cada dia desliga no horário marcado.' : (res.error || 'Não foi possível salvar.');
+    if (!res.ok) msg.textContent = res.error || 'Não foi possível salvar.';
+    else if (!$('#rot-ativo')?.checked) msg.textContent = 'Horários gravados, mas a rotina está desligada. Marque Desligar automaticamente.';
+    else msg.textContent = 'Rotina salva. Cada dia desliga no horário marcado.';
   }
 });
 
