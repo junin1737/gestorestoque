@@ -28,4 +28,11 @@
     <string name="online_loja_desconectada">O computador da loja está desligado ou sem internet agora. Tente de novo em instantes.</string>
     <string name="online_sem_resposta">Sem resposta da rede da loja nem pela internet. Confira a conexão do celular.</string>
     <string name="scan_product">Ler código</string>
+    <string name="apk_atualizar_titulo">Atualização disponível</string>
+    <string name="apk_atualizar_msg">Existe a versão %1$s do Gestor Estoque Online. A instalada é %2$s. Deseja atualizar agora?</string>
+    <string name="apk_atualizar_sim">Atualizar</string>
+    <string name="apk_atualizar_nao">Agora não</string>
+    <string name="apk_baixando">Baixando a atualização…</string>
+    <string name="apk_falha">Não foi possível baixar a atualização.</string>
+    <string name="apk_permitir">Permita a instalação de apps desta origem para concluir a atualização.</string>
 </resources>

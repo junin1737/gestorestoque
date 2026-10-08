@@ -32,6 +32,22 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
 
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Build APK
+        working-directory: android-app
+        run: .\gradlew.bat assembleRelease --no-daemon
+
       - name: Read version
         id: ver
         shell: bash
@@ -39,6 +55,7 @@ jobs:
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+          cp android-app/app/build/outputs/apk/release/app-release.apk "dist/gestorestoque-online-${VERSION}.apk"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -46,10 +63,13 @@ jobs:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: ${{ steps.ver.outputs.tag }}
           body: |
-            Instalador do Gestor Estoque Online ${{ steps.ver.outputs.version }}.
+            Gestor Estoque Online ${{ steps.ver.outputs.version }}.
 
-            No app: **Sobre → Verificar atualização agora**.
-          files: dist/gestorestoque-online-*.exe
+            No computador: **Sobre → Verificar atualização agora**.
+            No celular, o APK desta mesma versão se oferece para atualizar ao abrir.
+          files: |
+            dist/gestorestoque-online-*.exe
+            dist/gestorestoque-online-*.apk
           fail_on_unmatched_files: true
           make_latest: false
           prerelease: true

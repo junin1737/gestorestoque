@@ -2,6 +2,13 @@ plugins {
     id 'com.android.application'
 }
 
+// A versão do APK é a do Git (package.json da raiz), a mesma do instalador Windows.
+def pkgGit = new groovy.json.JsonSlurper().parse(rootProject.file("../package.json"))
+def versaoGit = (pkgGit.version ?: "0.0.0").toString()
+def numerosVersao = (versaoGit =~ /\d+/).collect { it.toInteger() }
+while (numerosVersao.size() < 4) numerosVersao << 0
+def codigoVersao = numerosVersao[0] * 1000000 + numerosVersao[1] * 10000 + numerosVersao[2] * 10 + numerosVersao[3]
+
 android {
     namespace 'com.mtautomacoes.gestorestoque'
     compileSdk 34
@@ -11,8 +18,8 @@ android {
         applicationId "com.mtautomacoes.gestorestoque.online"
         minSdk 24
         targetSdk 34
-        versionCode 3
-        versionName "1.0.26-online.1"
+        versionCode codigoVersao
+        versionName versaoGit
         // Celulares reais são ARM; x86 só serve para emulador e dobra o tamanho (OCR do ML Kit).
         ndk {
             abiFilters 'arm64-v8a', 'armeabi-v7a'

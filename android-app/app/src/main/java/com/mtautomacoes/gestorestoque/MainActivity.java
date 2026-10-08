@@ -167,6 +167,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        Atualizador.verificar(this);
+
         btnScanQr.setOnClickListener(v -> startQrScan());
         btnConnect.setOnClickListener(v -> connect());
 
@@ -741,6 +743,12 @@ public class MainActivity extends AppCompatActivity {
             }
             pendingPermissionRequest = null;
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        Atualizador.retomar(this);
     }
 
     @Override
