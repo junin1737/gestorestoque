@@ -41,33 +41,27 @@ function encerrarApp() {
   app.quit();
 }
 
+const { chaveRotinaDesligamento } = require('./server/rotinas-horario');
 let rotinaDisparada = '';
 
 function checarRotinaDesligamento() {
-  if (rotinaDisparada && encerrando) return;
+  if (encerrando) return;
   let cfg;
   try { cfg = require('./server/config').loadAppConfig(); } catch { return; }
-  const r = cfg.rotinas || {};
-  if (r.ativo !== true) return;
-  const agora = new Date();
-  let hora = '';
-  if (r.horas && typeof r.horas === 'object') hora = String(r.horas[String(agora.getDay())] || '');
-  else if (Array.isArray(r.dias) && r.dias.map(Number).includes(agora.getDay())) hora = String(r.hora || '');
-  if (!/^\d{2}:\d{2}$/.test(hora)) return;
-  const [hh, mm] = hora.split(':').map(Number);
-  if (agora.getHours() !== hh || agora.getMinutes() !== mm) return;
-  const chave = `${agora.getFullYear()}-${agora.getMonth()}-${agora.getDate()} ${hora}`;
-  if (rotinaDisparada === chave) return;
+  const chave = chaveRotinaDesligamento(cfg.rotinas, new Date());
+  if (!chave || rotinaDisparada === chave) return;
   rotinaDisparada = chave;
-  try {
-    spawn('shutdown', ['/s', '/f', '/t', '20', '/c', 'Gestor Estoque: desligamento programado.'], {
-      windowsHide: true,
-      detached: true,
-      stdio: 'ignore',
-    }).unref();
-  } catch (err) {
+  const exe = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'shutdown.exe');
+  const child = spawn(exe, ['/s', '/f', '/t', '20', '/c', 'Gestor Estoque: desligamento programado.'], {
+    windowsHide: true,
+    detached: true,
+    stdio: 'ignore',
+  });
+  child.on('error', (err) => {
+    rotinaDisparada = '';
     console.warn('Rotina de desligamento:', err.message);
-  }
+  });
+  child.unref();
   setTimeout(() => {
     try { encerrarApp(); } catch { /* ignore */ }
   }, 1000);
@@ -239,7 +233,8 @@ if (gotLock) {
     if (app.getLoginItemSettings(itemLoginAntigo).openAtLogin) definirIniciarComWindows(true);
     criarBandeja();
     createWindow();
-    setInterval(checarRotinaDesligamento, 20000);
+    checarRotinaDesligamento();
+    setInterval(checarRotinaDesligamento, 15000);
   });
   app.on('window-all-closed', () => app.quit());
   app.on('activate', () => {

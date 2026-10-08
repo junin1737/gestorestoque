@@ -44,6 +44,7 @@ const ROTAS_SERVIDOR_LOCAL = [
   /^\/config$/,
   /^\/connect$/,
   /^\/shutdown$/,
+  /^\/rotinas$/,
   /^\/licenca\/aplicar$/,
   /^\/licenca\/solicitar$/,
   /^\/database\//,

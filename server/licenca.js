@@ -433,6 +433,7 @@ const ROTAS_LIVRES = [
   /^\/network$/,
   /^\/qrcode$/,
   /^\/shutdown$/,
+  /^\/rotinas$/,
   /^\/config$/,
   /^\/tema$/,
   /^\/emitente$/,
