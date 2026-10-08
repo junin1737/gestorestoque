@@ -2185,9 +2185,9 @@ function renderUsuarios() {
           </select>
         </label>
         ${state.modulos?.online ? `<label>Acesso online
-          <select data-perm="online.acesso" ${state.mudaOnline === false ? 'disabled title="Só na rede da loja"' : ''}>
-            <option value="true" ${u.permissoes?.online?.acesso ? 'selected' : ''}>Sim</option>
-            <option value="false" ${!u.permissoes?.online?.acesso ? 'selected' : ''}>Não</option>
+          <select data-perm="online.acesso" ${u.supervisor || state.mudaOnline === false ? 'disabled' : ''} title="${u.supervisor ? 'O supervisor já entra com acesso total.' : (state.mudaOnline === false ? 'Só na rede da loja' : '')}">
+            <option value="true" ${u.supervisor || u.permissoes?.online?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.supervisor && !u.permissoes?.online?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>` : ''}
         <label>Consultar Compras

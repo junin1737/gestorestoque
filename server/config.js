@@ -133,15 +133,16 @@ function fullPermissoes() {
     if (key === 'importacao') out[key] = { acesso: true };
     if (key === 'compras') out[key] = { acesso: true };
     if (key === 'condicionais') out[key] = { acesso: true };
-    if (key === 'online') out[key] = { acesso: false };
+    if (key === 'online') out[key] = { acesso: true };
   }
   return out;
 }
 
-/** Supervisor e MT Entradas têm permissões fixas; só o acesso online é liberado (ou não) em Usuários. */
+/** Supervisor entra com acesso total, inclusive pela internet. No MT Entradas o acesso online continua opcional. */
 function comAcessoOnline(u, permissoes) {
   if (!MODULOS.online) return permissoes;
-  return { ...permissoes, online: { acesso: u.acessoOnline === true } };
+  const acesso = u.supervisor ? true : u.acessoOnline === true;
+  return { ...permissoes, online: { acesso } };
 }
 
 function ensureModulos(permissoes) {

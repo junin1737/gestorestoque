@@ -345,7 +345,8 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
   }
   const currentById = new Map(cfg.usuarios.map((u) => [Number(u.id), u]));
   const enviados = new Map((Array.isArray(usuarios) ? usuarios : []).map((u) => [Number(u.id), u]));
-  // Liberar ou tirar o acesso online (de qualquer usuário, inclusive supervisor e MT) só pela rede da loja.
+  // Liberar ou tirar o acesso online dos funcionários e do MT Entradas só pela rede da loja.
+  // O supervisor permanece com acesso total.
   const mudaOnline = !viaTunel(req);
   const onlinePedido = (prev) => {
     const v = enviados.get(Number(prev.id))?.permissoes?.online?.acesso;
@@ -354,7 +355,7 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
   // Só altera usuários já existentes (vindos do TB_FUNCIONARIO); a lista não cria nem apaga ninguém.
   cfg.usuarios = cfg.usuarios.map((prev) => {
     if (prev.supervisor) {
-      return { id: 0, nome: prev.nome || 'SUPERVISOR', supervisor: true, acessoOnline: onlinePedido(prev), permissoes: fullPermissoes() };
+      return { id: 0, nome: prev.nome || 'SUPERVISOR', supervisor: true, acessoOnline: true, permissoes: fullPermissoes() };
     }
     if (isMtEntradas(prev)) return { ...prev, acessoOnline: onlinePedido(prev) };
     const u = enviados.get(Number(prev.id));
