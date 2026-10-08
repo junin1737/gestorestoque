@@ -88,6 +88,17 @@ async function listarVinculos(tokenMt) {
   return { ...data, ok: data.ok !== false, itens: data.itens || [] };
 }
 
+async function excluirVinculo(tokenMt, id) {
+  return chamarLicenca(`/api/mt/vinculos/${Number(id)}`, {
+    method: 'DELETE',
+    headers: comToken(tokenMt),
+  });
+}
+
+async function excluirVinculoDaLoja(id) {
+  return comoEstaEmpresa(`/api/mt/vinculos/${Number(id)}`, { method: 'DELETE' });
+}
+
 async function criarVinculo(tokenMt, cnpjMatriz, cnpjFilial) {
   return chamarLicenca('/api/mt/vinculos', {
     method: 'POST',
@@ -141,6 +152,8 @@ module.exports = {
   listarEmpresas,
   listarCadastro,
   listarVinculos,
+  excluirVinculo,
+  excluirVinculoDaLoja,
   criarVinculo,
   grupoLogin,
   pendentesDestaEmpresa,
