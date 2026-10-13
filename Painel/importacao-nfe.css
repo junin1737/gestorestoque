@@ -894,6 +894,33 @@
   content: "⚠ ";
 }
 .massa-regra { margin: 0.35rem 0 0.7rem; }
+.massa-lista {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+.massa-row {
+  display: grid;
+  grid-template-columns: 1.1rem 4.5rem minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0.32rem 0.7rem;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+.massa-row + .massa-row { border-top: 1px solid var(--border); }
+.massa-row:hover { background: color-mix(in srgb, var(--primary-2) 7%, var(--bg-elev)); }
+.massa-row input[type="checkbox"] { width: 1rem; height: 1rem; margin: 0; }
+.massa-id { color: var(--muted); font-variant-numeric: tabular-nums; }
+.massa-row strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.massa-row .hint { margin: 0; font-size: 0.76rem; white-space: nowrap; }
+.massa-lista > .hint { margin: 0; padding: 0.6rem 0.7rem; }
+@media (max-width: 720px) {
+  .massa-row { grid-template-columns: 1.1rem 3.6rem minmax(0, 1fr); }
+  .massa-row .hint { grid-column: 3; white-space: normal; }
+}
 
 .imp-fields {
   display: grid;

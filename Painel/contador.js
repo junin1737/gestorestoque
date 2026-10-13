@@ -100,7 +100,7 @@
         </div>
         <div id="massa-previa-box"></div>
         </section>
-        <div id="massa-lista" class="item-list"></div>
+        <div id="massa-lista" class="massa-lista"></div>
       </section>
       <p class="hint">Cada campo alterado fica no relatório de Alterações, com o valor anterior, o novo, quem fez e a data.</p>`;
     selecionados = new Set();
@@ -196,8 +196,9 @@
     if (!box) return;
     const itens = res.itens || [];
     box.innerHTML = itens.map((it) => `
-      <label class="item-row">
+      <label class="massa-row">
         <input type="checkbox" data-id="${it.id_identificador}" ${selecionados.has(it.id_identificador) ? 'checked' : ''} />
+        <span class="massa-id">${esc(it.id_identificador)}</span>
         <strong>${esc(it.descricao)}</strong>
         <span class="hint">NCM ${esc(it.ncm || '—')} · CFOP ${esc(it.cfop || '—')} · ${esc(it.csosn || it.cst || 'sem CST/CSOSN')}</span>
       </label>`).join('') || '<p class="hint">Nenhum produto neste filtro.</p>';
