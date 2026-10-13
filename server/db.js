@@ -76,7 +76,29 @@ async function connectSmart(appCfg) {
   }
 }
 
+/** Segundos que uma gravação espera por linha presa por outro programa antes de desistir. */
+const ESPERA_BLOQUEIO_S = 15;
+
 function query(db, sql, params) {
+  // Conexão (não transação): o db.query do node-firebird abre READ COMMITTED NO_REC_VERSION com WAIT sem limite,
+  // e aí até um SELECT para indefinidamente se o Clipp/ManagePro tiver a linha alterada sem commit.
+  if (typeof db?.detach === 'function' && typeof db?.transaction === 'function') {
+    return new Promise((resolve, reject) => {
+      db.transaction({
+        isolation: Firebird.ISOLATION_READ_UNCOMMITTED,
+        wait: true,
+        waitTimeout: ESPERA_BLOQUEIO_S,
+      }, (errTx, tx) => {
+        if (errTx) return reject(errTx);
+        const cb = (err, rows) => {
+          if (err) return tx.rollback(() => reject(err));
+          return tx.commit((errCommit) => (errCommit ? reject(errCommit) : resolve(rows || [])));
+        };
+        if (params && params.length) tx.query(sql, params, cb);
+        else tx.query(sql, cb);
+      });
+    });
+  }
   return new Promise((resolve, reject) => {
     const cb = (err, rows) => (err ? reject(err) : resolve(rows || []));
     if (params && params.length) db.query(sql, params, cb);

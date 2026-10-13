@@ -9,6 +9,15 @@ const GENERATORS_ITEM_PEDIDO = ['GEN_TB_PED_VENDA_ITEM_ID', 'XX_GEN_TB_PEDI_I'];
 /** O Clipp numera o pedido por MAX+1; a integração ManagePro pode ter este generator. */
 const GENERATORS_PEDIDO = ['XX_GEN_ID_PEDIDO'];
 
+/** Espera curta: o Clipp/ManagePro com o pedido ou a peça aberta em edição segura a linha. */
+const ESPERA_BLOQUEIO_S = 8;
+
+function erroDeBloqueio(err) {
+  const texto = String(err?.message || err || '');
+  if (!/deadlock|lock conflict|lock time-?out|concurrent update|update conflicts/i.test(texto)) return err;
+  return new Error('O condicional ou o estoque de uma peça está aberto em outro programa (Clipp ou ManagePro). Feche a tela do pedido lá e tente de novo.');
+}
+
 async function proximoIdPedido(tx) {
   const seq = await query(tx, 'SELECT COALESCE(MAX(ID_PEDIDO), 0) + 1 AS ID FROM TB_PEDIDO_VENDA');
   let id = num(seq[0]?.ID);
@@ -242,6 +251,8 @@ async function detalhe(id) {
     const doc = mapPedido(cab[0]);
     doc.itens = await itensDoPedido(db, appCfg, codigo);
     doc.total = doc.itens.reduce((s, it) => s + num(it.total), 0);
+    const idReprovado = await statusReprovado(db);
+    doc.pode_reprovar = !!idReprovado && String(idReprovado) !== doc.status;
     return doc;
   });
 }
@@ -499,7 +510,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
         });
       } catch (err) {
         ultimoErro = err;
-        if (!/UNIQUE|PRIMARY|violation/i.test(String(err.message || '')) || tentativa === 2) throw err;
+        if (!/UNIQUE|PRIMARY|violation/i.test(String(err.message || '')) || tentativa === 2) throw erroDeBloqueio(err);
       }
     }
     throw ultimoErro || new Error('Não foi possível lançar o condicional.');
@@ -667,21 +678,30 @@ async function alterarStatus(id, idStatus, idParcela) {
       FROM TB_PED_VENDA_STATUS
       WHERE ID_STATUS = ? AND COALESCE(STATUS, 'A') = 'A'`, [status]);
     if (!st.length) throw new Error('Situação inválida.');
-    const existe = await query(db, 'SELECT ID_PEDIDO, ID_STATUS, ID_PARCELA FROM TB_PEDIDO_VENDA WHERE ID_PEDIDO = ?', [codigo]);
+    const existe = await query(db, `
+      SELECT P.ID_PEDIDO, P.ID_STATUS, P.ID_PARCELA, P.ID_MODULO, S.RESERVA
+      FROM TB_PEDIDO_VENDA P
+      LEFT JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
+      WHERE P.ID_PEDIDO = ?`, [codigo]);
     if (!existe.length) throw new Error('Condicional não encontrado.');
     const pagamento = num(idParcela) ? await resolverPagamento(db, idParcela) : null;
     const trocaPagamento = pagamento && pagamento.id_parcela !== num(existe[0].ID_PARCELA);
     if (status !== num(existe[0].ID_STATUS) || trocaPagamento) {
-      await withTransaction(db, async (tx) => {
-        if (trocaPagamento) {
-          await query(tx, 'UPDATE TB_PEDIDO_VENDA SET ID_PARCELA = ?, ID_FMAPGTO = ? WHERE ID_PEDIDO = ?', [
-            pagamento.id_parcela, pagamento.id_fmapgto, codigo,
-          ]);
-        }
-        if (status !== num(existe[0].ID_STATUS)) {
-          await query(tx, 'UPDATE TB_PEDIDO_VENDA SET ID_STATUS = ? WHERE ID_PEDIDO = ?', [status, codigo]);
-        }
-      });
+      try {
+        await withTransaction(db, async (tx) => {
+          if (trocaPagamento) {
+            await query(tx, 'UPDATE TB_PEDIDO_VENDA SET ID_PARCELA = ?, ID_FMAPGTO = ? WHERE ID_PEDIDO = ?', [
+              pagamento.id_parcela, pagamento.id_fmapgto, codigo,
+            ]);
+          }
+          if (status !== num(existe[0].ID_STATUS)) {
+            // Os triggers do Clipp acertam QTD_RESERV ao entrar ou sair de uma situação que reserva.
+            await query(tx, 'UPDATE TB_PEDIDO_VENDA SET ID_STATUS = ? WHERE ID_PEDIDO = ?', [status, codigo]);
+          }
+        }, { waitTimeout: ESPERA_BLOQUEIO_S });
+      } catch (err) {
+        throw erroDeBloqueio(err);
+      }
     }
     return {
       id: codigo,
@@ -690,8 +710,27 @@ async function alterarStatus(id, idStatus, idParcela) {
       reserva: reservaSim(st[0].RESERVA),
       id_parcela: pagamento ? pagamento.id_parcela : num(existe[0].ID_PARCELA),
       pagamento: pagamento ? pagamento.descricao : undefined,
+      estornou_reserva: reservaSim(existe[0].RESERVA) && !reservaSim(st[0].RESERVA) && num(existe[0].ID_MODULO) === 4,
     };
   });
+}
+
+async function statusReprovado(db) {
+  const rows = await query(db, `
+    SELECT FIRST 1 ID_STATUS FROM TB_PED_VENDA_STATUS
+    WHERE UPPER(DESCRICAO) CONTAINING 'REPROV' AND COALESCE(TRIM(RESERVA), 'N') <> 'S'
+      AND COALESCE(STATUS, 'A') = 'A'
+    ORDER BY ID_STATUS`);
+  return rows.length ? num(rows[0].ID_STATUS) : 0;
+}
+
+/** Reprovar = situação "Reprovado" do Clipp; o trigger dele devolve a quantidade reservada. */
+async function reprovar(id) {
+  const codigo = num(id);
+  if (!codigo) throw new Error('Condicional inválido.');
+  const idStatus = await withDb((db) => statusReprovado(db));
+  if (!idStatus) throw new Error('Esta base não tem a situação "Reprovado" ativa no pedido de venda.');
+  return alterarStatus(codigo, idStatus);
 }
 
 function textoWhatsapp(doc) {
@@ -717,6 +756,7 @@ module.exports = {
   listarPagamentos,
   criar,
   alterarStatus,
+  reprovar,
   htmlPdf,
   lojaEmitente,
   textoWhatsapp,

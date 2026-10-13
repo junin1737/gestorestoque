@@ -2586,6 +2586,14 @@ router.post('/condicionais/:id/status', LANCAR_CONDICIONAL, async (req, res) => 
   }
 });
 
+router.post('/condicionais/:id/reprovar', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await condicionais.reprovar(req.params.id)) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 const DIAS_ROTINA = [0, 1, 2, 3, 4, 5, 6];
 
 function horaValida(v) {

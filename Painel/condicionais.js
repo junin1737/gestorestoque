@@ -190,14 +190,14 @@ const Condicionais = (() => {
     sel.innerHTML = opcoesStatus(statusPadrao());
   }
 
-  async function mostrarDetalhe(id) {
+  async function mostrarDetalhe(id, aviso = '') {
     const box = $('#cond-detalhe');
     if (!box) return;
     abertoId = Number(id) || 0;
     painel('detalhe');
     abertoId = Number(id) || 0;
     marcarCardAtivo();
-    box.innerHTML = '<p class="hint">Carregando…</p>';
+    if (!aviso) box.innerHTML = '<p class="hint">Carregando…</p>';
     const res = await api(`/condicionais/${encodeURIComponent(id)}`);
     if (!res.ok) {
       box.innerHTML = `<p class="hint">${esc(res.error || 'Não encontrado')}</p>`;
@@ -226,9 +226,10 @@ const Condicionais = (() => {
         <label class="cond-filtro">Forma de pagamento
           <select id="cond-detalhe-pagamento">${opcoesPagamento(doc.id_parcela)}</select>
         </label>
-        <p class="hint" id="cond-detalhe-msg"></p>
+        <p class="hint" id="cond-detalhe-msg">${esc(aviso)}</p>
         <div class="banco-actions">
           <button type="button" class="btn primary small" id="cond-salvar-status">Salvar</button>
+          ${doc.pode_reprovar ? '<button type="button" class="btn danger small" id="cond-reprovar">Reprovar</button>' : ''}
           <button type="button" class="btn small" data-pdf="${esc(doc.id)}">Gerar PDF</button>
           <button type="button" class="btn small" data-wa="${esc(doc.id)}" data-fone="${esc(doc.telefone || '')}">WhatsApp</button>
         </div>
@@ -237,20 +238,47 @@ const Condicionais = (() => {
       </div>`;
     ligarAcoes(box);
     $('#cond-fechar-detalhe')?.addEventListener('click', () => fecharNovo());
-    $('#cond-salvar-status')?.addEventListener('click', async () => {
+
+    const botoes = ['#cond-salvar-status', '#cond-reprovar'].map((s) => $(s)).filter(Boolean);
+    async function gravar(botao, textoBotao, chamada, ok) {
       const msg = $('#cond-detalhe-msg');
-      const idStatus = Number($('#cond-detalhe-status')?.value || 0);
-      const idParcela = Number($('#cond-detalhe-pagamento')?.value || 0);
-      const salvo = await api(`/condicionais/${encodeURIComponent(doc.id)}/status`, {
-        method: 'POST',
-        body: { id_status: idStatus, id_parcela: idParcela || undefined },
-      });
-      if (!salvo.ok) {
-        if (msg) msg.textContent = salvo.error || 'Não foi possível salvar.';
+      const original = botao.textContent;
+      botoes.forEach((b) => { b.disabled = true; });
+      botao.textContent = textoBotao;
+      if (msg) msg.textContent = '';
+      let salvo;
+      try {
+        salvo = await chamada();
+      } catch (err) {
+        salvo = { ok: false, error: err?.message };
+      } finally {
+        botoes.forEach((b) => { b.disabled = false; });
+        botao.textContent = original;
+      }
+      if (!salvo?.ok) {
+        if (msg) msg.textContent = salvo?.error || 'Não foi possível salvar. Tente de novo.';
         return;
       }
-      if (msg) msg.textContent = 'Condicional atualizado.';
       await abrirLista();
+      await mostrarDetalhe(doc.id, typeof ok === 'function' ? ok(salvo) : ok);
+    }
+
+    $('#cond-salvar-status')?.addEventListener('click', (e) => {
+      const idStatus = Number($('#cond-detalhe-status')?.value || 0);
+      const idParcela = Number($('#cond-detalhe-pagamento')?.value || 0);
+      gravar(e.currentTarget, 'Salvando…', () => api(`/condicionais/${encodeURIComponent(doc.id)}/status`, {
+        method: 'POST',
+        body: { id_status: idStatus, id_parcela: idParcela || undefined },
+      }), 'Condicional atualizado.');
+    });
+    $('#cond-reprovar')?.addEventListener('click', (e) => {
+      const pergunta = `Reprovar o condicional ${doc.id}${doc.cliente ? ` de ${doc.cliente}` : ''}?\n\nAs peças reservadas voltam para o estoque disponível.`;
+      if (!window.confirm(pergunta)) return;
+      gravar(e.currentTarget, 'Reprovando…', () => api(`/condicionais/${encodeURIComponent(doc.id)}/reprovar`, {
+        method: 'POST',
+      }), (salvo) => (salvo.estornou_reserva
+        ? 'Condicional reprovado. A reserva das peças foi estornada.'
+        : 'Condicional reprovado.'));
     });
   }
 
