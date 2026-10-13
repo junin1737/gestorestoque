@@ -17,6 +17,10 @@ database_name = "gestor-licenca"
 database_id = "b037da95-e1a4-412b-a7e0-3e82647aa072"
 migrations_dir = "migrations"
 
+[[services]]
+binding = "RELAY"
+service = "gestor-relay"
+
 # Segredos (wrangler secret put ...):
 #   LICENCA_PRIVATE_KEY  chave Ed25519 PKCS8 em PEM (par da pública embutida em server/licenca.js)
 #   ADMIN_PASSWORD       senha do painel /admin

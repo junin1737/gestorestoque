@@ -65,9 +65,10 @@ const PEDIDO_HTML = `<div class="pedido" id="pedido">
   var pedidoMt=false;
   var aguardarClique=false;
   function verificar(){fetch('/parear/status',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
-    if(d.status==='aprovado'){location.replace('/');return}
-    if(!pedidoMt && /(?:^|[?&])mt=1(?:&|$)/.test(location.search)){
-      pedidoMt=true;aguardarClique=true;$('pd-nome').value=$('pd-nome').value||'MT Entradas';$('pd-nome').focus();
+    if(d.status==='aprovado'){location.replace(/(?:^|[?&])contador=1(?:&|$)/.test(location.search)?'/?contador=1':'/');return}
+    if(!pedidoMt){
+      var nomePedido=/(?:^|[?&])mt=1(?:&|$)/.test(location.search)?'MT Entradas':(/(?:^|[?&])contador=1(?:&|$)/.test(location.search)?'Contador':'');
+      if(nomePedido){pedidoMt=true;aguardarClique=true;$('pd-nome').value=$('pd-nome').value||nomePedido;$('pd-nome').focus();}
     }
     if(d.status==='pendente'){if(aguardarClique)return;esperando(d.codigo);return}
     if(d.status==='recusado'){formulario();erro('O pedido foi recusado no computador da loja.');return}

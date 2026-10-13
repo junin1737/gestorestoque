@@ -268,8 +268,12 @@
     <div class="mini" id="contadores-wrap"><p>Nenhum contador cadastrado.</p></div>
   </section>
   <section id="painel-contador-clientes" hidden>
-    <h2 style="margin:0 0 .4rem">Seus clientes</h2>
+    <div style="display:flex;align-items:center;gap:.5rem;margin:0 0 .4rem">
+      <h2 style="margin:0">Seus clientes</h2>
+      <button class="btn sm" id="btn-contador-atualizar" type="button" style="margin-left:auto">Atualizar</button>
+    </div>
     <p class="hint" id="contador-ola"></p>
+    <p class="hint">Online indica o Gestor Estoque aberto e conectado à internet no computador da loja. Acessar loja abre direto o login do contador.</p>
     <div class="mini" id="contador-clientes-wrap"><p>Nenhuma empresa vinculada.</p></div>
   </section>
   <section id="painel-cadastro" hidden>
@@ -699,6 +703,7 @@ async function api(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+let timerContadorClientes = null;
 function irPara(tela) {
   if (st.papel === 'entradas') tela = 'empresas';
   if (st.papel === 'contador') tela = 'meus';
@@ -737,6 +742,10 @@ function irPara(tela) {
   if (tela === 'contadores') carregarContadores();
   if (tela === 'meus') carregarClientesContador();
   if (tela === 'clientes' || tela === 'cadastro') carregar();
+  clearInterval(timerContadorClientes);
+  timerContadorClientes = tela === 'meus'
+    ? setInterval(() => { if (!document.hidden && st.token) carregarClientesContador(); }, 60000)
+    : null;
 }
 
 function mostrarApp(logado) {
@@ -1391,14 +1400,25 @@ async function carregarClientesContador() {
   if (!r.ok) { if (wrap) wrap.innerHTML = `<p>${esc(r.error || 'Falha ao listar clientes.')}</p>`; return; }
   const itens = r.itens || [];
   if (!itens.length) { wrap.innerHTML = '<p>Nenhuma empresa vinculada. A MT Automações marca o contador responsável no cadastro do cliente.</p>'; return; }
-  wrap.innerHTML = `<table><thead><tr><th>Empresa</th><th>CNPJ</th><th></th></tr></thead><tbody>${
+  wrap.innerHTML = `<table><thead><tr><th>Empresa</th><th>CNPJ</th><th>Status</th><th></th></tr></thead><tbody>${
     itens.map((e) => `<tr>
       <td>${esc(e.nome || '—')}</td>
       <td>${esc(fmtCnpj(e.cnpj))}</td>
-      <td>${e.url ? `<a class="btn sm" href="${esc(e.url)}" target="_blank" rel="noopener">Abrir a loja</a>` : 'Gestor offline'}</td>
+      <td><span class="badge ${e.online ? 'b-liberado' : 'b-bloqueado'}">${e.online ? 'Online' : 'Offline'}</span>${!e.online && e.ultimo_contato ? `<div class="hint">Visto ${esc(fmtVisto(e.ultimo_contato))}</div>` : ''}</td>
+      <td>${!e.url ? 'Aguardando o link da loja' : (e.online
+        ? `<a class="btn sm" href="${esc(e.url)}" target="_blank" rel="noopener">Acessar loja</a>`
+        : '<span class="hint">Gestor fechado ou sem internet</span>')}</td>
     </tr>`).join('')
   }</tbody></table>`;
 }
+
+function fmtVisto(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+$('#btn-contador-atualizar')?.addEventListener('click', () => carregarClientesContador());
 
 function abrirContador(c) {
   st.contadorEditando = c?.id || null;

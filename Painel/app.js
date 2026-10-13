@@ -537,7 +537,9 @@ async function api(path, options = {}) {
     return data;
   }
   if (data && data.code === 'DISPOSITIVO') showMsg(data.error || 'Dispositivo fora do prazo.');
-  if (res.status === 401 && (data?.code === 'AUTH' || data?.code === 'SESSAO_TROCADA') && state.usuario) {
+  const rotaDoContador = /^\/(contador|massa)(\/|$)/.test(path);
+  if (res.status === 401 && (data?.code === 'AUTH' || data?.code === 'SESSAO_TROCADA') && state.usuario
+    && (!state.usuario.contador || rotaDoContador)) {
     sessaoEncerrada(data.error);
   }
   return data;
@@ -861,6 +863,7 @@ function setEmitenteUI(emitente) {
 async function bootstrap() {
   $('#view-login').hidden = false;
   $('#view-app').hidden = true;
+  aplicarLinkContador();
 
   const cfgRes = await api('/config');
   if (cfgRes.offline) {
@@ -969,8 +972,10 @@ $('#login-usuario')?.addEventListener('keydown', (e) => {
 });
 
 let loginModoContador = false;
-$('#login-modo-contador')?.addEventListener('click', () => {
-  loginModoContador = !loginModoContador;
+$('#login-modo-contador')?.addEventListener('click', () => definirModoContador(!loginModoContador));
+
+function definirModoContador(ativo) {
+  loginModoContador = !!ativo;
   const box = $('#login-contador');
   const campoUsuario = $('#login-usuario')?.closest('.login-field');
   if (box) box.hidden = !loginModoContador;
@@ -979,7 +984,18 @@ $('#login-modo-contador')?.addEventListener('click', () => {
   if (sel) sel.required = !loginModoContador;
   const btn = $('#login-modo-contador');
   if (btn) btn.textContent = loginModoContador ? 'Entrar como funcionário' : 'Entrar como contador';
-});
+}
+
+/** Link "Acessar loja" do painel de licenças: chega com ?contador=1 e já abre o login do contador. */
+function aplicarLinkContador() {
+  const params = new URLSearchParams(location.search);
+  if (params.get('contador') !== '1') return;
+  params.delete('contador');
+  const resto = params.toString();
+  history.replaceState(null, '', `${location.pathname}${resto ? `?${resto}` : ''}${location.hash}`);
+  definirModoContador(true);
+  setTimeout(() => $('#login-contador-doc')?.focus(), 30);
+}
 
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1042,9 +1058,11 @@ function fillUserChrome() {
   if ($('#user-nome')) $('#user-nome').textContent = nome;
   if ($('#side-user-nome')) $('#side-user-nome').textContent = nome;
   if ($('#side-user-role')) {
-    $('#side-user-role').textContent = state.usuario?.mtEntradas
-      ? 'MT Entradas'
-      : (state.usuario?.supervisor ? 'Supervisor' : 'Usuário');
+    $('#side-user-role').textContent = state.usuario?.contador
+      ? 'Contador'
+      : (state.usuario?.mtEntradas
+        ? 'MT Entradas'
+        : (state.usuario?.supervisor ? 'Supervisor' : 'Usuário'));
   }
   if ($('#side-user-avatar')) $('#side-user-avatar').textContent = initialsFromName(nome);
 }
@@ -1140,6 +1158,8 @@ function enterApp() {
     });
   }
   showPage('dashboard');
+  // O contador só tem a sessão de /contador e /massa: as rotas do funcionário responderiam 401.
+  if (state.usuario?.contador) return;
   loadUnidades();
   carregarPedidoVinculo();
   carregarTrocaEmpresa();

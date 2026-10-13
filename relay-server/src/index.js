@@ -233,12 +233,20 @@ export default {
       return comSeguranca(await encaminharAoTunel(env, request, tunel));
     }
 
+    const estado = url.pathname.match(/^\/t\/([a-z2-7]{20,32})\/estado$/);
+    if (estado && request.method === 'GET') {
+      const stub = env.TUNEL.get(env.TUNEL.idFromName(estado[1]));
+      const r = await stub.fetch('https://tunel/tunel/estado');
+      return comSeguranca(new Response(r.body, r));
+    }
+
     const entrada = url.pathname.match(/^\/t\/([a-z2-7]{20,32})\/?$/);
     if (entrada) {
       const codigo = url.searchParams.get('p') || '';
       let destino = '/';
       if (/^[A-Za-z0-9_-]{16,64}$/.test(codigo)) destino = `/parear?c=${codigo}`;
       else if (url.searchParams.get('mt') === '1') destino = '/?mt=1';
+      else if (url.searchParams.get('contador') === '1') destino = '/?contador=1';
       const resp = new Response(null, { status: 302, headers: { Location: destino } });
       resp.headers.append('Set-Cookie', `${COOKIE_TUNEL}=${entrada[1]}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`);
       return comSeguranca(resp);
@@ -297,6 +305,9 @@ export class Tunel {
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/tunel/conectar') return this.conectar(request);
+    if (url.pathname === '/tunel/estado') {
+      return Response.json({ ok: true, online: this.conexoesVivas().length > 0 }, { headers: { 'Cache-Control': 'no-store' } });
+    }
     return this.encaminhar(request);
   }
 

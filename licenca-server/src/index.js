@@ -1431,20 +1431,48 @@ async function inativarContador(id, env) {
   return json({ ok: true });
 }
 
+/** true/false conforme o relay vê o Gestor da loja conectado agora; null se não deu para perguntar. */
+async function tunelConectado(env, urlTunel) {
+  if (!urlTunel) return false;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 4000);
+  try {
+    const req = new Request(`${urlTunel}/estado`, { signal: ctrl.signal, headers: { 'Cache-Control': 'no-store' } });
+    const r = env.RELAY ? await env.RELAY.fetch(req) : await fetch(req);
+    if (!r.ok) return null;
+    const d = await r.json();
+    return d?.ok ? !!d.online : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function clientesDoContador(sess, env) {
   await garantirTabelaMt(env);
   const rows = await env.DB.prepare(`
-    SELECT c.cnpj, c.razao, c.fantasia, c.aplicacao, m.nome AS nome_online, m.url
+    SELECT c.cnpj, c.razao, c.fantasia, c.aplicacao, m.nome AS nome_online, m.url,
+           (SELECT MAX(i.ultimo_contato) FROM instalacoes i
+             WHERE i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao) AS ultimo_contato
     FROM clientes c
     LEFT JOIN mt_empresas m ON m.cnpj = c.cnpj AND m.aplicacao = c.aplicacao
     WHERE c.contador_id = ? AND c.aplicacao = ?
     ORDER BY COALESCE(c.fantasia, c.razao, c.cnpj)
   `).bind(sess.id, APP_PADRAO).all();
-  const itens = (rows.results || []).map((r) => ({
-    cnpj: r.cnpj,
-    nome: r.fantasia || r.razao || r.nome_online || r.cnpj,
-    aplicacao: r.aplicacao,
-    url: r.url || '',
+  const desde = new Date(Date.now() - JANELA_ONLINE_MS).toISOString();
+  const itens = await Promise.all((rows.results || []).map(async (r) => {
+    const tunel = urlTunelValida(r.url);
+    const conectado = await tunelConectado(env, tunel);
+    const online = conectado === null ? !!r.ultimo_contato && r.ultimo_contato >= desde : conectado;
+    return {
+      cnpj: r.cnpj,
+      nome: r.fantasia || r.razao || r.nome_online || r.cnpj,
+      aplicacao: r.aplicacao,
+      url: tunel ? `${tunel}?contador=1` : '',
+      online,
+      ultimo_contato: r.ultimo_contato || null,
+    };
   }));
   return json({ ok: true, nome: sess.nome, itens });
 }
