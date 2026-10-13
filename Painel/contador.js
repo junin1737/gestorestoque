@@ -50,7 +50,7 @@
         <div class="imp-vinc-btns">
           <button type="button" class="btn small" id="massa-filtrar">Filtrar</button>
           <button type="button" class="btn small" id="massa-limpar">Limpar filtros</button>
-          <button type="button" class="btn small" id="massa-todos">Marcar filtrados</button>
+          <button type="button" class="btn small" id="massa-todos">Marcar todos</button>
           <button type="button" class="btn small btn-atencao" id="massa-abrir">Alterar em Massa</button>
         </div>
         <section class="imp-section massa-regra" id="massa-regra" hidden>
@@ -96,15 +96,21 @@
         <div class="imp-vinc-btns">
           <button type="button" class="btn small" id="massa-previa">Ver prévia</button>
           <button type="button" class="btn small primary" id="massa-aplicar" disabled>Aplicar</button>
+          <button type="button" class="btn small" id="massa-cancelar">Cancelar</button>
         </div>
         <div id="massa-previa-box"></div>
         </section>
         <div id="massa-lista" class="item-list"></div>
       </section>
       <p class="hint">Cada campo alterado fica no relatório de Alterações, com o valor anterior, o novo, quem fez e a data.</p>`;
-    $('#massa-filtrar')?.addEventListener('click', listar);
+    selecionados = new Set();
+    previaPronta = null;
+    $('#massa-filtrar')?.addEventListener('click', () => { desmarcarTodos(); listar(); });
     $('#massa-limpar')?.addEventListener('click', limparFiltros);
-    $('#massa-todos')?.addEventListener('click', marcarFiltrados);
+    $('#massa-todos')?.addEventListener('click', alternarTodos);
+    $('#massa-cancelar')?.addEventListener('click', cancelarRegra);
+    $('#reg-filtrados')?.addEventListener('change', invalidarPrevia);
+    $('#reg-marcados')?.addEventListener('change', invalidarPrevia);
     $('#massa-abrir')?.addEventListener('click', () => {
       const box = $('#massa-regra');
       if (!box) return;
@@ -125,6 +131,7 @@
     if (grupo) grupo.value = '';
     const incompleto = $('#massa-incompleto');
     if (incompleto) incompleto.checked = false;
+    desmarcarTodos();
     listar();
   }
 
@@ -198,18 +205,69 @@
       inp.addEventListener('change', () => {
         const id = Number(inp.dataset.id);
         if (inp.checked) selecionados.add(id);
-        else selecionados.delete(id);
+        else {
+          selecionados.delete(id);
+          const flag = $('#reg-filtrados');
+          if (flag) flag.checked = false;
+        }
+        invalidarPrevia();
+        atualizarBotaoTodos();
       });
     });
+    atualizarBotaoTodos();
   }
 
-  function marcarFiltrados() {
-    $$('#massa-lista input[data-id]').forEach((inp) => {
-      inp.checked = true;
-      selecionados.add(Number(inp.dataset.id));
+  function caixasDaLista() {
+    return $$('#massa-lista input[data-id]');
+  }
+
+  function atualizarBotaoTodos() {
+    const btn = $('#massa-todos');
+    if (!btn) return;
+    const caixas = caixasDaLista();
+    const todos = caixas.length > 0 && caixas.every((c) => c.checked);
+    btn.textContent = todos ? 'Desmarcar todos' : 'Marcar todos';
+    btn.disabled = !caixas.length;
+  }
+
+  function alternarTodos() {
+    const caixas = caixasDaLista();
+    const marcar = !(caixas.length > 0 && caixas.every((c) => c.checked));
+    caixas.forEach((inp) => {
+      inp.checked = marcar;
+      if (marcar) selecionados.add(Number(inp.dataset.id));
+      else selecionados.delete(Number(inp.dataset.id));
     });
+    if (!marcar) {
+      const flag = $('#reg-filtrados');
+      if (flag) flag.checked = false;
+    }
+    invalidarPrevia();
+    atualizarBotaoTodos();
+  }
+
+  function desmarcarTodos() {
+    selecionados = new Set();
+    caixasDaLista().forEach((inp) => { inp.checked = false; });
     const flag = $('#reg-filtrados');
-    if (flag) flag.checked = true;
+    if (flag) flag.checked = false;
+    invalidarPrevia();
+    atualizarBotaoTodos();
+  }
+
+  function invalidarPrevia() {
+    previaPronta = null;
+    const btn = $('#massa-aplicar');
+    if (btn) btn.disabled = true;
+    const box = $('#massa-previa-box');
+    if (box) box.innerHTML = '';
+  }
+
+  function cancelarRegra() {
+    invalidarPrevia();
+    const box = $('#massa-regra');
+    if (box) box.hidden = true;
+    $('#massa-abrir')?.scrollIntoView({ block: 'nearest' });
   }
 
   async function verPrevia() {

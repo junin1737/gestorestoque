@@ -889,21 +889,10 @@ async function bootstrap() {
     setEmitenteUI(conn.emitente);
     applyTheme(state.config.tema, conn.emitente?.logo);
     await loadFuncionarios();
+    // Como o funcionário, o contador digita CPF/CNPJ e senha a cada abertura do painel.
     await api('/logout', { method: 'POST', body: {} });
+    await api('/contador/logout', { method: 'POST', body: {} });
     await carregarLojasLogin();
-    const sessCont = await api('/contador/sessao');
-    if (sessCont.ok && sessCont.contador) {
-      state.usuario = {
-        id: 0,
-        nome: sessCont.contador.nome || 'Contador',
-        email: sessCont.contador.email || '',
-        contador: true,
-        supervisor: false,
-        permissoes: {},
-      };
-      enterApp();
-      return;
-    }
   } else {
     setServiceStatus(true, `Painel online, base offline: ${conn.error || 'falha Firebird'}`);
     setEmitenteUI({ nome_fanta: 'Gestor Estoque', logo: null });
