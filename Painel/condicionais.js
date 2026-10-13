@@ -43,6 +43,7 @@ const Condicionais = (() => {
         <p><strong>Emissão:</strong> ${esc(doc.data || '—')} ${esc(doc.horario || '')}</p>
         <p><strong>Validade:</strong> ${esc(doc.validade || '—')}</p>
         <p><strong>Vendedor:</strong> ${esc(doc.vendedor || '—')}</p>
+        ${doc.pagamento ? `<p><strong>Pagamento:</strong> ${esc(doc.pagamento)}</p>` : ''}
         <p><strong>Situação:</strong> ${esc(doc.status_label || '')}</p>
         ${doc.obs ? `<p><strong>Obs.:</strong> ${esc(doc.obs)}</p>` : ''}
         ${doc.qtd != null ? `<p><strong>Quantidade desta peça:</strong> ${esc(doc.qtd)}</p>` : ''}
@@ -151,6 +152,34 @@ const Condicionais = (() => {
       <option value="${esc(st.id)}" ${String(st.id) === String(atual) ? 'selected' : ''}>${esc(st.descricao)}${st.reserva ? ' · reserva' : ''}</option>`).join('');
   }
 
+  let pagamentos = null;
+
+  async function carregarPagamentos() {
+    if (Array.isArray(pagamentos)) return pagamentos;
+    const res = await api('/condicionais/pagamentos');
+    if (!res.ok) return [];
+    pagamentos = res.itens || [];
+    return pagamentos;
+  }
+
+  function opcoesPagamento(atual) {
+    const lista = (pagamentos || []).slice();
+    if (atual && Number(atual) !== 1 && !lista.some((p) => String(p.id_parcela) === String(atual))) {
+      lista.unshift({ id_parcela: atual, descricao: 'Forma atual' });
+    }
+    const vazio = `<option value="">${atual && Number(atual) !== 1 ? '—' : 'Selecione'}</option>`;
+    return vazio + lista.map((p) => `
+      <option value="${esc(p.id_parcela)}" ${String(p.id_parcela) === String(atual) ? 'selected' : ''}>${esc(p.descricao)}</option>`).join('');
+  }
+
+  async function preencherPagamentoLancamento() {
+    const sel = $('#cond-pagamento');
+    if (!sel) return;
+    const atual = sel.value;
+    await carregarPagamentos();
+    sel.innerHTML = opcoesPagamento(atual);
+  }
+
   function statusPadrao() {
     return (statuses.find((s) => s.reserva) || statuses[0] || {}).id || '';
   }
@@ -175,6 +204,7 @@ const Condicionais = (() => {
       return;
     }
     const doc = res.condicional || {};
+    await carregarPagamentos();
     const itens = (doc.itens || []).map((it) => `
       <div class="cond-item">
         <strong>${esc(it.descricao || 'Peça')}</strong>
@@ -193,9 +223,12 @@ const Condicionais = (() => {
         <label class="cond-filtro">Situação
           <select id="cond-detalhe-status">${opcoesStatus(doc.status)}</select>
         </label>
+        <label class="cond-filtro">Forma de pagamento
+          <select id="cond-detalhe-pagamento">${opcoesPagamento(doc.id_parcela)}</select>
+        </label>
         <p class="hint" id="cond-detalhe-msg"></p>
         <div class="banco-actions">
-          <button type="button" class="btn primary small" id="cond-salvar-status">Salvar situação</button>
+          <button type="button" class="btn primary small" id="cond-salvar-status">Salvar</button>
           <button type="button" class="btn small" data-pdf="${esc(doc.id)}">Gerar PDF</button>
           <button type="button" class="btn small" data-wa="${esc(doc.id)}" data-fone="${esc(doc.telefone || '')}">WhatsApp</button>
         </div>
@@ -207,15 +240,16 @@ const Condicionais = (() => {
     $('#cond-salvar-status')?.addEventListener('click', async () => {
       const msg = $('#cond-detalhe-msg');
       const idStatus = Number($('#cond-detalhe-status')?.value || 0);
+      const idParcela = Number($('#cond-detalhe-pagamento')?.value || 0);
       const salvo = await api(`/condicionais/${encodeURIComponent(doc.id)}/status`, {
         method: 'POST',
-        body: { id_status: idStatus },
+        body: { id_status: idStatus, id_parcela: idParcela || undefined },
       });
       if (!salvo.ok) {
-        if (msg) msg.textContent = salvo.error || 'Não foi possível salvar a situação.';
+        if (msg) msg.textContent = salvo.error || 'Não foi possível salvar.';
         return;
       }
-      if (msg) msg.textContent = 'Situação atualizada.';
+      if (msg) msg.textContent = 'Condicional atualizado.';
       await abrirLista();
     });
   }
@@ -258,7 +292,7 @@ const Condicionais = (() => {
           <span class="cond-pill${it.reserva ? ' is-reserva' : ''}">${esc(it.status_label)}</span>
         </span>
         <span class="cond-card-nome">${esc(it.cliente || 'Sem cliente')}</span>
-        <span class="hint">${esc(it.data)} ${esc(it.horario)} · ${esc(it.vendedor || 'sem vendedor')} · ${money(it.total)}</span>
+        <span class="hint">${esc(it.data)} ${esc(it.horario)} · ${esc(it.vendedor || 'sem vendedor')} · ${money(it.total)}${it.pagamento ? ` · ${esc(it.pagamento)}` : ''}</span>
       </button>`).join('');
     ligarAcoes(lista);
   }
@@ -502,6 +536,7 @@ const Condicionais = (() => {
           obs: $('#cond-obs')?.value || '',
           validade: $('#cond-validade')?.value || '',
           id_status: Number($('#cond-lanc-status')?.value || 0),
+          id_parcela: Number($('#cond-pagamento')?.value || 0),
           itens: itensNovos,
         },
       });
@@ -514,6 +549,7 @@ const Condicionais = (() => {
       if ($('#cond-cliente')) $('#cond-cliente').value = '';
       if ($('#cond-obs')) $('#cond-obs').value = '';
       if ($('#cond-validade')) $('#cond-validade').value = '';
+      if ($('#cond-pagamento')) $('#cond-pagamento').value = '';
       if ($('#cond-peca')) $('#cond-peca').value = '';
       if ($('#cond-preco')) $('#cond-preco').value = '';
       if ($('#cond-peca-estoque')) $('#cond-peca-estoque').textContent = '';
@@ -534,6 +570,7 @@ const Condicionais = (() => {
     $('#cond-novo-btn')?.addEventListener('click', () => {
       painel('novo');
       preencherStatusLancamento();
+      preencherPagamentoLancamento();
       carregarVendedores();
       $('#cond-cliente')?.focus();
     });

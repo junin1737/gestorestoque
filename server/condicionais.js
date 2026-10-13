@@ -1,8 +1,32 @@
 'use strict';
 
 const {
-  withDb, query, hasTable, columnExists, activeTargets, writeTargets, withTransaction, nextGenId,
+  withDb, query, hasTable, columnExists, activeTargets, writeTargets, withTransaction, nextGenIdSincronizado,
 } = require('./db');
+
+/** O Clipp numera pelo primeiro; o trigger XX_TR_INC_PED_I da integração ManagePro, pelo segundo. */
+const GENERATORS_ITEM_PEDIDO = ['GEN_TB_PED_VENDA_ITEM_ID', 'XX_GEN_TB_PEDI_I'];
+/** O Clipp numera o pedido por MAX+1; a integração ManagePro pode ter este generator. */
+const GENERATORS_PEDIDO = ['XX_GEN_ID_PEDIDO'];
+
+async function proximoIdPedido(tx) {
+  const seq = await query(tx, 'SELECT COALESCE(MAX(ID_PEDIDO), 0) + 1 AS ID FROM TB_PEDIDO_VENDA');
+  let id = num(seq[0]?.ID);
+  const gens = await query(tx, `
+    SELECT TRIM(RDB$GENERATOR_NAME) AS G FROM RDB$GENERATORS
+    WHERE RDB$GENERATOR_NAME IN (${GENERATORS_PEDIDO.map(() => '?').join(',')})`, GENERATORS_PEDIDO);
+  const atuais = [];
+  for (const r of gens) {
+    const g = String(r.G || '').trim();
+    const v = num((await query(tx, `SELECT GEN_ID(${g}, 0) AS V FROM RDB$DATABASE`))[0]?.V);
+    atuais.push({ g, v });
+    if (v + 1 > id) id = v + 1;
+  }
+  for (const { g, v } of atuais) {
+    if (v < id) await query(tx, `SELECT GEN_ID(${g}, ${id - v}) AS V FROM RDB$DATABASE`);
+  }
+  return id;
+}
 
 function num(v) {
   const n = Number(v);
@@ -68,9 +92,17 @@ function mapPedido(r) {
     status_label: String(r.STATUS || '').trim() || 'Sem status',
     reserva: reservaSim(r.RESERVA),
     obs: String(r.OBS || '').trim(),
+    id_parcela: r.ID_PARCELA == null ? null : num(r.ID_PARCELA),
+    pagamento: nomePagamento(r.ID_PARCELA, r.PAGAMENTO),
     total: num(r.TOTAL),
     origem: 'pedido',
   };
+}
+
+/** ID_PARCELA 1 é o "Nenhum" do Clipp. */
+function nomePagamento(idParcela, descricao) {
+  if (!num(idParcela) || num(idParcela) === 1) return '';
+  return String(descricao || '').replace(/\s+/g, ' ').trim();
 }
 
 async function sqlPedido(db) {
@@ -80,11 +112,46 @@ async function sqlPedido(db) {
          CAST(P.OBSERVACAO AS VARCHAR(300)) AS OBS,
          S.DESCRICAO AS STATUS, S.RESERVA,
          CL.NOME AS CLIENTE, CL.FONE_CELUL, CL.FONE_RESID, CL.FONE_COMER,
-         F.NOME AS VENDEDOR
+         F.NOME AS VENDEDOR,
+         P.ID_PARCELA, PA.DESCRICAO AS PAGAMENTO
   FROM TB_PEDIDO_VENDA P
   LEFT JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
   LEFT JOIN TB_CLIENTE CL ON CL.ID_CLIENTE = P.ID_CLIENTE
-  LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = P.ID_VENDEDOR`;
+  LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = P.ID_VENDEDOR
+  LEFT JOIN TB_PARCELAMENTO PA ON PA.ID_PARCELA = P.ID_PARCELA`;
+}
+
+/** Mesma lista do Clipp no pedido: parcelamentos ativos, cada um ligado à sua forma de pagamento. */
+async function listarPagamentos() {
+  return withDb(async (db) => {
+    if (!hasTable('TB_PARCELAMENTO')) return [];
+    const rows = await query(db, `
+      SELECT PA.ID_PARCELA, PA.DESCRICAO, PA.ID_FMAPGTO, F.DESCRICAO AS FORMA
+      FROM TB_PARCELAMENTO PA
+      LEFT JOIN TB_FORMA_PAGTO_SIS F ON F.ID_FMAPGTO = PA.ID_FMAPGTO
+      WHERE COALESCE(TRIM(PA.STATUS), 'A') = 'A' AND PA.ID_PARCELA <> 1
+      ORDER BY PA.DESCRICAO`);
+    return rows.map((r) => ({
+      id_parcela: num(r.ID_PARCELA),
+      descricao: String(r.DESCRICAO || '').replace(/\s+/g, ' ').trim(),
+      id_fmapgto: num(r.ID_FMAPGTO) || 1,
+      forma: String(r.FORMA || '').trim(),
+    }));
+  });
+}
+
+async function resolverPagamento(db, idParcela) {
+  const id = num(idParcela);
+  if (!id) throw new Error('Informe a forma de pagamento.');
+  const rows = await query(db, `
+    SELECT ID_PARCELA, ID_FMAPGTO, DESCRICAO FROM TB_PARCELAMENTO
+    WHERE ID_PARCELA = ? AND COALESCE(TRIM(STATUS), 'A') = 'A'`, [id]);
+  if (!rows.length) throw new Error('Forma de pagamento inválida ou inativa.');
+  return {
+    id_parcela: num(rows[0].ID_PARCELA),
+    id_fmapgto: num(rows[0].ID_FMAPGTO) || 1,
+    descricao: String(rows[0].DESCRICAO || '').replace(/\s+/g, ' ').trim(),
+  };
 }
 
 async function listarStatus(db) {
@@ -349,7 +416,7 @@ async function resolverStatus(db, idStatus) {
   return num(st[0].ID_STATUS);
 }
 
-async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus }) {
+async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus, idParcela }) {
   const itensOk = (itens || []).map((it) => ({
     id: num(it.id_identificador || it.id),
     qtd: num(it.qtd),
@@ -360,6 +427,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus 
   if (!itensOk.length) throw new Error('Inclua ao menos uma peça.');
   const dtValidade = dataInformada(validade);
   if (!dtValidade) throw new Error('Informe a validade.');
+  if (!num(idParcela)) throw new Error('Informe a forma de pagamento.');
   return withDb(async (db, appCfg) => {
     if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
     const temValidade = await columnExists(db, 'TB_PEDIDO_VENDA', 'DT_VALIDA');
@@ -367,6 +435,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus 
     const t = writeTargets(appCfg)[0]?.tables;
     if (!t) throw new Error('Estoque não encontrado nesta base.');
     const idStatusPedido = await resolverStatus(db, idStatus);
+    const pagamento = await resolverPagamento(db, idParcela);
     const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
     const mod = await query(db, `
       SELECT FIRST 1 P.ID_MODULO
@@ -378,13 +447,12 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus 
     for (let tentativa = 0; tentativa < 3; tentativa += 1) {
       try {
         return await withTransaction(db, async (tx) => {
-          const seq = await query(tx, 'SELECT COALESCE(MAX(ID_PEDIDO), 0) + 1 AS ID FROM TB_PEDIDO_VENDA');
-          const id = num(seq[0]?.ID);
+          const id = await proximoIdPedido(tx);
           const colsValidade = temValidade ? ', DT_VALIDA' : '';
           const valValidade = temValidade ? ', ?' : '';
           const paramsPedido = [
-            num(idCliente), num(idFuncionario), id, idStatusPedido, idModulo,
-            String(obs || '').slice(0, 300) || null,
+            num(idCliente), num(idFuncionario), id, pagamento.id_parcela, pagamento.id_fmapgto,
+            idStatusPedido, idModulo, String(obs || '').slice(0, 300) || null,
           ];
           if (temValidade) paramsPedido.push(dtValidade);
           await query(tx, `
@@ -392,7 +460,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus 
               ID_CLIENTE, ID_VENDEDOR, ID_PEDIDO, DT_PEDIDO, HR_PEDIDO,
               ID_PARCELA, ID_FMAPGTO, ID_STATUS, ID_MODULO, ORIGEM,
               UPDATED_INTEGRADORA, ENVIAR_INTEGRADORA, OBSERVACAO${colsValidade}
-            ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, 1, 1, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?${valValidade})`, paramsPedido);
+            ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?${valValidade})`, paramsPedido);
           const pedidoPorId = new Map();
           for (const it of itensOk) pedidoPorId.set(it.id, (pedidoPorId.get(it.id) || 0) + it.qtd);
           const estoqueVisto = new Set();
@@ -417,7 +485,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus 
             }
             const prc = it.prc > 0 ? it.prc : num(prod[0].PRC_VENDA);
             if (!(prc > 0)) throw new Error(`Informe o preço de ${nome}.`);
-            const idItem = await nextGenId(tx, 'GEN_TB_PED_VENDA_ITEM_ID', 'TB_PED_VENDA_ITEM', 'ID_ITEMPED');
+            const idItem = await nextGenIdSincronizado(tx, GENERATORS_ITEM_PEDIDO, 'TB_PED_VENDA_ITEM', 'ID_ITEMPED');
             await query(tx, `
               INSERT INTO TB_PED_VENDA_ITEM (
                 ID_ITEMPED, QTD_ITEM, VLR_TOTAL, PRC_CUSTO, PRC_LISTA, VLR_DESC,
@@ -569,6 +637,7 @@ function htmlPdf(doc, empresa, opcoes = {}) {
   Data: ${esc(doc.data)} ${esc(doc.horario)}<br>
   Validade: <strong>${esc(validade)}</strong><br>
   Vendedor: ${esc(doc.vendedor || '—')}<br>
+  ${doc.pagamento ? `Pagamento: <strong>${esc(doc.pagamento)}</strong><br>` : ''}
   Situação: ${esc(doc.status_label)}</p>
   ${doc.obs ? `<p>Obs.: ${esc(doc.obs)}</p>` : ''}
   ${corpo}
@@ -587,7 +656,7 @@ function money(n) {
   return num(n).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }
 
-async function alterarStatus(id, idStatus) {
+async function alterarStatus(id, idStatus, idParcela) {
   const codigo = num(id);
   const status = num(idStatus);
   if (!codigo) throw new Error('Condicional inválido.');
@@ -598,14 +667,29 @@ async function alterarStatus(id, idStatus) {
       FROM TB_PED_VENDA_STATUS
       WHERE ID_STATUS = ? AND COALESCE(STATUS, 'A') = 'A'`, [status]);
     if (!st.length) throw new Error('Situação inválida.');
-    const existe = await query(db, 'SELECT ID_PEDIDO FROM TB_PEDIDO_VENDA WHERE ID_PEDIDO = ?', [codigo]);
+    const existe = await query(db, 'SELECT ID_PEDIDO, ID_STATUS, ID_PARCELA FROM TB_PEDIDO_VENDA WHERE ID_PEDIDO = ?', [codigo]);
     if (!existe.length) throw new Error('Condicional não encontrado.');
-    await query(db, 'UPDATE TB_PEDIDO_VENDA SET ID_STATUS = ? WHERE ID_PEDIDO = ?', [status, codigo]);
+    const pagamento = num(idParcela) ? await resolverPagamento(db, idParcela) : null;
+    const trocaPagamento = pagamento && pagamento.id_parcela !== num(existe[0].ID_PARCELA);
+    if (status !== num(existe[0].ID_STATUS) || trocaPagamento) {
+      await withTransaction(db, async (tx) => {
+        if (trocaPagamento) {
+          await query(tx, 'UPDATE TB_PEDIDO_VENDA SET ID_PARCELA = ?, ID_FMAPGTO = ? WHERE ID_PEDIDO = ?', [
+            pagamento.id_parcela, pagamento.id_fmapgto, codigo,
+          ]);
+        }
+        if (status !== num(existe[0].ID_STATUS)) {
+          await query(tx, 'UPDATE TB_PEDIDO_VENDA SET ID_STATUS = ? WHERE ID_PEDIDO = ?', [status, codigo]);
+        }
+      });
+    }
     return {
       id: codigo,
       id_status: status,
       status_label: String(st[0].DESCRICAO || '').trim(),
       reserva: reservaSim(st[0].RESERVA),
+      id_parcela: pagamento ? pagamento.id_parcela : num(existe[0].ID_PARCELA),
+      pagamento: pagamento ? pagamento.descricao : undefined,
     };
   });
 }
@@ -619,6 +703,7 @@ function textoWhatsapp(doc) {
     doc.vendedor ? `Vendedor: ${doc.vendedor}` : '',
     ...linhas,
     `Total: ${money(doc.total)}`,
+    doc.pagamento ? `Pagamento: ${doc.pagamento}` : '',
   ].filter(Boolean).join('\n');
 }
 
@@ -629,6 +714,7 @@ module.exports = {
   buscarClientes,
   buscarPecas,
   listarVendedores,
+  listarPagamentos,
   criar,
   alterarStatus,
   htmlPdf,

@@ -143,13 +143,60 @@ async function withTransaction(db, fn, { waitTimeout = 15 } = {}) {
 /** Tabelas criadas pelo Gestor: só nelas o MAX+1 é aceitável (o Clipp não insere nelas). */
 const TABELAS_GESTOR = new Set(['GESTOR_EST_ALTERACAO', 'TB_MT_REGRA_TRIBUTO', 'TB_MT_CONVERSAO']);
 
+async function genValor(db, generatorName, passo) {
+  const rows = await query(db, `SELECT GEN_ID(${generatorName}, ${Math.trunc(passo)}) AS ID FROM RDB$DATABASE`);
+  return Number(rows[0]?.ID);
+}
+
+/**
+ * O generator pode estar atrás da tabela (base restaurada, outro sistema gravando por outro generator).
+ * Se o ID já existe, avança o generator até MAX+1 — generator não volta no rollback, então o ajuste fica.
+ */
+async function idLivreNoGenerator(db, generatorName, tableName, idColumn, id) {
+  if (!tableName || !idColumn) return id;
+  const usado = await query(db, `SELECT FIRST 1 1 AS X FROM ${tableName} WHERE ${idColumn} = ?`, [id]);
+  if (!usado.length) return id;
+  const max = Number((await query(db, `SELECT COALESCE(MAX(${idColumn}), 0) AS M FROM ${tableName}`))[0]?.M) || 0;
+  return genValor(db, generatorName, Math.max(1, max + 1 - id));
+}
+
+/**
+ * Próximo ID quando mais de um generator alimenta a mesma tabela
+ * (ex.: TB_PED_VENDA_ITEM — GEN_TB_PED_VENDA_ITEM_ID do Clipp e XX_GEN_TB_PEDI_I da integração).
+ * Parte do maior valor, pula IDs já gravados e deixa os demais generators alinhados.
+ */
+async function nextGenIdSincronizado(db, generators, tableName, idColumn) {
+  const nomes = [...new Set((generators || []).map((g) => String(g || '').trim().toUpperCase()).filter(Boolean))];
+  if (!nomes.length) throw new Error(`Nenhum generator informado para ${tableName}.`);
+  const existentes = await query(db, `
+    SELECT TRIM(RDB$GENERATOR_NAME) AS G FROM RDB$GENERATORS
+    WHERE RDB$GENERATOR_NAME IN (${nomes.map(() => '?').join(',')})`, nomes);
+  const lista = [];
+  for (const r of existentes) {
+    const g = String(r.G || '').trim().toUpperCase();
+    lista.push({ g, v: (await genValor(db, g, 0)) || 0 });
+  }
+  if (!lista.length) throw new Error(`Generator de ${tableName} não encontrado (${nomes.join(', ')}).`);
+  lista.sort((a, b) => b.v - a.v);
+  const principal = lista[0].g;
+  const id = await idLivreNoGenerator(db, principal, tableName, idColumn, await genValor(db, principal, 1));
+  if (!(Number.isFinite(id) && id > 0)) throw new Error(`Generator ${principal} retornou ${id}.`);
+  for (const { g } of lista.slice(1)) {
+    const atual = (await genValor(db, g, 0)) || 0;
+    if (atual < id) await genValor(db, g, id - atual);
+  }
+  return id;
+}
+
 async function nextGenId(db, generatorName, tableName, idColumn) {
   const tabela = String(tableName || '').toUpperCase();
   let motivo = 'generator não informado';
   if (generatorName) {
     try {
-      const rows = await query(db, `SELECT GEN_ID(${generatorName}, 1) AS ID FROM RDB$DATABASE`);
-      const id = Number(rows[0]?.ID);
+      const gerado = await genValor(db, generatorName, 1);
+      const id = Number.isFinite(gerado) && gerado > 0
+        ? await idLivreNoGenerator(db, generatorName, tabela, idColumn, gerado)
+        : gerado;
       if (Number.isFinite(id) && id > 0) return id;
       motivo = `retornou ${rows[0]?.ID}`;
     } catch (err) {
@@ -471,6 +518,7 @@ module.exports = {
   withTransaction,
   useDb,
   nextGenId,
+  nextGenIdSincronizado,
   query,
   connectSmart,
   detach,

@@ -2519,6 +2519,14 @@ router.get('/condicionais/vendedores', LANCAR_CONDICIONAL, async (req, res) => {
   }
 });
 
+router.get('/condicionais/pagamentos', VER_CONDICIONAL, async (req, res) => {
+  try {
+    res.json({ ok: true, itens: await condicionais.listarPagamentos() });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
 router.get('/condicionais/produto/:id', VER_CONDICIONAL, async (req, res) => {
   try {
     res.json({ ok: true, ...(await condicionais.doProduto(req.params.id)) });
@@ -2560,6 +2568,7 @@ router.post('/condicionais', LANCAR_CONDICIONAL, async (req, res) => {
       validade: req.body?.validade,
       itens: req.body?.itens,
       idStatus: req.body?.id_status,
+      idParcela: req.body?.id_parcela,
       usuario: req.usuario?.nome || '',
     });
     res.json({ ok: true, ...criado });
@@ -2570,7 +2579,7 @@ router.post('/condicionais', LANCAR_CONDICIONAL, async (req, res) => {
 
 router.post('/condicionais/:id/status', LANCAR_CONDICIONAL, async (req, res) => {
   try {
-    const atualizado = await condicionais.alterarStatus(req.params.id, req.body?.id_status);
+    const atualizado = await condicionais.alterarStatus(req.params.id, req.body?.id_status, req.body?.id_parcela);
     res.json({ ok: true, ...atualizado });
   } catch (err) {
     res.json({ ok: false, error: err.message });
