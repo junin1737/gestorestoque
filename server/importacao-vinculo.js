@@ -138,6 +138,7 @@ function aplicarFiscalPreservandoSaida(sistema, f) {
   sistema.ncm = sistema.ncm || f.ncm || '';
   sistema.cest = sistema.cest || f.cest || '';
   sistema.status = f.status || sistema.status || 'A';
+  if (!(Number(sistema.id_grupo) > 0) && Number(f.id_grupo) > 0) sistema.id_grupo = Number(f.id_grupo);
   sistema.criar_novo = false;
   sistema.controla_lote = !!f.controla_lote;
   // Cadastro do Clipp prevalece sobre parâmetro de CFOP (ex.: CSOSN 500 no produto vs 102 no mapa).

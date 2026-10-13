@@ -220,7 +220,7 @@ async function nextGenId(db, generatorName, tableName, idColumn) {
         ? await idLivreNoGenerator(db, generatorName, tabela, idColumn, gerado)
         : gerado;
       if (Number.isFinite(id) && id > 0) return id;
-      motivo = `retornou ${rows[0]?.ID}`;
+      motivo = `retornou ${id}`;
     } catch (err) {
       motivo = err.message;
     }

@@ -1003,6 +1003,29 @@
   min-width: 0;
 }
 
+.imp-grupo-row {
+  display: flex;
+  gap: 0.35rem;
+  align-items: center;
+  width: 100%;
+}
+
+.imp-grupo-row select {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.imp-grupo-row #imp-novo-grupo {
+  flex: 0 0 auto;
+  width: 2.1rem;
+  min-width: 2.1rem;
+  height: 2.1rem;
+  padding: 0;
+  font-size: 1.15rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
 .imp-item-conv {
   display: block;
   margin-top: 0.15rem;

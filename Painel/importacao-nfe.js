@@ -1766,6 +1766,16 @@ const ImportacaoNfe = (() => {
     return state.grupos;
   }
 
+  /** Nota conferida antes do grupo vir no vínculo: busca o grupo atual do produto uma vez. */
+  async function lerGrupoDoCadastro(it) {
+    const sys = it?.sistema;
+    if (!sys?.id_identificador || sys.criar_novo || Number(sys.id_grupo) > 0 || sys._grupo_lido) return;
+    if (state.itemTab !== 'saida') return;
+    sys._grupo_lido = true;
+    const res = await api(`/importacao/produto-fiscal/${sys.id_identificador}`);
+    if (res.ok && Number(res.item?.id_grupo) > 0) sys.id_grupo = Number(res.item.id_grupo);
+  }
+
   async function ensureUnidades() {
     if (state.unidades.length) return state.unidades;
     const res = await api('/importacao/unidades');
@@ -2110,16 +2120,16 @@ const ImportacaoNfe = (() => {
       return `<option value="${id}" ${id === atual ? 'selected' : ''}>${esc(g.descricao)}</option>`;
     }).join('');
     return `
-      <label class="imp-field">
+      <label class="imp-field full imp-grupo-field">
         <span>Grupo</span>
-        <select id="imp-grupo">
-          <option value="">Sem grupo</option>
-          ${opts}
-        </select>
-      </label>
-      <div class="imp-vinc-btns">
-        <button type="button" class="btn small outline" id="imp-novo-grupo">Cadastrar grupo</button>
-      </div>`;
+        <div class="imp-grupo-row">
+          <select id="imp-grupo">
+            <option value="">Sem grupo</option>
+            ${opts}
+          </select>
+          <button type="button" class="btn small" id="imp-novo-grupo" title="Cadastrar grupo" aria-label="Cadastrar grupo">+</button>
+        </div>
+      </label>`;
   }
 
   function panelSaida(sys, xml, vinculado, descEditable) {
@@ -2140,6 +2150,7 @@ const ImportacaoNfe = (() => {
           ${field('ID identificador', 'imp-id-ident', sys.id_identificador ?? '', { third: true, readonly: true, disabled: true })}
           ${field('ID estoque', 'imp-id-estoque', sys.id_estoque ?? '', { third: true, readonly: true, disabled: true })}
           ${field('Descrição', 'imp-desc', sys.descricao || (vinculado ? xml.xProd : ''), { full: true, readonly: !descEditable })}
+          ${descEditable ? grupoField(sys) : ''}
           ${field('Descrição complementar', 'imp-desc-cmpl', sys.desc_cmpl, { full: true })}
           ${field('Referência', 'imp-ref', sys.referencia, { half: true })}
           <label class="imp-field half imp-ean-field">
@@ -2156,7 +2167,6 @@ const ImportacaoNfe = (() => {
         <div class="imp-fields">
           ${field('Preço custo', 'imp-custo-ficha', moneyInput(sys.prc_custo ?? custoInfo.custoEstoque), { third: true, money: true })}
           ${field('Margem LB %', 'imp-margem', Number(sys.margem_lb) > 0 ? sys.margem_lb : '', { type: 'number', step: '0.01', third: true, placeholder: 'Vazio = sem margem' })}
-          ${sys.criar_novo ? grupoField(sys) : ''}
           ${field('Preço venda', 'imp-venda', Number(sys.prc_venda) > 0 ? moneyInput(sys.prc_venda) : '', { third: true, money: true, placeholder: 'Vazio = 0,01' })}
           ${field('Status', 'imp-status-prod', sys.status || 'A', { third: true })}
           ${comboField('Unidade', 'imp-uni-ficha', 'imp-uni-ficha-list', sys.uni_medida_saida || sys.uni_medida || '', { third: true, placeholder: 'Pesquisar unidade (TB_UNI_MEDIDA)…' })}
@@ -2446,7 +2456,8 @@ const ImportacaoNfe = (() => {
     const host = $('#imp-item-host');
     if (!it || !host) return;
     await ensureUnidades();
-    if ((it.sistema || {}).criar_novo) await ensureGrupos();
+    if ((it.sistema || {}).criar_novo || (it.sistema || {}).id_identificador) await ensureGrupos();
+    await lerGrupoDoCadastro(it);
     const simples = await ensureEmitenteFiscal();
     await hydrateClassTribRates(it.sistema || {});
     await hydrateTaxaLabels(it.sistema || {});
@@ -3850,16 +3861,25 @@ const ImportacaoNfe = (() => {
         deps.showMsg?.(res.error || 'Erro ao criar grupo');
         return;
       }
-      state.grupos = [...(state.grupos || []), res.grupo];
-      const sel = $('#imp-grupo');
-      if (sel && res.grupo) {
-        const opt = document.createElement('option');
-        opt.value = String(res.grupo.id_grupo);
-        opt.textContent = res.grupo.descricao;
-        opt.selected = true;
-        sel.appendChild(opt);
+      if (!res.grupo) return;
+      const idNovo = Number(res.grupo.id_grupo);
+      if (!(state.grupos || []).some((g) => Number(g.id_grupo) === idNovo)) {
+        state.grupos = [...(state.grupos || []), res.grupo]
+          .sort((a, b) => String(a.descricao).localeCompare(String(b.descricao), 'pt-BR'));
       }
-      deps.showToast?.('Grupo cadastrado');
+      const sel = $('#imp-grupo');
+      if (sel) {
+        let opt = [...sel.options].find((o) => Number(o.value) === idNovo);
+        if (!opt) {
+          opt = document.createElement('option');
+          opt.value = String(idNovo);
+          opt.textContent = res.grupo.descricao;
+          sel.appendChild(opt);
+        }
+        sel.value = String(idNovo);
+      }
+      if (it.sistema) it.sistema.id_grupo = idNovo;
+      deps.showToast?.(res.grupo.existente ? 'Esse grupo já existia e foi selecionado' : 'Grupo cadastrado');
     });
     $('#imp-salvar-ficha')?.addEventListener('click', async () => {
       const ok = await saveItem({ semRender: true });

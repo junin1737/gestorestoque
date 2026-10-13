@@ -2252,13 +2252,19 @@ function renderDetalhe() {
     if (!nome) return;
     const res = await api('/grupos', { method: 'POST', body: { descricao: nome } });
     if (!res.ok) return showMsg(res.error || 'Erro ao criar grupo');
-    state.grupos.push(res.grupo);
+    const idNovo = Number(res.grupo?.id_grupo);
+    if (!idNovo) return;
+    if (!state.grupos.some((g) => Number(g.id_grupo) === idNovo)) state.grupos.push(res.grupo);
     const sel = $('#f-grupo');
-    const opt = document.createElement('option');
-    opt.value = res.grupo.id_grupo;
-    opt.textContent = res.grupo.descricao;
-    opt.selected = true;
-    sel.appendChild(opt);
+    let opt = [...sel.options].find((o) => Number(o.value) === idNovo);
+    if (!opt) {
+      opt = document.createElement('option');
+      opt.value = idNovo;
+      opt.textContent = res.grupo.descricao;
+      sel.appendChild(opt);
+    }
+    sel.value = String(idNovo);
+    if (res.grupo.existente) showToast('Esse grupo já existia e foi selecionado');
   });
 }
 

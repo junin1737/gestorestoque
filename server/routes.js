@@ -851,7 +851,7 @@ router.post('/estoque', exigirModulo('estoque', 'importacao'), async (req, res) 
 
 router.post('/grupos', exigirModulo('estoque', 'importacao'), async (req, res) => {
   try {
-    const descricao = String((req.body && req.body.descricao) || '').trim();
+    const descricao = String((req.body && req.body.descricao) || '').trim().slice(0, 50);
     if (!descricao) return res.json({ ok: false, error: 'Informe a descrição do grupo.' });
     const grupo = await withDb(async (db, appCfg) => {
       const targets = writeTargets(appCfg);
@@ -860,8 +860,14 @@ router.post('/grupos', exigirModulo('estoque', 'importacao'), async (req, res) =
         const t = target.tables;
         if (!hasTable(t.grupo.replace(/_2$/, '')) && target.manage) continue;
         if (!hasTable(t.grupo) && target.manage) continue;
-        const genRows = await query(db, `SELECT GEN_ID(${t.genGrupo}, 1) AS ID FROM RDB$DATABASE`);
-        const id = Number(genRows[0].ID);
+        const igual = await query(db, `
+          SELECT FIRST 1 ID_GRUPO, DESCRICAO FROM ${t.grupo}
+          WHERE UPPER(TRIM(DESCRICAO)) = UPPER(?)`, [descricao]);
+        if (igual.length) {
+          created = { id_grupo: Number(igual[0].ID_GRUPO), descricao: String(igual[0].DESCRICAO || '').trim(), existente: true };
+          continue;
+        }
+        const id = await nextTableId(db, t.genGrupo, t.grupo, 'ID_GRUPO');
         await query(db, `INSERT INTO ${t.grupo} (ID_GRUPO, DESCRICAO) VALUES (?, ?)`, [id, descricao]);
         created = { id_grupo: id, descricao };
       }
