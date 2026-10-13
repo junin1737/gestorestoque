@@ -35,7 +35,7 @@ const {
   hasAuditTable,
 } = require('./audit');
 const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora } = require('./datetime');
-const { resolveOrigem, somenteServidorLocal, isServidorLocal, viaTunel } = require('./origem');
+const { resolveOrigem, somenteServidorLocal, isServidorLocal } = require('./origem');
 const licenca = require('./licenca');
 const auth = require('./auth');
 const { gerarHashSenha } = require('./senha');
@@ -333,7 +333,7 @@ function somenteSupervisor(req, res, next) {
 router.get('/usuarios', somenteSupervisor, (req, res) => {
   const appCfg = loadAppConfig();
   const cfg = loadUsersConfig(appCfg);
-  res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser), modulos: MODULOS, mudaOnline: !viaTunel(req) });
+  res.json({ ok: true, usuarios: cfg.usuarios.map(publicUser), modulos: MODULOS });
 });
 
 router.post('/usuarios', somenteSupervisor, async (req, res) => {
@@ -346,12 +346,10 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
   }
   const currentById = new Map(cfg.usuarios.map((u) => [Number(u.id), u]));
   const enviados = new Map((Array.isArray(usuarios) ? usuarios : []).map((u) => [Number(u.id), u]));
-  // Liberar ou tirar o acesso online dos funcionários e do MT Entradas só pela rede da loja.
   // O supervisor permanece com acesso total.
-  const mudaOnline = !viaTunel(req);
   const onlinePedido = (prev) => {
     const v = enviados.get(Number(prev.id))?.permissoes?.online?.acesso;
-    return mudaOnline && typeof v === 'boolean' ? v : prev.permissoes?.online?.acesso === true;
+    return typeof v === 'boolean' ? v : prev.permissoes?.online?.acesso === true;
   };
   // Só altera usuários já existentes (vindos do TB_FUNCIONARIO); a lista não cria nem apaga ninguém.
   cfg.usuarios = cfg.usuarios.map((prev) => {
@@ -378,7 +376,7 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
   }
   saveUsersConfig(appCfg, cfg);
   const salvo = loadUsersConfig(appCfg);
-  res.json({ ok: true, usuarios: salvo.usuarios.map(publicUser), mudaOnline });
+  res.json({ ok: true, usuarios: salvo.usuarios.map(publicUser) });
 });
 
 function descricaoExibicao(descricao, grade, cor, tamanho) {

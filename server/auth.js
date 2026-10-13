@@ -251,7 +251,7 @@ function funcionarioAtivo(id) {
 /** Motivo para barrar o usuário pela internet ({ status, error }) ou null se pode entrar. */
 async function bloqueioOnline(user) {
   if (!user.permissoes?.online?.acesso) {
-    return { status: 401, error: 'Este usuário não tem permissão de acesso online. Libere em Usuários, na rede da loja.' };
+    return { status: 401, error: 'Este usuário não tem permissão de acesso online. Peça ao supervisor para liberar em Usuários.' };
   }
   // O MT Entradas não é funcionário do Clipp; a senha dele já foi conferida no servidor de licenças.
   if (isMtEntradas(user)) return null;

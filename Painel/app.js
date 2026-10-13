@@ -2261,7 +2261,6 @@ async function loadUsuarios() {
   const res = await api('/usuarios');
   state.usuarios = res.usuarios || [];
   state.modulos = res.modulos || state.modulos;
-  state.mudaOnline = res.mudaOnline;
   renderUsuarios();
 }
 
@@ -2314,7 +2313,7 @@ function renderUsuarios() {
           </select>
         </label>
         ${state.modulos?.online ? `<label>Acesso online
-          <select data-perm="online.acesso" ${u.supervisor || state.mudaOnline === false ? 'disabled' : ''} title="${u.supervisor ? 'O supervisor já entra com acesso total.' : (state.mudaOnline === false ? 'Só na rede da loja' : '')}">
+          <select data-perm="online.acesso" ${u.supervisor ? 'disabled' : ''} title="${u.supervisor ? 'O supervisor já entra com acesso total.' : ''}">
             <option value="true" ${u.supervisor || u.permissoes?.online?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.supervisor && !u.permissoes?.online?.acesso ? 'selected' : ''}>Não</option>
           </select>
@@ -2423,7 +2422,6 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
   });
   if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
   state.usuarios = res.usuarios;
-  state.mudaOnline = res.mudaOnline;
   renderUsuarios();
   showToast('Usuários atualizados.');
 });
