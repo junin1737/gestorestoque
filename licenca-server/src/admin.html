@@ -35,7 +35,7 @@
 
   header.top { background: var(--brand); color: #fff; padding: .9rem 1.2rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
   header.top h1 { font-size: 17px; margin: 0; flex: 1; }
-  header.top .btn { background: rgba(255,255,255,.12); color: #fff; }
+  header.top .btn.ativo { background: #fff; color: var(--brand); }
   main { max-width: 1200px; margin: 0 auto; padding: 1rem; }
   .toolbar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: .8rem; }
   .toolbar input { flex: 1; min-width: 200px; }
@@ -174,16 +174,17 @@
 <section id="app" hidden>
   <header class="top">
     <h1>Licenças · MT Automações</h1>
-    <button class="btn sm" id="btn-revendas">Revendas</button>
-    <button class="btn sm" id="btn-teste">Teste grátis</button>
-    <button class="btn sm" id="btn-sup">Senha do supervisor</button>
-    <button class="btn sm" id="btn-contadores">Contadores</button>
-    <button class="btn sm" id="btn-novo">+ Cadastrar cliente</button>
-    <button class="btn sm" id="btn-empresas">Empresas online</button>
-    <button class="btn sm" id="btn-sair">Sair</button>
+    <button class="btn sm ativo" id="btn-clientes" data-tela="clientes" type="button">Clientes</button>
+    <button class="btn sm" id="btn-contadores" data-tela="contadores" type="button">Contadores</button>
+    <button class="btn sm" id="btn-empresas" data-tela="empresas" type="button">Empresas online</button>
+    <button class="btn sm" id="btn-revendas" type="button">Revendas</button>
+    <button class="btn sm" id="btn-teste" type="button">Teste grátis</button>
+    <button class="btn sm" id="btn-sup" type="button">Senha do supervisor</button>
+    <button class="btn sm" id="btn-sair" type="button">Sair</button>
   </header>
   <section id="painel-empresas" hidden>
     <div class="linha">
+      <button class="btn sm" id="btn-voltar-empresas" type="button">← Clientes</button>
       <h2 style="margin:0">Empresas online</h2>
       <button class="btn sm" id="btn-empresas-atualizar" type="button">Atualizar</button>
     </div>
@@ -192,6 +193,7 @@
   </section>
   <section id="painel-contadores" hidden>
     <div class="linha">
+      <button class="btn sm" id="btn-voltar-contadores" type="button">← Clientes</button>
       <h2 style="margin:0">Contadores</h2>
       <button class="btn sm primary" id="btn-contador-novo" type="button">+ Cadastrar</button>
     </div>
@@ -216,7 +218,8 @@
       <input id="busca" type="search" placeholder="Buscar por CNPJ, nome, máquina, NSE ou aplicação…" />
       <select id="f-app" title="Aplicação"><option value="">Todas as aplicações</option></select>
       <select id="f-revenda" title="Revenda"><option value="">Todas as revendas</option></select>
-      <button class="btn ghost" id="btn-atualizar">Atualizar</button>
+      <button class="btn ghost" id="btn-atualizar" type="button">Atualizar</button>
+      <button class="btn primary" id="btn-novo" type="button">+ Cadastrar cliente</button>
     </div>
     <div class="tabs" id="tabs">
       <button class="tab active" data-status="">Todos <span class="n" data-n="todos">0</span></button>
@@ -614,23 +617,46 @@ async function api(path, { method = 'GET', body } = {}) {
   return data;
 }
 
+function irPara(tela) {
+  if (st.papel === 'entradas') tela = 'empresas';
+  if (st.papel === 'contador') tela = 'meus';
+  const mapa = {
+    clientes: 'painel-licencas',
+    empresas: 'painel-empresas',
+    contadores: 'painel-contadores',
+    meus: 'painel-contador-clientes',
+  };
+  ['painel-licencas', 'painel-empresas', 'painel-contadores', 'painel-contador-clientes'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = id !== mapa[tela];
+  });
+  document.querySelectorAll('#app header.top .btn[data-tela]').forEach((b) => {
+    b.classList.toggle('ativo', b.dataset.tela === tela);
+  });
+  const voltarEmp = $('#btn-voltar-empresas');
+  const voltarCont = $('#btn-voltar-contadores');
+  if (voltarEmp) voltarEmp.hidden = st.papel === 'entradas';
+  if (voltarCont) voltarCont.hidden = st.papel !== 'admin';
+  if (tela === 'empresas') carregarEmpresas();
+  if (tela === 'contadores') carregarContadores();
+  if (tela === 'meus') carregarClientesContador();
+  if (tela === 'clientes') carregar();
+}
+
 function mostrarApp(logado) {
   $('#login').hidden = logado;
   $('#app').hidden = !logado;
   if (!logado) return;
   const entradas = st.papel === 'entradas';
   const contador = st.papel === 'contador';
-  $('#painel-licencas').hidden = entradas || contador;
-  $('#painel-empresas').hidden = !entradas;
-  $('#painel-contadores').hidden = true;
-  $('#painel-contador-clientes').hidden = !contador;
-  ['btn-revendas', 'btn-teste', 'btn-sup', 'btn-novo', 'btn-contadores', 'btn-empresas'].forEach((id) => {
+  ['btn-revendas', 'btn-teste', 'btn-sup', 'btn-novo', 'btn-contadores', 'btn-empresas', 'btn-clientes'].forEach((id) => {
     const el = document.getElementById(id);
     if (el) el.hidden = entradas || contador;
   });
-  if (contador) { carregarClientesContador(); return; }
-  if (entradas) carregarEmpresas();
-  else { carregarConfig(); carregarRevendas().then(carregar); }
+  if (contador) { irPara('meus'); return; }
+  if (entradas) { irPara('empresas'); return; }
+  carregarConfig();
+  carregarRevendas().then(() => irPara('clientes'));
 }
 async function carregarEmpresas() {
   const wrap = $('#empresas-wrap');
@@ -648,14 +674,10 @@ async function carregarEmpresas() {
     </tr>`).join('')
   }</tbody></table>`;
 }
-$('#btn-empresas')?.addEventListener('click', () => {
-  const box = $('#painel-empresas');
-  const lic = $('#painel-licencas');
-  const aberto = box.hidden;
-  box.hidden = !aberto;
-  lic.hidden = aberto;
-  if (aberto) carregarEmpresas();
-});
+$('#btn-empresas')?.addEventListener('click', () => irPara('empresas'));
+$('#btn-clientes')?.addEventListener('click', () => irPara('clientes'));
+$('#btn-voltar-empresas')?.addEventListener('click', () => irPara('clientes'));
+$('#btn-voltar-contadores')?.addEventListener('click', () => irPara('clientes'));
 $('#btn-empresas-atualizar')?.addEventListener('click', () => carregarEmpresas());
 function sair() {
   st.token = '';
@@ -1052,22 +1074,30 @@ $('#dlg-cliente').addEventListener('click', (e) => {
 
 $('#d-fechar').addEventListener('click', () => $('#dlg-cliente').close());
 $('#d-salvar').addEventListener('click', async () => {
-  const body = {
-    status: $('#d-status').value,
-    pago_ate: $('#d-pago').value || null,
-    em_teste: $('#d-teste').checked,
-    razao: $('#d-razao').value,
-    fantasia: $('#d-fantasia').value,
-    revenda_id: $('#d-revenda').value || null,
-    contador_id: $('#d-contador').value || null,
-    mensagem: $('#d-mensagem').value,
-    observacao: $('#d-obs').value,
-  };
-  const r = await api(rotaCliente(st.atual), { method: 'PUT', body });
-  if (!r.ok) { toast(r.error || 'Falha ao salvar.', true); return; }
-  preencherCliente(r);
-  toast('Salvo.');
-  carregar();
+  const btn = $('#d-salvar');
+  btn.disabled = true;
+  try {
+    const body = {
+      status: $('#d-status').value,
+      pago_ate: $('#d-pago').value || null,
+      em_teste: $('#d-teste').checked,
+      razao: $('#d-razao').value,
+      fantasia: $('#d-fantasia').value,
+      revenda_id: $('#d-revenda').value || null,
+      contador_id: $('#d-contador').value || null,
+      mensagem: $('#d-mensagem').value,
+      observacao: $('#d-obs').value,
+    };
+    const r = await api(rotaCliente(st.atual), { method: 'PUT', body });
+    if (!r.ok) { toast(r.error || 'Falha ao salvar.', true); return; }
+    $('#dlg-cliente').close();
+    toast('Salvo com sucesso.');
+    irPara('clientes');
+  } catch (err) {
+    toast(err.message || 'Falha ao salvar.', true);
+  } finally {
+    btn.disabled = false;
+  }
 });
 $('#d-sup-salvar').addEventListener('click', async () => {
   const s1 = $('#d-sup-1').value;
@@ -1253,15 +1283,7 @@ function abrirContador(c) {
   $('#dlg-contador').showModal();
 }
 
-$('#btn-contadores')?.addEventListener('click', () => {
-  const box = $('#painel-contadores');
-  const lic = $('#painel-licencas');
-  const aberto = box.hidden;
-  box.hidden = !aberto;
-  lic.hidden = aberto;
-  $('#painel-empresas').hidden = true;
-  if (aberto) carregarContadores();
-});
+$('#btn-contadores')?.addEventListener('click', () => irPara('contadores'));
 $('#btn-contador-novo')?.addEventListener('click', () => abrirContador(null));
 $('#contadores-wrap')?.addEventListener('click', (e) => {
   const btn = e.target.closest('[data-cont-edit]');
