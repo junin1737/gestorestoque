@@ -995,7 +995,7 @@ $('#form-login').addEventListener('submit', async (e) => {
   if (loginModoContador) {
     const resCont = await api('/contador/login', {
       method: 'POST',
-      body: { email: $('#login-contador-email')?.value || '', senha },
+      body: { documento: $('#login-contador-doc')?.value || '', senha },
     });
     if (!resCont.ok) {
       senhaEl.value = senha;
@@ -1084,7 +1084,8 @@ function enterApp() {
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
   if (cfgMais) cfgMais.hidden = !isNativeApk();
-  const showContador = !!state.usuario?.supervisor || !!state.usuario?.contador;
+  const ficha = state.usuario?.permissoes?.estoque?.ficha;
+  const showContador = !!state.usuario?.supervisor || !!state.usuario?.contador || ficha === 'editar';
   if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
   if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
   const showEmp = !!state.usuario?.mtEntradas;
@@ -1296,8 +1297,10 @@ async function showPage(page) {
     $('#page-title').textContent = 'Início';
     $('#page-sub').textContent = 'Escolha um módulo';
   } else if (page === 'contador') {
-    $('#page-title').textContent = 'Contador';
-    $('#page-sub').textContent = 'Clientes, itens e relação das alterações';
+    $('#page-title').textContent = 'Alteração em massa';
+    $('#page-sub').textContent = state.usuario?.contador
+      ? 'Só a tributação de saída dos produtos desta loja'
+      : 'Regra: se a condição for verdadeira, o campo preenchido muda';
     window.Contador?.onPageEnter();
   } else if (page === 'usuarios') {
     $('#page-title').textContent = 'Usuários';
@@ -3362,6 +3365,7 @@ window.Contador?.init({
   showMsg,
   showToast,
   supervisor: () => !!state.usuario?.supervisor,
+  contador: () => !!state.usuario?.contador,
 });
 
 window.ImportacaoNfe?.init({

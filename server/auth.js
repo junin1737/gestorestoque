@@ -383,6 +383,13 @@ function exigirSessao(req, res, next) {
       return next();
     }
   }
+  if (req.path.startsWith('/massa')) {
+    const contador = require('./contador').daRequisicao(req);
+    if (contador) {
+      req.contador = contador;
+      return next();
+    }
+  }
   if (ROTAS_SERVIDOR_LOCAL.some((re) => re.test(req.path)) && isServidorLocal(req)) return next();
   const u = usuarioDaSessao(req);
   if (!u) {

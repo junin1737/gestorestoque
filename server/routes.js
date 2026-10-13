@@ -2652,10 +2652,7 @@ router.get('/contador/contas', (req, res) => {
 });
 
 router.post('/contador/contas', (req, res) => {
-  if (!req.usuario?.supervisor) {
-    return res.status(403).json({ ok: false, error: 'Só o supervisor cadastra o contador.' });
-  }
-  res.json(contador.cadastrarConta(req.body || {}));
+  res.status(410).json({ ok: false, error: 'O cadastro do contador é feito no painel de licenças.' });
 });
 
 router.delete('/contador/contas', (req, res) => {
@@ -2723,6 +2720,80 @@ router.put('/contador/itens/:id', async (req, res) => {
   if (!autor) return;
   try {
     res.json(await contador.salvarItem(req.params.id, req.body || {}, autor));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+const massa = require('./massa');
+
+function modoMassa(req, res) {
+  if (req.contador) return 'contador';
+  if (req.usuario?.supervisor) return 'loja';
+  const ficha = req.usuario?.permissoes?.estoque?.ficha;
+  if (ficha === 'editar') return 'loja';
+  res.status(403).json({ ok: false, error: 'Sem permissão para alteração em massa.' });
+  return null;
+}
+
+function autorMassa(req) {
+  if (req.contador) return { id: 0, nome: req.contador.nome || 'Contador' };
+  return { id: req.usuario?.id || 0, nome: req.usuario?.nome || 'Painel' };
+}
+
+router.get('/massa/contexto', async (req, res) => {
+  if (!modoMassa(req, res)) return;
+  try {
+    res.json(await massa.contexto());
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.get('/massa/itens', async (req, res) => {
+  if (!modoMassa(req, res)) return;
+  try {
+    const itens = await massa.listar({
+      q: req.query.q,
+      ncm: req.query.ncm,
+      cfop: req.query.cfop,
+      cst: req.query.cst,
+      grupo: req.query.grupo,
+      incompleto: req.query.incompleto === '1',
+    });
+    res.json({ ok: true, itens });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.post('/massa/previa', async (req, res) => {
+  const modo = modoMassa(req, res);
+  if (!modo) return;
+  try {
+    res.json(await massa.previa(req.body || {}, modo));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/massa/aplicar', async (req, res) => {
+  const modo = modoMassa(req, res);
+  if (!modo) return;
+  try {
+    if (modo === 'contador') {
+      const { LICENCA_URL } = require('./licenca');
+      const cnpj = String((await contador.listarClientes())[0]?.cnpj || '').replace(/\D/g, '');
+      const token = contador.tokenPainel(req);
+      const vinc = await fetch(`${LICENCA_URL}/api/admin/contador/vinculo?cnpj=${encodeURIComponent(cnpj)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const okVinc = await vinc.json().catch(() => ({}));
+      if (!okVinc.ok) return res.status(403).json({ ok: false, error: okVinc.error || 'Este contador não atende esta loja.' });
+    }
+    const body = { ...(req.body || {}) };
+    delete body.senha;
+    res.json(await massa.aplicar(body, modo, autorMassa(req)));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

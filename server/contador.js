@@ -111,7 +111,10 @@ function removerConta(email) {
 
 function emitirToken(conta) {
   const payload = Buffer.from(JSON.stringify({
-    e: conta.email,
+    e: conta.email || conta.documento,
+    n: conta.nome || '',
+    p: conta.painel ? 1 : 0,
+    t: conta.tokenPainel || '',
     exp: Date.now() + 12 * 3600000,
   })).toString('base64url');
   const sig = crypto.createHmac('sha256', segredo()).update(payload).digest('base64url');
@@ -158,26 +161,62 @@ function definirCookie(res, valor, maxAgeS) {
 function contaDoToken(token) {
   const dados = lerToken(token);
   if (!dados) return null;
+  if (dados.p) {
+    return { email: dados.e, nome: dados.n || 'Contador', documento: dados.e, ativo: true };
+  }
   const conta = lerContas().find((c) => c.email === dados.e && c.ativo !== false);
   if (!conta) return null;
   return contaPublica(conta);
 }
 
-function daRequisicao(req) {
-  return contaDoToken(lerCookie(req, COOKIE));
+function tokenPainel(req) {
+  const dados = lerToken(lerCookie(req, COOKIE));
+  return dados?.t || '';
 }
 
-function login(email, senha) {
-  const mail = String(email || '').trim().toLowerCase();
-  const conta = lerContas().find((c) => c.email === mail && c.ativo !== false);
-  if (!conta || !conferirHashSenha(senha, conta.senhaHash)) {
-    return { ok: false, error: 'E-mail ou senha incorretos.' };
+async function cnpjDaLoja() {
+  const rows = await withDb(async (db) => query(db, `SELECT FIRST 1 CNPJ FROM TB_EMITENTE`));
+  return String(rows[0]?.CNPJ || '').replace(/\D/g, '');
+}
+
+async function login(documento, senha) {
+  const doc = String(documento || '').replace(/\D/g, '');
+  if (!(doc.length === 11 || doc.length === 14)) {
+    return { ok: false, error: 'Informe o CPF ou CNPJ do contador.' };
   }
+  const { LICENCA_URL } = require('./licenca');
+  let data;
+  try {
+    const res = await fetch(`${LICENCA_URL}/api/admin/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario: doc, senha: String(senha || '') }),
+    });
+    data = await res.json();
+  } catch {
+    return { ok: false, error: 'Não foi possível falar com o painel de licenças.' };
+  }
+  if (!data.ok || data.papel !== 'contador') {
+    return { ok: false, error: 'CPF/CNPJ ou senha incorretos.' };
+  }
+  let cnpj = '';
+  try { cnpj = await cnpjDaLoja(); } catch { cnpj = ''; }
+  let vinc;
+  try {
+    const res = await fetch(`${LICENCA_URL}/api/admin/contador/vinculo?cnpj=${encodeURIComponent(cnpj)}`, {
+      headers: { Authorization: `Bearer ${data.token}` },
+    });
+    vinc = await res.json();
+  } catch {
+    return { ok: false, error: 'Não foi possível confirmar o vínculo desta loja.' };
+  }
+  if (!vinc.ok) return { ok: false, error: vinc.error || 'Este contador não atende esta loja.' };
+  const conta = { email: doc, documento: doc, nome: data.nome || 'Contador', painel: true, ativo: true, tokenPainel: data.token };
   return { ok: true, token: emitirToken(conta), conta: contaPublica(conta) };
 }
 
-function responderLogin(req, res) {
-  const r = login(req.body?.email, req.body?.senha);
+async function responderLogin(req, res) {
+  const r = await login(req.body?.documento || req.body?.email, req.body?.senha);
   if (!r.ok) return res.status(401).json(r);
   definirCookie(res, r.token, 12 * 3600);
   return res.json({ ok: true, contador: r.conta });
@@ -466,12 +505,17 @@ async function desfazer(id, autor) {
   return { ok: true, item: out };
 }
 
+function daRequisicao(req) {
+  return contaDoToken(lerCookie(req, COOKIE));
+}
+
 module.exports = {
   COOKIE,
   listarContas,
   cadastrarConta,
   removerConta,
   daRequisicao,
+  tokenPainel,
   responderLogin,
   logout,
   listarClientes,

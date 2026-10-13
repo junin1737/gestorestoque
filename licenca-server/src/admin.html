@@ -155,7 +155,8 @@
   <form class="login-card" id="form-login">
     <h1>Painel de licenças</h1>
     <p>MT Automações — acesso restrito</p>
-    <label>Senha<input type="password" id="login-senha" autocomplete="current-password" required autofocus /></label>
+    <label>Usuário<input type="text" id="login-usuario" autocomplete="username" required autofocus placeholder="Supervisor, MT Entradas ou CPF/CNPJ" /></label>
+    <label>Senha<input type="password" id="login-senha" autocomplete="current-password" required /></label>
     <div class="erro" id="login-erro"></div>
     <button class="btn primary" style="width:100%" type="submit">Entrar</button>
   </form>
@@ -167,6 +168,7 @@
     <button class="btn sm" id="btn-revendas">Revendas</button>
     <button class="btn sm" id="btn-teste">Teste grátis</button>
     <button class="btn sm" id="btn-sup">Senha do supervisor</button>
+    <button class="btn sm" id="btn-contadores">Contadores</button>
     <button class="btn sm" id="btn-novo">+ Cadastrar cliente</button>
     <button class="btn sm" id="btn-empresas">Empresas online</button>
     <button class="btn sm" id="btn-sair">Sair</button>
@@ -178,6 +180,19 @@
     </div>
     <p class="hint">O status online indica o Gestor aberto, com internet, no servidor do cliente. Acessar abre o link enviado por aquele computador e já pede a autorização. No computador da loja, autorize o pedido MT Entradas.</p>
     <div class="mini" id="empresas-wrap"><p>Nenhuma empresa registrada ainda.</p></div>
+  </section>
+  <section id="painel-contadores" hidden>
+    <div class="linha">
+      <h2 style="margin:0">Contadores</h2>
+      <button class="btn sm primary" id="btn-contador-novo" type="button">+ Cadastrar</button>
+    </div>
+    <p class="hint">O contador entra neste painel com o CPF ou CNPJ e a senha cadastrados aqui. Ele só vê as empresas em que foi marcado como responsável.</p>
+    <div class="mini" id="contadores-wrap"><p>Nenhum contador cadastrado.</p></div>
+  </section>
+  <section id="painel-contador-clientes" hidden>
+    <h2 style="margin:0 0 .4rem">Seus clientes</h2>
+    <p class="hint" id="contador-ola"></p>
+    <div class="mini" id="contador-clientes-wrap"><p>Nenhuma empresa vinculada.</p></div>
   </section>
   <main id="painel-licencas">
     <div class="aviso" id="aviso-sup" hidden>
@@ -259,6 +274,13 @@
       <label>Nome fantasia<input id="d-fantasia" maxlength="120" /></label>
       <label>Revenda<select id="d-revenda"></select></label>
     </div>
+    <h3>Contador responsável</h3>
+    <div class="linha">
+      <label>Buscar<input id="d-cont-busca" placeholder="Nome, e-mail ou documento" /></label>
+      <label>Contador<select id="d-contador"><option value="">Sem contador</option></select></label>
+      <button class="btn ghost" id="d-cont-novo" type="button">+</button>
+    </div>
+    <p class="sub">Opcional. Cada cliente tem no máximo um contador. O mesmo contador pode atender várias empresas.</p>
     <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
     <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
 
@@ -428,6 +450,40 @@
   </div>
 </dialog>
 
+<dialog id="dlg-contador">
+  <div class="dlg-head">
+    <div class="dlg-titulo"><h2 id="c-titulo">Contador</h2></div>
+  </div>
+  <div class="dlg-body">
+    <label>Nome / razão social<input id="c-nome" maxlength="120" required /></label>
+    <div class="grid2">
+      <label>Documento
+        <select id="c-tipo">
+          <option value="cpf">CPF</option>
+          <option value="cnpj">CNPJ</option>
+        </select>
+      </label>
+      <label>Número<input id="c-doc" inputmode="numeric" placeholder="Somente números" /></label>
+    </div>
+    <div class="grid2">
+      <label>CRC (opcional)<input id="c-crc" maxlength="20" /></label>
+      <label>Telefone (opcional)<input id="c-tel" maxlength="20" /></label>
+    </div>
+    <label>E-mail<input id="c-email" type="email" maxlength="120" /></label>
+    <div class="grid2">
+      <label>Senha<input id="c-senha" type="password" autocomplete="new-password" /></label>
+      <label>Confirmação<input id="c-confirma" type="password" autocomplete="new-password" /></label>
+    </div>
+    <label class="chk"><input type="checkbox" id="c-ativo" checked /> Ativo</label>
+    <p class="sub">Senha com no mínimo 8 caracteres, letra e número. No cadastro novo ela é obrigatória. Para manter a senha atual, deixe os dois campos vazios.</p>
+    <div class="erro" id="c-erro"></div>
+  </div>
+  <div class="dlg-foot">
+    <button class="btn ghost" id="c-fechar" type="button">Fechar</button>
+    <button class="btn primary" id="c-salvar" type="button">Salvar</button>
+  </div>
+</dialog>
+
 <script>
 'use strict';
 const $ = (s) => document.querySelector(s);
@@ -441,7 +497,7 @@ function papelDoToken(token) {
     return 'admin';
   }
 }
-const st = { token: localStorage.getItem('mt_licenca_token') || '', papel: 'admin', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null };
+const st = { token: localStorage.getItem('mt_licenca_token') || '', papel: localStorage.getItem('mt_licenca_papel') || 'admin', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null, contadorEditando: null, contadores: [] };
 st.papel = st.token ? papelDoToken(st.token) : 'admin';
 const rotaCliente = (c) => `/clientes/${encodeURIComponent(c.app)}/${c.cnpj}`;
 const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloqueado', vencido: 'Vencido', teste: 'Em teste' };
@@ -554,14 +610,16 @@ function mostrarApp(logado) {
   $('#app').hidden = !logado;
   if (!logado) return;
   const entradas = st.papel === 'entradas';
-  $('#painel-licencas').hidden = entradas;
+  const contador = st.papel === 'contador';
+  $('#painel-licencas').hidden = entradas || contador;
   $('#painel-empresas').hidden = !entradas;
-  ['btn-revendas', 'btn-teste', 'btn-sup', 'btn-novo'].forEach((id) => {
+  $('#painel-contadores').hidden = true;
+  $('#painel-contador-clientes').hidden = !contador;
+  ['btn-revendas', 'btn-teste', 'btn-sup', 'btn-novo', 'btn-contadores', 'btn-empresas'].forEach((id) => {
     const el = document.getElementById(id);
-    if (el) el.hidden = entradas;
+    if (el) el.hidden = entradas || contador;
   });
-  const btnEmp = $('#btn-empresas');
-  if (btnEmp) btnEmp.hidden = entradas;
+  if (contador) { carregarClientesContador(); return; }
   if (entradas) carregarEmpresas();
   else { carregarConfig(); carregarRevendas().then(carregar); }
 }
@@ -594,17 +652,19 @@ function sair() {
   st.token = '';
   st.papel = 'admin';
   localStorage.removeItem('mt_licenca_token');
+  localStorage.removeItem('mt_licenca_papel');
   mostrarApp(false);
 }
 
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#login-erro').textContent = '';
-  const r = await api('/login', { method: 'POST', body: { senha: $('#login-senha').value } });
+  const r = await api('/login', { method: 'POST', body: { usuario: $('#login-usuario').value, senha: $('#login-senha').value } });
   if (!r.ok) { $('#login-erro').textContent = r.error || 'Falha no login.'; return; }
   st.token = r.token;
-  st.papel = r.papel === 'entradas' ? 'entradas' : 'admin';
+  st.papel = r.papel === 'entradas' ? 'entradas' : (r.papel === 'contador' ? 'contador' : 'admin');
   localStorage.setItem('mt_licenca_token', r.token);
+  localStorage.setItem('mt_licenca_papel', st.papel);
   $('#login-senha').value = '';
   mostrarApp(true);
 });
@@ -840,6 +900,7 @@ function preencherCliente(r) {
   $('#d-razao').value = c.razao || '';
   $('#d-fantasia').value = c.fantasia || '';
   $('#d-revenda').innerHTML = opcoesRevenda(c.revenda_id);
+  preencherSelectContador(c.contador_id);
   $('#d-mensagem').value = c.mensagem || '';
   $('#d-obs').value = c.observacao || '';
   $('#d-sup-1').value = '';
@@ -975,6 +1036,7 @@ $('#d-salvar').addEventListener('click', async () => {
     razao: $('#d-razao').value,
     fantasia: $('#d-fantasia').value,
     revenda_id: $('#d-revenda').value || null,
+    contador_id: $('#d-contador').value || null,
     mensagem: $('#d-mensagem').value,
     observacao: $('#d-obs').value,
   };
@@ -1092,6 +1154,138 @@ window.addEventListener('popstate', () => {
 
 setInterval(() => { if (st.token && !document.hidden && !$$('dialog[open]').length) carregar(); }, 60000);
 mostrarApp(!!st.token);
+
+function fmtDoc(tipo, doc) {
+  const d = String(doc || '').replace(/\D/g, '');
+  if (tipo === 'cpf' && d.length === 11) return d.replace(/^(\d{3})(\d{3})(\d{3})(\d{2})$/, '$1.$2.$3-$4');
+  if (d.length === 14) return d.replace(/^(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})$/, '$1.$2.$3/$4-$5');
+  return d;
+}
+
+async function carregarContadores(q) {
+  const qs = q ? `?q=${encodeURIComponent(q)}` : '';
+  const r = await api(`/contadores${qs}`);
+  const wrap = $('#contadores-wrap');
+  if (!r.ok) { if (wrap) wrap.innerHTML = `<p>${esc(r.error || 'Falha ao listar.')}</p>`; return []; }
+  st.contadores = r.itens || [];
+  if (wrap) {
+    wrap.innerHTML = st.contadores.length
+      ? `<table><thead><tr><th>Nome</th><th>Documento</th><th>E-mail</th><th>Status</th><th></th></tr></thead><tbody>${
+        st.contadores.map((c) => `<tr>
+          <td>${esc(c.nome)}</td>
+          <td>${esc(fmtDoc(c.tipo_doc, c.documento))}</td>
+          <td>${esc(c.email)}</td>
+          <td>${c.ativo ? 'Ativo' : 'Inativo'}</td>
+          <td><button class="btn sm" type="button" data-cont-edit="${c.id}">Editar</button></td>
+        </tr>`).join('')
+      }</tbody></table>`
+      : '<p>Nenhum contador cadastrado.</p>';
+  }
+  return st.contadores;
+}
+
+function preencherSelectContador(idAtual) {
+  const sel = $('#d-contador');
+  if (!sel) return;
+  const atual = String(idAtual || sel.value || '');
+  const lista = st.contadores || [];
+  sel.innerHTML = '<option value="">Sem contador</option>' + lista.map((c) => (
+    `<option value="${c.id}"${String(c.id) === atual ? ' selected' : ''}>${esc(c.nome)} · ${esc(fmtDoc(c.tipo_doc, c.documento))}${c.ativo ? '' : ' (inativo)'}</option>`
+  )).join('');
+  if (atual && !lista.some((c) => String(c.id) === atual)) {
+    sel.insertAdjacentHTML('beforeend', `<option value="${esc(atual)}" selected>Contador #${esc(atual)}</option>`);
+  }
+}
+
+async function carregarClientesContador() {
+  const r = await api('/contador/clientes');
+  const wrap = $('#contador-clientes-wrap');
+  const ola = $('#contador-ola');
+  if (ola) ola.textContent = r.nome ? `${r.nome}, estas são as empresas vinculadas a você.` : '';
+  if (!r.ok) { if (wrap) wrap.innerHTML = `<p>${esc(r.error || 'Falha ao listar clientes.')}</p>`; return; }
+  const itens = r.itens || [];
+  if (!itens.length) { wrap.innerHTML = '<p>Nenhuma empresa vinculada. A MT Automações marca o contador responsável no cadastro do cliente.</p>'; return; }
+  wrap.innerHTML = `<table><thead><tr><th>Empresa</th><th>CNPJ</th><th></th></tr></thead><tbody>${
+    itens.map((e) => `<tr>
+      <td>${esc(e.nome || '—')}</td>
+      <td>${esc(fmtCnpj(e.cnpj))}</td>
+      <td>${e.url ? `<a class="btn sm" href="${esc(e.url)}" target="_blank" rel="noopener">Abrir a loja</a>` : 'Gestor offline'}</td>
+    </tr>`).join('')
+  }</tbody></table>`;
+}
+
+function abrirContador(c) {
+  st.contadorEditando = c?.id || null;
+  $('#c-titulo').textContent = c ? 'Editar contador' : 'Novo contador';
+  $('#c-nome').value = c?.nome || '';
+  $('#c-tipo').value = c?.tipo_doc || 'cpf';
+  $('#c-doc').value = c?.documento || '';
+  $('#c-crc').value = c?.crc || '';
+  $('#c-email').value = c?.email || '';
+  $('#c-tel').value = c?.telefone || '';
+  $('#c-senha').value = '';
+  $('#c-confirma').value = '';
+  $('#c-ativo').checked = c ? !!c.ativo : true;
+  $('#c-erro').textContent = '';
+  $('#dlg-contador').showModal();
+}
+
+$('#btn-contadores')?.addEventListener('click', () => {
+  const box = $('#painel-contadores');
+  const lic = $('#painel-licencas');
+  const aberto = box.hidden;
+  box.hidden = !aberto;
+  lic.hidden = aberto;
+  $('#painel-empresas').hidden = true;
+  if (aberto) carregarContadores();
+});
+$('#btn-contador-novo')?.addEventListener('click', () => abrirContador(null));
+$('#contadores-wrap')?.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-cont-edit]');
+  if (!btn) return;
+  const c = (st.contadores || []).find((x) => String(x.id) === btn.dataset.contEdit);
+  if (c) abrirContador(c);
+});
+$('#c-fechar')?.addEventListener('click', () => $('#dlg-contador').close());
+$('#c-salvar')?.addEventListener('click', async () => {
+  const erro = $('#c-erro');
+  erro.textContent = '';
+  const body = {
+    nome: $('#c-nome').value,
+    tipo_doc: $('#c-tipo').value,
+    documento: $('#c-doc').value,
+    crc: $('#c-crc').value,
+    email: $('#c-email').value,
+    telefone: $('#c-tel').value,
+    senha: $('#c-senha').value,
+    confirma: $('#c-confirma').value,
+    ativo: $('#c-ativo').checked,
+  };
+  const id = st.contadorEditando;
+  const r = await api(id ? `/contadores/${id}` : '/contadores', { method: id ? 'PUT' : 'POST', body });
+  if (!r.ok) { erro.textContent = r.error || 'Falha ao salvar.'; return; }
+  $('#dlg-contador').close();
+  await carregarContadores();
+  preencherSelectContador(r.contador?.id);
+  if ($('#d-contador') && r.contador?.id && $('#dlg-cliente').open) $('#d-contador').value = String(r.contador.id);
+  toast('Contador salvo.');
+});
+let tContBusca;
+$('#d-cont-busca')?.addEventListener('input', (e) => {
+  clearTimeout(tContBusca);
+  tContBusca = setTimeout(async () => {
+    const atual = $('#d-contador').value;
+    await carregarContadores(e.target.value.trim());
+    preencherSelectContador(atual);
+  }, 250);
+});
+$('#d-cont-novo')?.addEventListener('click', () => abrirContador(null));
+const abrirClienteOriginal = abrirCliente;
+abrirCliente = async function (cli) {
+  await carregarContadores();
+  return abrirClienteOriginal(cli);
+};
+
 </script>
 </body>
 </html>
