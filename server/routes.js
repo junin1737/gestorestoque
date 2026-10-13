@@ -53,6 +53,7 @@ function publicUser(u) {
     supervisor: !!u.supervisor,
     mtEntradas: isMtEntradas(u),
     permissoes: u.permissoes,
+    documento: String(u.documento || '').replace(/\D/g, ''),
     temSenha: temSenha(u),
   };
 }
@@ -362,6 +363,7 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
     if (!u) return prev;
     const next = {
       ...prev,
+      documento: String(u.documento || '').replace(/\D/g, ''),
       permissoes: ensureModulos(u.permissoes),
     };
     if (MODULOS.online) next.permissoes.online = { acesso: onlinePedido(prev) };
@@ -2728,12 +2730,37 @@ router.put('/contador/itens/:id', async (req, res) => {
 const massa = require('./massa');
 
 function modoMassa(req, res) {
-  if (req.contador) return 'contador';
-  if (req.usuario?.supervisor) return 'loja';
-  const ficha = req.usuario?.permissoes?.estoque?.ficha;
-  if (ficha === 'editar') return 'loja';
+  if (req.contador) return Promise.resolve('contador');
+  if (req.usuario?.supervisor) return Promise.resolve('loja');
+  if (req.usuario?.permissoes?.massa?.acesso === true) {
+    return conferirDocumentoContador(req).then((confere) => {
+      if (!confere.ok) {
+        res.status(403).json({ ok: false, error: confere.error });
+        return null;
+      }
+      return 'loja';
+    });
+  }
   res.status(403).json({ ok: false, error: 'Sem permissão para alteração em massa.' });
-  return null;
+  return Promise.resolve(null);
+}
+
+async function conferirDocumentoContador(req) {
+  const doc = String(req.usuario?.documento || '').replace(/\D/g, '');
+  if (doc.length !== 11 && doc.length !== 14) {
+    return { ok: false, error: 'Cadastre o CPF/CNPJ deste usuário para comparar com o contador do painel.' };
+  }
+  try {
+    const headers = await licenca.cabecalhosInstalacao();
+    const res = await fetch(`${licenca.LICENCA_URL}/api/mt/contador-documento?documento=${encodeURIComponent(doc)}`, { headers });
+    const data = await res.json().catch(() => ({}));
+    if (!data.confere) {
+      return { ok: false, error: data.motivo || 'O CPF/CNPJ do usuário não confere com o contador vinculado no painel.' };
+    }
+    return { ok: true, nome: data.nome || '' };
+  } catch (err) {
+    return { ok: false, error: 'Não foi possível comparar o CPF/CNPJ com o painel de licenças.' };
+  }
 }
 
 function autorMassa(req) {
@@ -2742,7 +2769,7 @@ function autorMassa(req) {
 }
 
 router.get('/massa/contexto', async (req, res) => {
-  if (!modoMassa(req, res)) return;
+  if (!(await modoMassa(req, res))) return;
   try {
     res.json(await massa.contexto());
   } catch (err) {
@@ -2751,7 +2778,7 @@ router.get('/massa/contexto', async (req, res) => {
 });
 
 router.get('/massa/itens', async (req, res) => {
-  if (!modoMassa(req, res)) return;
+  if (!(await modoMassa(req, res))) return;
   try {
     const itens = await massa.listar({
       q: req.query.q,
@@ -2768,7 +2795,7 @@ router.get('/massa/itens', async (req, res) => {
 });
 
 router.post('/massa/previa', async (req, res) => {
-  const modo = modoMassa(req, res);
+  const modo = await modoMassa(req, res);
   if (!modo) return;
   try {
     res.json(await massa.previa(req.body || {}, modo));
@@ -2778,7 +2805,7 @@ router.post('/massa/previa', async (req, res) => {
 });
 
 router.post('/massa/aplicar', async (req, res) => {
-  const modo = modoMassa(req, res);
+  const modo = await modoMassa(req, res);
   if (!modo) return;
   try {
     if (modo === 'contador') {

@@ -1049,6 +1049,49 @@ function fillUserChrome() {
   if ($('#side-user-avatar')) $('#side-user-avatar').textContent = initialsFromName(nome);
 }
 
+let offlineDesde = 0;
+let avisoDesconexao = false;
+let conexaoTimer = null;
+
+function pintarConexao(ligado) {
+  const el = $('#app-conexao');
+  if (!el) return;
+  el.hidden = false;
+  el.classList.toggle('is-off', !ligado);
+  const txt = $('#app-conexao-txt');
+  if (txt) txt.textContent = ligado ? 'Conectado ao servidor' : 'Sem conexão com o servidor';
+}
+
+async function pulsoConexao() {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 8000);
+  try {
+    const res = await fetch('/api/health', { cache: 'no-store', signal: ctrl.signal, credentials: 'same-origin' });
+    if (!res.ok) throw new Error('offline');
+    if (avisoDesconexao) window.dispatchEvent(new CustomEvent('gestor-conectado'));
+    offlineDesde = 0;
+    avisoDesconexao = false;
+    pintarConexao(true);
+  } catch {
+    if (!offlineDesde) offlineDesde = Date.now();
+    const passou = Date.now() - offlineDesde >= 30000;
+    pintarConexao(!passou);
+    if (passou && !avisoDesconexao) {
+      avisoDesconexao = true;
+      window.dispatchEvent(new CustomEvent('gestor-desconectado'));
+    }
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function iniciarConexao() {
+  pintarConexao(true);
+  if (conexaoTimer) return;
+  pulsoConexao();
+  conexaoTimer = setInterval(pulsoConexao, 10000);
+}
+
 function enterApp() {
   const senhaEl = $('#login-senha');
   if (senhaEl) {
@@ -1058,6 +1101,7 @@ function enterApp() {
   $('#view-login').hidden = true;
   $('#view-app').hidden = false;
   fillUserChrome();
+  iniciarConexao();
   const canUsers = !!state.usuario?.supervisor;
   const canAlt = can('alteracoes', 'acesso');
   const canEst = can('estoque', 'acesso');
@@ -1084,8 +1128,7 @@ function enterApp() {
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
   if (cfgMais) cfgMais.hidden = !isNativeApk();
-  const ficha = state.usuario?.permissoes?.estoque?.ficha;
-  const showContador = !!state.usuario?.supervisor || !!state.usuario?.contador || ficha === 'editar';
+  const showContador = !!state.usuario?.supervisor || !!state.usuario?.contador || can('massa', 'acesso');
   if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
   if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
   const showEmp = !!state.usuario?.mtEntradas;
@@ -2273,6 +2316,15 @@ function renderUsuarios() {
             <option value="false" ${u.permissoes?.condicionais?.acesso === false ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        <label>Alteração em massa
+          <select data-perm="massa.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.massa?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.massa?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
+        <label>CPF/CNPJ do contador
+          <input data-field="documento" value="${escapeAttr(u.documento || '')}" inputmode="numeric" placeholder="Comparado com o painel" ${u.supervisor || u.mtEntradas ? 'disabled' : ''} />
+        </label>
       </div>
     </div>
   `).join('');
@@ -2338,7 +2390,11 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         compras: {
           acesso: $('[data-perm="compras.acesso"]', card)?.value === 'true',
         },
+        massa: {
+          acesso: $('[data-perm="massa.acesso"]', card)?.value === 'true',
+        },
       },
+      documento: String($('[data-field="documento"]', card)?.value || '').replace(/\D/g, ''),
     };
     const selOnline = $('[data-perm="online.acesso"]', card);
     if (selOnline) next.permissoes.online = { acesso: selOnline.value === 'true' };

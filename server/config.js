@@ -43,6 +43,10 @@ const MODULOS = {
     label: 'Condicionais',
     default: { acesso: true },
   },
+  massa: {
+    label: 'Alteração em massa',
+    default: { acesso: false },
+  },
 };
 if (edicao.ONLINE) {
   MODULOS.online = { label: 'Acesso online', default: { acesso: false } };
@@ -133,6 +137,7 @@ function fullPermissoes() {
     if (key === 'importacao') out[key] = { acesso: true };
     if (key === 'compras') out[key] = { acesso: true };
     if (key === 'condicionais') out[key] = { acesso: true };
+    if (key === 'massa') out[key] = { acesso: true };
     if (key === 'online') out[key] = { acesso: true };
   }
   return out;

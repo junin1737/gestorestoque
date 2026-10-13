@@ -662,7 +662,30 @@ input, select, textarea {
   margin-top: 0.25rem;
   min-height: 2.2rem;
 }
-.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; padding-bottom: 1.8rem; }
+.app-conexao {
+  position: fixed;
+  left: 248px;
+  right: 0;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.38rem 1rem;
+  font-size: 0.78rem;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev, #fff);
+}
+.app-conexao-dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #1f9d55;
+  flex: 0 0 auto;
+}
+.app-conexao.is-off { color: #a33b32; }
+.app-conexao.is-off .app-conexao-dot { background: #c0392b; }
 .topbar {
   display: flex; justify-content: space-between; align-items: center;
   padding: 0.85rem 1.25rem; border-bottom: 1px solid var(--border); background: var(--bg-elev);
@@ -1496,6 +1519,10 @@ html[data-theme="escuro"] .toolbar-select select {
     min-height: 0;
     overflow: hidden;
     padding-bottom: calc(var(--nav-h) + var(--safe-b));
+  }
+  .app-conexao {
+    left: 0;
+    bottom: calc(var(--nav-h) + var(--safe-b));
   }
   .topbar {
     flex-shrink: 0;

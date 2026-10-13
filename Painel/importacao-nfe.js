@@ -46,6 +46,7 @@ const ImportacaoNfe = (() => {
     { id: 'lote', label: 'Lote / ANP' },
   ];
   const ITEM_TABS_ETAPA = ITEM_TABS;
+  const RASCUNHO_NOTA = 'ge-rascunho-notas';
 
   const NATUREZAS_CFOP_TODOS = [
     'industrializa',
@@ -2483,6 +2484,7 @@ const ImportacaoNfe = (() => {
           <p class="hint">${vinculado ? `Vinculado · ${esc(sys.id_identificador || 'novo')}` : 'Sem vínculo'} · CFOP ${esc(xml.CFOP || '')}</p>
         </div>
         <div class="imp-item-nav">
+          ${conferirEtapasAtivo() ? '<button type="button" class="btn small" id="imp-verificar-item">Verificar item</button>' : ''}
           <button type="button" class="btn small" id="imp-item-prev" ${state.itemIndex <= 0 ? 'disabled' : ''}>Anterior</button>
           <button type="button" class="btn small" id="imp-item-next" ${state.itemIndex >= total - 1 ? 'disabled' : ''}>Próximo</button>
         </div>
@@ -2498,6 +2500,16 @@ const ImportacaoNfe = (() => {
     bindItemEvents(it);
     if (tab === 'vinculo') loadProdutosBusca(state.buscaProduto);
     renderItensLista();
+    if (state.rolarTopo) {
+      state.rolarTopo = false;
+      requestAnimationFrame(() => scrollConferenciaTopo());
+    }
+  }
+
+  function scrollConferenciaTopo() {
+    ['#imp-view-item .imp-item-scroll', '.imp-item-scroll', '#page-importacao'].forEach((sel) => {
+      document.querySelector(sel)?.scrollTo({ top: 0, behavior: 'smooth' });
+    });
   }
 
   async function loadProdutosBusca(q) {
@@ -3421,7 +3433,8 @@ const ImportacaoNfe = (() => {
       body: patch,
     });
     if (!res.ok) {
-      deps.showMsg?.(res.error || 'Erro ao salvar item');
+      gravarRascunhoNota();
+      deps.showMsg?.(res.error || 'Erro ao salvar item. A última alteração ficou guardada neste aparelho.');
       return false;
     }
     state.sessao = res.sessao;
@@ -3495,6 +3508,22 @@ const ImportacaoNfe = (() => {
     renderItemScreen();
   }
 
+  async function verificarItem() {
+    const it = itemAt(state.itemIndex);
+    if (!it || !exigirProdutoVinculado(it)) return;
+    const ok = {};
+    ITEM_TABS_ETAPA.forEach((t) => { ok[t.id] = true; });
+    it.etapas_ok = ok;
+    it.conferido = true;
+    state.rolarTopo = true;
+    const saved = await saveItem({ semRender: true });
+    if (!saved) return;
+    deps.showToast?.('Item verificado. Todas as etapas foram concluídas.');
+    const total = state.sessao?.itens?.length || 0;
+    if (state.itemIndex < total - 1) openItem(state.itemIndex + 1);
+    else renderItemScreen();
+  }
+
   function avancarEtapa() {
     const idx = ITEM_TABS_ETAPA.findIndex((t) => t.id === state.itemTab);
     if (idx < 0 || idx >= ITEM_TABS_ETAPA.length - 1) return;
@@ -3503,6 +3532,7 @@ const ImportacaoNfe = (() => {
       confirmEtapaAtual();
       deps.showToast?.('Etapa confirmada');
     }
+    state.rolarTopo = true;
     setItemTab(ITEM_TABS_ETAPA[idx + 1].id);
   }
 
@@ -3787,6 +3817,7 @@ const ImportacaoNfe = (() => {
       renderItemScreen();
       deps.showToast?.('Ficha salva. Confirme o vínculo para prosseguir.');
     });
+    $('#imp-verificar-item')?.addEventListener('click', () => verificarItem());
     $('#imp-proxima-etapa')?.addEventListener('click', () => avancarEtapa());
     $('#imp-etapa-anterior')?.addEventListener('click', () => voltarEtapa());
     $('#imp-etapa-cancelar')?.addEventListener('click', () => {
@@ -3815,6 +3846,7 @@ const ImportacaoNfe = (() => {
     $('#imp-salvar-proximo')?.addEventListener('click', async () => {
       if (!exigirProdutoVinculado(itemAt(state.itemIndex))) return;
       if (conferirEtapasAtivo()) confirmEtapaAtual();
+      state.rolarTopo = true;
       const next = state.itemIndex < (state.sessao?.itens?.length || 0) - 1;
       if (next) {
         await saveItem({ next: true });
@@ -4773,6 +4805,11 @@ const ImportacaoNfe = (() => {
 
     $('#imp-btn-confirmar')?.addEventListener('click', async () => {
       if (!state.sessao) return;
+      if (!navigator.onLine || document.getElementById('app-conexao')?.classList.contains('is-off')) {
+        gravarRascunhoNota();
+        deps.showMsg?.('Sem conexão com o servidor. A conferência ficou guardada neste aparelho e a nota não entra no Clipp até você gravar com a conexão de volta.');
+        return;
+      }
       const btn = $('#imp-btn-confirmar');
       if (btn?.classList.contains('is-disabled') || btn?.getAttribute('aria-disabled') === 'true') {
         deps.showMsg?.(btn?.title || 'Confira todos os itens e vincule o fornecedor antes de gravar.');
@@ -4823,6 +4860,7 @@ const ImportacaoNfe = (() => {
         });
         if (res.ok) {
           deps.showMsg?.(res.message || 'Entrada confirmada');
+          limparRascunhoNota(state.sessao);
           abrirRelatorioEntrada(res.gravacao);
           state.sessao = null;
           showView('inicio');
@@ -4956,12 +4994,104 @@ const ImportacaoNfe = (() => {
     return true;
   }
 
+  function chaveNota(s) {
+    return String(s?.chave || '').replace(/\D/g, '');
+  }
+
+  function lerRascunhosNota() {
+    try { return JSON.parse(localStorage.getItem(RASCUNHO_NOTA) || '{}'); } catch { return {}; }
+  }
+
+  function gravarRascunhoNota() {
+    const s = state.sessao;
+    const ch = chaveNota(s);
+    if (!s || ch.length !== 44 || s.status === 'confirmada') return;
+    if (state.view === 'item') {
+      try {
+        const patch = collectItemPatch();
+        const it = itemAt(state.itemIndex);
+        if (it && patch?.sistema) {
+          it.sistema = { ...it.sistema, ...patch.sistema };
+          if (patch.etapas_ok) it.etapas_ok = { ...etapasOkOf(it), ...patch.etapas_ok };
+          if (patch.conferido != null) it.conferido = !!patch.conferido;
+          if (patch.observacao != null) it.observacao = patch.observacao;
+        }
+      } catch (_) { /* a tela do item pode não estar aberta */ }
+    }
+    const all = lerRascunhosNota();
+    all[ch] = {
+      em: Date.now(),
+      itemIndex: state.itemIndex,
+      itemTab: state.itemTab,
+      view: state.view,
+      sessao: state.sessao,
+    };
+    try { localStorage.setItem(RASCUNHO_NOTA, JSON.stringify(all)); } catch (_) { /* quota */ }
+  }
+
+  function limparRascunhoNota(s) {
+    const ch = chaveNota(s);
+    if (ch.length !== 44) return;
+    const all = lerRascunhosNota();
+    if (!all[ch]) return;
+    delete all[ch];
+    try { localStorage.setItem(RASCUNHO_NOTA, JSON.stringify(all)); } catch (_) { /* ignore */ }
+  }
+
+  async function retomarRascunho(sessao) {
+    const ch = chaveNota(sessao);
+    const r = lerRascunhosNota()[ch];
+    if (!r?.sessao || !sessao || state.sessao?.id !== sessao.id) return;
+    const servidor = Date.parse(sessao.updatedAt || '') || 0;
+    const temConferencia = (it) => {
+      if (!it) return false;
+      if (it.conferido) return true;
+      return Object.values(it.etapas_ok || {}).some(Boolean);
+    };
+    const rascunhoTem = (r.sessao.itens || []).some(temConferencia);
+    const servidorTem = (sessao.itens || []).some(temConferencia);
+    if (!(r.em > servidor) && !(rascunhoTem && !servidorTem)) return;
+    const localItens = new Map((r.sessao.itens || []).map((it) => [Number(it.nItem), it]));
+    const itens = (sessao.itens || []).map((it) => {
+      const loc = localItens.get(Number(it.nItem));
+      if (!loc) return it;
+      return {
+        ...it,
+        sistema: loc.sistema || it.sistema,
+        etapas_ok: loc.etapas_ok || it.etapas_ok,
+        conferido: !!loc.conferido,
+        observacao: loc.observacao ?? it.observacao,
+      };
+    });
+    state.sessao = { ...sessao, itens };
+    state.itemIndex = Number.isInteger(r.itemIndex) ? r.itemIndex : 0;
+    state.itemTab = r.itemTab || state.itemTab;
+    for (const it of itens) {
+      if (!localItens.has(Number(it.nItem))) continue;
+      try {
+        const res = await api(`/importacao/sessoes/${sessao.id}/itens/${it.nItem}`, {
+          method: 'PUT',
+          body: {
+            sistema: it.sistema,
+            conferido: !!it.conferido,
+            observacao: it.observacao || '',
+            etapas_ok: it.etapas_ok || {},
+          },
+        });
+        if (res?.sessao) state.sessao = res.sessao;
+      } catch (_) { /* fica no aparelho até a conexão voltar */ }
+    }
+    if (state.view === 'sessao') renderSessao();
+    deps.showToast?.('Conferência retomada de onde parou. A nota ainda não entrou no Clipp.');
+  }
+
   function abrirSessaoImportada(sessao) {
     state.sessao = sessao || null;
     state.itemIndex = 0;
     state.tab = 'dados';
     state.view = 'sessao';
     state.xmlTextPendente = null;
+    retomarRascunho(sessao);
   }
 
   function onPageEnter() {
@@ -5014,6 +5144,17 @@ const ImportacaoNfe = (() => {
   function init(options) {
     deps = options || {};
     bindEvents();
+    if (!state.rascunhoLigado) {
+      state.rascunhoLigado = true;
+      window.addEventListener('gestor-desconectado', () => {
+        if (!state.sessao || state.sessao.status === 'confirmada') return;
+        gravarRascunhoNota();
+        deps.showToast?.('Sem conexão há 30 segundos. A conferência desta nota ficou guardada neste aparelho e não entra no Clipp.');
+      });
+      window.addEventListener('beforeunload', () => {
+        if (state.sessao && state.sessao.status !== 'confirmada') gravarRascunhoNota();
+      });
+    }
   }
 
   return {

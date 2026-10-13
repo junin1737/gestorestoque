@@ -180,6 +180,7 @@ function usuarioDaSessao(req) {
     supervisor: !!user.supervisor,
     mtEntradas: mt,
     permissoes: user.permissoes,
+    documento: String(user.documento || '').replace(/\D/g, ''),
     sessao: { nonce: dados.n, exp: dados.exp },
   };
 }
@@ -333,6 +334,7 @@ async function login(req, res) {
       supervisor: !!user.supervisor,
       mtEntradas: mt,
       permissoes: user.permissoes,
+      documento: String(user.documento || '').replace(/\D/g, ''),
       temSenha: true,
     },
   });

@@ -863,6 +863,38 @@
   margin-bottom: 0.45rem;
 }
 
+.massa-checks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 1.15rem;
+  margin: 0.15rem 0 0.55rem;
+}
+.massa-checks label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0;
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+.massa-checks input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  flex: 0 0 auto;
+}
+.btn-atencao {
+  border-color: #c47b00;
+  color: #8a5600;
+  background: #fff6e5;
+}
+.btn-atencao::before {
+  content: "⚠ ";
+}
+.massa-regra { margin: 0.35rem 0 0.7rem; }
+
 .imp-fields {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

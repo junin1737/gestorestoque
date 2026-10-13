@@ -1215,12 +1215,38 @@ const SEM_INSTALACAO = {
  * Lado MT (lista de empresas, cadastro de vínculos): token do login MT.
  * Lado da loja (grupo, vínculos e aceite da própria empresa): CNPJ + segredo da instalação, e só a própria empresa.
  */
+async function compararContadorDocumento(env, cnpjLoja, documento) {
+  const doc = soDigitos(documento);
+  if (!(doc.length === 11 || doc.length === 14)) {
+    return json({ ok: true, confere: false, motivo: 'CPF/CNPJ do usuário inválido.' });
+  }
+  const cont = await env.DB.prepare(
+    'SELECT id, nome, ativo FROM contadores WHERE documento = ?'
+  ).bind(doc).first();
+  if (!cont || !Number(cont.ativo)) {
+    return json({ ok: true, confere: false, motivo: 'Este CPF/CNPJ não está cadastrado como contador ativo no painel.' });
+  }
+  const cli = await env.DB.prepare(
+    'SELECT cnpj FROM clientes WHERE cnpj = ? AND aplicacao = ? AND contador_id = ?'
+  ).bind(cnpjLoja, APP_PADRAO, cont.id).first();
+  if (!cli) {
+    return json({ ok: true, confere: false, motivo: 'O CPF/CNPJ do usuário não é o contador vinculado a esta empresa no painel.' });
+  }
+  return json({ ok: true, confere: true, nome: cont.nome });
+}
+
 async function rotaMt(request, env, url) {
   const p = url.pathname;
   if (p === '/api/mt/login' && request.method === 'POST') return loginMt(request, env);
 
   const sess = await sessaoToken(env, request);
   const appQuery = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
+
+  if (p === '/api/mt/contador-documento' && request.method === 'GET') {
+    const cnpj = await instalacaoDaRequisicao(request, env, appQuery);
+    if (!cnpj) return json(SEM_INSTALACAO, 403);
+    return compararContadorDocumento(env, cnpj, url.searchParams.get('documento'));
+  }
 
   if (p === '/api/mt/empresas' && request.method === 'GET') {
     return sess ? listarEmpresasMt(url, env) : json(SEM_SESSAO_MT, 401);

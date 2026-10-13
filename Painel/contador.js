@@ -43,15 +43,17 @@
           <label class="imp-field">Grupo
             <select id="massa-grupo"><option value="">Todos</option>${grupos.map((g) => `<option value="${g.id}">${esc(g.descricao)}</option>`).join('')}</select>
           </label>
-          <label class="imp-field chk"><input type="checkbox" id="massa-incompleto" /> Tributação incompleta</label>
+        </div>
+        <div class="massa-checks">
+          <label><input type="checkbox" id="massa-incompleto" /> Tributação incompleta</label>
         </div>
         <div class="imp-vinc-btns">
           <button type="button" class="btn small" id="massa-filtrar">Filtrar</button>
+          <button type="button" class="btn small" id="massa-limpar">Limpar filtros</button>
           <button type="button" class="btn small" id="massa-todos">Marcar filtrados</button>
+          <button type="button" class="btn small btn-atencao" id="massa-abrir">Alterar em Massa</button>
         </div>
-        <div id="massa-lista" class="item-list"></div>
-      </section>
-      <section class="imp-section">
+        <section class="imp-section massa-regra" id="massa-regra" hidden>
         <header class="imp-section-head"><h4>Regra</h4></header>
         <div class="imp-fields">
           ${campo('reg-ncm-igual', 'SE NCM igual a', '19059090')}
@@ -59,8 +61,10 @@
           <label class="imp-field">SE grupo
             <select id="reg-grupo"><option value="">—</option>${grupos.map((g) => `<option value="${g.id}">${esc(g.descricao)}</option>`).join('')}</select>
           </label>
-          <label class="imp-field chk"><input type="checkbox" id="reg-marcados" checked /> Usar os produtos marcados</label>
-          <label class="imp-field chk"><input type="checkbox" id="reg-filtrados" /> Todos os filtrados</label>
+        </div>
+        <div class="massa-checks">
+          <label><input type="checkbox" id="reg-marcados" checked /> Usar os produtos marcados</label>
+          <label><input type="checkbox" id="reg-filtrados" /> Todos os filtrados</label>
         </div>
         <p class="hint">ENTÃO preencher (só o que estiver preenchido):</p>
         <div class="imp-fields" id="massa-acoes">
@@ -94,12 +98,33 @@
           <button type="button" class="btn small primary" id="massa-aplicar" disabled>Aplicar</button>
         </div>
         <div id="massa-previa-box"></div>
+        </section>
+        <div id="massa-lista" class="item-list"></div>
       </section>
       <p class="hint">Cada campo alterado fica no relatório de Alterações, com o valor anterior, o novo, quem fez e a data.</p>`;
     $('#massa-filtrar')?.addEventListener('click', listar);
+    $('#massa-limpar')?.addEventListener('click', limparFiltros);
     $('#massa-todos')?.addEventListener('click', marcarFiltrados);
+    $('#massa-abrir')?.addEventListener('click', () => {
+      const box = $('#massa-regra');
+      if (!box) return;
+      box.hidden = !box.hidden;
+      if (!box.hidden) box.scrollIntoView({ block: 'nearest' });
+    });
     $('#massa-previa')?.addEventListener('click', verPrevia);
     $('#massa-aplicar')?.addEventListener('click', aplicar);
+    listar();
+  }
+
+  function limparFiltros() {
+    ['massa-q', 'massa-ncm', 'massa-cfop', 'massa-cst'].forEach((id) => {
+      const el = $(`#${id}`);
+      if (el) el.value = '';
+    });
+    const grupo = $('#massa-grupo');
+    if (grupo) grupo.value = '';
+    const incompleto = $('#massa-incompleto');
+    if (incompleto) incompleto.checked = false;
     listar();
   }
 
