@@ -3432,7 +3432,9 @@ function fmtDate(d) {
 window.Contador?.init({
   api,
   showMsg,
+  showConfirm,
   showToast,
+  usuario: () => state.usuario,
   supervisor: () => !!state.usuario?.supervisor,
   contador: () => !!state.usuario?.contador,
 });

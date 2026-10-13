@@ -101,9 +101,19 @@ async function listarGrupos(db, t) {
   }
 }
 
+function condicoesAtivas(body) {
+  if (!body.usar_condicao) return [];
+  return (Array.isArray(body.condicoes) ? body.condicoes : [])
+    .filter((c) => (c.tipo === 'grupo' ? Number(c.valor) > 0 : txt(c.valor).replace(/\D/g, '') !== ''));
+}
+
+function idsDoCorpo(body) {
+  return (Array.isArray(body.ids) ? body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
+}
+
 function montarWhere(body, simples) {
   const filtro = body.filtro || {};
-  const condicoes = Array.isArray(body.condicoes) ? body.condicoes : [];
+  const condicoes = condicoesAtivas(body);
   const where = [`(E.STATUS = 'A' OR E.STATUS IS NULL OR E.STATUS = 'I')`];
   const params = [];
   const ncmFiltro = txt(filtro.ncm).replace(/\D/g, '');
@@ -149,12 +159,49 @@ function montarWhere(body, simples) {
       params.push(Number(c.valor));
     }
   }
-  const ids = (Array.isArray(body.ids) ? body.ids : []).map(Number).filter((n) => Number.isInteger(n) && n > 0);
-  if (!body.todos_filtrados && ids.length) {
-    where.push(`I.ID_IDENTIFICADOR IN (${ids.map(() => '?').join(',')})`);
-    params.push(...ids);
+  const ids = idsDoCorpo(body);
+  if (!body.todos_filtrados) {
+    if (!ids.length) where.push('1 = 0');
+    else {
+      where.push(`I.ID_IDENTIFICADOR IN (${ids.map(() => '?').join(',')})`);
+      params.push(...ids);
+    }
   }
   return { where, params, ids };
+}
+
+/** Escopo: produtos marcados ou todos os filtrados; a condição (SE) só vale quando ligada e com parâmetro. */
+function erroEscopo(body) {
+  if (!body.todos_filtrados && !idsDoCorpo(body).length) {
+    return 'Marque produtos na lista ou escolha "Todos os filtrados".';
+  }
+  if (body.usar_condicao && !condicoesAtivas(body).length) {
+    return 'A condição está ligada: informe NCM igual, NCM começa com ou grupo. Ou desligue a condição para alterar todos do escopo.';
+  }
+  return '';
+}
+
+const CLASS_TRIB = [
+  { k: 'id_class_trib', rotulo: 'Reforma — class. trib. NFe', tabela: 'TB_EST_TRIBUTOS', col: '_CLASS_NFE' },
+  { k: 'id_class_trib_nfce', rotulo: 'Reforma — class. trib. NFCe', tabela: 'TB_EST_TRIBUTOS_NFCE', col: '_CLASS_NFCE' },
+];
+
+/** Lê a classificação tributária atual só quando a regra mexe nela. */
+async function anexarClassAtual(db, rows, acoes) {
+  const idsEst = [...new Set(rows.map((r) => Number(r.ID_ESTOQUE)))];
+  for (const c of CLASS_TRIB) {
+    if (acoes[c.k] === undefined) continue;
+    const mapa = new Map();
+    for (let i = 0; i < idsEst.length; i += 500) {
+      const lote = idsEst.slice(i, i + 500);
+      if (!lote.length) continue;
+      try {
+        const lidos = await query(db, `SELECT ID_ESTOQUE, ID_CLASS_TRIB FROM ${c.tabela} WHERE ID_ESTOQUE IN (${lote.map(() => '?').join(',')})`, lote);
+        lidos.forEach((l) => mapa.set(Number(l.ID_ESTOQUE), l.ID_CLASS_TRIB == null ? null : Number(l.ID_CLASS_TRIB)));
+      } catch { /* tabela ausente: trata como vazio */ }
+    }
+    rows.forEach((r) => { r[c.col] = mapa.get(Number(r.ID_ESTOQUE)) ?? null; });
+  }
 }
 
 function sqlItens(t, where, limite) {
@@ -198,6 +245,12 @@ function mudancasDaLinha(row, acoes, modo) {
     const para = acoes[campo.k];
     if (!igual(de, para)) lista.push({ campo: campo.k, rotulo: campo.rotulo, de, para });
   }
+  for (const c of CLASS_TRIB) {
+    if (acoes[c.k] === undefined) continue;
+    const de = row[c.col] == null ? '' : Number(row[c.col]);
+    const para = acoes[c.k] == null ? '' : acoes[c.k];
+    if (String(de) !== String(para)) lista.push({ campo: c.k, rotulo: c.rotulo, de, para: para === '' ? '(vazio)' : para });
+  }
   return lista;
 }
 
@@ -216,6 +269,8 @@ async function listar(filtro) {
       cfop: txt(r.CFOP),
       cst: txt(r.CST),
       csosn: txt(r.CSOSN),
+      cst_cfe: txt(r.CST_CFE),
+      csosn_cfe: txt(r.CSOSN_CFE),
       grupo: r.ID_GRUPO == null ? null : Number(r.ID_GRUPO),
       qtd_atual: Number(r.QTD_ATUAL || 0),
     }));
@@ -225,9 +280,8 @@ async function listar(filtro) {
 async function previa(body, modo) {
   const acoes = acoesLimpas(body, modo);
   if (!Object.keys(acoes).length) return { ok: false, error: 'Preencha ao menos um campo para alterar. Campo em branco não muda o valor atual.' };
-  if (!body.todos_filtrados && !(Array.isArray(body.ids) && body.ids.length) && !(body.condicoes || []).some((c) => txt(c.valor) || c.tipo === 'grupo')) {
-    return { ok: false, error: 'Marque produtos, use todos os filtrados ou informe uma condição.' };
-  }
+  const erro = erroEscopo(body);
+  if (erro) return { ok: false, error: erro };
   return withDb(async (db, appCfg) => {
     const alvo = writeTargets(appCfg)[0];
     if (!alvo) return { ok: false, error: 'Base de estoque indisponível.' };
@@ -244,13 +298,27 @@ async function previa(body, modo) {
     if (total > LIMITE) {
       return { ok: false, error: `A regra pega ${total} produtos. O limite por vez é ${LIMITE}. Aperte o filtro.` };
     }
-    const rows = await query(db, sqlItens(alvo.tables, where, 40), params);
-    const amostra = rows.map((r) => ({
+    const rows = await query(db, sqlItens(alvo.tables, where, LIMITE), params);
+    await anexarClassAtual(db, rows, acoes);
+    const itens = rows.map((r) => ({
       id_identificador: Number(r.ID_IDENTIFICADOR),
       descricao: txt(r.DESCRICAO),
+      ncm: txt(r.COD_NCM),
       mudancas: mudancasDaLinha(r, acoes, modo),
-    })).filter((r) => r.mudancas.length);
-    return { ok: true, total, amostra, simples };
+    }));
+    const amostra = itens.filter((r) => r.mudancas.length);
+    return {
+      ok: true,
+      total,
+      com_mudanca: amostra.length,
+      sem_mudanca: itens.length - amostra.length,
+      amostra,
+      iguais: itens.filter((r) => !r.mudancas.length).map(({ id_identificador, descricao }) => ({ id_identificador, descricao })),
+      acoes: [...camposPermitidos(modo), ...CLASS_TRIB]
+        .filter((c) => acoes[c.k] !== undefined)
+        .map((c) => ({ rotulo: c.rotulo, valor: acoes[c.k] == null ? '(vazio)' : acoes[c.k] })),
+      simples,
+    };
   });
 }
 
@@ -292,6 +360,7 @@ async function aplicar(body, modo, autor) {
     const simples = txt(emit[0]?.SIMPLES).toUpperCase() === 'S';
     const { where, params } = montarWhere(body, simples);
     const rows = await query(db, sqlItens(t, where, LIMITE), params);
+    await anexarClassAtual(db, rows, acoes);
     const auditoria = [];
     let alterados = 0;
     await withTransaction(db, async (tx) => {
@@ -320,9 +389,10 @@ async function aplicar(body, modo, autor) {
           prodP.push(id);
           await query(tx, `UPDATE ${t.produto} SET ${prod.join(', ')} WHERE ID_IDENTIFICADOR = ?`, prodP);
         }
-        if (acoes.id_class_trib !== undefined) await gravarClass(tx, 'TB_EST_TRIBUTOS', idEst, acoes.id_class_trib);
-        if (acoes.id_class_trib_nfce !== undefined) await gravarClass(tx, 'TB_EST_TRIBUTOS_NFCE', idEst, acoes.id_class_trib_nfce);
-        if (!mudancas.length && acoes.id_class_trib === undefined && acoes.id_class_trib_nfce === undefined) continue;
+        for (const c of CLASS_TRIB) {
+          if (mudancas.some((m) => m.campo === c.k)) await gravarClass(tx, c.tabela, idEst, acoes[c.k]);
+        }
+        if (!mudancas.length) continue;
         alterados += 1;
         for (const m of mudancas) {
           auditoria.push({
