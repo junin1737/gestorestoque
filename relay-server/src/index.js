@@ -21,6 +21,9 @@ const MAX_RESPOSTA = 50 * 1024 * 1024;
 const PEDACO = 256 * 1024;
 const TIMEOUT_MS = 90 * 1000;
 const LIMITE_POR_MINUTO = 600;
+/** O Gestor manda "ping" a cada 25 s; sem ping há mais que isso, a conexão está morta (queda de internet). */
+const SEM_PING_MS = 90 * 1000;
+const WS_ABERTO = 1;
 /** Endereço por loja: <nse>.<domínio>, apontando para o túnel da instalação dona daquele NSE. */
 const DOMINIO_PADRAO = 'smsjrdeveloper.com.br';
 /** O NSE do Clipp sempre tem dígitos; subdomínios só com letras (blog, loja…) seguem para a origem. */
@@ -332,9 +335,29 @@ export class Tunel {
     return r.n > LIMITE_POR_MINUTO;
   }
 
+  /**
+   * Conexões da loja que podem atender, da mais nova para a mais antiga.
+   * Depois de uma queda, a conexão antiga fica na lista (fechando, ou aberta sem resposta) junto da nova.
+   */
+  conexoesVivas() {
+    const agora = Date.now();
+    const vivas = [];
+    for (const ws of this.ctx.getWebSockets('gestor')) {
+      if (ws.readyState !== WS_ABERTO) continue;
+      const desde = Number(ws.deserializeAttachment()?.desde) || 0;
+      const ping = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() || desde;
+      if (agora - Math.max(ping, desde) > SEM_PING_MS) {
+        try { ws.close(4001, 'Sem ping'); } catch { /* já fechado */ }
+        continue;
+      }
+      vivas.push({ ws, desde });
+    }
+    return vivas.sort((a, b) => b.desde - a.desde).map((v) => v.ws);
+  }
+
   async encaminhar(request) {
-    const ws = this.ctx.getWebSockets('gestor')[0];
-    if (!ws) {
+    const conexoes = this.conexoesVivas();
+    if (!conexoes.length) {
       return pagina('Loja desconectada', 'O computador da loja não está conectado à internet agora (ou o Gestor Estoque está fechado). Tente novamente em instantes.', 503);
     }
     const ip = request.headers.get('CF-Connecting-IP') || '';
@@ -370,22 +393,38 @@ export class Tunel {
         this.pendentes.delete(id);
         resolve(new Response('O computador da loja demorou para responder.', { status: 504 }));
       }, TIMEOUT_MS);
-      this.pendentes.set(id, { resolve, timer, status: 502, headers: [], partes: [], tamanho: 0, metodo });
+      this.pendentes.set(id, { resolve, timer, status: 502, headers: [], partes: [], tamanho: 0, metodo, ws: null });
     });
 
-    try {
-      const semCorpo = !corpo || corpo.length === 0;
-      ws.send(JSON.stringify({ t: 'req', id, m: metodo, u: url.pathname + url.search, h: headers, fim: semCorpo }));
-      if (!semCorpo) {
-        for (let i = 0; i < corpo.length; i += PEDACO) {
-          const fim = i + PEDACO >= corpo.length;
-          ws.send(JSON.stringify({ t: 'req-parte', id, d: bytesParaB64(corpo.subarray(i, i + PEDACO)), fim }));
+    const semCorpo = !corpo || corpo.length === 0;
+    let enviado = false;
+    for (const ws of conexoes) {
+      const p = this.pendentes.get(id);
+      if (!p) break;
+      p.ws = ws;
+      try {
+        ws.send(JSON.stringify({ t: 'req', id, m: metodo, u: url.pathname + url.search, h: headers, fim: semCorpo }));
+        if (!semCorpo) {
+          for (let i = 0; i < corpo.length; i += PEDACO) {
+            const fim = i + PEDACO >= corpo.length;
+            ws.send(JSON.stringify({ t: 'req-parte', id, d: bytesParaB64(corpo.subarray(i, i + PEDACO)), fim }));
+          }
         }
+        enviado = true;
+        break;
+      } catch {
+        try { ws.close(1011, 'Falha ao enviar'); } catch { /* já fechado */ }
       }
-    } catch {
-      this.finalizar(id, new Response('Conexão com a loja caiu.', { status: 502 }));
     }
+    if (!enviado) this.finalizar(id, new Response('Conexão com a loja caiu.', { status: 502 }));
     return resposta;
+  }
+
+  /** Só as requisições que estavam na conexão que caiu (a nova pode estar atendendo outras). */
+  falharDaConexao(ws) {
+    for (const [id, p] of [...this.pendentes]) {
+      if (!p.ws || p.ws === ws) this.finalizar(id, new Response('Conexão com a loja caiu.', { status: 502 }));
+    }
   }
 
   finalizar(id, resp) {
@@ -443,15 +482,11 @@ export class Tunel {
   }
 
   async webSocketClose(ws, code, reason) {
-    for (const id of [...this.pendentes.keys()]) {
-      this.finalizar(id, new Response('Conexão com a loja caiu.', { status: 502 }));
-    }
+    this.falharDaConexao(ws);
     try { ws.close(code, reason); } catch { /* já fechado */ }
   }
 
-  async webSocketError() {
-    for (const id of [...this.pendentes.keys()]) {
-      this.finalizar(id, new Response('Conexão com a loja caiu.', { status: 502 }));
-    }
+  async webSocketError(ws) {
+    this.falharDaConexao(ws);
   }
 }
