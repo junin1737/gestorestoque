@@ -155,7 +155,16 @@
   <form class="login-card" id="form-login">
     <h1>Painel de licenças</h1>
     <p>MT Automações — acesso restrito</p>
-    <label>Usuário<input type="text" id="login-usuario" autocomplete="username" required autofocus placeholder="Supervisor, MT Entradas ou CPF/CNPJ" /></label>
+    <label>Acesso
+      <select id="login-perfil" required>
+        <option value="supervisor">Supervisor</option>
+        <option value="entradas">MT Entradas</option>
+        <option value="contador">Contador</option>
+      </select>
+    </label>
+    <label id="login-doc-wrap" hidden>CPF ou CNPJ
+      <input id="login-documento" inputmode="numeric" autocomplete="username" placeholder="Somente números" />
+    </label>
     <label>Senha<input type="password" id="login-senha" autocomplete="current-password" required /></label>
     <div class="erro" id="login-erro"></div>
     <button class="btn primary" style="width:100%" type="submit">Entrar</button>
@@ -656,16 +665,30 @@ function sair() {
   mostrarApp(false);
 }
 
+function atualizarLoginPerfil() {
+  const contador = $('#login-perfil')?.value === 'contador';
+  const wrap = $('#login-doc-wrap');
+  const doc = $('#login-documento');
+  if (wrap) wrap.hidden = !contador;
+  if (doc) doc.required = !!contador;
+}
+$('#login-perfil')?.addEventListener('change', atualizarLoginPerfil);
+atualizarLoginPerfil();
+
 $('#form-login').addEventListener('submit', async (e) => {
   e.preventDefault();
   $('#login-erro').textContent = '';
-  const r = await api('/login', { method: 'POST', body: { usuario: $('#login-usuario').value, senha: $('#login-senha').value } });
+  const perfil = $('#login-perfil').value;
+  const body = { perfil, senha: $('#login-senha').value };
+  if (perfil === 'contador') body.documento = $('#login-documento').value;
+  const r = await api('/login', { method: 'POST', body });
   if (!r.ok) { $('#login-erro').textContent = r.error || 'Falha no login.'; return; }
   st.token = r.token;
   st.papel = r.papel === 'entradas' ? 'entradas' : (r.papel === 'contador' ? 'contador' : 'admin');
   localStorage.setItem('mt_licenca_token', r.token);
   localStorage.setItem('mt_licenca_papel', st.papel);
   $('#login-senha').value = '';
+  if ($('#login-documento')) $('#login-documento').value = '';
   mostrarApp(true);
 });
 $('#btn-sair').addEventListener('click', sair);

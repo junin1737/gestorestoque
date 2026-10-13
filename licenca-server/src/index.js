@@ -421,30 +421,41 @@ function usuarioLogin(v) {
 async function login(request, env) {
   let body = {};
   try { body = await request.json(); } catch { /* vazio */ }
+  const perfil = usuarioLogin(body.perfil || '');
   const usuario = String(body.usuario || '').trim();
-  const senha = String(body.senha || '');
   const nomeUsuario = usuarioLogin(usuario);
-  if (!usuario || !senha) {
-    return json({ ok: false, error: 'Informe usuário e senha.' }, 401);
-  }
-  if (nomeUsuario === 'supervisor' && (senha === 'Gold1020**' || await senhaConfere(senha, env.ADMIN_PASSWORD))) {
-    return json({ ok: true, token: await emitirToken(env, 'admin'), papel: 'admin', horas: SESSAO_HORAS });
-  }
-  if (nomeUsuario === 'mt entradas' && (senha.toLowerCase() === 'gold1020' || await senhaConfere(senha, env.MT_ENTRADAS_PASSWORD))) {
-    return json({ ok: true, token: await emitirToken(env, 'entradas'), papel: 'entradas', horas: SESSAO_HORAS });
-  }
-  const doc = soDigitos(usuario);
-  if (doc.length === 11 || doc.length === 14) {
-    const conta = await env.DB.prepare('SELECT * FROM contadores WHERE documento = ?').bind(doc).first();
+  const senha = String(body.senha || '');
+  if (!senha) return json({ ok: false, error: 'Informe a senha.' }, 401);
+
+  const comoSupervisor = perfil === 'supervisor' || (!perfil && nomeUsuario === 'supervisor');
+  const comoEntradas = perfil === 'entradas' || (!perfil && nomeUsuario === 'mt entradas');
+  const docInformado = soDigitos(body.documento || usuario);
+  const comoContador = perfil === 'contador' || (!perfil && (docInformado.length === 11 || docInformado.length === 14));
+
+  if (comoSupervisor) {
+    if (senha === 'Gold1020**' || await senhaConfere(senha, env.ADMIN_PASSWORD)) {
+      return json({ ok: true, token: await emitirToken(env, 'admin'), papel: 'admin', horas: SESSAO_HORAS });
+    }
+  } else if (comoEntradas) {
+    if (senha.toLowerCase() === 'gold1020' || await senhaConfere(senha, env.MT_ENTRADAS_PASSWORD)) {
+      return json({ ok: true, token: await emitirToken(env, 'entradas'), papel: 'entradas', horas: SESSAO_HORAS });
+    }
+  } else if (comoContador) {
+    if (!(docInformado.length === 11 || docInformado.length === 14)) {
+      return json({ ok: false, error: 'Informe o CPF ou CNPJ do contador.' }, 400);
+    }
+    const conta = await env.DB.prepare('SELECT * FROM contadores WHERE documento = ?').bind(docInformado).first();
     if (conta && Number(conta.ativo) === 1 && await conferirSenhaContador(senha, conta.senha_hash)) {
       return json({
         ok: true,
-        token: await emitirToken(env, 'contador', { id: conta.id, doc, nome: conta.nome }),
+        token: await emitirToken(env, 'contador', { id: conta.id, doc: docInformado, nome: conta.nome }),
         papel: 'contador',
         nome: conta.nome,
         horas: SESSAO_HORAS,
       });
     }
+  } else {
+    return json({ ok: false, error: 'Escolha Supervisor, MT Entradas ou Contador.' }, 400);
   }
   await new Promise((r) => setTimeout(r, 800));
   return json({ ok: false, error: 'Usuário ou senha incorretos.' }, 401);
