@@ -103,6 +103,12 @@ function syncSistemaComXmlItem(sistema, xmlItem) {
   return sistema;
 }
 
+/** "Vender por pacote": quantidade de pacotes digitada no item (0 quando não usa). */
+function qtdPacotes(sistema = {}) {
+  const n = Number(sistema?.qtd_pacotes);
+  return sistema?.vender_pacote && n > 0 ? n : 0;
+}
+
 /** Custo unitário líquido da nota (por unid. estoque, após conversor). */
 function calcCustoUnitarioItem(sistema = {}, xmlItem = {}) {
   const trib = sistema.tributos || {};
@@ -110,7 +116,7 @@ function calcCustoUnitarioItem(sistema = {}, xmlItem = {}) {
   const qtdXml = Number(sistema.qtd_xml ?? xmlItem.qCom ?? 0) || 0;
   const conversor = Number(sistema.conversor ?? 1) || 1;
   // Sempre usa conversão — não confiar em sistema.qtd antigo (pode ser qtd da XML)
-  const qtdEstoque = Number((qtdXml * conversor).toFixed(6)) || 0;
+  const qtdEstoque = qtdPacotes(sistema) || Number((qtdXml * conversor).toFixed(6)) || 0;
 
   const vProd = Number(
     xmlItem.vProd != null ? xmlItem.vProd : (Number(xmlItem.vUnCom || 0) * qtdXml)
@@ -228,6 +234,7 @@ module.exports = {
   aplicarRateiosDoXml,
   syncSistemaComXmlItem,
   calcCustoUnitarioItem,
+  qtdPacotes,
   valorProdutoItem,
   totalMercadoriaItem,
   validarTotaisNf,

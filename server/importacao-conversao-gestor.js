@@ -1,24 +1,31 @@
 'use strict';
 
-const { query, hasTable, refreshTables, withDb } = require('./db');
+const { query, hasTable, refreshTables, withDb, columnExists } = require('./db');
 
 const TABLE = 'TB_MT_CONVERSAO';
 
 async function ensureConversaoGestor(db) {
   await refreshTables(db);
-  if (hasTable(TABLE)) return;
-  await query(db, `
-    CREATE TABLE ${TABLE} (
-      ID INTEGER NOT NULL,
-      ID_IDENTIFICADOR INTEGER,
-      ID_FORNEC INTEGER,
-      UNI_XML VARCHAR(10),
-      UNI_ESTOQUE VARCHAR(10),
-      CONVERSOR NUMERIC(18,6),
-      UPDATED_AT TIMESTAMP,
-      CONSTRAINT PK_TB_MT_CONVERSAO PRIMARY KEY (ID)
-    )`);
-  await refreshTables(db);
+  if (!hasTable(TABLE)) {
+    await query(db, `
+      CREATE TABLE ${TABLE} (
+        ID INTEGER NOT NULL,
+        ID_IDENTIFICADOR INTEGER,
+        ID_FORNEC INTEGER,
+        UNI_XML VARCHAR(10),
+        UNI_ESTOQUE VARCHAR(10),
+        CONVERSOR NUMERIC(18,6),
+        UPDATED_AT TIMESTAMP,
+        PACOTE CHAR(1),
+        CONSTRAINT PK_TB_MT_CONVERSAO PRIMARY KEY (ID)
+      )`);
+    await refreshTables(db);
+    return;
+  }
+  // "Vender por pacote": o CONVERSOR guarda pacotes por unidade da nota.
+  if (!(await columnExists(db, TABLE, 'PACOTE'))) {
+    await query(db, `ALTER TABLE ${TABLE} ADD PACOTE CHAR(1)`);
+  }
 }
 
 function normUni(v) {
@@ -33,7 +40,7 @@ async function buscarConversaoGestor({ idIdentificador, idFornec, uniXml } = {})
   return withDb(async (db) => {
     await ensureConversaoGestor(db);
     const params = [idIdent];
-    let sql = `SELECT FIRST 1 ID, ID_IDENTIFICADOR, ID_FORNEC, UNI_XML, UNI_ESTOQUE, CONVERSOR
+    let sql = `SELECT FIRST 1 ID, ID_IDENTIFICADOR, ID_FORNEC, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE
       FROM ${TABLE} WHERE ID_IDENTIFICADOR = ?`;
     if (idForn) {
       sql += ' AND (ID_FORNEC = ? OR ID_FORNEC IS NULL)';
@@ -55,6 +62,7 @@ async function buscarConversaoGestor({ idIdentificador, idFornec, uniXml } = {})
       uni_xml: r.UNI_XML || '',
       uni_estoque: r.UNI_ESTOQUE || '',
       conversor: Number(r.CONVERSOR || 1) || 1,
+      pacote: String(r.PACOTE || '').trim() === 'S',
       origem: 'gestor',
     };
   });
@@ -67,6 +75,7 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
   const uniXml = normUni(dados.uni_xml);
   const uniEst = normUni(dados.uni_estoque) || 'UN';
   const conversor = Number(dados.conversor || 1) || 1;
+  const pacote = dados.pacote ? 'S' : 'N';
 
   const run = async (db) => {
     await ensureConversaoGestor(db);
@@ -80,16 +89,16 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
     if (exist[0]) {
       await query(db, `
         UPDATE ${TABLE}
-        SET UNI_ESTOQUE = ?, CONVERSOR = ?, UPDATED_AT = CURRENT_TIMESTAMP
-        WHERE ID = ?`, [uniEst, conversor, exist[0].ID]);
+        SET UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = ?, UPDATED_AT = CURRENT_TIMESTAMP
+        WHERE ID = ?`, [uniEst, conversor, pacote, exist[0].ID]);
       return { id: exist[0].ID, atualizado: true };
     }
     const next = await query(db, `SELECT COALESCE(MAX(ID), 0) + 1 AS ID FROM ${TABLE}`);
     const id = Number(next[0]?.ID || 1);
     await query(db, `
-      INSERT INTO ${TABLE} (ID, ID_IDENTIFICADOR, ID_FORNEC, UNI_XML, UNI_ESTOQUE, CONVERSOR, UPDATED_AT)
-      VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
-      id, idIdent, idForn, uniXml || null, uniEst, conversor,
+      INSERT INTO ${TABLE} (ID, ID_IDENTIFICADOR, ID_FORNEC, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE, UPDATED_AT)
+      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
+      id, idIdent, idForn, uniXml || null, uniEst, conversor, pacote,
     ]);
     return { id, atualizado: false };
   };
