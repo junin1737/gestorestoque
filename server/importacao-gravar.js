@@ -3,7 +3,7 @@
 const { withDb, withTransaction, query, writeTargets, hasTable, columnExists, nextGenId } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop, classTribPorCodigoDb } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
-const { round2, calcCustoUnitarioItem, qtdPacotes, valorProdutoItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
+const { round2, calcCustoUnitarioItem, qtdPacotes, valorProdutoItem, validarTotaisNf, validarFinanceiroNf, valorSemFinanceiro } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
 const {
   RAMO_TRANSPORTES, buscarPorCnpj, buscarTransportador, cadastrarFornecedor, getFornecedorById,
@@ -1181,19 +1181,23 @@ async function gravarNfCompra(sessao, {
 
       let parcelasGeradas = 0;
       if (geraFinanceiroNota) {
+        const itensComFlag = itens.map((it, i) => ({
+          ...it,
+          sistema: { ...(it.sistema || {}), gera_financeiro: itemFlags[i]?.gera_financeiro || 'S' },
+        }));
+        const aPagar = round2(Number(tot.vNF || 0) - valorSemFinanceiro(itensComFlag));
         const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
           ? fin.parcelas
-          : [{ nDup: '001', dVenc: agora.dataSql, vDup: tot.vNF || 0 }];
-        const checagemFin = validarFinanceiroNf(sessao.xml, { parcelas: parcelasXml });
+          : [{ nDup: '001', dVenc: agora.dataSql, vDup: aPagar }];
+        const checagemFin = validarFinanceiroNf(sessao.xml, { parcelas: parcelasXml }, itensComFlag);
         if (!checagemFin.ok) throw new Error(checagemFin.erro);
-        const vNf = checagemFin.vNf;
         const somaParc = checagemFin.soma;
         const idNumPag = await nextId(db, 'GEN_TB_NFCOMPRA_FMAPAGTO_ID', 'TB_NFCOMPRA_FMAPAGTO', 'ID_NUMPAG');
         await query(db, `
           INSERT INTO TB_NFCOMPRA_FMAPAGTO (ID_NUMPAG, VLR_PAGTO, ID_NFCOMPRA, ID_FMANFCE, ID_PARCELA)
           VALUES (?, ?, ?, ?, ?)`, [
           idNumPag,
-          vNf || somaParc,
+          somaParc,
           idNf,
           idFmanfce || 5,
           idParcela,

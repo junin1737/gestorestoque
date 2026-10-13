@@ -167,21 +167,29 @@ function totalMercadoriaItem(xmlItem = {}, sistema = {}) {
   return round2(vProd - vDesc + vFrete + vSeg + vOutro);
 }
 
+/** Parte do item no vNF: mercadoria + IPI + ST + FCP − ICMS desonerado. */
+function valorItemNaNf(it = {}) {
+  const xml = it.xml || it;
+  const sys = it.sistema || {};
+  const imp = xml.imposto || {};
+  const trib = sys.tributos || {};
+  return totalMercadoriaItem(xml, sys)
+    + Number(trib.v_ipi ?? imp.vIPI ?? 0)
+    + Number(trib.v_icms_st ?? imp.vICMSST ?? 0)
+    + Number(trib.v_fcp ?? imp.vFCP ?? 0)
+    + Number(trib.v_fcp_st ?? imp.vFCPST ?? 0)
+    - Number(trib.v_icms_deson ?? imp.vICMSDeson ?? 0);
+}
+
 function reconstruirVnfItens(itens = []) {
-  let recon = 0;
-  for (const it of itens) {
-    const xml = it.xml || it;
-    const sys = it.sistema || {};
-    const imp = xml.imposto || {};
-    const trib = sys.tributos || {};
-    recon += totalMercadoriaItem(xml, sys);
-    recon += Number(trib.v_ipi ?? imp.vIPI ?? 0);
-    recon += Number(trib.v_icms_st ?? imp.vICMSST ?? 0);
-    recon += Number(trib.v_fcp ?? imp.vFCP ?? 0);
-    recon += Number(trib.v_fcp_st ?? imp.vFCPST ?? 0);
-    recon -= Number(trib.v_icms_deson ?? imp.vICMSDeson ?? 0);
-  }
-  return round2(recon);
+  return round2(itens.reduce((acc, it) => acc + valorItemNaNf(it), 0));
+}
+
+/** Itens que não geram financeiro (bonificação, brinde…): ficam fora do valor a pagar. */
+function valorSemFinanceiro(itens = []) {
+  return round2((itens || [])
+    .filter((it) => String(it?.sistema?.gera_financeiro || 'S').toUpperCase() === 'N')
+    .reduce((acc, it) => acc + valorItemNaNf(it), 0));
 }
 
 function validarTotaisNf(xml, itensSessao) {
@@ -202,31 +210,42 @@ function validarTotaisNf(xml, itensSessao) {
   return { ok: true, vNf, recon, delta };
 }
 
-function validarFinanceiroNf(xml, financeiro) {
+/**
+ * Parcelas × valor a pagar. Com itens que não geram financeiro, vale o total da NF sem eles
+ * (ex.: venda + bonificação 5910: a duplicata vem só com a venda); o total cheio também é aceito.
+ */
+function validarFinanceiroNf(xml, financeiro, itens = []) {
   const vNf = round2(xml?.total?.vNF || 0);
-  if (vNf <= 0.009) return { ok: true, vNf: 0, soma: 0, delta: 0 };
+  if (vNf <= 0.009) return { ok: true, vNf: 0, alvo: 0, soma: 0, delta: 0 };
+  const semFin = valorSemFinanceiro(itens);
+  const alvo = semFin > 0.009 ? round2(vNf - semFin) : vNf;
+  const rotulo = semFin > 0.009
+    ? `a pagar ${alvo.toFixed(2)} = NF ${vNf.toFixed(2)} − ${semFin.toFixed(2)} sem financeiro`
+    : `NF ${vNf.toFixed(2)}`;
   const parcelas = Array.isArray(financeiro?.parcelas) ? financeiro.parcelas : [];
   if (!parcelas.length) {
     return {
       ok: false,
       vNf,
+      alvo,
       soma: 0,
-      delta: vNf,
-      erro: `Informe as parcelas do financeiro (total da NF ${vNf.toFixed(2)}). Abra a aba Financeiro, confira e salve antes de gravar.`,
+      delta: alvo,
+      erro: `Informe as parcelas do financeiro (${rotulo}). Abra a aba Financeiro, confira e salve antes de gravar.`,
     };
   }
   const soma = round2(parcelas.reduce((a, p) => a + Number(p.vDup || 0), 0));
-  const delta = round2(Math.abs(vNf - soma));
+  const delta = round2(Math.min(Math.abs(alvo - soma), Math.abs(vNf - soma)));
   if (delta > DIFERENCA_MAX_NF) {
     return {
       ok: false,
       vNf,
+      alvo,
       soma,
       delta,
-      erro: `Diferença de valor acima de 3 centavos no financeiro (NF ${vNf.toFixed(2)} × parcelas ${soma.toFixed(2)}, delta ${delta.toFixed(2)}). Ajuste as parcelas antes de salvar ou gravar.`,
+      erro: `Diferença de valor acima de 3 centavos no financeiro (${rotulo} × parcelas ${soma.toFixed(2)}, delta ${round2(Math.abs(alvo - soma)).toFixed(2)}). Ajuste as parcelas antes de salvar ou gravar.`,
     };
   }
-  return { ok: true, vNf, soma, delta };
+  return { ok: true, vNf, alvo, soma, delta };
 }
 
 module.exports = {
@@ -239,5 +258,6 @@ module.exports = {
   totalMercadoriaItem,
   validarTotaisNf,
   validarFinanceiroNf,
+  valorSemFinanceiro,
   DIFERENCA_MAX_NF,
 };

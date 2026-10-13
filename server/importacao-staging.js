@@ -1143,7 +1143,7 @@ function updateFinanceiro(sessaoId, financeiro) {
   const finPatch = { ...financeiro };
   if (financeiro.parcelas) finPatch.parcelas = financeiro.parcelas;
   const finMerged = { ...s.financeiro, ...finPatch };
-  const checagemFin = validarFinanceiroNf(s.xml, finMerged);
+  const checagemFin = validarFinanceiroNf(s.xml, finMerged, s.itens);
   if (!checagemFin.ok) return { ok: false, error: checagemFin.erro };
   s.financeiro = finMerged;
   // Evita persistir "Nenhum" se o cliente mandar id 1 por engano
@@ -1316,7 +1316,7 @@ async function confirmarSessaoInterno(sessaoId, opts = {}) {
 
   const precisaValidarFin = (s.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
   if (precisaValidarFin) {
-    const checagemFin = validarFinanceiroNf(s.xml, s.financeiro);
+    const checagemFin = validarFinanceiroNf(s.xml, s.financeiro, s.itens);
     if (!checagemFin.ok) {
       return { ok: false, error: checagemFin.erro };
     }

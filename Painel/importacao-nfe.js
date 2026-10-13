@@ -1502,9 +1502,11 @@ const ImportacaoNfe = (() => {
     const tPagLbl = fin.tPag
       ? `tPag ${esc(fin.tPag)}${fin.sugestao_label ? ` · ${esc(fin.sugestao_label)}` : ''}`
       : (fin.sugestao_label ? esc(fin.sugestao_label) : 'Sem &lt;pag&gt; no XML — inferido pela fatura/duplicatas');
+    const aPagar = valorAPagarNf(s);
     host.innerHTML = `
       <div class="imp-section">
         <p class="hint">Faturamento sugerido pelo XML: <strong>${tPagLbl}</strong></p>
+        ${aPagar.semFin > 0.009 ? `<p class="hint">Valor a pagar: <strong>${money(aPagar.alvo)}</strong> (total da NF ${money(aPagar.vNf)} − ${money(aPagar.semFin)} de itens que não geram financeiro, como bonificação).</p>` : ''}
         <div class="imp-fields">
           ${field('Valor total NF', 'imp-vnf', s.xml?.total?.vNF, { type: 'number', step: '0.01', third: true, readonly: true })}
           ${field('Valor produtos', 'imp-vprod', s.xml?.total?.vProd, { type: 'number', step: '0.01', third: true, readonly: true })}
@@ -1579,7 +1581,7 @@ const ImportacaoNfe = (() => {
       const p = state.parcelamentos.find((x) => String(x.id_parcela) === String($('#imp-parcelamento')?.value));
       const n = Number(p?.n_parcelas || 0);
       if (n < 1) return;
-      const total = Number(s.xml?.total?.vNF || 0);
+      const total = valorAPagarNf(s).alvo;
       const first = String($('#imp-parc-d-0')?.value || parc[0]?.dVenc || todayLocal()).slice(0, 10);
       const interval = Number(p.intervalo || 30) || 30;
       const each = Number((total / n).toFixed(2));
@@ -1601,12 +1603,10 @@ const ImportacaoNfe = (() => {
         vDup: Number($(`#imp-parc-v-${i}`)?.value || 0),
         dVenc: $(`#imp-parc-d-${i}`)?.value || '',
       }));
-      const vNf = Number(s.xml?.total?.vNF || 0);
       const somaParc = parcelas.reduce((acc, p) => acc + Number(p.vDup || 0), 0);
-      if (vNf > 0.009 && parcelas.length && Math.abs(vNf - somaParc) > 0.03) {
-        deps.showMsg?.(
-          `Soma das parcelas (${somaParc.toFixed(2)}) difere do total da NF (${vNf.toFixed(2)}). Ajuste os valores antes de salvar.`
-        );
+      const erroParc = parcelas.length ? erroParcelasNf(s, somaParc) : '';
+      if (erroParc) {
+        deps.showMsg?.(`${erroParc} Ajuste os valores antes de salvar.`);
         return;
       }
       const idFmapgto = $('#imp-fmpag')?.value || null;
@@ -2112,6 +2112,36 @@ const ImportacaoNfe = (() => {
     };
   }
 
+  /** Total da NF sem os itens que não geram financeiro (bonificação, brinde…). */
+  function valorAPagarNf(s) {
+    const vNf = Number(s?.xml?.total?.vNF || 0);
+    const semFin = (s?.itens || [])
+      .filter((it) => String(it?.sistema?.gera_financeiro || 'S').toUpperCase() === 'N')
+      .reduce((acc, it) => {
+        const sys = it.sistema || {};
+        const xml = it.xml || {};
+        const trib = sys.tributos || {};
+        const imp = xml.imposto || {};
+        return acc + calcCustoNotaUnitario(sys, xml).totalItem
+          + Number(trib.v_fcp ?? imp.vFCP ?? 0)
+          + Number(trib.v_fcp_st ?? imp.vFCPST ?? 0)
+          - Number(trib.v_icms_deson ?? imp.vICMSDeson ?? 0);
+      }, 0);
+    const sem = Number(semFin.toFixed(2));
+    return { vNf, semFin: sem, alvo: sem > 0.009 ? Number((vNf - sem).toFixed(2)) : vNf };
+  }
+
+  /** Mensagem de erro quando a soma das parcelas não fecha com o valor a pagar; '' se ok. */
+  function erroParcelasNf(s, somaParc) {
+    const { vNf, semFin, alvo } = valorAPagarNf(s);
+    if (vNf <= 0.009) return '';
+    if (Math.abs(alvo - somaParc) <= 0.03 || Math.abs(vNf - somaParc) <= 0.03) return '';
+    const ref = semFin > 0.009
+      ? `do valor a pagar (${alvo.toFixed(2)} = NF ${vNf.toFixed(2)} − ${semFin.toFixed(2)} de itens sem financeiro)`
+      : `do total da NF (${vNf.toFixed(2)})`;
+    return `Soma das parcelas (${somaParc.toFixed(2)}) difere ${ref}.`;
+  }
+
   function grupoField(sys) {
     const grupos = state.grupos || [];
     const atual = Number(sys.id_grupo) || 0;
@@ -2536,9 +2566,15 @@ const ImportacaoNfe = (() => {
   }
 
   function scrollConferenciaTopo() {
-    ['#imp-view-item .imp-item-scroll', '.imp-item-scroll', '#page-importacao'].forEach((sel) => {
-      document.querySelector(sel)?.scrollTo({ top: 0, behavior: 'smooth' });
-    });
+    const topo = () => {
+      document.querySelectorAll('#imp-view-item .imp-item-scroll, #page-importacao').forEach((el) => { el.scrollTop = 0; });
+      for (let el = document.getElementById('imp-item-host'); el; el = el.parentElement) {
+        if (el.scrollTop > 0) el.scrollTop = 0;
+      }
+      if (window.scrollY > 0) window.scrollTo(0, 0);
+    };
+    topo();
+    setTimeout(topo, 80);
   }
 
   async function loadProdutosBusca(q) {
@@ -3566,6 +3602,7 @@ const ImportacaoNfe = (() => {
       it.observacao = patch.observacao;
       if (patch.etapas_ok) it.etapas_ok = { ...etapasOkOf(it), ...patch.etapas_ok };
     }
+    if (state.itemTab !== tabId) state.rolarTopo = true;
     state.itemTab = tabId;
     renderItemScreen();
   }
@@ -4917,19 +4954,19 @@ const ImportacaoNfe = (() => {
           return;
         }
       } catch { /* segue se params falhar */ }
-      const vNfConf = Number(state.sessao?.xml?.total?.vNF || 0);
+      const aPagarConf = valorAPagarNf(state.sessao);
       const parcConf = state.sessao?.financeiro?.parcelas || [];
       const somaParcConf = parcConf.reduce((acc, p) => acc + Number(p.vDup || 0), 0);
-      if (vNfConf > 0.009) {
+      const geraFinConf = (state.sessao.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
+      if (geraFinConf && aPagarConf.vNf > 0.009) {
         if (!parcConf.length) {
-          deps.showMsg?.(`Informe as parcelas na aba Financeiro (total da NF ${vNfConf.toFixed(2)}) e salve antes de gravar.`);
+          deps.showMsg?.(`Informe as parcelas na aba Financeiro (valor a pagar ${aPagarConf.alvo.toFixed(2)}) e salve antes de gravar.`);
           setTab('financeiro');
           return;
         }
-        if (Math.abs(vNfConf - somaParcConf) > 0.03) {
-          deps.showMsg?.(
-            `Soma das parcelas (${somaParcConf.toFixed(2)}) difere do total da NF (${vNfConf.toFixed(2)}). Ajuste na aba Financeiro.`
-          );
+        const erroParcConf = erroParcelasNf(state.sessao, somaParcConf);
+        if (erroParcConf) {
+          deps.showMsg?.(`${erroParcConf} Ajuste na aba Financeiro.`);
           setTab('financeiro');
           return;
         }
