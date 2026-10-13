@@ -2001,14 +2001,23 @@ const ImportacaoNfe = (() => {
     return `${convFatorFmt(qtdXml)} × ${convFatorFmt(conversor)}`;
   }
 
+  function pacoteHint(pacotes) {
+    return Number(pacotes) > 0 ? `${convFatorFmt(pacotes)} pacote(s)` : 'Informe a quantidade de pacotes';
+  }
+
   function panelConversao(sys, xml, qtdXml, conversor, qtdConv) {
     const custoInfo = calcCustoNotaUnitario({ ...sys, conversor, qtd_xml: qtdXml, qtd: qtdConv }, xml);
     const uniXml = sys.uni_medida_xml || xml.uCom || '';
     const uniEst = sys.uni_medida || 'UN';
     const qtdAtual = Number(sys.qtd_atual || 0);
     const qtdDepois = qtdAtual + Number(qtdConv || 0);
+    const pacote = !!sys.vender_pacote;
     return `
       <section class="imp-panel" data-panel="conversao">
+        <label class="imp-check">
+          <input type="checkbox" id="imp-pacote" ${pacote ? 'checked' : ''} />
+          Vender por pacote: informar quantos pacotes saem deste item da nota
+        </label>
         <div class="imp-cmp-pair">
           <article class="imp-cmp-mini">
             <span>Na nota</span>
@@ -2019,16 +2028,19 @@ const ImportacaoNfe = (() => {
           <article class="imp-cmp-mini">
             <span>No estoque</span>
             <strong id="imp-qtd-preview">${num(qtdConv)}</strong>
-            <p class="imp-conv-fator-hint">${esc(convFatorHint(qtdXml, conversor))}</p>
+            <p class="imp-conv-fator-hint">${esc(pacote ? pacoteHint(qtdConv) : convFatorHint(qtdXml, conversor))}</p>
             <input type="hidden" id="imp-uni" value="${esc(uniEst)}" />
-            <div class="imp-fields" style="margin:0.15rem 0 0">
+            <div class="imp-fields" id="imp-conv-fator-wrap" style="margin:0.15rem 0 0" ${pacote ? 'hidden' : ''}>
               ${field('Converter em:', 'imp-conversor', conversor, { type: 'number', step: '0.0001', full: true })}
+            </div>
+            <div class="imp-fields" id="imp-pacote-wrap" style="margin:0.15rem 0 0" ${pacote ? '' : 'hidden'}>
+              ${field('Quantidade de pacotes', 'imp-qtd-pacotes', qtdPacotes(sys) || '', { type: 'number', step: 'any', full: true, placeholder: 'Ex.: 20' })}
             </div>
           </article>
         </div>
         <div class="imp-result-banner">
           Entram no estoque <strong id="imp-result-qtd">${num(qtdConv)} ${esc(uniEst)}</strong>
-          <span> · custo unitário ${money(custoInfo.custoEstoque)}${Number.isFinite(qtdAtual) ? ` · estoque atual ${num(qtdAtual)} → ${num(qtdDepois)}` : ''}</span>
+          <span> · custo unitário <span id="imp-result-custo">${money(custoInfo.custoEstoque)}</span>${Number.isFinite(qtdAtual) ? ` · estoque atual ${num(qtdAtual)} → ${num(qtdDepois)}` : ''}</span>
         </div>
         <label class="imp-check">
           <input type="checkbox" id="imp-lembrar-conv" ${sys.lembrar_conversao === false ? '' : 'checked'} />
@@ -2040,7 +2052,7 @@ const ImportacaoNfe = (() => {
           ${field('Entrada Estoque', 'imp-qtd', qtdConv, { type: 'number', step: '0.0001' })}
           ${field('Custo Convertido', 'imp-custo-conv', custoInfo.custoEstoque, { type: 'number', step: '0.0001' })}
         </div>
-        <p class="hint">Custo convertido = total líquido do item ÷ quantidade de estoque.</p>
+        <p class="hint">Custo convertido = total líquido do item ÷ quantidade de estoque.${pacote ? ' Ex.: caixa de 12 kg vendida em pacotes de 600 g = 20 pacotes.' : ''}</p>
         <div class="imp-vinc-btns">
           <button type="button" class="btn small" id="imp-cad-unidade">Cadastrar unidade</button>
         </div>
@@ -2048,12 +2060,18 @@ const ImportacaoNfe = (() => {
     `;
   }
 
+  /** "Vender por pacote": quantidade de pacotes digitada (0 quando o item não usa). */
+  function qtdPacotes(sys = {}) {
+    const n = Number(sys?.qtd_pacotes);
+    return sys?.vender_pacote && n > 0 ? n : 0;
+  }
+
   function calcCustoNotaUnitario(sys = {}, xml = {}) {
     const trib = sys.tributos || {};
     const imp = xml.imposto || {};
     const qtdXml = Number(sys.qtd_xml ?? xml.qCom ?? 0) || 0;
     const conversor = Number(sys.conversor ?? 1) || 1;
-    const qtdEstoque = Number((qtdXml * conversor).toFixed(6)) || 0;
+    const qtdEstoque = qtdPacotes(sys) || Number((qtdXml * conversor).toFixed(6)) || 0;
 
     const vProd = Number(xml.vProd != null ? xml.vProd : (Number(xml.vUnCom || 0) * qtdXml)) || 0;
     const vDesc = Number(sys.v_desc ?? xml.vDesc ?? 0) || 0;
@@ -2446,7 +2464,7 @@ const ImportacaoNfe = (() => {
     const descEditable = !!sys.criar_novo || !!sys.id_identificador;
     const qtdXml = Number(sys.qtd_xml ?? xml.qCom ?? 0);
     const conversor = Number(sys.conversor ?? 1) || 1;
-    const qtdConv = Number((qtdXml * conversor).toFixed(6));
+    const qtdConv = qtdPacotes(sys) || Number((qtdXml * conversor).toFixed(6));
     const tab = state.itemTab || 'vinculo';
     const isLastTab = tab === 'lote';
 
@@ -2674,10 +2692,18 @@ const ImportacaoNfe = (() => {
 
   function syncQtdConvertida(opts = {}) {
     const qtdXml = Number($('#imp-qtd-xml')?.value || 0);
+    const sysAtual = itemAt(state.itemIndex)?.sistema || {};
+    const pacoteEl = $('#imp-pacote');
+    const pacote = pacoteEl ? pacoteEl.checked : !!sysAtual.vender_pacote;
+    const pacotes = pacote ? (Number($('#imp-qtd-pacotes')?.value ?? sysAtual.qtd_pacotes ?? 0) || 0) : 0;
+    if (pacote && pacotes > 0 && qtdXml > 0 && $('#imp-conversor')) {
+      // O conversor guardado passa a ser pacotes por unidade da nota (lembrado para o fornecedor).
+      $('#imp-conversor').value = String(Number((pacotes / qtdXml).toFixed(6)));
+    }
     const conv = Number($('#imp-conversor')?.value || 1) || 1;
-    const qtdConv = Number((qtdXml * conv).toFixed(6));
+    const qtdConv = pacotes > 0 ? pacotes : Number((qtdXml * conv).toFixed(6));
     const out = $('#imp-qtd');
-    if (out && !opts.fromQtdField) out.value = String(qtdConv);
+    if (out && (!opts.fromQtdField || pacotes > 0)) out.value = String(qtdConv);
     const prevConv = $('#imp-conv-preview');
     const prevQtd = $('#imp-qtd-preview');
     if (prevConv) prevConv.textContent = String(conv);
@@ -2686,7 +2712,7 @@ const ImportacaoNfe = (() => {
       const qtdShow = opts.fromQtdField && out ? Number(out.value || 0) : qtdConv;
       prevQtd.textContent = String(num(qtdShow));
       const hint = document.querySelector('.imp-conv-fator-hint');
-      if (hint) hint.textContent = convFatorHint(qtdXml, conv);
+      if (hint) hint.textContent = pacote ? pacoteHint(pacotes) : convFatorHint(qtdXml, conv);
       const banner = $('#imp-result-qtd');
       if (banner) banner.textContent = `${num(qtdShow)} ${uni}`.trim();
     }
@@ -2695,6 +2721,8 @@ const ImportacaoNfe = (() => {
       const qtdFinal = opts.fromQtdField && out ? Number(out.value || 0) : qtdConv;
       const custoInfo = calcCustoNotaUnitario({
         ...(it.sistema || {}),
+        vender_pacote: pacote,
+        qtd_pacotes: pacotes || null,
         conversor: conv,
         qtd_xml: qtdXml,
         qtd: qtdFinal > 0 ? qtdFinal : qtdConv,
@@ -2713,10 +2741,14 @@ const ImportacaoNfe = (() => {
       const custoFicha = $('#imp-custo-ficha');
       if (custoFicha) custoFicha.value = String(custoInfo.custoEstoque);
       // Sempre atualiza o custo de estoque no item (evita gravar vUnCom × qtd convertida)
+      const custoBanner = $('#imp-result-custo');
+      if (custoBanner) custoBanner.textContent = money(custoInfo.custoEstoque);
       if (it.sistema) {
         it.sistema.conversor = conv;
         it.sistema.qtd = qtdFinal > 0 ? qtdFinal : qtdConv;
         it.sistema.prc_custo = custoInfo.custoEstoque;
+        it.sistema.vender_pacote = pacote;
+        it.sistema.qtd_pacotes = pacotes || null;
       }
     }
   }
@@ -2743,7 +2775,7 @@ const ImportacaoNfe = (() => {
     }
     const qtdXml = Number(sys.qtd_xml ?? xmlItem.qCom ?? 0) || 0;
     sys.qtd_xml = qtdXml;
-    sys.qtd = Number((qtdXml * Number(sys.conversor || 1)).toFixed(6));
+    sys.qtd = qtdPacotes(sys) || Number((qtdXml * Number(sys.conversor || 1)).toFixed(6));
     const custoInfo = calcCustoNotaUnitario(sys, xmlItem);
     if (custoInfo.custoEstoque > 0) sys.prc_custo = custoInfo.custoEstoque;
   }
@@ -3030,12 +3062,20 @@ const ImportacaoNfe = (() => {
         if (idFornec) qsConv.set('id_fornec', String(idFornec));
         if (it.xml?.uCom) qsConv.set('uni_xml', it.xml.uCom);
         const cv = await api(`/importacao/conversao-gestor?${qsConv}`);
+        it.sistema.vender_pacote = false;
+        it.sistema.qtd_pacotes = null;
         if (cv.item?.uni_estoque) {
           it.sistema.uni_medida = cv.item.uni_estoque;
           it.sistema.conversor = Number(cv.item.conversor || 1) || 1;
           it.sistema.conversor_origem = 'gestor';
           const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0);
           it.sistema.qtd = Number((qtdXml * Number(it.sistema.conversor || 1)).toFixed(6));
+          if (cv.item.pacote && it.sistema.qtd > 0) {
+            it.sistema.vender_pacote = true;
+            it.sistema.qtd_pacotes = Number(it.sistema.qtd.toFixed(3));
+            it.sistema.qtd = it.sistema.qtd_pacotes;
+            it.sistema.conversor_manual = true;
+          }
           const custoInfo = calcCustoNotaUnitario(it.sistema, it.xml || {});
           if (custoInfo.custoEstoque > 0) it.sistema.prc_custo = custoInfo.custoEstoque;
         }
@@ -3117,7 +3157,7 @@ const ImportacaoNfe = (() => {
     const vFrete = gnDef('#imp-frete', sys.v_frete ?? 0);
     const vSeguro = gnDef('#imp-seguro', sys.v_seguro ?? 0);
     const vOutro = gnDef('#imp-outro', sys.v_outro ?? 0);
-    const conversor = gnDef('#imp-conversor', sys.conversor ?? 1) || 1;
+    let conversor = gnDef('#imp-conversor', sys.conversor ?? 1) || 1;
     const qtdXmlRaw = gn('#imp-qtd-xml');
     const qtdXml = Number(
       qtdXmlRaw != null && qtdXmlRaw > 0
@@ -3131,6 +3171,13 @@ const ImportacaoNfe = (() => {
     } else if (Number(sys.qtd) > 0 && Math.abs(Number(sys.qtd) - qtd) > 1e-9 && sys.conversor_manual) {
       qtd = Number(sys.qtd);
     }
+    const venderPacote = $('#imp-pacote') ? $('#imp-pacote').checked : !!sys.vender_pacote;
+    const pacotesCampo = gn('#imp-qtd-pacotes');
+    const pacotes = venderPacote ? (Number(pacotesCampo ?? sys.qtd_pacotes) || 0) : 0;
+    if (pacotes > 0) {
+      qtd = pacotes;
+      if (qtdXml > 0) conversor = Number((pacotes / qtdXml).toFixed(6)) || conversor;
+    }
 
     let custo = parseMoney($('#imp-custo-ficha')?.value);
     if (custo === undefined) custo = gn('#imp-custo-conv');
@@ -3140,6 +3187,8 @@ const ImportacaoNfe = (() => {
     if (Math.abs(conversor - 1) > 1e-9 || !(Number(custo) > 0)) {
       const merged = {
         ...sys,
+        vender_pacote: venderPacote,
+        qtd_pacotes: pacotes || null,
         conversor,
         qtd_xml: qtdXml,
         qtd,
@@ -3211,7 +3260,9 @@ const ImportacaoNfe = (() => {
         uni_medida_saida: uniSaida || '',
         uni_medida_xml: g('#imp-uni-xml') || sys.uni_medida_xml || '',
         conversor,
-        conversor_manual: !!sys.conversor_manual,
+        conversor_manual: !!sys.conversor_manual || pacotes > 0,
+        vender_pacote: venderPacote,
+        qtd_pacotes: pacotes || null,
         trabalha_lote: $('#imp-trabalha-lote')
           ? ($('#imp-trabalha-lote').checked ? 'S' : 'N')
           : (sys.trabalha_lote || 'N'),
@@ -3976,6 +4027,27 @@ const ImportacaoNfe = (() => {
       if (it?.sistema) it.sistema.conversor_manual = true;
       syncQtdConvertida();
     });
+    $('#imp-pacote')?.addEventListener('change', (e) => {
+      const it = itemAt(state.itemIndex);
+      const ligado = e.target.checked;
+      const fator = $('#imp-conversor');
+      if (it?.sistema) {
+        it.sistema.conversor_manual = true;
+        if (ligado) it.sistema.conversor_sem_pacote = Number(fator?.value || 1) || 1;
+        else if (fator) fator.value = String(it.sistema.conversor_sem_pacote || 1);
+      }
+      const wrapFator = $('#imp-conv-fator-wrap');
+      const wrapPacote = $('#imp-pacote-wrap');
+      if (wrapFator) wrapFator.hidden = ligado;
+      if (wrapPacote) wrapPacote.hidden = !ligado;
+      syncQtdConvertida();
+      if (ligado) $('#imp-qtd-pacotes')?.focus();
+    });
+    $('#imp-qtd-pacotes')?.addEventListener('input', () => {
+      const it = itemAt(state.itemIndex);
+      if (it?.sistema) it.sistema.conversor_manual = true;
+      syncQtdConvertida();
+    });
     $('#imp-qtd')?.addEventListener('input', () => {
       const it = itemAt(state.itemIndex);
       const qtdXml = Number($('#imp-qtd-xml')?.value || it?.sistema?.qtd_xml || it?.xml?.qCom || 0);
@@ -4029,7 +4101,7 @@ const ImportacaoNfe = (() => {
         item.sistema.conversor = res.item?.conversor ?? conversor;
         item.sistema.conversor_manual = false;
         const qtdXml = Number(item.sistema.qtd_xml ?? item.xml?.qCom ?? 0);
-        item.sistema.qtd = Number((qtdXml * Number(item.sistema.conversor || 1)).toFixed(6));
+        item.sistema.qtd = qtdPacotes(item.sistema) || Number((qtdXml * Number(item.sistema.conversor || 1)).toFixed(6));
         const custoInfo = calcCustoNotaUnitario(item.sistema, item.xml || {});
         if (custoInfo.custoEstoque > 0) item.sistema.prc_custo = custoInfo.custoEstoque;
       }

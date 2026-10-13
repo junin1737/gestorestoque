@@ -3,7 +3,7 @@
 const { withDb, withTransaction, query, writeTargets, hasTable, columnExists, nextGenId } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop, classTribPorCodigoDb } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
-const { round2, calcCustoUnitarioItem, valorProdutoItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
+const { round2, calcCustoUnitarioItem, qtdPacotes, valorProdutoItem, validarTotaisNf, validarFinanceiroNf } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
 const {
   RAMO_TRANSPORTES, buscarPorCnpj, buscarTransportador, cadastrarFornecedor, getFornecedorById,
@@ -956,7 +956,7 @@ async function gravarLotesItem(db, appCfg, idNfcItem, idIdent, it) {
     if (!num) continue;
     let qtdEnt = Number(lote.qtd_entrada || 0);
     if (!(qtdEnt > 0)) {
-      qtdEnt = Number((Number(it.xml?.qCom || 0) * conversor).toFixed(6));
+      qtdEnt = qtdPacotes(it.sistema) || Number((Number(it.xml?.qCom || 0) * conversor).toFixed(6));
     }
     for (const target of targets) {
       const idLote = await ensureLoteProduto(db, target.tables, {
@@ -1128,6 +1128,12 @@ async function gravarNfCompra(sessao, {
     const idTransportador = hasTable('TB_NFC_TRANSPORTADOR')
       ? await ensureIdTransportador(conn, sessao)
       : null;
+    // DDL fora da transação da nota: no Firebird a coluna nova só vale depois do commit.
+    try {
+      await require('./importacao-conversao-gestor').ensureConversaoGestor(conn);
+    } catch (e) {
+      console.warn('TB_MT_CONVERSAO:', e.message);
+    }
 
     return withTransaction(conn, async (db) => {
       const idNf = await nextId(db, 'GEN_TB_NFCOMPRA_ID', 'TB_NFCOMPRA', 'ID_NFCOMPRA');
@@ -1308,7 +1314,7 @@ async function gravarNfCompra(sessao, {
         const qtdXml = Number(it.sistema.qtd_xml) > 0
           ? Number(it.sistema.qtd_xml)
           : (Number(it.xml?.qCom || 0) || 0);
-        let qtdEstoque = Number(it.sistema.qtd);
+        let qtdEstoque = qtdPacotes(it.sistema) || Number(it.sistema.qtd);
         if (!(qtdEstoque > 0)) {
           qtdEstoque = Number((qtdXml * conversor).toFixed(6));
         }
@@ -1437,6 +1443,7 @@ async function gravarNfCompra(sessao, {
             uni_xml: p.it.sistema?.uni_medida_xml || p.it.xml?.uCom || '',
             uni_estoque: p.it.sistema?.uni_medida || 'UN',
             conversor: p.it.sistema?.conversor ?? 1,
+            pacote: !!(p.it.sistema?.vender_pacote && Number(p.it.sistema?.qtd_pacotes) > 0),
           }, db);
         } catch (e) {
           console.warn('TB_MT_CONVERSAO:', e.message);

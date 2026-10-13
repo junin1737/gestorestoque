@@ -225,6 +225,13 @@ async function aplicarSugestoesVinculo(sessao) {
         p.it.sistema.conversor_origem = 'gestor';
         const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
         p.it.sistema.qtd = Number((qtdXml * Number(p.it.sistema.conversor || 1)).toFixed(6));
+        if (gest.pacote && p.it.sistema.qtd > 0) {
+          // O conversor guardado é pacotes por unidade da nota; arredonda o resto da divisão.
+          p.it.sistema.vender_pacote = true;
+          p.it.sistema.qtd_pacotes = Number(p.it.sistema.qtd.toFixed(3));
+          p.it.sistema.qtd = p.it.sistema.qtd_pacotes;
+          p.it.sistema.conversor_manual = true;
+        }
       }
     } catch (e) {
       console.warn('Conversão Gestor:', e.message);
