@@ -90,6 +90,15 @@ function sqlValor(fonte) {
   return `(COALESCE(I.VLR_TOTAL, 0) - COALESCE(I.VLR_DESC, 0) + COALESCE(I.VLR_FRETE, 0) + COALESCE(I.VLR_SEGURO, 0) + COALESCE(I.VLR_DESPESA, 0) + ${st} + ${ipi} + ${fcp})`;
 }
 
+function sqlComFrete() {
+  return '(COALESCE(I.VLR_TOTAL, 0) + COALESCE(I.VLR_FRETE, 0))';
+}
+
+function filtroCartao(coluna, ignorar) {
+  if (!ignorar) return '';
+  return ` AND NOT (UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTAO' OR UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTÃO' OR UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTÕES')`;
+}
+
 function fonteSemFilhas(fonte) {
   return { ...fonte, st: null, ipi: null, fcp: null };
 }
@@ -266,6 +275,7 @@ async function somar(db, fonte, filtros, tipo, modo) {
     SELECT TRIM(N.NF_MODELO) AS MODELO,
            COUNT(DISTINCT N.${f.id}) AS NOTAS,
            SUM(${sqlValor(f)}) AS VALOR,
+           SUM(${sqlComFrete()}) AS COM_FRETE,
            SUM(COALESCE(I.QTD_ITEM, 0)) AS QTD,
            COUNT(*) AS ITENS
     FROM ${f.item} I
@@ -278,10 +288,14 @@ async function somar(db, fonte, filtros, tipo, modo) {
 }
 
 async function totais(db, usaManage, filtros, escopo) {
-  const vendas = { fiscal: 0, gerencial: 0, manage: 0, nfce: 0, nfe: 0, notas: 0, itens: 0, qtd: 0 };
+  const vendas = {
+    fiscal: 0, gerencial: 0, manage: 0, nfce: 0, nfe: 0, notas: 0, itens: 0, qtd: 0,
+    frete: 0, freteFiscal: 0, freteGerencial: 0, freteManage: 0, freteNfce: 0, freteNfe: 0,
+  };
   const compras = { valor: 0, notas: 0, itens: 0, qtd: 0 };
   let devolucaoVenda = 0;
   let devolucaoCompra = 0;
+  let devolucaoVendaFrete = 0;
 
   if (escopo !== 'compras') {
     for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
@@ -289,9 +303,21 @@ async function totais(db, usaManage, filtros, escopo) {
       if (positivas) {
         for (const r of positivas) {
           vendas[bucketModelo(r.MODELO, fonte.manage)] += centavos(r.VALOR);
+          const frete = centavos(r.COM_FRETE);
           const modelo = String(r.MODELO || '').trim();
-          if (modelo === '65') vendas.nfce += centavos(r.VALOR);
-          if (modelo === '55') vendas.nfe += centavos(r.VALOR);
+          const bucket = bucketModelo(modelo, fonte.manage);
+          vendas.frete += frete;
+          if (bucket === 'gerencial') vendas.freteGerencial += frete;
+          else if (bucket === 'manage') vendas.freteManage += frete;
+          else vendas.freteFiscal += frete;
+          if (modelo === '65') {
+            vendas.nfce += centavos(r.VALOR);
+            vendas.freteNfce += frete;
+          }
+          if (modelo === '55') {
+            vendas.nfe += centavos(r.VALOR);
+            vendas.freteNfe += frete;
+          }
           vendas.notas += inteiro(r.NOTAS);
           vendas.itens += inteiro(r.ITENS);
           vendas.qtd += centavos(r.QTD);
@@ -314,7 +340,10 @@ async function totais(db, usaManage, filtros, escopo) {
         }
       }
       const dev = await somar(db, fonte, filtros, 'compra', 'devolucao_venda');
-      if (dev) for (const r of dev) devolucaoVenda += centavos(r.VALOR);
+      if (dev) for (const r of dev) {
+        devolucaoVenda += centavos(r.VALOR);
+        devolucaoVendaFrete += centavos(r.COM_FRETE);
+      }
     }
   }
 
@@ -325,6 +354,7 @@ async function totais(db, usaManage, filtros, escopo) {
     devolucaoCompra,
     totalVendido: vendas.fiscal + vendas.gerencial + vendas.manage - devolucaoVenda,
     totalComprado: compras.valor - devolucaoCompra,
+    totalComFrete: vendas.frete - devolucaoVendaFrete,
   };
 }
 
@@ -650,7 +680,7 @@ async function porMes(db, usaManage, filtros) {
   return meses.map((r) => ({ mes: r.mes, nome: r.nome, vendido: reais(r.vendido), comprado: reais(r.comprado) }));
 }
 
-async function porMesFinanceiro(db, filtros) {
+async function porMesFinanceiro(db, filtros, ignorarCartao) {
   const ano = String(filtros.inicio || isoHoje()).slice(0, 4);
   const inicio = `${ano}-01-01`;
   const fim = `${Number(ano) + 1}-01-01`;
@@ -661,12 +691,19 @@ async function porMesFinanceiro(db, filtros) {
       if (n >= 1 && n <= 12) meses[n - 1][campo] += centavos(r.VALOR);
     }
   }
+  const origemReceber = ignorarCartao
+    ? `FROM TB_CTAREC_BAIXA B LEFT JOIN TB_CONTA_RECEBER C ON C.ID_CTAREC = B.ID_CTAREC
+       WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
+         AND TRIM(COALESCE(B.TIP_RECBTO, '')) = 'T'${filtroCartao('C.HISTORICO', true)}`
+    : `FROM TB_CTAREC_BAIXA
+       WHERE DT_BAIXA >= '${inicio}' AND DT_BAIXA < '${fim}'
+         AND TRIM(COALESCE(TIP_RECBTO, '')) = 'T'`;
+  const colData = ignorarCartao ? 'B.DT_BAIXA' : 'DT_BAIXA';
+  const colValor = ignorarCartao ? 'B.VLR_RECEB' : 'VLR_RECEB';
   somar(await ler(db, `
-    SELECT EXTRACT(MONTH FROM DT_BAIXA) AS MES, SUM(COALESCE(VLR_RECEB, 0)) AS VALOR
-    FROM TB_CTAREC_BAIXA
-    WHERE DT_BAIXA >= '${inicio}' AND DT_BAIXA < '${fim}'
-      AND TRIM(COALESCE(TIP_RECBTO, '')) = 'T'
-    GROUP BY EXTRACT(MONTH FROM DT_BAIXA)`), 'vendido');
+    SELECT EXTRACT(MONTH FROM ${colData}) AS MES, SUM(COALESCE(${colValor}, 0)) AS VALOR
+    ${origemReceber}
+    GROUP BY EXTRACT(MONTH FROM ${colData})`), 'vendido');
   somar(await ler(db, `
     SELECT EXTRACT(MONTH FROM DT_BAIXA) AS MES, SUM(COALESCE(VLR_PAGO, 0)) AS VALOR
     FROM TB_CTAPAG_BAIXA
@@ -674,6 +711,156 @@ async function porMesFinanceiro(db, filtros) {
       AND TRIM(COALESCE(TIP_PAGTO, '')) = 'T'
     GROUP BY EXTRACT(MONTH FROM DT_BAIXA)`), 'comprado');
   return meses.map((r) => ({ mes: r.mes, nome: r.nome, vendido: reais(r.vendido), comprado: reais(r.comprado) }));
+}
+
+const NOMES_MES_LONGO = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+function intervaloMes(iso) {
+  const [y, m] = parseIso(iso).split('-').map(Number);
+  const inicio = `${y}-${String(m).padStart(2, '0')}-01`;
+  const fimExclusivo = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, '0')}-01`;
+  return { inicio, fimExclusivo, rotulo: `${NOMES_MES_LONGO[m - 1]} de ${y}` };
+}
+
+function dataBr(iso) {
+  const [y, m, d] = parseIso(iso).split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function linhaConta(r) {
+  return {
+    documento: String(r.DOCUMENTO == null ? '' : r.DOCUMENTO).trim(),
+    historico: String(r.HISTORICO || '').trim(),
+    vencimento: diaIso(r.DT_VENCTO),
+    valor: reais(centavos(r.VALOR)),
+    situacao: String(r.SITUACAO || '').trim(),
+  };
+}
+
+function sqlRestante(alias, temColuna) {
+  if (temColuna) return `COALESCE(${alias}.VLR_RESTANTE, 0)`;
+  return `(COALESCE(${alias}.VLR_CTAREC, 0) - COALESCE((
+    SELECT SUM(BX.VLR_RECEB) FROM TB_CTAREC_BAIXA BX
+    WHERE BX.ID_CTAREC = ${alias}.ID_CTAREC
+      AND TRIM(COALESCE(BX.TIP_RECBTO, '')) = 'T'
+  ), 0))`;
+}
+
+async function temColunaRestante(db) {
+  const rows = await ler(db, `
+    SELECT 1 AS OK FROM RDB$RELATION_FIELDS
+    WHERE TRIM(RDB$RELATION_NAME) = 'TB_CONTA_RECEBER'
+      AND TRIM(RDB$FIELD_NAME) = 'VLR_RESTANTE'`);
+  return !!(rows && rows.length);
+}
+
+async function somaReceberAberto(db, inicio, fimExclusivo, ignorarCartao, temColuna) {
+  const saldo = sqlRestante('C', temColuna);
+  const rows = await ler(db, `
+    SELECT COALESCE(SUM(${saldo}), 0) AS VALOR
+    FROM TB_CONTA_RECEBER C
+    WHERE C.DT_VENCTO >= '${inicio}' AND C.DT_VENCTO < '${fimExclusivo}'
+      AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
+      AND ${saldo} > 0.009
+      ${filtroCartao('C.HISTORICO', ignorarCartao)}`);
+  return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
+}
+
+async function somaPagarAberto(db, inicio, fimExclusivo) {
+  const rows = await ler(db, `
+    SELECT COALESCE(SUM(C.VLR_CTAPAG), 0) AS VALOR
+    FROM TB_CONTA_PAGAR C
+    WHERE C.DT_VENCTO >= '${inicio}' AND C.DT_VENCTO < '${fimExclusivo}'
+      AND TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'C'
+      AND NOT EXISTS (
+        SELECT 1 FROM TB_CTAPAG_BAIXA B
+        WHERE B.ID_CTAPAG = C.ID_CTAPAG AND TRIM(COALESCE(B.TIP_PAGTO, '')) = 'T'
+      )`);
+  return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
+}
+
+async function somaRecebidas(db, inicio, fimExclusivo, ignorarCartao) {
+  const rows = await ler(db, `
+    SELECT COALESCE(SUM(B.VLR_RECEB), 0) AS VALOR
+    FROM TB_CTAREC_BAIXA B
+    LEFT JOIN TB_CONTA_RECEBER C ON C.ID_CTAREC = B.ID_CTAREC
+    WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fimExclusivo}'
+      AND TRIM(COALESCE(B.TIP_RECBTO, '')) = 'T'
+      ${filtroCartao('C.HISTORICO', ignorarCartao)}`);
+  return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
+}
+
+async function somaPagas(db, inicio, fimExclusivo) {
+  const rows = await ler(db, `
+    SELECT COALESCE(SUM(VLR_PAGO), 0) AS VALOR
+    FROM TB_CTAPAG_BAIXA
+    WHERE DT_BAIXA >= '${inicio}' AND DT_BAIXA < '${fimExclusivo}'
+      AND TRIM(COALESCE(TIP_PAGTO, '')) = 'T'`);
+  return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
+}
+
+async function consultarFinanceiro(db, filtros, ignorarCartao) {
+  const temColuna = await temColunaRestante(db);
+  const dia = filtros.fim;
+  const diaFim = addDias(dia, 1);
+  const mes = intervaloMes(dia);
+  const pagarDia = await somaPagarAberto(db, dia, diaFim);
+  const pagarMes = await somaPagarAberto(db, mes.inicio, mes.fimExclusivo);
+  const receberDia = await somaReceberAberto(db, dia, diaFim, ignorarCartao, temColuna);
+  const receberMes = await somaReceberAberto(db, mes.inicio, mes.fimExclusivo, ignorarCartao, temColuna);
+  const pagasDia = await somaPagas(db, dia, diaFim);
+  const pagasMes = await somaPagas(db, mes.inicio, mes.fimExclusivo);
+  const recebidasDia = await somaRecebidas(db, dia, diaFim, ignorarCartao);
+  const recebidasMes = await somaRecebidas(db, mes.inicio, mes.fimExclusivo, ignorarCartao);
+  const pagar = await ler(db, `
+    SELECT FIRST 200 TRIM(CAST(C.DOCUMENTO AS VARCHAR(40))) AS DOCUMENTO,
+           TRIM(COALESCE(C.HISTORICO, '')) AS HISTORICO,
+           C.DT_VENCTO, C.VLR_CTAPAG AS VALOR,
+           CASE WHEN EXISTS (
+             SELECT 1 FROM TB_CTAPAG_BAIXA B
+             WHERE B.ID_CTAPAG = C.ID_CTAPAG AND TRIM(COALESCE(B.TIP_PAGTO, '')) = 'T'
+           ) THEN 'Paga' ELSE 'Em aberto' END AS SITUACAO
+    FROM TB_CONTA_PAGAR C
+    WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
+      AND TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'C'
+    ORDER BY C.DT_VENCTO, C.ID_CTAPAG`);
+  const saldoReceber = sqlRestante('C', temColuna);
+  const receber = await ler(db, `
+    SELECT FIRST 200 TRIM(CAST(C.DOCUMENTO AS VARCHAR(40))) AS DOCUMENTO,
+           TRIM(COALESCE(C.HISTORICO, '')) AS HISTORICO,
+           C.DT_VENCTO, C.VLR_CTAREC AS VALOR,
+           CASE WHEN ${saldoReceber} > 0.009 THEN 'Em aberto' ELSE 'Recebida' END AS SITUACAO
+    FROM TB_CONTA_RECEBER C
+    WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
+      AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
+      ${filtroCartao('C.HISTORICO', ignorarCartao)}
+    ORDER BY C.DT_VENCTO, C.ID_CTAREC`);
+  const totalPagar = await ler(db, `
+    SELECT COUNT(*) AS N FROM TB_CONTA_PAGAR
+    WHERE DT_VENCTO >= '${filtros.inicio}' AND DT_VENCTO < '${filtros.fimExclusivo}'
+      AND TRIM(COALESCE(TIP_CTAPAG, '')) <> 'C'`);
+  const totalReceber = await ler(db, `
+    SELECT COUNT(*) AS N FROM TB_CONTA_RECEBER
+    WHERE DT_VENCTO >= '${filtros.inicio}' AND DT_VENCTO < '${filtros.fimExclusivo}'
+      AND TRIM(COALESCE(TIP_CTAREC, '')) <> 'C'
+      ${filtroCartao('HISTORICO', ignorarCartao)}`);
+  return {
+    referenciaDia: dataBr(dia),
+    referenciaMes: mes.rotulo,
+    ignorarCartao: !!ignorarCartao,
+    pagarDia: reais(pagarDia),
+    pagarMes: reais(pagarMes),
+    receberDia: reais(receberDia),
+    receberMes: reais(receberMes),
+    pagasDia: reais(pagasDia),
+    pagasMes: reais(pagasMes),
+    recebidasDia: reais(recebidasDia),
+    recebidasMes: reais(recebidasMes),
+    contasPagar: (pagar || []).map(linhaConta),
+    contasReceber: (receber || []).map(linhaConta),
+    contasPagarTotal: totalPagar && totalPagar[0] ? inteiro(totalPagar[0].N) : 0,
+    contasReceberTotal: totalReceber && totalReceber[0] ? inteiro(totalReceber[0].N) : 0,
+  };
 }
 
 async function detalharDashboard(db, opcoes = {}) {
@@ -723,6 +910,12 @@ function cardsVenda(t) {
   const notas = t.vendas.notas;
   return {
     totalVendido: reais(t.totalVendido),
+    comFrete: reais(t.totalComFrete),
+    comFreteFiscais: reais(t.vendas.freteFiscal),
+    comFreteGerenciais: reais(t.vendas.freteGerencial),
+    comFreteManage: reais(t.vendas.freteManage),
+    comFreteNfce: reais(t.vendas.freteNfce),
+    comFreteNfe: reais(t.vendas.freteNfe),
     vendasFiscais: reais(t.vendas.fiscal),
     vendasGerenciais: reais(t.vendas.gerencial),
     vendasManage: reais(t.vendas.manage),
@@ -833,12 +1026,32 @@ async function consultarDashboard(db, opcoes = {}) {
   if (usaManage) abas.push('manage');
   if (usaGr || !usaManage) abas.push('vendas');
   abas.push('fiscal');
+  abas.push('financeiro');
   const pedida = String(opcoes.aba || '').trim().toLowerCase();
   const aba = abas.includes(pedida) ? pedida : (usaManage ? 'manage' : 'vendas');
+  const ignorarCartao = Number((opcoes.appCfg || loadAppConfig()).ignorar_receber_cartao) === 1;
+  if (aba === 'financeiro') {
+    const fin = await consultarFinanceiro(db, filtros, ignorarCartao);
+    return {
+      perfil,
+      usaManage,
+      usaGr,
+      aba,
+      abas,
+      fiscal: false,
+      periodo: { inicio: filtros.inicio, fim: filtros.fim },
+      ano: String(filtros.inicio || '').slice(0, 4),
+      ...fin,
+      vazio: false,
+      mensagem: '',
+    };
+  }
   const filtrosAba = filtrosDaAba(filtros, aba, usaManage, usaGr);
   const t = await totais(db, usaManage, filtrosAba, aba === 'fiscal' ? 'vendas' : 'ambos');
   let vendidoDia = 0;
   let vendidoMes = 0;
+  let vendidoDiaComFrete = 0;
+  let vendidoMesComFrete = 0;
   if (aba === 'fiscal' || aba === 'manage') {
     const hoje = isoHoje();
     const diaFiltro = { ...filtrosAba, inicio: hoje, fim: hoje, fimExclusivo: addDias(hoje, 1) };
@@ -847,13 +1060,15 @@ async function consultarDashboard(db, opcoes = {}) {
     const mes = await totais(db, usaManage, mesFiltro, 'vendas');
     vendidoDia = reais(dia.totalVendido);
     vendidoMes = reais(mes.totalVendido);
+    vendidoDiaComFrete = reais(dia.totalComFrete);
+    vendidoMesComFrete = reais(mes.totalComFrete);
   }
   const gruposVenda = await porGrupo(db, usaManage, filtrosAba, 'vendas');
   const gruposCompra = await porGrupo(db, usaManage, filtrosAba, 'compras');
   const tipos = await porTipo(db, usaManage, filtrosAba);
   const pagamento = await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
   const serieMensal = aba === 'manage'
-    ? await porMesFinanceiro(db, filtrosAba)
+    ? await porMesFinanceiro(db, filtrosAba, ignorarCartao)
     : await porMes(db, usaManage, filtrosAba);
   const vazio = t.totalVendido === 0 && (aba === 'fiscal' || t.totalComprado === 0);
   return {
@@ -868,6 +1083,8 @@ async function consultarDashboard(db, opcoes = {}) {
     ...cardsVenda(t),
     vendidoDia,
     vendidoMes,
+    vendidoDiaComFrete,
+    vendidoMesComFrete,
     porGrupoVenda: gruposVenda,
     porGrupoCompra: gruposCompra,
     porTipo: tipos.itens,

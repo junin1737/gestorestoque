@@ -2316,6 +2316,9 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 .fin-card span { color: var(--muted); font-size: var(--fs-sm); }
 .fin-card strong { font-size: 1.35rem; letter-spacing: -0.02em; }
 .fin-card small { color: var(--muted); font-size: var(--fs-xs); }
+.fin-card .fin-extra { color: var(--primary-2); font-weight: 700; }
+.pref-check { display: flex; align-items: center; gap: 0.55rem; font-weight: 650; margin: 0; }
+.pref-check input { width: auto; min-height: 0; }
 .fin-box {
   background: color-mix(in srgb, var(--primary-2) 8%, var(--bg-elev));
   border: 1px solid color-mix(in srgb, var(--primary-2) 22%, var(--border));

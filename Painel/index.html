@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=246" />
+  <link rel="stylesheet" href="styles.css?v=247" />
   <link rel="stylesheet" href="importacao-nfe.css?v=244" />
 </head>
 <body>
@@ -642,6 +642,14 @@
                 </select>
               </label>
             </div>
+            <div class="pref-card">
+              <h3>Dashboard</h3>
+              <label class="pref-check">
+                <input type="checkbox" id="cfg-ignorar-cartao" />
+                <span>Desconsiderar contas a receber com cartão no histórico</span>
+              </label>
+              <p class="hint">Marcado, essas contas saem da aba Financeiro e do recebido do gráfico.</p>
+            </div>
           </div>
           <div id="cfg-tab-tributos" class="cfg-tab" hidden>
             <div id="cfg-tributos-host"></div>
@@ -825,7 +833,7 @@
   <script src="compras.js?v=240"></script>
   <script src="condicionais.js?v=240"></script>
   <script src="contador.js?v=240"></script>
-  <script src="dashboard.js?v=247"></script>
-  <script src="app.js?v=244"></script>
+  <script src="dashboard.js?v=249"></script>
+  <script src="app.js?v=245"></script>
 </body>
 </html>

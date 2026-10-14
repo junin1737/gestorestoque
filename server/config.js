@@ -106,6 +106,7 @@ function defaultAppConfig() {
     password: 'masterkey',
     sistema: 'clipp', // clipp | managepro | ambos
     usa_manage: 0, // 1 inclui TB_NFVENDA_2/_3 e TB_NFCOMPRA_2 nos dashboards
+    ignorar_receber_cartao: 0, // 1 tira do dashboard a conta a receber com cartão no histórico
     tema: 'claro', // claro | escuro | empresa
     fiscal: {
       tipo: 'a1',
@@ -323,6 +324,10 @@ function lerUsaManage(cfg) {
   return Number(cfg && cfg.usa_manage) === 1 ? 1 : 0;
 }
 
+function lerIgnorarReceberCartao(cfg) {
+  return Number(cfg && cfg.ignorar_receber_cartao) === 1 ? 1 : 0;
+}
+
 function usaManageDoPedido(current, body) {
   if (!body || body.usa_manage === undefined) return lerUsaManage(current);
   return body.usa_manage === true || Number(body.usa_manage) === 1 ? 1 : 0;
@@ -347,6 +352,7 @@ module.exports = {
   saveUsersConfig,
   isMtEntradas,
   lerUsaManage,
+  lerIgnorarReceberCartao,
   usaManageDoPedido,
   CHAVES_DASHBOARD,
   PERFIL_DASHBOARD,

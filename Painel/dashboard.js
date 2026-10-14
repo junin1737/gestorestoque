@@ -113,8 +113,13 @@ function queryDash(extra) {
   return params;
 }
 
-function card(titulo, valor, detalhe) {
-  return `<article class="fin-card"><span>${esc(titulo)}</span><strong>${esc(valor)}</strong><small>${esc(detalhe || '')}</small></article>`;
+function card(titulo, valor, detalhe, extra) {
+  return `<article class="fin-card"><span>${esc(titulo)}</span><strong>${esc(valor)}</strong><small>${esc(detalhe || '')}</small>${extra ? `<small class="fin-extra">${esc(extra)}</small>` : ''}</article>`;
+}
+
+function linhaFrete(valor) {
+  if (valor == null || valor === '') return '';
+  return `valor + frete ${brl(valor)}`;
 }
 
 function htmlMeses(dados) {
@@ -165,8 +170,10 @@ function tabelaGrupo(linhas, lado) {
 function htmlFiltros(perfil) {
   if (perfil === 'MT_ENTRADAS') return '';
   const p = dashFiltros.inicio ? dashFiltros : (perfil === 'CONTADOR_ACESSA' ? periodoContador() : periodoPadrao());
-  const extra = perfil === 'PADRAO'
-    ? `<label>Grupo<select data-filtro="grupo"><option value="">Todos</option></select></label>
+  const extra = perfil === 'CONTADOR_ACESSA'
+    ? `<label>NCM<input data-filtro="ncm" placeholder="Código" value="${esc(p.ncm || '')}" /></label>`
+    : (perfil === 'PADRAO' && dashAba !== 'financeiro'
+      ? `<label>Grupo<select data-filtro="grupo"><option value="">Todos</option></select></label>
        <label>Tipo<select data-filtro="tipo">
          <option value="">Todos</option>
          <option value="produto" ${p.tipoItem === 'produto' ? 'selected' : ''}>Produto</option>
@@ -179,7 +186,7 @@ function htmlFiltros(perfil) {
          <option value="65" ${p.modelo === '65' ? 'selected' : ''}>65</option>
          <option value="GR" ${p.modelo === 'GR' ? 'selected' : ''}>GR</option>
        </select></label>`
-    : `<label>NCM<input data-filtro="ncm" placeholder="Código" value="${esc(p.ncm || '')}" /></label>`;
+      : '');
   const exportar = perfil === 'CONTADOR_ACESSA'
     ? `<button type="button" class="btn" data-exportar="pdf">PDF</button><button type="button" class="btn" data-exportar="xlsx">Excel</button>`
     : '';
@@ -201,9 +208,42 @@ function htmlAbas(dados) {
     manage: 'Manage',
     vendas: 'Vendas',
     fiscal: 'NFe+NFCe',
+    financeiro: 'Financeiro',
   };
   return `<div class="fin-abas" role="tablist">${abas.map((aba) => `
     <button type="button" class="tab ${dados.aba === aba ? 'active' : ''}" data-aba="${aba}">${rotulo[aba] || aba}</button>`).join('')}</div>`;
+}
+
+function tabelaContas(linhas, vazio) {
+  const corpo = (linhas || []).map((r) => `
+    <tr>
+      <td>${esc(r.vencimento ? r.vencimento.split('-').reverse().join('/') : '')}</td>
+      <td>${esc(r.documento)}</td>
+      <td>${esc(r.historico)}</td>
+      <td>${brl(r.valor)}</td>
+      <td>${esc(r.situacao)}</td>
+    </tr>`).join('');
+  return `<table class="fin-table"><thead><tr><th>Vencimento</th><th>Documento</th><th>Histórico</th><th>Valor</th><th>Situação</th></tr></thead><tbody>${corpo || `<tr><td colspan="5">${esc(vazio)}</td></tr>`}</tbody></table>`;
+}
+
+function htmlFinanceiro(dados) {
+  const aviso = `${dados.ignorarCartao ? '<p class="hint">Contas a receber com cartão no histórico estão fora desta aba.</p>' : ''}
+  <p class="hint">O dia e o mês dos cards seguem a data Até. A lista usa o período De–Até.</p>`;
+  const corte = (lista, total) => (total > (lista || []).length ? `<p class="hint">Mostrando ${(lista || []).length} de ${total}.</p>` : '');
+  return `${htmlAbas(dados)}
+  ${aviso}
+  <div class="fin-cards">
+    ${card('A pagar no dia', brl(dados.pagarDia), dados.referenciaDia || '')}
+    ${card('A pagar no mês', brl(dados.pagarMes), dados.referenciaMes || '')}
+    ${card('A receber no dia', brl(dados.receberDia), dados.referenciaDia || '')}
+    ${card('A receber no mês', brl(dados.receberMes), dados.referenciaMes || '')}
+    ${card('Pagas no dia', brl(dados.pagasDia), dados.referenciaDia || '')}
+    ${card('Pagas no mês', brl(dados.pagasMes), dados.referenciaMes || '')}
+    ${card('Recebidas no dia', brl(dados.recebidasDia), dados.referenciaDia || '')}
+    ${card('Recebidas no mês', brl(dados.recebidasMes), dados.referenciaMes || '')}
+  </div>
+  <section class="fin-box"><h2>Contas a pagar</h2>${tabelaContas(dados.contasPagar, 'Nenhuma conta a pagar no período')}${corte(dados.contasPagar, dados.contasPagarTotal)}</section>
+  <section class="fin-box"><h2>Contas a receber</h2>${tabelaContas(dados.contasReceber, 'Nenhuma conta a receber no período')}${corte(dados.contasReceber, dados.contasReceberTotal)}</section>`;
 }
 
 function htmlConteudo(dados) {
@@ -211,15 +251,16 @@ function htmlConteudo(dados) {
   if (dados.aba === 'fiscal') {
     return `${htmlAbas(dados)}
     <div class="fin-cards">
-      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
-      ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje')}
-      ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual')}
-      ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65')}
-      ${card('NF-e', brl(dados.vendasNfe), 'modelo 55')}
+      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete))}
+      ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', linhaFrete(dados.vendidoDiaComFrete))}
+      ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', linhaFrete(dados.vendidoMesComFrete))}
+      ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65', linhaFrete(dados.comFreteNfce))}
+      ${card('NF-e', brl(dados.vendasNfe), 'modelo 55', linhaFrete(dados.comFreteNfe))}
     </div>
     ${htmlMeses(dados)}
     ${htmlRecortes(dados)}`;
   }
+  if (dados.aba === 'financeiro') return htmlFinanceiro(dados);
   if (dados.vazio) return `${htmlAbas(dados)}<p class="fin-vazio">Nenhuma movimentação no período</p>`;
   if (dados.perfil === 'MT_ENTRADAS') {
     return `<div class="fin-cards">
@@ -240,16 +281,16 @@ function htmlConteudo(dados) {
     </section>`;
   }
   const separados = dados.aba === 'manage'
-    ? `${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
-       ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje')}
-       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual')}`
+    ? `${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete))}
+       ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', linhaFrete(dados.vendidoDiaComFrete))}
+       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', linhaFrete(dados.vendidoMesComFrete))}`
     : dados.usaGr
-      ? `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
-         ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas')}
-         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'fora da conversão')}`
-      : `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
-         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'modelos 55 e 65')}
-         ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR')}`;
+      ? `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete))}
+         ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas', linhaFrete(dados.comFreteGerenciais))}
+         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'fora da conversão', linhaFrete(dados.comFreteFiscais))}`
+      : `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete))}
+         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'modelos 55 e 65', linhaFrete(dados.comFreteFiscais))}
+         ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR', linhaFrete(dados.comFreteGerenciais))}`;
   return `${htmlAbas(dados)}
   <div class="fin-cards">
     ${separados}
@@ -398,4 +439,9 @@ function abrirDash(origem) {
   return true;
 }
 
-window.Dashboard = { mostrarMenuDash, mostrarAtalhos, abrirDash, dashPerfis };
+function limparCacheDash() {
+  dashCacheChave = '';
+  dashCacheHtml = '';
+}
+
+window.Dashboard = { mostrarMenuDash, mostrarAtalhos, abrirDash, dashPerfis, limparCacheDash };

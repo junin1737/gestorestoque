@@ -887,6 +887,8 @@ async function bootstrap() {
   document.body.classList.toggle('gestor-demo', !!cfgRes.demo);
   applyTheme(state.config.tema);
   if ($('#tema-rapido')) $('#tema-rapido').value = state.config.tema || 'claro';
+  const chkCartao = $('#cfg-ignorar-cartao');
+  if (chkCartao) chkCartao.checked = Number(state.config.ignorarReceberCartao) === 1;
 
   const lic = await api('/licenca');
   if (lic.ok && lic.licenca && !lic.licenca.liberado) mostrarBloqueioLicenca(lic.licenca);
@@ -1246,6 +1248,17 @@ $('#btn-menu-mobile')?.addEventListener('click', () => {
   setSidebarOpen(!document.body.classList.contains('sidebar-open'));
 });
 $('#sidebar-backdrop')?.addEventListener('click', () => setSidebarOpen(false));
+
+$('#cfg-ignorar-cartao')?.addEventListener('change', async (e) => {
+  const ignorarReceberCartao = e.target.checked ? 1 : 0;
+  const res = await api('/dashboard/opcoes', { method: 'POST', body: { ignorarReceberCartao } });
+  if (!res.ok) {
+    e.target.checked = !e.target.checked;
+    return;
+  }
+  state.config.ignorarReceberCartao = ignorarReceberCartao;
+  window.Dashboard?.limparCacheDash?.();
+});
 
 $('#tema-rapido').addEventListener('change', async (e) => {
   const tema = e.target.value;

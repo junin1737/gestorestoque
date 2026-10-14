@@ -10,6 +10,7 @@ const {
   fullPermissoes,
   isMtEntradas,
   lerUsaManage,
+  lerIgnorarReceberCartao,
   usaManageDoPedido,
   CHAVES_DASHBOARD,
   comDashboards,
@@ -182,10 +183,18 @@ router.get('/config', (req, res) => {
       sistema: cfg.sistema,
       tema: cfg.tema,
       usa_manage: lerUsaManage(cfg),
+      ignorarReceberCartao: lerIgnorarReceberCartao(cfg),
     },
     modulos: MODULOS,
     demo: DEMO_ATIVO,
   });
+});
+
+router.post('/dashboard/opcoes', (req, res) => {
+  const current = loadAppConfig();
+  const ignorar = req.body?.ignorarReceberCartao === true || Number(req.body?.ignorarReceberCartao) === 1 ? 1 : 0;
+  saveAppConfig({ ...current, ignorar_receber_cartao: ignorar });
+  res.json({ ok: true, ignorarReceberCartao: ignorar });
 });
 
 router.post('/tema', (req, res) => {
