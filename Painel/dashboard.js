@@ -117,6 +117,16 @@ function card(titulo, valor, detalhe) {
   return `<article class="fin-card"><span>${esc(titulo)}</span><strong>${esc(valor)}</strong><small>${esc(detalhe || '')}</small></article>`;
 }
 
+function htmlMeses(dados) {
+  return `<section id="secao-resumo" class="fin-box"><h2>Entradas x saídas <span>${esc(dados.ano || '')}</span></h2>${barras(dados.porMes || [])}</section>`;
+}
+
+function htmlPagamento(dados) {
+  const pags = (dados.porPagamento || []).map((r) => `
+    <div class="fin-pag"><span>${esc(r.forma)}</span><strong>${brl(r.valor)}</strong><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span></div>`).join('');
+  return `<section id="secao-pagto" class="fin-box"><h2>Vendas por forma de pagamento</h2>${pags || '<p class="hint">Nenhuma movimentação no período</p>'}</section>`;
+}
+
 function barras(serie) {
   const lista = serie && serie.length ? serie : [];
   const max = Math.max(1, ...lista.map((d) => Math.max(d.vendido, d.comprado, 0)));
@@ -196,7 +206,9 @@ function htmlConteudo(dados) {
       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual')}
       ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65')}
       ${card('NF-e', brl(dados.vendasNfe), 'modelo 55')}
-    </div>`;
+    </div>
+    ${htmlMeses(dados)}
+    ${htmlPagamento(dados)}`;
   }
   if (dados.vazio) return `${htmlAbas(dados)}<p class="fin-vazio">Nenhuma movimentação no período</p>`;
   if (dados.perfil === 'MT_ENTRADAS') {
@@ -218,8 +230,6 @@ function htmlConteudo(dados) {
     </section>`;
   }
   const tipos = (dados.porTipo || []).map((r) => `<tr><td>${esc(r.tipo)}</td><td>${r.itens}</td><td>${r.vendas}</td><td>${brl(r.valor)}</td><td>${esc(r.participacao)}%</td></tr>`).join('');
-  const pags = (dados.porPagamento || []).map((r) => `
-    <div class="fin-pag"><span>${esc(r.forma)}</span><strong>${brl(r.valor)}</strong><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span></div>`).join('');
   const separados = dados.aba === 'manage'
     ? `${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
        ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65')}
@@ -237,13 +247,13 @@ function htmlConteudo(dados) {
     ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`)}
     ${card('Ticket médio', brl(dados.ticketMedio), 'total vendido ÷ notas')}
   </div>
-  <section id="secao-resumo" class="fin-box"><h2>Entradas x saídas <span>${esc(dados.ano || '')}</span></h2>${barras(dados.porMes || [])}</section>
+  ${htmlMeses(dados)}
   <section id="secao-grupo" class="fin-box"><h2>Vendas por grupo</h2>${tabelaGrupo(dados.porGrupoVenda, 'das vendas')}</section>
   <section id="secao-tipo" class="fin-box"><h2>Vendas por tipo de item</h2>
     <table class="fin-table"><thead><tr><th>Tipo</th><th>Itens</th><th>Vendas</th><th>Valor</th><th>%</th></tr></thead><tbody>${tipos || '<tr><td colspan="5">Nenhuma movimentação no período</td></tr>'}</tbody></table>
   </section>
   <section id="secao-compras" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupoCompra, 'das compras')}</section>
-  <section id="secao-pagto" class="fin-box"><h2>Vendas por forma de pagamento</h2>${pags || '<p class="hint">Nenhuma movimentação no período</p>'}</section>`;
+  ${htmlPagamento(dados)}`;
 }
 
 function preencherGrupos(dados) {

@@ -66,29 +66,38 @@ function fontesVendaEscopo(usaManage, filtros) {
   return lista;
 }
 
-function fontesCompra(usaManage) {
-  return usaManage ? FONTES_COMPRA : FONTES_COMPRA.filter((f) => !f.manage);
+function fontesCompra(usaManage, filtros) {
+  const lista = usaManage ? FONTES_COMPRA : FONTES_COMPRA.filter((f) => !f.manage);
+  if (filtros?.escopoCompra === 'manage') return lista.filter((f) => f.manage);
+  if (filtros?.escopoCompra === 'clipp') return lista.filter((f) => !f.manage);
+  return lista;
 }
 
-function joinsValor(fonte) {
-  const partes = [];
-  if (fonte.st) partes.push(`LEFT JOIN ${fonte.st} ST ON ST.${fonte.idItem} = I.${fonte.idItem}`);
-  if (fonte.ipi) partes.push(`LEFT JOIN ${fonte.ipi} IPI ON IPI.${fonte.idItem} = I.${fonte.idItem}`);
-  if (fonte.fcp) partes.push(`LEFT JOIN ${fonte.fcp} FCP ON FCP.${fonte.idItem} = I.${fonte.idItem}`);
-  return partes.join('\n');
+function somaFilha(tabela, coluna, idItem) {
+  return `(SELECT SUM(${coluna}) FROM ${tabela} X WHERE X.${idItem} = I.${idItem})`;
 }
 
 function sqlValor(fonte) {
   let st = '0';
-  if (fonte.st && fonte.stNoItem) st = 'COALESCE(ST.VLR_ST, I.VLR_ST, 0)';
-  else if (fonte.st) st = 'COALESCE(ST.VLR_ST, 0)';
+  if (fonte.st && fonte.stNoItem) st = `COALESCE(${somaFilha(fonte.st, 'X.VLR_ST', fonte.idItem)}, I.VLR_ST, 0)`;
+  else if (fonte.st) st = `COALESCE(${somaFilha(fonte.st, 'X.VLR_ST', fonte.idItem)}, 0)`;
   else if (fonte.stNoItem) st = 'COALESCE(I.VLR_ST, 0)';
   let ipi = '0';
-  if (fonte.ipi && fonte.ipiNoItem) ipi = 'COALESCE(IPI.VLR_IPI, I.VLR_IPI, 0)';
-  else if (fonte.ipi) ipi = 'COALESCE(IPI.VLR_IPI, 0)';
+  if (fonte.ipi && fonte.ipiNoItem) ipi = `COALESCE(${somaFilha(fonte.ipi, 'X.VLR_IPI', fonte.idItem)}, I.VLR_IPI, 0)`;
+  else if (fonte.ipi) ipi = `COALESCE(${somaFilha(fonte.ipi, 'X.VLR_IPI', fonte.idItem)}, 0)`;
   else if (fonte.ipiNoItem) ipi = 'COALESCE(I.VLR_IPI, 0)';
-  const fcp = fonte.fcp ? 'COALESCE(FCP.VLR_FCP_ST, 0)' : '0';
+  const fcp = fonte.fcp ? `COALESCE(${somaFilha(fonte.fcp, 'X.VLR_FCP_ST', fonte.idItem)}, 0)` : '0';
   return `(COALESCE(I.VLR_TOTAL, 0) - COALESCE(I.VLR_DESC, 0) + COALESCE(I.VLR_FRETE, 0) + COALESCE(I.VLR_SEGURO, 0) + COALESCE(I.VLR_DESPESA, 0) + ${st} + ${ipi} + ${fcp})`;
+}
+
+function fonteSemFilhas(fonte) {
+  return { ...fonte, st: null, ipi: null, fcp: null };
+}
+
+async function lerFonte(db, fonte, sqlDe) {
+  const lista = await ler(db, sqlDe(fonte));
+  if (lista || (!fonte.st && !fonte.ipi && !fonte.fcp)) return lista;
+  return ler(db, sqlDe(fonteSemFilhas(fonte)));
 }
 
 function sufixoCfop(col) {
@@ -253,21 +262,19 @@ function bucketModelo(modelo, manage) {
 
 async function somar(db, fonte, filtros, tipo, modo) {
   const classif = sqlClassificacao(fonte, filtros, false);
-  const sql = `
+  return lerFonte(db, fonte, (f) => `
     SELECT TRIM(N.NF_MODELO) AS MODELO,
-           COUNT(DISTINCT N.${fonte.id}) AS NOTAS,
-           SUM(${sqlValor(fonte)}) AS VALOR,
+           COUNT(DISTINCT N.${f.id}) AS NOTAS,
+           SUM(${sqlValor(f)}) AS VALOR,
            SUM(COALESCE(I.QTD_ITEM, 0)) AS QTD,
            COUNT(*) AS ITENS
-    FROM ${fonte.item} I
-    JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-    ${joinsValor(fonte)}
+    FROM ${f.item} I
+    JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
     ${classif.join}
-    WHERE ${predNota(tipo, filtros, fonte)}
+    WHERE ${predNota(tipo, filtros, f)}
       AND ${predItem(modo)}
       ${classif.where}
-    GROUP BY TRIM(N.NF_MODELO)`;
-  return ler(db, sql);
+    GROUP BY TRIM(N.NF_MODELO)`);
 }
 
 async function totais(db, usaManage, filtros, escopo) {
@@ -296,7 +303,7 @@ async function totais(db, usaManage, filtros, escopo) {
   }
 
   if (escopo !== 'vendas') {
-    for (const fonte of fontesCompra(usaManage)) {
+    for (const fonte of fontesCompra(usaManage, filtros)) {
       const positivas = await somar(db, fonte, filtros, 'compra', 'compra');
       if (positivas) {
         for (const r of positivas) {
@@ -328,21 +335,19 @@ function variacao(atual, anterior) {
 
 async function agregarGrupo(db, fonte, filtros, tipo, modo, sinal) {
   const classif = sqlClassificacao(fonte, filtros, true);
-  const sql = `
+  const lista = await lerFonte(db, fonte, (f) => `
     SELECT COALESCE(EST.ID_GRUPO, 0) AS ID_GRUPO,
            COALESCE(TRIM(GRP.DESCRICAO), 'Sem grupo') AS DESCRICAO,
-           SUM(${sqlValor(fonte)}) AS VALOR,
+           SUM(${sqlValor(f)}) AS VALOR,
            SUM(COALESCE(I.QTD_ITEM, 0)) AS QTD,
-           COUNT(DISTINCT N.${fonte.id}) AS NOTAS
-    FROM ${fonte.item} I
-    JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-    ${joinsValor(fonte)}
+           COUNT(DISTINCT N.${f.id}) AS NOTAS
+    FROM ${f.item} I
+    JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
     ${classif.join}
-    WHERE ${predNota(tipo, filtros, fonte)}
+    WHERE ${predNota(tipo, filtros, f)}
       AND ${predItem(modo)}
       ${classif.where}
-    GROUP BY COALESCE(EST.ID_GRUPO, 0), COALESCE(TRIM(GRP.DESCRICAO), 'Sem grupo')`;
-  const lista = await ler(db, sql);
+    GROUP BY COALESCE(EST.ID_GRUPO, 0), COALESCE(TRIM(GRP.DESCRICAO), 'Sem grupo')`);
   return (lista || []).map((r) => ({
     id: inteiro(r.ID_GRUPO),
     descricao: String(r.DESCRICAO || 'Sem grupo').trim() || 'Sem grupo',
@@ -381,11 +386,11 @@ async function porGrupo(db, usaManage, filtros, lado) {
     for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
       listas.push(await agregarGrupo(db, fonte, filtros, 'venda', 'venda', 1));
     }
-    for (const fonte of fontesCompra(usaManage)) {
+    for (const fonte of fontesCompra(usaManage, filtros)) {
       listas.push(await agregarGrupo(db, fonte, filtros, 'compra', 'devolucao_venda', -1));
     }
   } else {
-    for (const fonte of fontesCompra(usaManage)) {
+    for (const fonte of fontesCompra(usaManage, filtros)) {
       listas.push(await agregarGrupo(db, fonte, filtros, 'compra', 'compra', 1));
     }
     for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
@@ -407,21 +412,19 @@ async function porTipo(db, usaManage, filtros) {
   }
   for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     const classif = sqlClassificacao(fonte, filtros, true);
-    const sql = `
+    const lista = await lerFonte(db, fonte, (f) => `
       SELECT ${SQL_TIPO} AS TIPO,
              CAST(N.DT_EMISSAO AS DATE) AS DIA,
-             SUM(${sqlValor(fonte)}) AS VALOR,
+             SUM(${sqlValor(f)}) AS VALOR,
              COUNT(*) AS ITENS,
-             COUNT(DISTINCT N.${fonte.id}) AS NOTAS
-      FROM ${fonte.item} I
-      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-    ${joinsValor(fonte)}
+             COUNT(DISTINCT N.${f.id}) AS NOTAS
+      FROM ${f.item} I
+      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
       ${classif.join}
-      WHERE ${predNota('venda', filtros, fonte)}
+      WHERE ${predNota('venda', filtros, f)}
         AND ${predItem('venda')}
         ${classif.where}
-      GROUP BY ${SQL_TIPO}, CAST(N.DT_EMISSAO AS DATE)`;
-    const lista = await ler(db, sql);
+      GROUP BY ${SQL_TIPO}, CAST(N.DT_EMISSAO AS DATE)`);
     for (const r of lista || []) {
       const tipo = String(r.TIPO || 'outros').trim() || 'outros';
       const valor = centavos(r.VALOR);
@@ -431,21 +434,19 @@ async function porTipo(db, usaManage, filtros) {
       evolucao.set(chave, (evolucao.get(chave) || 0) + valor);
     }
   }
-  for (const fonte of fontesCompra(usaManage)) {
+  for (const fonte of fontesCompra(usaManage, filtros)) {
     const classif = sqlClassificacao(fonte, filtros, true);
-    const sql = `
+    const lista = await lerFonte(db, fonte, (f) => `
       SELECT ${SQL_TIPO} AS TIPO,
-             SUM(${sqlValor(fonte)}) AS VALOR,
+             SUM(${sqlValor(f)}) AS VALOR,
              COUNT(*) AS ITENS
-      FROM ${fonte.item} I
-      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-    ${joinsValor(fonte)}
+      FROM ${f.item} I
+      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
       ${classif.join}
-      WHERE ${predNota('compra', filtros)}
+      WHERE ${predNota('compra', filtros, f)}
         AND ${predItem('devolucao_venda')}
         ${classif.where}
-      GROUP BY ${SQL_TIPO}`;
-    const lista = await ler(db, sql);
+      GROUP BY ${SQL_TIPO}`);
     for (const r of lista || []) somaTipo(String(r.TIPO || 'outros').trim() || 'outros', -centavos(r.VALOR), -inteiro(r.ITENS), 0);
   }
   const rows = [...map.values()];
@@ -477,14 +478,13 @@ async function porNcm(db, usaManage, filtros) {
   }
   async function lado(fonte, tipo, modo, sinal) {
     const classif = sqlClassificacao(fonte, filtros, true);
-    const lista = await ler(db, `
+    const lista = await lerFonte(db, fonte, (f) => `
       SELECT COALESCE(TRIM(PRD.COD_NCM), '') AS NCM,
-             SUM(${sqlValor(fonte)}) AS VALOR
-      FROM ${fonte.item} I
-      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-      ${joinsValor(fonte)}
+             SUM(${sqlValor(f)}) AS VALOR
+      FROM ${f.item} I
+      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
       ${classif.join}
-      WHERE ${predNota(tipo, filtros, fonte)}
+      WHERE ${predNota(tipo, filtros, f)}
         AND ${predItem(modo)}
         ${classif.where}
       GROUP BY COALESCE(TRIM(PRD.COD_NCM), '')`);
@@ -493,7 +493,7 @@ async function porNcm(db, usaManage, filtros) {
   for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     await lado(fonte, 'venda', 'venda', 1);
   }
-  for (const fonte of fontesCompra(usaManage)) {
+  for (const fonte of fontesCompra(usaManage, filtros)) {
     await lado(fonte, 'compra', 'devolucao_venda', -1);
   }
   return [...map.entries()]
@@ -518,16 +518,15 @@ async function porPagamento(db, usaManage, filtros, devolucaoVendaCentavos) {
   }
   for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     const classif = sqlClassificacao(fonte, filtros, false);
-    const notas = await ler(db, `
-      SELECT N.${fonte.id} AS ID, N.ID_FMAPGTO AS FORMA, SUM(${sqlValor(fonte)}) AS VALOR
-      FROM ${fonte.item} I
-      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-    ${joinsValor(fonte)}
+    const notas = await lerFonte(db, fonte, (f) => `
+      SELECT N.${f.id} AS ID, N.ID_FMAPGTO AS FORMA, SUM(${sqlValor(f)}) AS VALOR
+      FROM ${f.item} I
+      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
       ${classif.join}
-      WHERE ${predNota('venda', filtros, fonte)}
+      WHERE ${predNota('venda', filtros, f)}
         AND ${predItem('venda')}
         ${classif.where}
-      GROUP BY N.${fonte.id}, N.ID_FMAPGTO`);
+      GROUP BY N.${f.id}, N.ID_FMAPGTO`);
     if (!notas) continue;
     const detalhe = new Map();
     if (fonte.pagamentoDetalhe) {
@@ -584,13 +583,12 @@ async function porDia(db, usaManage, filtros) {
   async function acumular(fonte, tipo, modo, campo, sinal) {
     const classif = sqlClassificacao(fonte, filtros, false);
     const dataCol = tipo === 'compra' ? 'N.DT_ENTRADA' : 'N.DT_EMISSAO';
-    const lista = await ler(db, `
-      SELECT CAST(${dataCol} AS DATE) AS DIA, SUM(${sqlValor(fonte)}) AS VALOR
-      FROM ${fonte.item} I
-      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-      ${joinsValor(fonte)}
+    const lista = await lerFonte(db, fonte, (f) => `
+      SELECT CAST(${dataCol} AS DATE) AS DIA, SUM(${sqlValor(f)}) AS VALOR
+      FROM ${f.item} I
+      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
       ${classif.join}
-      WHERE ${predNota(tipo, filtros, fonte)}
+      WHERE ${predNota(tipo, filtros, f)}
         AND ${predItem(modo)}
         ${classif.where}
       GROUP BY CAST(${dataCol} AS DATE)`);
@@ -600,7 +598,7 @@ async function porDia(db, usaManage, filtros) {
     await acumular(fonte, 'venda', 'venda', 'vendido', 1);
     await acumular(fonte, 'venda', 'devolucao_compra', 'comprado', -1);
   }
-  for (const fonte of fontesCompra(usaManage)) {
+  for (const fonte of fontesCompra(usaManage, filtros)) {
     await acumular(fonte, 'compra', 'compra', 'comprado', 1);
     await acumular(fonte, 'compra', 'devolucao_venda', 'vendido', -1);
   }
@@ -627,13 +625,12 @@ async function porMes(db, usaManage, filtros) {
   async function acumular(fonte, tipo, modo, campo, sinal) {
     const classif = sqlClassificacao(fonte, filtrosAno, false);
     const dataCol = tipo === 'compra' ? 'N.DT_ENTRADA' : 'N.DT_EMISSAO';
-    const lista = await ler(db, `
-      SELECT EXTRACT(MONTH FROM CAST(${dataCol} AS DATE)) AS MES, SUM(${sqlValor(fonte)}) AS VALOR
-      FROM ${fonte.item} I
-      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-      ${joinsValor(fonte)}
+    const lista = await lerFonte(db, fonte, (f) => `
+      SELECT EXTRACT(MONTH FROM CAST(${dataCol} AS DATE)) AS MES, SUM(${sqlValor(f)}) AS VALOR
+      FROM ${f.item} I
+      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
       ${classif.join}
-      WHERE ${predNota(tipo, filtrosAno, fonte)}
+      WHERE ${predNota(tipo, filtrosAno, f)}
         AND ${predItem(modo)}
         ${classif.where}
       GROUP BY EXTRACT(MONTH FROM CAST(${dataCol} AS DATE))`);
@@ -646,7 +643,7 @@ async function porMes(db, usaManage, filtros) {
     await acumular(fonte, 'venda', 'venda', 'vendido', 1);
     await acumular(fonte, 'venda', 'devolucao_compra', 'comprado', -1);
   }
-  for (const fonte of fontesCompra(usaManage)) {
+  for (const fonte of fontesCompra(usaManage, filtros)) {
     await acumular(fonte, 'compra', 'compra', 'comprado', 1);
     await acumular(fonte, 'compra', 'devolucao_venda', 'vendido', -1);
   }
@@ -662,16 +659,15 @@ async function detalharDashboard(db, opcoes = {}) {
   async function lerLado(fonte, tipo, modo, natureza, sinal) {
     const classif = sqlClassificacao(fonte, filtros, true);
     const dataCol = tipo === 'compra' ? 'N.DT_ENTRADA' : 'N.DT_EMISSAO';
-    const lista = await ler(db, `
+    const lista = await lerFonte(db, fonte, (f) => `
       SELECT N.NF_NUMERO AS NOTA, ${dataCol} AS DATA, I.NUM_ITEM AS ITEM,
              COALESCE(TRIM(PRD.COD_NCM), '') AS NCM,
              COALESCE(I.QTD_ITEM, 0) AS QTD,
-             ${sqlValor(fonte)} AS VALOR
-      FROM ${fonte.item} I
-      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
-      ${joinsValor(fonte)}
+             ${sqlValor(f)} AS VALOR
+      FROM ${f.item} I
+      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
       ${classif.join}
-      WHERE ${predNota(tipo, filtros, fonte)}
+      WHERE ${predNota(tipo, filtros, f)}
         AND ${predItem(modo)}
         ${classif.where}`);
     for (const r of lista || []) {
@@ -689,7 +685,7 @@ async function detalharDashboard(db, opcoes = {}) {
   for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     await lerLado(fonte, 'venda', 'venda', 'Saída', 1);
   }
-  for (const fonte of fontesCompra(usaManage)) {
+  for (const fonte of fontesCompra(usaManage, filtros)) {
     await lerLado(fonte, 'compra', 'compra', 'Entrada', 1);
     await lerLado(fonte, 'compra', 'devolucao_venda', 'Devolução de venda', -1);
   }
@@ -829,8 +825,8 @@ async function consultarDashboard(db, opcoes = {}) {
   const gruposVenda = aba === 'fiscal' ? [] : await porGrupo(db, usaManage, filtrosAba, 'vendas');
   const gruposCompra = aba === 'fiscal' ? [] : await porGrupo(db, usaManage, filtrosAba, 'compras');
   const tipos = aba === 'fiscal' ? { itens: [], evolucao: [] } : await porTipo(db, usaManage, filtrosAba);
-  const pagamento = aba === 'fiscal' ? [] : await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
-  const serieMensal = aba === 'fiscal' ? [] : await porMes(db, usaManage, filtrosAba);
+  const pagamento = await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
+  const serieMensal = await porMes(db, usaManage, filtrosAba);
   const vazio = t.totalVendido === 0 && (aba === 'fiscal' || t.totalComprado === 0);
   return {
     perfil,
@@ -863,31 +859,42 @@ async function empresaUsaGr(db) {
 }
 
 function filtrosDaAba(filtros, aba, usaManage, usaGr) {
+  const modeloEscolhido = filtros.modelosVenda && filtros.modelosVenda.length === 1 ? filtros.modelosVenda : null;
   if (aba === 'manage') {
     return {
       ...filtros,
       escopoVenda: 'manage',
+      escopoCompra: 'manage',
       excluirConvertidas: false,
-      modelosVenda: ['55', '65'],
+      modelosVenda: modeloEscolhido,
+      modelosCompra: modeloEscolhido || filtros.modelosCompra,
     };
   }
   if (aba === 'fiscal') {
     return {
       ...filtros,
       escopoVenda: 'clipp',
+      escopoCompra: 'clipp',
       excluirConvertidas: false,
       modelosVenda: MODELOS_FISCAIS,
+      modelosCompra: MODELOS_FISCAIS,
     };
   }
   if (usaGr) {
     return {
       ...filtros,
       escopoVenda: 'clipp',
+      escopoCompra: 'clipp',
       excluirConvertidas: true,
       modelosVenda: filtros.modelosVenda,
     };
   }
-  return { ...filtros, escopoVenda: usaManage ? '' : 'clipp', excluirConvertidas: false };
+  return {
+    ...filtros,
+    escopoVenda: usaManage ? '' : 'clipp',
+    escopoCompra: usaManage ? '' : 'clipp',
+    excluirConvertidas: false,
+  };
 }
 
 module.exports = {
