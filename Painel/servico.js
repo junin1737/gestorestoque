@@ -209,6 +209,8 @@ function fillBanco(cfg) {
   $('#cfg-host').value = cfg.host || '127.0.0.1';
   $('#cfg-port').value = cfg.port || 3050;
   $('#cfg-sistema').value = cfg.sistema || 'clipp';
+  const usaManage = $('#cfg-usa-manage');
+  if (usaManage) usaManage.checked = Number(cfg.usa_manage) === 1;
 }
 
 async function loadBanco() {
@@ -284,6 +286,7 @@ function readBanco() {
     user: 'SYSDBA',
     password: 'masterkey',
     sistema: $('#cfg-sistema').value,
+    usa_manage: $('#cfg-usa-manage')?.checked ? 1 : 0,
   };
 }
 

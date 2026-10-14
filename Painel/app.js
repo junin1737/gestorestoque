@@ -620,6 +620,9 @@ function setServiceStatus(online, detail) {
 function can(modulo, acao) {
   const u = state.usuario;
   if (!u) return false;
+  if (String(modulo || '').startsWith('dashboard_')) {
+    return !!u.permissoes?.[modulo]?.acesso;
+  }
   if (u.supervisor) return true;
   const p = (u.permissoes && u.permissoes[modulo]) || {};
   if (acao === 'acesso') return !!p.acesso;
@@ -1141,6 +1144,7 @@ function enterApp() {
   const showEmp = !!state.usuario?.mtEntradas;
   if ($('#nav-empresas')) $('#nav-empresas').hidden = !showEmp;
   if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = !showEmp;
+  if (window.Dashboard) Dashboard.mostrarMenuDash();
   if (state.usuario?.contador) {
     document.querySelectorAll('.nav-btn, #mobile-nav [data-page], #mais-sheet [data-page]').forEach((btn) => {
       btn.hidden = btn.dataset.page !== 'contador';
@@ -1194,6 +1198,7 @@ $('#mais-sheet-back')?.addEventListener('click', () => setMaisOpen(false));
 $('#mais-sheet')?.querySelectorAll('[data-page]').forEach((btn) => {
   btn.addEventListener('click', async () => {
     setMaisOpen(false);
+    if (btn.dataset.perfil) state.dashAbertura = { perfil: btn.dataset.perfil, secao: btn.dataset.secao || 'resumo' };
     await showPage(btn.dataset.page);
   });
 });
@@ -1246,8 +1251,19 @@ $('#btn-empresas-atualizar')?.addEventListener('click', () => loadEmpresas());
 initUiScale();
 
 function setNavActive(page) {
-  $$('.nav-btn').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
-  $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page));
+  const atual = state.dashAtual;
+  $$('.nav-btn').forEach((b) => {
+    let on = b.dataset.page === page;
+    if (page === 'dashboard') {
+      if (b.dataset.perfil) {
+        on = !!atual && b.dataset.perfil === atual.perfil && (b.dataset.secao || 'resumo') === (atual.secao || 'resumo');
+      } else {
+        on = !atual;
+      }
+    }
+    b.classList.toggle('active', on);
+  });
+  $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page && !atual));
   const mais = $('#btn-mais-mobile');
   if (mais) {
     mais.classList.toggle('active', ['compras', 'condicionais', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
@@ -1257,6 +1273,8 @@ function setNavActive(page) {
 $$('.nav-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
     document.body.classList.remove('sidebar-open');
+    if (btn.dataset.perfil) state.dashAbertura = { perfil: btn.dataset.perfil, secao: btn.dataset.secao || 'resumo' };
+    else if (btn.dataset.page === 'dashboard') state.dashInicio = true;
     await showPage(btn.dataset.page);
   });
 });
@@ -1328,6 +1346,23 @@ async function showPage(page) {
   }
   if (state.usuario?.contador && page !== 'contador') page = 'contador';
 
+  if (page === 'dashboard' && state.dashInicio) {
+    state.dashInicio = false;
+    state.dashAtual = null;
+    state.dashAbertura = null;
+  } else if (page === 'dashboard' && !state.usuario?.contador && window.Dashboard?.dashPerfis().length) {
+    const lista = Dashboard.dashPerfis();
+    const pedido = state.dashAbertura;
+    const alvo = pedido && lista.includes(pedido.perfil)
+      ? pedido
+      : (state.dashAtual && lista.includes(state.dashAtual.perfil) ? state.dashAtual : { perfil: lista[0], secao: 'resumo' });
+    state.dashAtual = { perfil: alvo.perfil, secao: alvo.secao || 'resumo' };
+    state.dashAbertura = alvo;
+  } else if (page === 'dashboard') {
+    state.dashAtual = null;
+    state.dashAbertura = null;
+  }
+
   const saiaCompras = $('#page-compras') && !$('#page-compras').hidden && page !== 'compras';
   if (saiaCompras) window.Compras?.onPageLeave?.();
 
@@ -1346,8 +1381,14 @@ async function showPage(page) {
   if (estActions) estActions.hidden = page !== 'estoque';
 
   if (page === 'dashboard') {
-    $('#page-title').textContent = 'Início';
-    $('#page-sub').textContent = 'Escolha um módulo';
+    if (state.dashAtual && window.Dashboard) {
+      Dashboard.abrirDash(state.dashAtual);
+      state.dashAbertura = null;
+    } else {
+      if (window.Dashboard) Dashboard.mostrarAtalhos(true);
+      $('#page-title').textContent = 'Início';
+      $('#page-sub').textContent = 'Escolha um módulo';
+    }
   } else if (page === 'contador') {
     $('#page-title').textContent = 'Alteração em massa';
     $('#page-sub').textContent = state.usuario?.contador
@@ -2336,6 +2377,24 @@ function renderUsuarios() {
             <option value="false" ${!u.permissoes?.massa?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        <label>Dashboard
+          <select data-perm="dashboard_padrao.acesso">
+            <option value="true" ${u.permissoes?.dashboard_padrao?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.dashboard_padrao?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
+        <label>Dashboard do contador
+          <select data-perm="dashboard_contador.acesso">
+            <option value="true" ${u.permissoes?.dashboard_contador?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.dashboard_contador?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
+        <label>Dashboard de entradas
+          <select data-perm="dashboard_entradas.acesso">
+            <option value="true" ${u.permissoes?.dashboard_entradas?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.dashboard_entradas?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
         <label>CPF/CNPJ do contador
           <input data-field="documento" value="${escapeAttr(u.documento || '')}" inputmode="numeric" placeholder="Comparado com o painel" ${u.supervisor || u.mtEntradas ? 'disabled' : ''} />
         </label>
@@ -2406,6 +2465,15 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         },
         massa: {
           acesso: $('[data-perm="massa.acesso"]', card)?.value === 'true',
+        },
+        dashboard_padrao: {
+          acesso: $('[data-perm="dashboard_padrao.acesso"]', card)?.value === 'true',
+        },
+        dashboard_contador: {
+          acesso: $('[data-perm="dashboard_contador.acesso"]', card)?.value === 'true',
+        },
+        dashboard_entradas: {
+          acesso: $('[data-perm="dashboard_entradas.acesso"]', card)?.value === 'true',
         },
       },
       documento: String($('[data-field="documento"]', card)?.value || '').replace(/\D/g, ''),

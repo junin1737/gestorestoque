@@ -1,0 +1,344 @@
+'use strict';
+
+const PERFIS_DASH = [
+  { chave: 'dashboard_entradas', perfil: 'MT_ENTRADAS', titulo: 'Dashboard de entradas' },
+  { chave: 'dashboard_contador', perfil: 'CONTADOR_ACESSA', titulo: 'Dashboard do contador' },
+  { chave: 'dashboard_padrao', perfil: 'PADRAO', titulo: 'Dashboard' },
+];
+
+let dashPerfil = '';
+let dashSecao = 'resumo';
+let dashGeracao = 0;
+let dashCacheChave = '';
+let dashCacheHtml = '';
+let dashFiltros = {};
+
+function dashPerfis() {
+  const p = state.usuario?.permissoes || {};
+  return PERFIS_DASH.filter((item) => p[item.chave]?.acesso === true).map((item) => item.perfil);
+}
+
+function dashTitulo(perfil) {
+  return PERFIS_DASH.find((item) => item.perfil === perfil)?.titulo || 'Dashboard';
+}
+
+function isoLocal(data) {
+  const d = data || new Date();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const dia = String(d.getDate()).padStart(2, '0');
+  return `${d.getFullYear()}-${m}-${dia}`;
+}
+
+function periodoPadrao() {
+  const hoje = new Date();
+  return { inicio: isoLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), fim: isoLocal(hoje) };
+}
+
+function periodoContador() {
+  const hoje = new Date();
+  const ini = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
+  const fim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
+  return { inicio: isoLocal(ini), fim: isoLocal(fim) };
+}
+
+function brl(valor) {
+  return Number(valor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+}
+
+function esc(valor) {
+  return String(valor ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
+
+function mostrarMenuDash() {
+  const tem = {
+    PADRAO: dashPerfis().includes('PADRAO'),
+    CONTADOR_ACESSA: dashPerfis().includes('CONTADOR_ACESSA'),
+    MT_ENTRADAS: dashPerfis().includes('MT_ENTRADAS'),
+  };
+  const mapa = [
+    ['nav-dash-padrao', tem.PADRAO],
+    ['nav-dash-grupo', tem.PADRAO],
+    ['nav-dash-tipo', tem.PADRAO],
+    ['nav-dash-compras', tem.PADRAO],
+    ['nav-dash-contador', tem.CONTADOR_ACESSA],
+    ['nav-dash-ncm', tem.CONTADOR_ACESSA],
+    ['nav-dash-entradas', tem.MT_ENTRADAS],
+    ['nav-dash-padrao-mobile', tem.PADRAO],
+    ['nav-dash-contador-mobile', tem.CONTADOR_ACESSA],
+    ['nav-dash-entradas-mobile', tem.MT_ENTRADAS],
+  ];
+  mapa.forEach(([id, visivel]) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !visivel;
+  });
+}
+
+function mostrarAtalhos(mostrar) {
+  const atalhos = document.getElementById('dash-atalhos');
+  const painel = document.getElementById('dash-financeiro');
+  if (atalhos) atalhos.hidden = !mostrar;
+  if (painel) painel.hidden = mostrar;
+}
+
+function lerFiltros() {
+  if (dashPerfil === 'MT_ENTRADAS') return;
+  const box = document.getElementById('dash-financeiro');
+  const tem = box?.querySelector('[data-filtro="inicio"]');
+  if (!tem) {
+    if (!dashFiltros.inicio) dashFiltros = dashPerfil === 'CONTADOR_ACESSA' ? periodoContador() : periodoPadrao();
+    return;
+  }
+  const valor = (nome) => box.querySelector(`[data-filtro="${nome}"]`)?.value || '';
+  dashFiltros = {
+    inicio: valor('inicio'),
+    fim: valor('fim'),
+    grupoId: valor('grupo'),
+    tipoItem: valor('tipo'),
+    modelo: valor('modelo'),
+    ncm: valor('ncm').trim(),
+  };
+}
+
+function queryDash(extra) {
+  lerFiltros();
+  const params = new URLSearchParams();
+  params.set('perfil', dashPerfil);
+  if (dashPerfil !== 'MT_ENTRADAS') {
+    ['inicio', 'fim', 'grupoId', 'tipoItem', 'modelo', 'ncm'].forEach((k) => {
+      if (dashFiltros[k]) params.set(k, dashFiltros[k]);
+    });
+  }
+  Object.entries(extra || {}).forEach(([k, v]) => { if (v) params.set(k, v); });
+  return params;
+}
+
+function card(titulo, valor, detalhe) {
+  return `<article class="fin-card"><span>${esc(titulo)}</span><strong>${esc(valor)}</strong><small>${esc(detalhe || '')}</small></article>`;
+}
+
+function barras(serie) {
+  const max = Math.max(1, ...serie.map((d) => Math.max(d.vendido, d.comprado)));
+  const cols = serie.map((d) => {
+    const altV = Math.round((Math.max(d.vendido, 0) / max) * 100);
+    const altC = Math.round((Math.max(d.comprado, 0) / max) * 100);
+    const dia = d.dia.slice(8);
+    return `<div class="fin-col" title="${esc(d.dia)}"><span class="fin-bars"><span class="fin-bar pago" style="height:${altC}%"></span><span class="fin-bar rec" style="height:${altV}%"></span></span><em>${esc(dia)}</em></div>`;
+  }).join('');
+  return `<div class="fin-chart">${cols || '<p class="hint">Nenhuma movimentação no período</p>'}</div>
+    <p class="fin-legenda"><i class="rec"></i> Recebido <i class="pago"></i> Pago</p>`;
+}
+
+function tabelaGrupo(linhas, lado) {
+  const corpo = (linhas || []).map((r) => `
+    <tr>
+      <td>${esc(r.grupo)}</td>
+      <td>${brl(r.valor)}</td>
+      <td>${esc(r.quantidade)}</td>
+      <td>${esc(r.notas)}</td>
+      <td><span class="fin-part">${esc(r.participacao)}%</span><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span></td>
+    </tr>`).join('');
+  return `<table class="fin-table"><thead><tr><th>Grupo</th><th>Valor</th><th>Qtd</th><th>Notas</th><th>% ${esc(lado)}</th></tr></thead><tbody>${corpo || '<tr><td colspan="5">Nenhuma movimentação no período</td></tr>'}</tbody></table>`;
+}
+
+function htmlFiltros(perfil) {
+  if (perfil === 'MT_ENTRADAS') return '';
+  const p = dashFiltros.inicio ? dashFiltros : (perfil === 'CONTADOR_ACESSA' ? periodoContador() : periodoPadrao());
+  const extra = perfil === 'PADRAO'
+    ? `<label>Grupo<select data-filtro="grupo"><option value="">Todos</option></select></label>
+       <label>Tipo<select data-filtro="tipo">
+         <option value="">Todos</option>
+         <option value="produto" ${p.tipoItem === 'produto' ? 'selected' : ''}>Produto</option>
+         <option value="servico" ${p.tipoItem === 'servico' ? 'selected' : ''}>Serviço</option>
+         <option value="outros" ${p.tipoItem === 'outros' ? 'selected' : ''}>Outros</option>
+       </select></label>
+       <label>Modelo<select data-filtro="modelo">
+         <option value="">Todos</option>
+         <option value="55" ${p.modelo === '55' ? 'selected' : ''}>55</option>
+         <option value="65" ${p.modelo === '65' ? 'selected' : ''}>65</option>
+         <option value="GR" ${p.modelo === 'GR' ? 'selected' : ''}>GR</option>
+       </select></label>`
+    : `<label>NCM<input data-filtro="ncm" placeholder="Código" value="${esc(p.ncm || '')}" /></label>`;
+  const exportar = perfil === 'CONTADOR_ACESSA'
+    ? `<button type="button" class="btn" data-exportar="pdf">PDF</button><button type="button" class="btn" data-exportar="xlsx">Excel</button>`
+    : '';
+  return `<form class="fin-filtros" id="fin-filtros">
+    <label>De<input type="date" data-filtro="inicio" value="${esc(p.inicio)}" /></label>
+    <label>Até<input type="date" data-filtro="fim" value="${esc(p.fim)}" /></label>
+    ${extra}
+    <button type="submit" class="btn primary">Atualizar</button>
+    ${exportar}
+  </form>`;
+}
+
+function htmlConteudo(dados) {
+  if (!dados) return '<p class="hint">Carregando…</p>';
+  if (dados.vazio) return '<p class="fin-vazio">Nenhuma movimentação no período</p>';
+  if (dados.perfil === 'MT_ENTRADAS') {
+    return `<div class="fin-cards">
+      ${card('Entradas do dia', brl(dados.entradasDia), `${dados.notasDia || 0} notas`)}
+      ${card('Entradas do mês', brl(dados.entradasMes), `${dados.notasMes || 0} notas`)}
+    </div>
+    <section id="secao-resumo" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupo, 'do mês')}</section>`;
+  }
+  if (dados.perfil === 'CONTADOR_ACESSA') {
+    const ncm = (dados.porNcm || []).map((r) => `<tr><td>${esc(r.ncm)}</td><td>${brl(r.totalVendido)}</td></tr>`).join('');
+    return `<div class="fin-cards">
+      ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`)}
+      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasSaida || 0} notas`)}
+      ${card('Diferença', brl(dados.diferenca), 'vendido − comprado')}
+    </div>
+    <section id="secao-ncm" class="fin-box"><h2>Totalizador por NCM</h2>
+      <table class="fin-table"><thead><tr><th>NCM</th><th>Total vendido</th></tr></thead><tbody>${ncm || '<tr><td colspan="2">Nenhuma movimentação no período</td></tr>'}</tbody></table>
+    </section>`;
+  }
+  const comp = dados.comparativo || {};
+  const varV = comp.variacaoVendido == null ? 'sem base' : `${comp.variacaoVendido}%`;
+  const tipos = (dados.porTipo || []).map((r) => `<tr><td>${esc(r.tipo)}</td><td>${r.itens}</td><td>${r.vendas}</td><td>${brl(r.valor)}</td><td>${esc(r.participacao)}%</td></tr>`).join('');
+  const pags = (dados.porPagamento || []).map((r) => `
+    <div class="fin-pag"><span>${esc(r.forma)}</span><strong>${brl(r.valor)}</strong><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span></div>`).join('');
+  return `<div class="fin-cards">
+    ${card('Total vendido', brl(dados.totalVendido), `Período anterior ${brl(comp.totalVendido)} (${varV})`)}
+    ${card('Vendas fiscais', brl(dados.vendasFiscais), `${dados.notasVenda || 0} notas`)}
+    ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR')}
+    ${dados.usaManage ? card('Vendas Manage', brl(dados.vendasManage), '') : ''}
+    ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`)}
+    ${card('Ticket médio', brl(dados.ticketMedio), 'total vendido ÷ notas')}
+  </div>
+  <section id="secao-resumo" class="fin-box"><h2>Entradas x saídas</h2>${barras(dados.porDia || [])}</section>
+  <section id="secao-grupo" class="fin-box"><h2>Vendas por grupo</h2>${tabelaGrupo(dados.porGrupoVenda, 'das vendas')}</section>
+  <section id="secao-tipo" class="fin-box"><h2>Vendas por tipo de item</h2>
+    <table class="fin-table"><thead><tr><th>Tipo</th><th>Itens</th><th>Vendas</th><th>Valor</th><th>%</th></tr></thead><tbody>${tipos || '<tr><td colspan="5">Nenhuma movimentação no período</td></tr>'}</tbody></table>
+  </section>
+  <section id="secao-compras" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupoCompra, 'das compras')}</section>
+  <section id="secao-pagto" class="fin-box"><h2>Vendas por forma de pagamento</h2>${pags || '<p class="hint">Nenhuma movimentação no período</p>'}</section>`;
+}
+
+function preencherGrupos(dados) {
+  const sel = document.querySelector('#dash-financeiro [data-filtro="grupo"]');
+  if (!sel) return;
+  const atual = sel.value;
+  const vistos = new Map();
+  (dados.porGrupoVenda || []).concat(dados.porGrupoCompra || []).forEach((r) => {
+    if (r.id) vistos.set(String(r.id), r.grupo);
+  });
+  sel.innerHTML = '<option value="">Todos</option>' + [...vistos.entries()]
+    .map(([id, nome]) => `<option value="${esc(id)}">${esc(nome)}</option>`).join('');
+  const grupo = dashFiltros.grupoId || atual;
+  if (grupo) sel.value = grupo;
+}
+
+function rolarSecao() {
+  const id = dashSecao === 'ncm' ? 'secao-ncm' : dashSecao === 'grupo' ? 'secao-grupo' : dashSecao === 'tipo' ? 'secao-tipo' : dashSecao === 'compras' ? 'secao-compras' : 'secao-resumo';
+  const alvo = document.getElementById(id);
+  if (alvo && dashSecao !== 'resumo') alvo.scrollIntoView({ block: 'start' });
+}
+
+async function carregarDash() {
+  const corpo = document.getElementById('dash-corpo');
+  if (!corpo) return;
+  const params = queryDash();
+  const chave = `${dashPerfil}?${params.toString()}`;
+  if (chave === dashCacheChave && dashCacheHtml) {
+    corpo.innerHTML = dashCacheHtml;
+    ligarFiltros();
+    rolarSecao();
+    return;
+  }
+  const geracao = ++dashGeracao;
+  corpo.innerHTML = '<p class="hint">Carregando…</p>';
+  const res = await api(`/dashboard?${params.toString()}`);
+  if (geracao !== dashGeracao) return;
+  if (res.code === 'SEM_PERMISSAO' || res.status === 403 || /sem permissão/i.test(res.error || '')) {
+    corpo.innerHTML = '<p class="fin-vazio">Sem permissão para este dashboard.</p>';
+    return;
+  }
+  if (!res.ok) {
+    corpo.innerHTML = `<p class="fin-vazio">${esc(res.error || 'Falha ao consultar.')}</p>`;
+    return;
+  }
+  corpo.innerHTML = htmlFiltros(dashPerfil) + htmlConteudo(res);
+  preencherGrupos(res);
+  ligarFiltros();
+  dashCacheChave = chave;
+  dashCacheHtml = corpo.innerHTML;
+  rolarSecao();
+}
+
+function ligarFiltros() {
+  const form = document.getElementById('fin-filtros');
+  form?.addEventListener('submit', (ev) => {
+    ev.preventDefault();
+    carregarDash();
+  });
+  document.querySelectorAll('#dash-financeiro [data-exportar]').forEach((btn) => {
+    btn.addEventListener('click', () => exportarDash(btn.dataset.exportar));
+  });
+}
+
+async function exportarDash(formato) {
+  const params = queryDash({ formato });
+  const res = await fetch(`/api/dashboard/exportar?${params.toString()}`, { credentials: 'same-origin' });
+  if (!res.ok) {
+    let msg = 'Falha ao exportar.';
+    try { msg = (await res.json()).error || msg; } catch { /* arquivo */ }
+    showMsg(msg);
+    return;
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = formato === 'pdf' ? 'contador.pdf' : 'contador.xls';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function abrirDash(origem) {
+  const lista = dashPerfis();
+  if (!lista.length) return false;
+  const anterior = dashPerfil;
+  if (origem?.perfil && lista.includes(origem.perfil)) dashPerfil = origem.perfil;
+  if (!lista.includes(dashPerfil)) dashPerfil = lista[0];
+  if (origem?.secao) dashSecao = origem.secao;
+  if (dashPerfil !== anterior) {
+    dashFiltros = {};
+    dashCacheChave = '';
+    dashCacheHtml = '';
+  }
+  const titulo = document.getElementById('page-title');
+  const sub = document.getElementById('page-sub');
+  if (titulo) titulo.textContent = dashTitulo(dashPerfil);
+  if (sub) sub.textContent = lista.length > 1 ? 'Escolha o dashboard no seletor' : 'Movimento do período';
+  mostrarAtalhos(false);
+  const painel = document.getElementById('dash-financeiro');
+  const corpo = painel?.querySelector('#dash-corpo');
+  if (corpo && dashPerfil === anterior && anterior) {
+    const sel = document.getElementById('fin-perfil');
+    if (sel) sel.value = dashPerfil;
+    const carregando = /Carregando/.test(corpo.textContent || '');
+    if (carregando || dashCacheHtml) {
+      if (dashCacheHtml) rolarSecao();
+      return true;
+    }
+  }
+  const seletor = lista.length > 1
+    ? `<label class="fin-seletor">Dashboard<select id="fin-perfil">${lista.map((p) => `<option value="${p}" ${p === dashPerfil ? 'selected' : ''}>${esc(dashTitulo(p))}</option>`).join('')}</select></label>`
+    : '';
+  if (painel) painel.innerHTML = seletor + '<div id="dash-corpo"><p class="hint">Carregando…</p></div>';
+  document.getElementById('fin-perfil')?.addEventListener('change', (ev) => {
+    dashPerfil = ev.target.value;
+    dashSecao = 'resumo';
+    dashFiltros = {};
+    dashCacheChave = '';
+    dashCacheHtml = '';
+    const tituloEl = document.getElementById('page-title');
+    if (tituloEl) tituloEl.textContent = dashTitulo(dashPerfil);
+    carregarDash();
+  });
+  carregarDash();
+  return true;
+}
+
+window.Dashboard = { mostrarMenuDash, mostrarAtalhos, abrirDash, dashPerfis };

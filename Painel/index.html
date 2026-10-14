@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=240" />
+  <link rel="stylesheet" href="styles.css?v=242" />
   <link rel="stylesheet" href="importacao-nfe.css?v=240" />
 </head>
 <body>
@@ -126,9 +126,37 @@
           </div>
         </div>
         <nav class="side-nav">
-          <button class="nav-btn active" data-page="dashboard">
+          <button class="nav-btn active" data-page="dashboard" data-secao="resumo">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
             Início
+          </button>
+          <button class="nav-btn" data-page="dashboard" data-perfil="PADRAO" data-secao="resumo" id="nav-dash-padrao" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 16v3M12 11v8M16 7v12" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Dashboard
+          </button>
+          <button class="nav-btn" data-page="dashboard" data-perfil="PADRAO" data-secao="grupo" id="nav-dash-grupo" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19h16M7 16V9M12 16V5M17 16v-4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Vendas por grupo
+          </button>
+          <button class="nav-btn" data-page="dashboard" data-perfil="PADRAO" data-secao="tipo" id="nav-dash-tipo" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 19V10M10 19V5M15 19v-6M20 19V8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Vendas por tipo
+          </button>
+          <button class="nav-btn" data-page="dashboard" data-perfil="PADRAO" data-secao="compras" id="nav-dash-compras" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 7h15l-1.5 8H8L6 7zM6 7 5 4H3" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Compras
+          </button>
+          <button class="nav-btn" data-page="dashboard" data-perfil="CONTADOR_ACESSA" data-secao="resumo" id="nav-dash-contador" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10A1.5 1.5 0 0 1 18.5 6v13l-6.5-3.2L5.5 19V6A1.5 1.5 0 0 1 7 4.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Dashboard do contador
+          </button>
+          <button class="nav-btn" data-page="dashboard" data-perfil="CONTADOR_ACESSA" data-secao="ncm" id="nav-dash-ncm" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M5 12h14M5 18h8" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Totalizador por NCM
+          </button>
+          <button class="nav-btn" data-page="dashboard" data-perfil="MT_ENTRADAS" data-secao="resumo" id="nav-dash-entradas" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V8l8-4 8 4v10M9 18v-5h6v5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Dashboard de entradas
           </button>
           <button class="nav-btn" data-page="estoque" id="nav-estoque">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M12 20V9.5M3 8.5l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
@@ -220,7 +248,8 @@
 
         <!-- DASHBOARD -->
         <div id="page-dashboard" class="page">
-          <div class="dash-grid">
+          <div id="dash-financeiro" hidden></div>
+          <div class="dash-grid" id="dash-atalhos">
             <button type="button" id="dash-estoque" class="dash-card">
               <span class="dash-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M12 20V9.5M3 8.5l9 4.5 9-4.5" fill="none" stroke="currentColor" stroke-width="1.75"/></svg>
@@ -677,6 +706,9 @@
               <p class="trocar-empresa-titulo">Trocar empresa</p>
               <div id="trocar-empresa-lista-mobile"></div>
             </div>
+            <button type="button" data-page="dashboard" data-perfil="PADRAO" data-secao="resumo" id="nav-dash-padrao-mobile" hidden>Dashboard</button>
+            <button type="button" data-page="dashboard" data-perfil="CONTADOR_ACESSA" data-secao="resumo" id="nav-dash-contador-mobile" hidden>Dashboard do contador</button>
+            <button type="button" data-page="dashboard" data-perfil="MT_ENTRADAS" data-secao="resumo" id="nav-dash-entradas-mobile" hidden>Dashboard de entradas</button>
             <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
@@ -797,6 +829,7 @@
   <script src="compras.js?v=240"></script>
   <script src="condicionais.js?v=240"></script>
   <script src="contador.js?v=240"></script>
-  <script src="app.js?v=240"></script>
+  <script src="dashboard.js?v=242"></script>
+  <script src="app.js?v=242"></script>
 </body>
 </html>

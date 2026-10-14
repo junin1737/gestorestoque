@@ -9,6 +9,11 @@ const {
   ensureModulos,
   fullPermissoes,
   isMtEntradas,
+  lerUsaManage,
+  usaManageDoPedido,
+  CHAVES_DASHBOARD,
+  comDashboards,
+  perfisDashboard,
 } = require('./config');
 const {
   withDb,
@@ -41,6 +46,7 @@ const auth = require('./auth');
 const { gerarHashSenha } = require('./senha');
 
 const router = express.Router();
+router.use(require('./dashboard-http'));
 const { exigirModulo } = auth;
 
 /** NF-e de demonstração (mock) só para treinamento — nunca em base de cliente por padrão. */
@@ -175,6 +181,7 @@ router.get('/config', (req, res) => {
       ...conexao,
       sistema: cfg.sistema,
       tema: cfg.tema,
+      usa_manage: lerUsaManage(cfg),
     },
     modulos: MODULOS,
     demo: DEMO_ATIVO,
@@ -203,6 +210,7 @@ router.post('/config', somenteServidorLocal, (req, res) => {
     password: 'masterkey',
     sistema: body.sistema || current.sistema,
     tema: body.tema || current.tema,
+    usa_manage: usaManageDoPedido(current, body),
   };
   saveAppConfig(next);
   res.json({ ok: true, config: { ...next, password: undefined } });
@@ -220,6 +228,7 @@ router.post('/connect', somenteServidorLocal, async (req, res) => {
       user: 'SYSDBA',
       password: 'masterkey',
       sistema: body.sistema || current.sistema,
+      usa_manage: usaManageDoPedido(current, body),
     };
     saveAppConfig(cfg);
 
@@ -354,9 +363,21 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
   // Só altera usuários já existentes (vindos do TB_FUNCIONARIO); a lista não cria nem apaga ninguém.
   cfg.usuarios = cfg.usuarios.map((prev) => {
     if (prev.supervisor) {
-      return { id: 0, nome: prev.nome || 'SUPERVISOR', supervisor: true, acessoOnline: true, permissoes: fullPermissoes() };
+      const enviado = enviados.get(Number(prev.id));
+      const origem = enviado?.permissoes ? { permissoes: enviado.permissoes } : prev;
+      return {
+        id: 0,
+        nome: prev.nome || 'SUPERVISOR',
+        supervisor: true,
+        acessoOnline: true,
+        permissoes: comDashboards(fullPermissoes(), origem),
+      };
     }
-    if (isMtEntradas(prev)) return { ...prev, acessoOnline: onlinePedido(prev) };
+    if (isMtEntradas(prev)) {
+      const enviado = enviados.get(Number(prev.id));
+      const origem = enviado?.permissoes ? { permissoes: enviado.permissoes } : prev;
+      return { ...prev, acessoOnline: onlinePedido(prev), permissoes: comDashboards(prev.permissoes, origem) };
+    }
     const u = enviados.get(Number(prev.id));
     if (!u) return prev;
     const next = {

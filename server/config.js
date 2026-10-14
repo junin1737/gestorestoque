@@ -47,6 +47,25 @@ const MODULOS = {
     label: 'Alteração em massa',
     default: { acesso: false },
   },
+  dashboard_padrao: {
+    label: 'Dashboard padrão',
+    default: { acesso: false },
+  },
+  dashboard_contador: {
+    label: 'Dashboard do contador',
+    default: { acesso: false },
+  },
+  dashboard_entradas: {
+    label: 'Dashboard de entradas',
+    default: { acesso: false },
+  },
+};
+
+const CHAVES_DASHBOARD = ['dashboard_entradas', 'dashboard_contador', 'dashboard_padrao'];
+const PERFIL_DASHBOARD = {
+  dashboard_entradas: 'MT_ENTRADAS',
+  dashboard_contador: 'CONTADOR_ACESSA',
+  dashboard_padrao: 'PADRAO',
 };
 if (edicao.ONLINE) {
   MODULOS.online = { label: 'Acesso online', default: { acesso: false } };
@@ -86,6 +105,7 @@ function defaultAppConfig() {
     user: 'SYSDBA',
     password: 'masterkey',
     sistema: 'clipp', // clipp | managepro | ambos
+    usa_manage: 0, // 1 inclui TB_NFVENDA_2/_3 e TB_NFCOMPRA_2 nos dashboards
     tema: 'claro', // claro | escuro | empresa
     fiscal: {
       tipo: 'a1',
@@ -139,8 +159,28 @@ function fullPermissoes() {
     if (key === 'condicionais') out[key] = { acesso: true };
     if (key === 'massa') out[key] = { acesso: true };
     if (key === 'online') out[key] = { acesso: true };
+    if (CHAVES_DASHBOARD.includes(key)) out[key] = { acesso: false };
   }
   return out;
+}
+
+function comDashboards(base, origem) {
+  const out = { ...base };
+  for (const k of CHAVES_DASHBOARD) {
+    const acesso = origem?.permissoes?.[k]?.acesso;
+    out[k] = { acesso: acesso === true || acesso === 'true' || acesso === 1 };
+  }
+  return out;
+}
+
+function acessoDashboard(v) {
+  return v === true || v === 'true' || v === 1;
+}
+
+function perfisDashboard(u) {
+  return CHAVES_DASHBOARD
+    .filter((k) => acessoDashboard(u?.permissoes?.[k]?.acesso))
+    .map((k) => PERFIL_DASHBOARD[k]);
 }
 
 /** Supervisor entra com acesso total, inclusive pela internet. No MT Entradas o acesso online continua opcional. */
@@ -212,7 +252,7 @@ function loadUsersConfig(appCfg) {
         ...u,
         id: 0,
         nome: u.nome || 'SUPERVISOR',
-        permissoes: comAcessoOnline(u, fullPermissoes()),
+        permissoes: comDashboards(comAcessoOnline(u, fullPermissoes()), u),
       };
     }
     return { ...u, permissoes: ensureModulos(u.permissoes) };
@@ -235,11 +275,8 @@ function ensureUsuarioMtEntradas(cfg) {
     if (atual.nome !== 'MT Entradas') { atual.nome = 'MT Entradas'; mudou = true; }
     if (Number(atual.id) !== MT_ENTRADAS_ID) { atual.id = MT_ENTRADAS_ID; mudou = true; }
     if (atual.senhaHash || atual.senha) { delete atual.senhaHash; delete atual.senha; mudou = true; }
-    atual.permissoes = comAcessoOnline(atual, ensureModulos({
-      importacao: { acesso: true },
-      compras: { acesso: true },
-      estoque: { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'visualizar' },
-    }));
+    if (atual.permissoes?.dashboard_entradas?.acesso !== true) mudou = true;
+    atual.permissoes = permissoesMtEntradas(atual);
     return mudou;
   }
   cfg.usuarios.push({
@@ -248,13 +285,19 @@ function ensureUsuarioMtEntradas(cfg) {
     mtEntradas: true,
     senhaVer: 1,
     acessoOnline: false,
-    permissoes: comAcessoOnline({}, ensureModulos({
-      importacao: { acesso: true },
-      compras: { acesso: true },
-      estoque: { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'visualizar' },
-    })),
+    permissoes: permissoesMtEntradas({}),
   });
   return true;
+}
+
+function permissoesMtEntradas(u) {
+  const base = ensureModulos({
+    importacao: { acesso: true },
+    compras: { acesso: true },
+    estoque: { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'visualizar' },
+    dashboard_entradas: { acesso: true },
+  });
+  return comAcessoOnline(u, comDashboards(base, { permissoes: base }));
 }
 
 function isMtEntradas(u) {
@@ -267,6 +310,16 @@ function saveUsersConfig(appCfg, cfg) {
   const tmp = `${p}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(cfg, null, 2), 'utf8');
   fs.renameSync(tmp, p);
+}
+
+/** Único ponto que lê o parâmetro de servidor usa_manage (0 ou 1). */
+function lerUsaManage(cfg) {
+  return Number(cfg && cfg.usa_manage) === 1 ? 1 : 0;
+}
+
+function usaManageDoPedido(current, body) {
+  if (!body || body.usa_manage === undefined) return lerUsaManage(current);
+  return body.usa_manage === true || Number(body.usa_manage) === 1 ? 1 : 0;
 }
 
 function addModulo(key, definition) {
@@ -287,6 +340,12 @@ module.exports = {
   loadUsersConfig,
   saveUsersConfig,
   isMtEntradas,
+  lerUsaManage,
+  usaManageDoPedido,
+  CHAVES_DASHBOARD,
+  PERFIL_DASHBOARD,
+  comDashboards,
+  perfisDashboard,
   ensureModulos,
   fullPermissoes,
   addModulo,
