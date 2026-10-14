@@ -45,10 +45,10 @@ public final class Atualizador {
             try {
                 String local = versaoInstalada(activity);
                 String[] nuvem = versaoDaNuvem();
-                String git = nuvem != null ? nuvem[0] : versaoDoGit();
-                String download = nuvem != null ? nuvem[1] : null;
+                final String git = nuvem != null ? nuvem[0] : versaoDoGit();
+                String daNuvem = nuvem != null ? nuvem[1] : null;
                 if (git.isEmpty() || cmp(git, local) <= 0) return;
-                if (download == null) download = apkDaRelease(git);
+                final String download = daNuvem != null ? daNuvem : apkDaRelease(git);
                 if (download == null || activity.isFinishing()) return;
                 activity.runOnUiThread(() -> perguntar(activity, local, git, download));
             } catch (Exception ignored) {
