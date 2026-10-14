@@ -124,12 +124,12 @@ function htmlMeses(dados) {
   return `<section id="secao-resumo" class="fin-box"><h2>Entradas x saídas <span>${esc(dados.ano || '')}</span></h2>${barras(dados.porMes || [])}</section>`;
 }
 
+function pct(valor) {
+  return `${Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
+}
+
 function htmlRecortes(dados) {
-  const tipos = (dados.porTipo || []).map((r) => `<tr><td>${esc(r.tipo)}</td><td>${r.itens}</td><td>${r.vendas}</td><td>${brl(r.valor)}</td><td>${esc(r.participacao)}%</td></tr>`).join('');
   return `<section id="secao-grupo" class="fin-box"><h2>Vendas por grupo</h2>${tabelaGrupo(dados.porGrupoVenda, 'das vendas')}</section>
-  <section id="secao-tipo" class="fin-box"><h2>Vendas por tipo de item</h2>
-    <table class="fin-table"><thead><tr><th>Tipo</th><th>Itens</th><th>Vendas</th><th>Valor</th><th>%</th></tr></thead><tbody>${tipos || '<tr><td colspan="5">Nenhuma movimentação no período</td></tr>'}</tbody></table>
-  </section>
   ${htmlPagamento(dados)}
   <section id="secao-compras" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupoCompra, 'das compras')}</section>`;
 }
@@ -158,7 +158,7 @@ function tabelaGrupo(linhas, lado) {
   const corpo = (linhas || []).map((r) => {
     const margem = Number(r.margem) || 0;
     const ultima = vendas
-      ? `<strong class="fin-margem ${margem < 0 ? 'neg' : 'pos'}">${brl(r.margem)}</strong>`
+      ? `<strong class="fin-margem ${margem < 0 ? 'neg' : 'pos'}">${brl(r.margem)}</strong><span class="fin-margem-pct ${margem < 0 ? 'neg' : 'pos'}">${pct(r.margemPct)}</span>`
       : `<span class="fin-part">${esc(r.participacao)}%</span><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span>`;
     return `<tr>
       <td>${esc(r.grupo)}</td>
@@ -233,20 +233,26 @@ function htmlFinanceiro(dados) {
   const aviso = `${dados.ignorarCartao ? '<p class="hint">Contas a receber com cartão no histórico estão fora desta aba.</p>' : ''}
   <p class="hint">O dia e o mês dos cards seguem a data Até. A lista usa o período De–Até.</p>`;
   const corte = (lista, total) => (total > (lista || []).length ? `<p class="hint">Mostrando ${(lista || []).length} de ${total}.</p>` : '');
+  const receber = `${card('A receber no dia', brl(dados.receberDia), dados.referenciaDia || '', '', 'saida')}
+    ${card('A receber no mês', brl(dados.receberMes), dados.referenciaMes || '', '', 'saida')}
+    ${card('Recebidas no dia', brl(dados.recebidasDia), dados.referenciaDia || '', '', 'saida')}
+    ${card('Recebidas no mês', brl(dados.recebidasMes), dados.referenciaMes || '', '', 'saida')}`;
+  const pagar = `${card('A pagar no dia', brl(dados.pagarDia), dados.referenciaDia || '', '', 'entrada')}
+    ${card('A pagar no mês', brl(dados.pagarMes), dados.referenciaMes || '', '', 'entrada')}
+    ${card('Pagas no dia', brl(dados.pagasDia), dados.referenciaDia || '', '', 'entrada')}
+    ${card('Pagas no mês', brl(dados.pagasMes), dados.referenciaMes || '', '', 'entrada')}`;
   return `${htmlAbas(dados)}
   ${aviso}
-  <div class="fin-cards">
-    ${card('A pagar no dia', brl(dados.pagarDia), dados.referenciaDia || '', '', 'entrada')}
-    ${card('A pagar no mês', brl(dados.pagarMes), dados.referenciaMes || '', '', 'entrada')}
-    ${card('A receber no dia', brl(dados.receberDia), dados.referenciaDia || '', '', 'saida')}
-    ${card('A receber no mês', brl(dados.receberMes), dados.referenciaMes || '', '', 'saida')}
-    ${card('Pagas no dia', brl(dados.pagasDia), dados.referenciaDia || '', '', 'entrada')}
-    ${card('Pagas no mês', brl(dados.pagasMes), dados.referenciaMes || '', '', 'entrada')}
-    ${card('Recebidas no dia', brl(dados.recebidasDia), dados.referenciaDia || '', '', 'saida')}
-    ${card('Recebidas no mês', brl(dados.recebidasMes), dados.referenciaMes || '', '', 'saida')}
-  </div>
-  <section class="fin-box"><h2>Contas a pagar</h2>${tabelaContas(dados.contasPagar, 'Nenhuma conta a pagar no período')}${corte(dados.contasPagar, dados.contasPagarTotal)}</section>
-  <section class="fin-box"><h2>Contas a receber</h2>${tabelaContas(dados.contasReceber, 'Nenhuma conta a receber no período')}${corte(dados.contasReceber, dados.contasReceberTotal)}</section>`;
+  <section class="fin-box"><h2>Contas a receber</h2>
+    <div class="fin-cards">${receber}</div>
+    ${tabelaContas(dados.contasReceber, 'Nenhuma conta a receber no período')}
+    ${corte(dados.contasReceber, dados.contasReceberTotal)}
+  </section>
+  <section class="fin-box"><h2>Contas a pagar</h2>
+    <div class="fin-cards">${pagar}</div>
+    ${tabelaContas(dados.contasPagar, 'Nenhuma conta a pagar no período')}
+    ${corte(dados.contasPagar, dados.contasPagarTotal)}
+  </section>`;
 }
 
 function htmlConteudo(dados) {

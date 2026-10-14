@@ -243,12 +243,6 @@ function sqlClassificacao(fonte, filtros, sempre) {
   return { join, where: extra.length ? ` AND ${extra.join(' AND ')}` : '' };
 }
 
-const SQL_TIPO = `TRIM(CASE
-  WHEN TRIM(COALESCE(EST.ID_TIPOITEM, '')) = '9' THEN 'servico'
-  WHEN TRIM(COALESCE(EST.ID_TIPOITEM, '')) IN ('', '99') THEN 'outros'
-  ELSE 'produto'
-END)`;
-
 function predNota(tipo, filtros, fonte) {
   const dataCol = tipo === 'compra' ? 'N.DT_ENTRADA' : 'N.DT_EMISSAO';
   const modelos = tipo === 'compra' ? filtros.modelosCompra : filtros.modelosVenda;
@@ -412,6 +406,7 @@ function juntarGrupo(listas) {
     grupo: r.grupo,
     valor: reais(r.valor),
     margem: reais(r.valor - r.custo),
+    margemPct: r.valor ? Math.round((10000 * (r.valor - r.custo)) / r.valor) / 100 : 0,
     quantidade: reais(r.quantidade),
     notas: r.notas,
   }));
@@ -439,76 +434,6 @@ async function porGrupo(db, usaManage, filtros, lado) {
     }
   }
   return juntarGrupo(listas);
-}
-
-async function porTipo(db, usaManage, filtros) {
-  const map = new Map();
-  const evolucao = new Map();
-  function somaTipo(tipo, valor, itens, notas) {
-    const atual = map.get(tipo) || { tipo, valor: 0, itens: 0, notas: 0 };
-    atual.valor += valor;
-    atual.itens += itens;
-    atual.notas += notas;
-    map.set(tipo, atual);
-  }
-  for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
-    const classif = sqlClassificacao(fonte, filtros, true);
-    const lista = await lerFonte(db, fonte, (f) => `
-      SELECT ${SQL_TIPO} AS TIPO,
-             CAST(N.DT_EMISSAO AS DATE) AS DIA,
-             SUM(${sqlValor(f)}) AS VALOR,
-             COUNT(*) AS ITENS,
-             COUNT(DISTINCT N.${f.id}) AS NOTAS
-      FROM ${f.item} I
-      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
-      ${classif.join}
-      WHERE ${predNota('venda', filtros, f)}
-        AND ${predItem('venda')}
-        ${classif.where}
-      GROUP BY ${SQL_TIPO}, CAST(N.DT_EMISSAO AS DATE)`);
-    for (const r of lista || []) {
-      const tipo = String(r.TIPO || 'outros').trim() || 'outros';
-      const valor = centavos(r.VALOR);
-      somaTipo(tipo, valor, inteiro(r.ITENS), inteiro(r.NOTAS));
-      const dia = diaIso(r.DIA);
-      const chave = `${dia}|${tipo}`;
-      evolucao.set(chave, (evolucao.get(chave) || 0) + valor);
-    }
-  }
-  for (const fonte of fontesCompra(usaManage, filtros)) {
-    const classif = sqlClassificacao(fonte, filtros, true);
-    const lista = await lerFonte(db, fonte, (f) => `
-      SELECT ${SQL_TIPO} AS TIPO,
-             SUM(${sqlValor(f)}) AS VALOR,
-             COUNT(*) AS ITENS
-      FROM ${f.item} I
-      JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
-      ${classif.join}
-      WHERE ${predNota('compra', filtros, f)}
-        AND ${predItem('devolucao_venda')}
-        ${classif.where}
-      GROUP BY ${SQL_TIPO}`);
-    for (const r of lista || []) somaTipo(String(r.TIPO || 'outros').trim() || 'outros', -centavos(r.VALOR), -inteiro(r.ITENS), 0);
-  }
-  const rows = [...map.values()];
-  const total = rows.reduce((a, r) => a + r.valor, 0);
-  return {
-    itens: rows
-      .map((r) => ({
-        tipo: r.tipo,
-        valor: reais(r.valor),
-        itens: r.itens,
-        vendas: r.notas,
-        participacao: total ? Math.round((10000 * r.valor) / total) / 100 : 0,
-      }))
-      .sort((a, b) => b.valor - a.valor),
-    evolucao: [...evolucao.entries()]
-      .map(([chave, valor]) => {
-        const [dia, tipo] = chave.split('|');
-        return { dia, tipo, valor: reais(valor) };
-      })
-      .sort((a, b) => a.dia.localeCompare(b.dia) || a.tipo.localeCompare(b.tipo)),
-  };
 }
 
 async function porNcm(db, usaManage, filtros) {
@@ -694,7 +619,54 @@ async function porMes(db, usaManage, filtros) {
   return meses.map((r) => ({ mes: r.mes, nome: r.nome, vendido: reais(r.vendido), comprado: reais(r.comprado) }));
 }
 
-async function porMesFinanceiro(db, filtros, ignorarCartao) {
+async function relacaoExiste(db, nome) {
+  const rows = await ler(db, `
+    SELECT 1 AS OK FROM RDB$RELATIONS
+    WHERE RDB$SYSTEM_FLAG = 0 AND TRIM(RDB$RELATION_NAME) = '${nome}'`);
+  return !!(rows && rows.length);
+}
+
+async function colunaExiste(db, tabela, coluna) {
+  const rows = await ler(db, `
+    SELECT 1 AS OK FROM RDB$RELATION_FIELDS
+    WHERE TRIM(RDB$RELATION_NAME) = '${tabela}'
+      AND TRIM(RDB$FIELD_NAME) = '${coluna}'`);
+  return !!(rows && rows.length);
+}
+
+async function baixaReceber(db, conta) {
+  const direta = conta === 'TB_CONTA_RECEBER' ? 'TB_CTAREC_BAIXA' : 'TB_CTAREC_BAIXA_2';
+  if (await relacaoExiste(db, direta) && await colunaExiste(db, direta, 'VLR_RECEB')) return direta;
+  const rows = await ler(db, `
+    SELECT TRIM(RC.RDB$RELATION_NAME) AS NOME
+    FROM RDB$RELATION_CONSTRAINTS RC
+    JOIN RDB$REF_CONSTRAINTS REF ON REF.RDB$CONSTRAINT_NAME = RC.RDB$CONSTRAINT_NAME
+    JOIN RDB$RELATION_CONSTRAINTS PK ON PK.RDB$CONSTRAINT_NAME = REF.RDB$CONST_NAME_UQ
+    WHERE RC.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'
+      AND TRIM(PK.RDB$RELATION_NAME) = '${conta}'`);
+  for (const r of rows || []) {
+    const nome = String(r.NOME || '').trim();
+    if (nome && await colunaExiste(db, nome, 'VLR_RECEB') && await colunaExiste(db, nome, 'TIP_RECBTO')) return nome;
+  }
+  return '';
+}
+
+async function fontesContaReceber(db, usaManage) {
+  const nomes = ['TB_CONTA_RECEBER'];
+  if (usaManage && await relacaoExiste(db, 'TB_CONTA_RECEBER_2')) nomes.push('TB_CONTA_RECEBER_2');
+  const fontes = [];
+  for (const conta of nomes) {
+    if (!(await relacaoExiste(db, conta))) continue;
+    fontes.push({
+      conta,
+      baixa: await baixaReceber(db, conta),
+      temRestante: await colunaExiste(db, conta, 'VLR_RESTANTE'),
+    });
+  }
+  return fontes;
+}
+
+async function porMesFinanceiro(db, filtros, ignorarCartao, usaManage) {
   const ano = String(filtros.inicio || isoHoje()).slice(0, 4);
   const inicio = `${ano}-01-01`;
   const fim = `${Number(ano) + 1}-01-01`;
@@ -705,19 +677,22 @@ async function porMesFinanceiro(db, filtros, ignorarCartao) {
       if (n >= 1 && n <= 12) meses[n - 1][campo] += centavos(r.VALOR);
     }
   }
-  const origemReceber = ignorarCartao
-    ? `FROM TB_CTAREC_BAIXA B LEFT JOIN TB_CONTA_RECEBER C ON C.ID_CTAREC = B.ID_CTAREC
-       WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
-         AND TRIM(COALESCE(B.TIP_RECBTO, '')) = 'T'${filtroCartao('C.HISTORICO', true)}`
-    : `FROM TB_CTAREC_BAIXA
-       WHERE DT_BAIXA >= '${inicio}' AND DT_BAIXA < '${fim}'
-         AND TRIM(COALESCE(TIP_RECBTO, '')) = 'T'`;
-  const colData = ignorarCartao ? 'B.DT_BAIXA' : 'DT_BAIXA';
-  const colValor = ignorarCartao ? 'B.VLR_RECEB' : 'VLR_RECEB';
-  somar(await ler(db, `
-    SELECT EXTRACT(MONTH FROM ${colData}) AS MES, SUM(COALESCE(${colValor}, 0)) AS VALOR
-    ${origemReceber}
-    GROUP BY EXTRACT(MONTH FROM ${colData})`), 'vendido');
+  for (const fonte of await fontesContaReceber(db, usaManage)) {
+    if (!fonte.baixa) continue;
+    const origem = ignorarCartao
+      ? `FROM ${fonte.baixa} B LEFT JOIN ${fonte.conta} C ON C.ID_CTAREC = B.ID_CTAREC
+         WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
+           AND TRIM(COALESCE(B.TIP_RECBTO, '')) = 'T'${filtroCartao('C.HISTORICO', true)}`
+      : `FROM ${fonte.baixa}
+         WHERE DT_BAIXA >= '${inicio}' AND DT_BAIXA < '${fim}'
+           AND TRIM(COALESCE(TIP_RECBTO, '')) = 'T'`;
+    const colData = ignorarCartao ? 'B.DT_BAIXA' : 'DT_BAIXA';
+    const colValor = ignorarCartao ? 'B.VLR_RECEB' : 'VLR_RECEB';
+    somar(await ler(db, `
+      SELECT EXTRACT(MONTH FROM ${colData}) AS MES, SUM(COALESCE(${colValor}, 0)) AS VALOR
+      ${origem}
+      GROUP BY EXTRACT(MONTH FROM ${colData})`), 'vendido');
+  }
   somar(await ler(db, `
     SELECT EXTRACT(MONTH FROM DT_BAIXA) AS MES, SUM(COALESCE(VLR_PAGO, 0)) AS VALOR
     FROM TB_CTAPAG_BAIXA
@@ -751,33 +726,30 @@ function linhaConta(r) {
   };
 }
 
-function sqlRestante(alias, temColuna) {
-  if (temColuna) return `COALESCE(${alias}.VLR_RESTANTE, 0)`;
+function sqlRestante(alias, fonte) {
+  if (fonte.temRestante) return `COALESCE(${alias}.VLR_RESTANTE, 0)`;
+  if (!fonte.baixa) return `COALESCE(${alias}.VLR_CTAREC, 0)`;
   return `(COALESCE(${alias}.VLR_CTAREC, 0) - COALESCE((
-    SELECT SUM(BX.VLR_RECEB) FROM TB_CTAREC_BAIXA BX
+    SELECT SUM(BX.VLR_RECEB) FROM ${fonte.baixa} BX
     WHERE BX.ID_CTAREC = ${alias}.ID_CTAREC
       AND TRIM(COALESCE(BX.TIP_RECBTO, '')) = 'T'
   ), 0))`;
 }
 
-async function temColunaRestante(db) {
-  const rows = await ler(db, `
-    SELECT 1 AS OK FROM RDB$RELATION_FIELDS
-    WHERE TRIM(RDB$RELATION_NAME) = 'TB_CONTA_RECEBER'
-      AND TRIM(RDB$FIELD_NAME) = 'VLR_RESTANTE'`);
-  return !!(rows && rows.length);
-}
-
-async function somaReceberAberto(db, inicio, fimExclusivo, ignorarCartao, temColuna) {
-  const saldo = sqlRestante('C', temColuna);
-  const rows = await ler(db, `
-    SELECT COALESCE(SUM(${saldo}), 0) AS VALOR
-    FROM TB_CONTA_RECEBER C
-    WHERE C.DT_VENCTO >= '${inicio}' AND C.DT_VENCTO < '${fimExclusivo}'
-      AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
-      AND ${saldo} > 0.009
-      ${filtroCartao('C.HISTORICO', ignorarCartao)}`);
-  return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
+async function somaReceberAberto(db, fontes, inicio, fimExclusivo, ignorarCartao) {
+  let total = 0;
+  for (const fonte of fontes) {
+    const saldo = sqlRestante('C', fonte);
+    const rows = await ler(db, `
+      SELECT COALESCE(SUM(${saldo}), 0) AS VALOR
+      FROM ${fonte.conta} C
+      WHERE C.DT_VENCTO >= '${inicio}' AND C.DT_VENCTO < '${fimExclusivo}'
+        AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
+        AND ${saldo} > 0.009
+        ${filtroCartao('C.HISTORICO', ignorarCartao)}`);
+    total += rows && rows[0] ? centavos(rows[0].VALOR) : 0;
+  }
+  return total;
 }
 
 async function somaPagarAberto(db, inicio, fimExclusivo) {
@@ -793,15 +765,20 @@ async function somaPagarAberto(db, inicio, fimExclusivo) {
   return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
 }
 
-async function somaRecebidas(db, inicio, fimExclusivo, ignorarCartao) {
-  const rows = await ler(db, `
-    SELECT COALESCE(SUM(B.VLR_RECEB), 0) AS VALOR
-    FROM TB_CTAREC_BAIXA B
-    LEFT JOIN TB_CONTA_RECEBER C ON C.ID_CTAREC = B.ID_CTAREC
-    WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fimExclusivo}'
-      AND TRIM(COALESCE(B.TIP_RECBTO, '')) = 'T'
-      ${filtroCartao('C.HISTORICO', ignorarCartao)}`);
-  return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
+async function somaRecebidas(db, fontes, inicio, fimExclusivo, ignorarCartao) {
+  let total = 0;
+  for (const fonte of fontes) {
+    if (!fonte.baixa) continue;
+    const rows = await ler(db, `
+      SELECT COALESCE(SUM(B.VLR_RECEB), 0) AS VALOR
+      FROM ${fonte.baixa} B
+      LEFT JOIN ${fonte.conta} C ON C.ID_CTAREC = B.ID_CTAREC
+      WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fimExclusivo}'
+        AND TRIM(COALESCE(B.TIP_RECBTO, '')) = 'T'
+        ${filtroCartao('C.HISTORICO', ignorarCartao)}`);
+    total += rows && rows[0] ? centavos(rows[0].VALOR) : 0;
+  }
+  return total;
 }
 
 async function somaPagas(db, inicio, fimExclusivo) {
@@ -813,19 +790,19 @@ async function somaPagas(db, inicio, fimExclusivo) {
   return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
 }
 
-async function consultarFinanceiro(db, filtros, ignorarCartao) {
-  const temColuna = await temColunaRestante(db);
+async function consultarFinanceiro(db, filtros, ignorarCartao, usaManage) {
+  const fontes = await fontesContaReceber(db, usaManage);
   const dia = filtros.fim;
   const diaFim = addDias(dia, 1);
   const mes = intervaloMes(dia);
   const pagarDia = await somaPagarAberto(db, dia, diaFim);
   const pagarMes = await somaPagarAberto(db, mes.inicio, mes.fimExclusivo);
-  const receberDia = await somaReceberAberto(db, dia, diaFim, ignorarCartao, temColuna);
-  const receberMes = await somaReceberAberto(db, mes.inicio, mes.fimExclusivo, ignorarCartao, temColuna);
+  const receberDia = await somaReceberAberto(db, fontes, dia, diaFim, ignorarCartao);
+  const receberMes = await somaReceberAberto(db, fontes, mes.inicio, mes.fimExclusivo, ignorarCartao);
   const pagasDia = await somaPagas(db, dia, diaFim);
   const pagasMes = await somaPagas(db, mes.inicio, mes.fimExclusivo);
-  const recebidasDia = await somaRecebidas(db, dia, diaFim, ignorarCartao);
-  const recebidasMes = await somaRecebidas(db, mes.inicio, mes.fimExclusivo, ignorarCartao);
+  const recebidasDia = await somaRecebidas(db, fontes, dia, diaFim, ignorarCartao);
+  const recebidasMes = await somaRecebidas(db, fontes, mes.inicio, mes.fimExclusivo, ignorarCartao);
   const pagar = await ler(db, `
     SELECT FIRST 200 TRIM(CAST(C.DOCUMENTO AS VARCHAR(40))) AS DOCUMENTO,
            TRIM(COALESCE(C.HISTORICO, '')) AS HISTORICO,
@@ -838,26 +815,33 @@ async function consultarFinanceiro(db, filtros, ignorarCartao) {
     WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
       AND TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'C'
     ORDER BY C.DT_VENCTO, C.ID_CTAPAG`);
-  const saldoReceber = sqlRestante('C', temColuna);
-  const receber = await ler(db, `
-    SELECT FIRST 200 TRIM(CAST(C.DOCUMENTO AS VARCHAR(40))) AS DOCUMENTO,
-           TRIM(COALESCE(C.HISTORICO, '')) AS HISTORICO,
-           C.DT_VENCTO, C.VLR_CTAREC AS VALOR,
-           CASE WHEN ${saldoReceber} > 0.009 THEN 'Em aberto' ELSE 'Recebida' END AS SITUACAO
-    FROM TB_CONTA_RECEBER C
-    WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
-      AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
-      ${filtroCartao('C.HISTORICO', ignorarCartao)}
-    ORDER BY C.DT_VENCTO, C.ID_CTAREC`);
+  const receber = [];
+  let contasReceberTotal = 0;
+  for (const fonte of fontes) {
+    const saldoReceber = sqlRestante('C', fonte);
+    const lista = await ler(db, `
+      SELECT FIRST 200 TRIM(CAST(C.DOCUMENTO AS VARCHAR(40))) AS DOCUMENTO,
+             TRIM(COALESCE(C.HISTORICO, '')) AS HISTORICO,
+             C.DT_VENCTO, C.VLR_CTAREC AS VALOR,
+             CASE WHEN ${saldoReceber} > 0.009 THEN 'Em aberto' ELSE 'Recebida' END AS SITUACAO
+      FROM ${fonte.conta} C
+      WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
+        AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
+        ${filtroCartao('C.HISTORICO', ignorarCartao)}
+      ORDER BY C.DT_VENCTO, C.ID_CTAREC`);
+    receber.push(...(lista || []));
+    const total = await ler(db, `
+      SELECT COUNT(*) AS N FROM ${fonte.conta}
+      WHERE DT_VENCTO >= '${filtros.inicio}' AND DT_VENCTO < '${filtros.fimExclusivo}'
+        AND TRIM(COALESCE(TIP_CTAREC, '')) <> 'C'
+        ${filtroCartao('HISTORICO', ignorarCartao)}`);
+    contasReceberTotal += total && total[0] ? inteiro(total[0].N) : 0;
+  }
+  receber.sort((a, b) => String(diaIso(a.DT_VENCTO)).localeCompare(String(diaIso(b.DT_VENCTO))));
   const totalPagar = await ler(db, `
     SELECT COUNT(*) AS N FROM TB_CONTA_PAGAR
     WHERE DT_VENCTO >= '${filtros.inicio}' AND DT_VENCTO < '${filtros.fimExclusivo}'
       AND TRIM(COALESCE(TIP_CTAPAG, '')) <> 'C'`);
-  const totalReceber = await ler(db, `
-    SELECT COUNT(*) AS N FROM TB_CONTA_RECEBER
-    WHERE DT_VENCTO >= '${filtros.inicio}' AND DT_VENCTO < '${filtros.fimExclusivo}'
-      AND TRIM(COALESCE(TIP_CTAREC, '')) <> 'C'
-      ${filtroCartao('HISTORICO', ignorarCartao)}`);
   return {
     referenciaDia: dataBr(dia),
     referenciaMes: mes.rotulo,
@@ -871,9 +855,9 @@ async function consultarFinanceiro(db, filtros, ignorarCartao) {
     recebidasDia: reais(recebidasDia),
     recebidasMes: reais(recebidasMes),
     contasPagar: (pagar || []).map(linhaConta),
-    contasReceber: (receber || []).map(linhaConta),
+    contasReceber: receber.slice(0, 200).map(linhaConta),
     contasPagarTotal: totalPagar && totalPagar[0] ? inteiro(totalPagar[0].N) : 0,
-    contasReceberTotal: totalReceber && totalReceber[0] ? inteiro(totalReceber[0].N) : 0,
+    contasReceberTotal,
   };
 }
 
@@ -1051,7 +1035,7 @@ async function consultarDashboard(db, opcoes = {}) {
   const aba = abas.includes(pedida) ? pedida : (usaManage ? 'manage' : 'vendas');
   const ignorarCartao = Number((opcoes.appCfg || loadAppConfig()).ignorar_receber_cartao) === 1;
   if (aba === 'financeiro') {
-    const fin = await consultarFinanceiro(db, filtros, ignorarCartao);
+    const fin = await consultarFinanceiro(db, filtros, ignorarCartao, usaManage);
     return {
       perfil,
       usaManage,
@@ -1085,10 +1069,9 @@ async function consultarDashboard(db, opcoes = {}) {
   }
   const gruposVenda = await porGrupo(db, usaManage, filtrosAba, 'vendas');
   const gruposCompra = await porGrupo(db, usaManage, filtrosAba, 'compras');
-  const tipos = await porTipo(db, usaManage, filtrosAba);
   const pagamento = await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
   const serieMensal = aba === 'manage'
-    ? await porMesFinanceiro(db, filtrosAba, ignorarCartao)
+    ? await porMesFinanceiro(db, filtrosAba, ignorarCartao, usaManage)
     : await porMes(db, usaManage, filtrosAba);
   const vazio = t.totalVendido === 0 && (aba === 'fiscal' || t.totalComprado === 0);
   return {
@@ -1107,8 +1090,6 @@ async function consultarDashboard(db, opcoes = {}) {
     vendidoMesComFrete,
     porGrupoVenda: gruposVenda,
     porGrupoCompra: gruposCompra,
-    porTipo: tipos.itens,
-    evolucaoTipo: tipos.evolucao,
     porPagamento: pagamento,
     porMes: serieMensal,
     vazio,

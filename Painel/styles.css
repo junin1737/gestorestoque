@@ -2318,8 +2318,9 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 .fin-card.fin-saida strong { color: #1f9d55; }
 .fin-card.fin-entrada strong { color: #e23d3d; }
 .fin-margem { font-weight: 700; }
-.fin-margem.pos { color: #1f9d55; }
-.fin-margem.neg { color: #e23d3d; }
+.fin-margem.pos, .fin-margem-pct.pos { color: #1f9d55; }
+.fin-margem.neg, .fin-margem-pct.neg { color: #e23d3d; }
+.fin-margem-pct { display: block; margin-top: 0.12rem; font-size: 0.78rem; font-weight: 700; }
 .fin-card small { color: var(--muted); font-size: var(--fs-xs); }
 .fin-card .fin-extra { color: var(--primary-2); font-weight: 700; }
 .pref-check { display: flex; align-items: center; gap: 0.55rem; font-weight: 650; margin: 0; }
