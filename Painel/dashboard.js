@@ -60,9 +60,6 @@ function mostrarMenuDash() {
   };
   const mapa = [
     ['nav-dash-padrao', tem.PADRAO],
-    ['nav-dash-grupo', tem.PADRAO],
-    ['nav-dash-tipo', tem.PADRAO],
-    ['nav-dash-compras', tem.PADRAO],
     ['nav-dash-contador', tem.CONTADOR_ACESSA],
     ['nav-dash-ncm', tem.CONTADOR_ACESSA],
     ['nav-dash-entradas', tem.MT_ENTRADAS],
@@ -121,14 +118,15 @@ function card(titulo, valor, detalhe) {
 }
 
 function barras(serie) {
-  const max = Math.max(1, ...serie.map((d) => Math.max(d.vendido, d.comprado)));
-  const cols = serie.map((d) => {
-    const altV = Math.round((Math.max(d.vendido, 0) / max) * 100);
-    const altC = Math.round((Math.max(d.comprado, 0) / max) * 100);
-    const dia = d.dia.slice(8);
-    return `<div class="fin-col" title="${esc(d.dia)}"><span class="fin-bars"><span class="fin-bar pago" style="height:${altC}%"></span><span class="fin-bar rec" style="height:${altV}%"></span></span><em>${esc(dia)}</em></div>`;
+  const lista = serie && serie.length ? serie : [];
+  const max = Math.max(1, ...lista.map((d) => Math.max(d.vendido, d.comprado, 0)));
+  const cols = lista.map((d) => {
+    const altV = d.vendido > 0 ? Math.max(6, Math.round((d.vendido / max) * 100)) : 0;
+    const altC = d.comprado > 0 ? Math.max(6, Math.round((d.comprado / max) * 100)) : 0;
+    const nome = d.nome || '';
+    return `<div class="fin-col" title="${esc(nome)} · recebido ${brl(d.vendido)} · pago ${brl(d.comprado)}"><span class="fin-bars"><span class="fin-bar pago" style="height:${altC}%"></span><span class="fin-bar rec" style="height:${altV}%"></span></span><em>${esc(nome)}</em></div>`;
   }).join('');
-  return `<div class="fin-chart">${cols || '<p class="hint">Nenhuma movimentação no período</p>'}</div>
+  return `<div class="fin-chart">${cols}</div>
     <p class="fin-legenda"><i class="rec"></i> Recebido <i class="pago"></i> Pago</p>`;
 }
 
@@ -239,7 +237,7 @@ function htmlConteudo(dados) {
     ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`)}
     ${card('Ticket médio', brl(dados.ticketMedio), 'total vendido ÷ notas')}
   </div>
-  <section id="secao-resumo" class="fin-box"><h2>Entradas x saídas</h2>${barras(dados.porDia || [])}</section>
+  <section id="secao-resumo" class="fin-box"><h2>Entradas x saídas <span>${esc(dados.ano || '')}</span></h2>${barras(dados.porMes || [])}</section>
   <section id="secao-grupo" class="fin-box"><h2>Vendas por grupo</h2>${tabelaGrupo(dados.porGrupoVenda, 'das vendas')}</section>
   <section id="secao-tipo" class="fin-box"><h2>Vendas por tipo de item</h2>
     <table class="fin-table"><thead><tr><th>Tipo</th><th>Itens</th><th>Vendas</th><th>Valor</th><th>%</th></tr></thead><tbody>${tipos || '<tr><td colspan="5">Nenhuma movimentação no período</td></tr>'}</tbody></table>

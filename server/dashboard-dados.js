@@ -609,6 +609,50 @@ async function porDia(db, usaManage, filtros) {
     .sort((a, b) => a.dia.localeCompare(b.dia));
 }
 
+const NOMES_MES = ['Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+async function porMes(db, usaManage, filtros) {
+  const ano = String(filtros.inicio || isoHoje()).slice(0, 4);
+  const filtrosAno = {
+    ...filtros,
+    inicio: `${ano}-01-01`,
+    fim: `${ano}-12-31`,
+    fimExclusivo: `${Number(ano) + 1}-01-01`,
+  };
+  const meses = NOMES_MES.map((nome, i) => ({ mes: i + 1, nome, vendido: 0, comprado: 0 }));
+  function celula(mes) {
+    const n = inteiro(mes);
+    return n >= 1 && n <= 12 ? meses[n - 1] : null;
+  }
+  async function acumular(fonte, tipo, modo, campo, sinal) {
+    const classif = sqlClassificacao(fonte, filtrosAno, false);
+    const dataCol = tipo === 'compra' ? 'N.DT_ENTRADA' : 'N.DT_EMISSAO';
+    const lista = await ler(db, `
+      SELECT EXTRACT(MONTH FROM CAST(${dataCol} AS DATE)) AS MES, SUM(${sqlValor(fonte)}) AS VALOR
+      FROM ${fonte.item} I
+      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
+      ${joinsValor(fonte)}
+      ${classif.join}
+      WHERE ${predNota(tipo, filtrosAno, fonte)}
+        AND ${predItem(modo)}
+        ${classif.where}
+      GROUP BY EXTRACT(MONTH FROM CAST(${dataCol} AS DATE))`);
+    for (const r of lista || []) {
+      const cel = celula(r.MES);
+      if (cel) cel[campo] += sinal * centavos(r.VALOR);
+    }
+  }
+  for (const fonte of fontesVendaEscopo(usaManage, filtrosAno)) {
+    await acumular(fonte, 'venda', 'venda', 'vendido', 1);
+    await acumular(fonte, 'venda', 'devolucao_compra', 'comprado', -1);
+  }
+  for (const fonte of fontesCompra(usaManage)) {
+    await acumular(fonte, 'compra', 'compra', 'comprado', 1);
+    await acumular(fonte, 'compra', 'devolucao_venda', 'vendido', -1);
+  }
+  return meses.map((r) => ({ mes: r.mes, nome: r.nome, vendido: reais(r.vendido), comprado: reais(r.comprado) }));
+}
+
 async function detalharDashboard(db, opcoes = {}) {
   const usaManage = opcoes.usaManage === undefined
     ? lerUsaManage(opcoes.appCfg || loadAppConfig())
@@ -766,7 +810,7 @@ async function consultarDashboard(db, opcoes = {}) {
   const abas = [];
   if (usaManage) abas.push('manage');
   if (usaGr || !usaManage) abas.push('vendas');
-  if (usaManage || usaGr) abas.push('fiscal');
+  abas.push('fiscal');
   const pedida = String(opcoes.aba || '').trim().toLowerCase();
   const aba = abas.includes(pedida) ? pedida : (usaManage ? 'manage' : 'vendas');
   const filtrosAba = filtrosDaAba(filtros, aba, usaManage, usaGr);
@@ -786,7 +830,7 @@ async function consultarDashboard(db, opcoes = {}) {
   const gruposCompra = aba === 'fiscal' ? [] : await porGrupo(db, usaManage, filtrosAba, 'compras');
   const tipos = aba === 'fiscal' ? { itens: [], evolucao: [] } : await porTipo(db, usaManage, filtrosAba);
   const pagamento = aba === 'fiscal' ? [] : await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
-  const serieDiaria = aba === 'fiscal' ? [] : await porDia(db, usaManage, filtrosAba);
+  const serieMensal = aba === 'fiscal' ? [] : await porMes(db, usaManage, filtrosAba);
   const vazio = t.totalVendido === 0 && (aba === 'fiscal' || t.totalComprado === 0);
   return {
     perfil,
@@ -796,6 +840,7 @@ async function consultarDashboard(db, opcoes = {}) {
     abas,
     fiscal: aba === 'fiscal',
     periodo: { inicio: filtros.inicio, fim: filtros.fim },
+    ano: String(filtros.inicio || '').slice(0, 4),
     ...cardsVenda(t),
     vendidoDia,
     vendidoMes,
@@ -804,7 +849,7 @@ async function consultarDashboard(db, opcoes = {}) {
     porTipo: tipos.itens,
     evolucaoTipo: tipos.evolucao,
     porPagamento: pagamento,
-    porDia: serieDiaria,
+    porMes: serieMensal,
     vazio,
     mensagem: vazio ? 'Nenhuma movimentação no período' : '',
   };
