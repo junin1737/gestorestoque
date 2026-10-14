@@ -81,7 +81,6 @@ function mostrarAtalhos(mostrar) {
 }
 
 function lerFiltros() {
-  if (dashPerfil === 'MT_ENTRADAS') return;
   const box = document.getElementById('dash-financeiro');
   const tem = box?.querySelector('[data-filtro="inicio"]');
   if (!tem) {
@@ -103,11 +102,9 @@ function queryDash(extra) {
   lerFiltros();
   const params = new URLSearchParams();
   params.set('perfil', dashPerfil);
-  if (dashPerfil !== 'MT_ENTRADAS') {
-    ['inicio', 'fim', 'grupoId', 'tipoItem', 'modelo', 'ncm'].forEach((k) => {
-      if (dashFiltros[k]) params.set(k, dashFiltros[k]);
-    });
-  }
+  ['inicio', 'fim', 'grupoId', 'tipoItem', 'modelo', 'ncm'].forEach((k) => {
+    if (dashFiltros[k]) params.set(k, dashFiltros[k]);
+  });
   if (dashAba) params.set('aba', dashAba);
   Object.entries(extra || {}).forEach(([k, v]) => { if (v) params.set(k, v); });
   return params;
@@ -175,7 +172,6 @@ function tabelaGrupo(linhas, lado) {
 }
 
 function htmlFiltros(perfil) {
-  if (perfil === 'MT_ENTRADAS') return '';
   const p = dashFiltros.inicio ? dashFiltros : (perfil === 'CONTADOR_ACESSA' ? periodoContador() : periodoPadrao());
   const extra = perfil === 'CONTADOR_ACESSA'
     ? `<label>NCM<input data-filtro="ncm" placeholder="Código" value="${esc(p.ncm || '')}" /></label>`
@@ -268,14 +264,15 @@ function htmlConteudo(dados) {
     ${htmlRecortes(dados)}`;
   }
   if (dados.aba === 'financeiro') return htmlFinanceiro(dados);
-  if (dados.vazio) return `${htmlAbas(dados)}<p class="fin-vazio">Nenhuma movimentação no período</p>`;
   if (dados.perfil === 'MT_ENTRADAS') {
-    return `<div class="fin-cards">
-      ${card('Entradas do dia', brl(dados.entradasDia), `${dados.notasDia || 0} notas`, '', 'entrada')}
-      ${card('Entradas do mês', brl(dados.entradasMes), `${dados.notasMes || 0} notas`, '', 'entrada')}
+    return `<p class="hint">O dia e o mês dos cards seguem a data Até. A lista usa o período De–Até.</p>
+    <div class="fin-cards">
+      ${card('Entradas do dia', brl(dados.entradasDia), `${dados.referenciaDia || ''} · ${dados.notasDia || 0} notas`, '', 'entrada')}
+      ${card('Entradas do mês', brl(dados.entradasMes), `${dados.referenciaMes || ''} · ${dados.notasMes || 0} notas`, '', 'entrada')}
     </div>
-    <section id="secao-resumo" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupo, 'do mês')}</section>`;
+    <section id="secao-resumo" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupo, 'do período')}</section>`;
   }
+  if (dados.vazio) return `${htmlAbas(dados)}<p class="fin-vazio">Nenhuma movimentação no período</p>`;
   if (dados.perfil === 'CONTADOR_ACESSA') {
     const ncm = (dados.porNcm || []).map((r) => `<tr><td>${esc(r.ncm)}</td><td>${brl(r.totalVendido)}</td></tr>`).join('');
     const sinal = Number(dados.diferenca) < 0 ? 'entrada' : 'saida';

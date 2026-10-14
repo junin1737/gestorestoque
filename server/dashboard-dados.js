@@ -953,17 +953,20 @@ function montarFiltros(opcoes, perfil) {
   };
   if (perfil === 'MT_ENTRADAS') {
     const hoje = isoHoje();
+    const inicio = opcoes.inicio ? parseIso(opcoes.inicio) : `${hoje.slice(0, 8)}01`;
+    const fim = opcoes.fim ? parseIso(opcoes.fim) : hoje;
+    if (fim < inicio) throw new Error('A data final é anterior à inicial');
     return {
       ...base,
       grupoId: null,
       tipoItem: '',
       ncm: '',
-      inicio: `${hoje.slice(0, 8)}01`,
-      fim: hoje,
-      fimExclusivo: addDias(hoje, 1),
+      inicio,
+      fim,
+      fimExclusivo: addDias(fim, 1),
       modelosVenda: MODELOS_FISCAIS,
       modelosCompra: MODELOS_FISCAIS,
-      dia: hoje,
+      dia: fim,
     };
   }
   const inicio = parseIso(opcoes.inicio);
@@ -993,23 +996,26 @@ async function consultarDashboard(db, opcoes = {}) {
   const filtros = montarFiltros(opcoes, perfil);
 
   if (perfil === 'MT_ENTRADAS') {
-    const diaFiltro = { ...filtros, inicio: filtros.dia, fim: filtros.dia, fimExclusivo: addDias(filtros.dia, 1) };
+    const mesIntervalo = intervaloMes(filtros.fim);
+    const diaFiltro = { ...filtros, inicio: filtros.fim, fim: filtros.fim, fimExclusivo: addDias(filtros.fim, 1) };
+    const mesFiltro = { ...filtros, inicio: mesIntervalo.inicio, fimExclusivo: mesIntervalo.fimExclusivo };
     const dia = await totais(db, usaManage, diaFiltro, 'compras');
-    const mes = await totais(db, usaManage, filtros, 'compras');
+    const mes = await totais(db, usaManage, mesFiltro, 'compras');
     const grupos = await porGrupo(db, usaManage, filtros, 'compras');
-    const vazio = dia.totalComprado === 0 && mes.totalComprado === 0;
     return {
       perfil,
       usaManage,
       fiscal: true,
       periodo: { inicio: filtros.inicio, fim: filtros.fim },
+      referenciaDia: dataBr(filtros.fim),
+      referenciaMes: mesIntervalo.rotulo,
       entradasDia: reais(dia.totalComprado),
       entradasMes: reais(mes.totalComprado),
       notasDia: dia.compras.notas,
       notasMes: mes.compras.notas,
       porGrupo: grupos,
-      vazio,
-      mensagem: vazio ? 'Nenhuma movimentação no período' : '',
+      vazio: false,
+      mensagem: '',
     };
   }
 
