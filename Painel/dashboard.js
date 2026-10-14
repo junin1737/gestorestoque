@@ -229,6 +229,14 @@ function tabelaContas(linhas, vazio) {
   return `<table class="fin-table"><thead><tr><th>Vencimento</th><th>Documento</th><th>Histórico</th><th>Valor</th><th>Situação</th></tr></thead><tbody>${corpo || `<tr><td colspan="5">${esc(vazio)}</td></tr>`}</tbody></table>`;
 }
 
+function tabelaRecebimentoConta(linhas) {
+  const corpo = (linhas || []).map((r) => {
+    const nome = [r.codigo, r.plano].filter(Boolean).join(' · ');
+    return `<tr><td>${esc(nome)}</td><td class="fin-valor-saida">${brl(r.recebido)}</td></tr>`;
+  }).join('');
+  return `<table class="fin-table"><thead><tr><th>Conta</th><th>Recebido</th></tr></thead><tbody>${corpo || '<tr><td colspan="2">Nenhum recebimento no período</td></tr>'}</tbody></table>`;
+}
+
 function tabelaPlano(linhas) {
   const corpo = (linhas || []).map((r) => {
     const nome = [r.codigo, r.plano].filter(Boolean).join(' · ');
@@ -243,7 +251,7 @@ function tabelaPlano(linhas) {
 
 function htmlFinanceiro(dados) {
   const aviso = `${dados.ignorarCartao ? '<p class="hint">Contas a receber com cartão no histórico estão fora desta aba.</p>' : ''}
-  <p class="hint">O dia e o mês dos cards seguem a data Até. A lista e o plano de contas usam o período De–Até.</p>`;
+  <p class="hint">O dia e o mês dos cards seguem a data Até. A lista, o recebimento por conta e o plano de contas usam o período De–Até.</p>`;
   const corte = (lista, total) => (total > (lista || []).length ? `<p class="hint">Mostrando ${(lista || []).length} de ${total}.</p>` : '');
   const bloco = (titulo, aberto, liquidado, painel, linhas, vazio, total) => `
     <section class="fin-box">
@@ -267,11 +275,17 @@ function htmlFinanceiro(dados) {
   return `${htmlAbas(dados)}
   ${aviso}
   <div class="fin-mov-acoes">
-    <button type="button" class="btn" data-fin-painel="fin-plano" data-fin-mostrar="Ver por plano de contas" data-fin-ocultar="Ocultar plano de contas" aria-expanded="false">Ver por plano de contas</button>
+    <button type="button" class="btn" data-fin-painel="fin-recebimento" data-fin-mostrar="Recebimento por conta" data-fin-ocultar="Ocultar recebimento por conta" aria-expanded="false">Recebimento por conta</button>
+    <button type="button" class="btn" data-fin-painel="fin-plano" data-fin-mostrar="Por plano de contas" data-fin-ocultar="Ocultar plano de contas" aria-expanded="false">Por plano de contas</button>
   </div>
+  <section id="fin-recebimento" class="fin-box" hidden>
+    <h2>Recebimento por conta</h2>
+    <p class="hint">Baixas do período De–Até, pela conta em que o valor entrou.</p>
+    ${tabelaRecebimentoConta(dados.porRecebimentoConta)}
+  </section>
   <section id="fin-plano" class="fin-box" hidden>
-    <h2>Pagamentos e recebimentos por plano de contas</h2>
-    <p class="hint">Baixas do período De–Até, agrupadas pela conta do plano.</p>
+    <h2>Por plano de contas</h2>
+    <p class="hint">Baixas do período De–Até, pela conta de origem do título.</p>
     ${tabelaPlano(dados.porPlano)}
   </section>
   ${bloco('Contas a receber', 'receber', 'Recebidas', 'receber', dados.contasReceber, 'Nenhuma conta a receber no período', dados.contasReceberTotal)}

@@ -1152,9 +1152,8 @@ function enterApp() {
   const showContador = !!state.usuario?.supervisor || !!state.usuario?.contador || can('massa', 'acesso');
   if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
   if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
-  const showEmp = !!state.usuario?.mtEntradas;
-  if ($('#nav-empresas')) $('#nav-empresas').hidden = !showEmp;
-  if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = !showEmp;
+  if ($('#nav-empresas')) $('#nav-empresas').hidden = true;
+  if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = true;
   if (window.Dashboard) Dashboard.mostrarMenuDash();
   if (state.usuario?.contador) {
     state.dashAbertura = { perfil: 'CONTADOR_ACESSA', secao: 'resumo' };
@@ -1171,7 +1170,14 @@ function enterApp() {
   if (state.usuario?.contador) return;
   loadUnidades();
   carregarPedidoVinculo();
-  carregarTrocaEmpresa();
+  if (state.usuario?.mtEntradas) {
+    const troca = $('#trocar-empresa');
+    const trocaMobile = $('#trocar-empresa-mobile');
+    if (troca) troca.hidden = true;
+    if (trocaMobile) trocaMobile.hidden = true;
+  } else {
+    carregarTrocaEmpresa();
+  }
 }
 
 function trocarUsuario() {
@@ -1364,10 +1370,7 @@ async function showPage(page) {
     showMsg('Sem permissão para condicionais.');
     page = 'dashboard';
   }
-  if (page === 'empresas' && !state.usuario?.mtEntradas) {
-    showMsg('Somente o usuário MT Entradas troca de empresa.');
-    page = 'dashboard';
-  }
+  if (page === 'empresas') page = 'dashboard';
   if (page === 'usuarios' && !state.usuario?.supervisor) {
     showMsg('Só o supervisor cadastra os usuários do painel.');
     page = 'dashboard';
