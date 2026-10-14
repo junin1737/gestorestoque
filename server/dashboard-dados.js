@@ -650,6 +650,32 @@ async function porMes(db, usaManage, filtros) {
   return meses.map((r) => ({ mes: r.mes, nome: r.nome, vendido: reais(r.vendido), comprado: reais(r.comprado) }));
 }
 
+async function porMesFinanceiro(db, filtros) {
+  const ano = String(filtros.inicio || isoHoje()).slice(0, 4);
+  const inicio = `${ano}-01-01`;
+  const fim = `${Number(ano) + 1}-01-01`;
+  const meses = NOMES_MES.map((nome, i) => ({ mes: i + 1, nome, vendido: 0, comprado: 0 }));
+  function somar(lista, campo) {
+    for (const r of lista || []) {
+      const n = inteiro(r.MES);
+      if (n >= 1 && n <= 12) meses[n - 1][campo] += centavos(r.VALOR);
+    }
+  }
+  somar(await ler(db, `
+    SELECT EXTRACT(MONTH FROM DT_BAIXA) AS MES, SUM(COALESCE(VLR_RECEB, 0)) AS VALOR
+    FROM TB_CTAREC_BAIXA
+    WHERE DT_BAIXA >= '${inicio}' AND DT_BAIXA < '${fim}'
+      AND TRIM(COALESCE(TIP_RECBTO, '')) = 'T'
+    GROUP BY EXTRACT(MONTH FROM DT_BAIXA)`), 'vendido');
+  somar(await ler(db, `
+    SELECT EXTRACT(MONTH FROM DT_BAIXA) AS MES, SUM(COALESCE(VLR_PAGO, 0)) AS VALOR
+    FROM TB_CTAPAG_BAIXA
+    WHERE DT_BAIXA >= '${inicio}' AND DT_BAIXA < '${fim}'
+      AND TRIM(COALESCE(TIP_PAGTO, '')) = 'T'
+    GROUP BY EXTRACT(MONTH FROM DT_BAIXA)`), 'comprado');
+  return meses.map((r) => ({ mes: r.mes, nome: r.nome, vendido: reais(r.vendido), comprado: reais(r.comprado) }));
+}
+
 async function detalharDashboard(db, opcoes = {}) {
   const usaManage = opcoes.usaManage === undefined
     ? lerUsaManage(opcoes.appCfg || loadAppConfig())
@@ -813,7 +839,7 @@ async function consultarDashboard(db, opcoes = {}) {
   const t = await totais(db, usaManage, filtrosAba, aba === 'fiscal' ? 'vendas' : 'ambos');
   let vendidoDia = 0;
   let vendidoMes = 0;
-  if (aba === 'fiscal') {
+  if (aba === 'fiscal' || aba === 'manage') {
     const hoje = isoHoje();
     const diaFiltro = { ...filtrosAba, inicio: hoje, fim: hoje, fimExclusivo: addDias(hoje, 1) };
     const mesFiltro = { ...filtrosAba, inicio: `${hoje.slice(0, 8)}01`, fim: hoje, fimExclusivo: addDias(hoje, 1) };
@@ -822,11 +848,13 @@ async function consultarDashboard(db, opcoes = {}) {
     vendidoDia = reais(dia.totalVendido);
     vendidoMes = reais(mes.totalVendido);
   }
-  const gruposVenda = aba === 'fiscal' ? [] : await porGrupo(db, usaManage, filtrosAba, 'vendas');
-  const gruposCompra = aba === 'fiscal' ? [] : await porGrupo(db, usaManage, filtrosAba, 'compras');
-  const tipos = aba === 'fiscal' ? { itens: [], evolucao: [] } : await porTipo(db, usaManage, filtrosAba);
+  const gruposVenda = await porGrupo(db, usaManage, filtrosAba, 'vendas');
+  const gruposCompra = await porGrupo(db, usaManage, filtrosAba, 'compras');
+  const tipos = await porTipo(db, usaManage, filtrosAba);
   const pagamento = await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
-  const serieMensal = await porMes(db, usaManage, filtrosAba);
+  const serieMensal = aba === 'manage'
+    ? await porMesFinanceiro(db, filtrosAba)
+    : await porMes(db, usaManage, filtrosAba);
   const vazio = t.totalVendido === 0 && (aba === 'fiscal' || t.totalComprado === 0);
   return {
     perfil,

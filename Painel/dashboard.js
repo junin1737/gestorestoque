@@ -121,6 +121,16 @@ function htmlMeses(dados) {
   return `<section id="secao-resumo" class="fin-box"><h2>Entradas x saídas <span>${esc(dados.ano || '')}</span></h2>${barras(dados.porMes || [])}</section>`;
 }
 
+function htmlRecortes(dados) {
+  const tipos = (dados.porTipo || []).map((r) => `<tr><td>${esc(r.tipo)}</td><td>${r.itens}</td><td>${r.vendas}</td><td>${brl(r.valor)}</td><td>${esc(r.participacao)}%</td></tr>`).join('');
+  return `<section id="secao-grupo" class="fin-box"><h2>Vendas por grupo</h2>${tabelaGrupo(dados.porGrupoVenda, 'das vendas')}</section>
+  <section id="secao-tipo" class="fin-box"><h2>Vendas por tipo de item</h2>
+    <table class="fin-table"><thead><tr><th>Tipo</th><th>Itens</th><th>Vendas</th><th>Valor</th><th>%</th></tr></thead><tbody>${tipos || '<tr><td colspan="5">Nenhuma movimentação no período</td></tr>'}</tbody></table>
+  </section>
+  ${htmlPagamento(dados)}
+  <section id="secao-compras" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupoCompra, 'das compras')}</section>`;
+}
+
 function htmlPagamento(dados) {
   const pags = (dados.porPagamento || []).map((r) => `
     <div class="fin-pag"><span>${esc(r.forma)}</span><strong>${brl(r.valor)}</strong><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span></div>`).join('');
@@ -208,7 +218,7 @@ function htmlConteudo(dados) {
       ${card('NF-e', brl(dados.vendasNfe), 'modelo 55')}
     </div>
     ${htmlMeses(dados)}
-    ${htmlPagamento(dados)}`;
+    ${htmlRecortes(dados)}`;
   }
   if (dados.vazio) return `${htmlAbas(dados)}<p class="fin-vazio">Nenhuma movimentação no período</p>`;
   if (dados.perfil === 'MT_ENTRADAS') {
@@ -229,11 +239,10 @@ function htmlConteudo(dados) {
       <table class="fin-table"><thead><tr><th>NCM</th><th>Total vendido</th></tr></thead><tbody>${ncm || '<tr><td colspan="2">Nenhuma movimentação no período</td></tr>'}</tbody></table>
     </section>`;
   }
-  const tipos = (dados.porTipo || []).map((r) => `<tr><td>${esc(r.tipo)}</td><td>${r.itens}</td><td>${r.vendas}</td><td>${brl(r.valor)}</td><td>${esc(r.participacao)}%</td></tr>`).join('');
   const separados = dados.aba === 'manage'
     ? `${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
-       ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65')}
-       ${card('NF-e', brl(dados.vendasNfe), 'modelo 55')}`
+       ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje')}
+       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual')}`
     : dados.usaGr
       ? `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
          ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas')}
@@ -248,12 +257,7 @@ function htmlConteudo(dados) {
     ${card('Ticket médio', brl(dados.ticketMedio), 'total vendido ÷ notas')}
   </div>
   ${htmlMeses(dados)}
-  <section id="secao-grupo" class="fin-box"><h2>Vendas por grupo</h2>${tabelaGrupo(dados.porGrupoVenda, 'das vendas')}</section>
-  <section id="secao-tipo" class="fin-box"><h2>Vendas por tipo de item</h2>
-    <table class="fin-table"><thead><tr><th>Tipo</th><th>Itens</th><th>Vendas</th><th>Valor</th><th>%</th></tr></thead><tbody>${tipos || '<tr><td colspan="5">Nenhuma movimentação no período</td></tr>'}</tbody></table>
-  </section>
-  <section id="secao-compras" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupoCompra, 'das compras')}</section>
-  ${htmlPagamento(dados)}`;
+  ${htmlRecortes(dados)}`;
 }
 
 function preencherGrupos(dados) {
