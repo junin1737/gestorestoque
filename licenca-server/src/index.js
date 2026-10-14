@@ -1561,10 +1561,59 @@ async function rotaAdmin(request, env, url) {
   return json({ ok: false, error: 'Rota não encontrada.' }, 404);
 }
 
+const NOME_ATUALIZACAO = /^gestorestoque-online-\d+\.\d+\.\d+-online\.\d+\.(exe|apk)$/;
+
+function arquivoAtualizacao(origem, nome) {
+  if (!nome || !NOME_ATUALIZACAO.test(nome)) return null;
+  return { nome, url: `${origem}/atualizacao/arquivo/${nome}` };
+}
+
+async function atualizacaoManifesto(request, env) {
+  if (!env.ATUALIZACAO) return json({ ok: false, error: 'Atualização ainda não configurada.' }, 503);
+  const obj = await env.ATUALIZACAO.get('online/manifest.json');
+  if (!obj) return json({ ok: true, versao: '', notas: '', exe: null, apk: null });
+  let manifesto;
+  try {
+    manifesto = JSON.parse(await obj.text());
+  } catch {
+    return json({ ok: false, error: 'Manifesto de atualização inválido.' }, 500);
+  }
+  const origem = new URL(request.url).origin;
+  return json({
+    ok: true,
+    versao: String(manifesto.versao || '').replace(/^v/i, ''),
+    notas: String(manifesto.notas || ''),
+    exe: arquivoAtualizacao(origem, manifesto.exe),
+    apk: arquivoAtualizacao(origem, manifesto.apk),
+  });
+}
+
+async function atualizacaoArquivo(request, env, nome) {
+  if (!NOME_ATUALIZACAO.test(nome)) return json({ ok: false, error: 'Arquivo inválido.' }, 400);
+  if (!env.ATUALIZACAO) return json({ ok: false, error: 'Atualização ainda não configurada.' }, 503);
+  const obj = await env.ATUALIZACAO.get(`online/${nome}`);
+  if (!obj) return json({ ok: false, error: 'Arquivo não encontrado.' }, 404);
+  const tipo = nome.endsWith('.apk')
+    ? 'application/vnd.android.package-archive'
+    : 'application/octet-stream';
+  const headers = {
+    'Content-Type': tipo,
+    'Content-Disposition': `attachment; filename="${nome}"`,
+    'Cache-Control': 'public, max-age=86400',
+  };
+  if (obj.size) headers['Content-Length'] = String(obj.size);
+  return new Response(obj.body, { headers });
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
+      if (url.pathname === '/atualizacao' && request.method === 'GET') return await atualizacaoManifesto(request, env);
+      const arquivo = url.pathname.match(/^\/atualizacao\/arquivo\/([^/]+)$/);
+      if (arquivo && request.method === 'GET') {
+        return await atualizacaoArquivo(request, env, decodeURIComponent(arquivo[1]));
+      }
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
       if (url.pathname.startsWith('/api/mt/')) return await rotaMt(request, env, url);
       if (url.pathname.startsWith('/api/admin/')) return await rotaAdmin(request, env, url);

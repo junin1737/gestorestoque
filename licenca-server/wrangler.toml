@@ -21,6 +21,12 @@ migrations_dir = "migrations"
 binding = "RELAY"
 service = "gestor-relay"
 
+# Instalador e APK da edição online. Plano gratuito do R2 (10 GB, sem taxa de saída).
+# Criar uma vez: npx wrangler r2 bucket create gestor-atualizacao
+[[r2_buckets]]
+binding = "ATUALIZACAO"
+bucket_name = "gestor-atualizacao"
+
 # Segredos (wrangler secret put ...):
 #   LICENCA_PRIVATE_KEY  chave Ed25519 PKCS8 em PEM (par da pública embutida em server/licenca.js)
 #   ADMIN_PASSWORD       senha do painel /admin

@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
  * se a release dessa versão tiver APK mais novo, baixa e instala.
  */
 public final class Atualizador {
+    private static final String NUVEM_URL = "https://painel.smsjrdeveloper.com.br/atualizacao";
     private static final String PKG_URL =
             "https://raw.githubusercontent.com/junin1737/gestorestoque/online/package.json";
     private static final String RELEASE_URL =
@@ -43,9 +44,11 @@ public final class Atualizador {
         new Thread(() -> {
             try {
                 String local = versaoInstalada(activity);
-                String git = versaoDoGit();
+                String[] nuvem = versaoDaNuvem();
+                String git = nuvem != null ? nuvem[0] : versaoDoGit();
+                String download = nuvem != null ? nuvem[1] : null;
                 if (git.isEmpty() || cmp(git, local) <= 0) return;
-                String download = apkDaRelease(git);
+                if (download == null) download = apkDaRelease(git);
                 if (download == null || activity.isFinishing()) return;
                 activity.runOnUiThread(() -> perguntar(activity, local, git, download));
             } catch (Exception ignored) {
@@ -122,6 +125,20 @@ public final class Atualizador {
             return info.versionName == null ? "" : info.versionName;
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    /** [versão, url do apk] quando o painel já publicou um APK mais novo. */
+    private static String[] versaoDaNuvem() {
+        try {
+            JSONObject dados = new JSONObject(httpTexto(NUVEM_URL));
+            String versao = dados.optString("versao", "").trim();
+            JSONObject apk = dados.optJSONObject("apk");
+            String url = apk == null ? "" : apk.optString("url", "").trim();
+            if (versao.isEmpty() || url.isEmpty()) return null;
+            return new String[] { versao, url };
+        } catch (Exception ignored) {
+            return null;
         }
     }
 

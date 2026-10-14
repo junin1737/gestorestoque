@@ -6,6 +6,7 @@ const { app, dialog, BrowserWindow, shell } = require('electron');
 const { spawn, spawnSync } = require('child_process');
 
 const edicao = require('./edicao');
+const { LICENCA_URL } = require('./licenca');
 
 const GH_OWNER = 'junin1737';
 const GH_REPO = 'gestorestoque';
@@ -59,7 +60,7 @@ function httpsGetJson(url) {
     });
     req.on('error', reject);
     req.setTimeout(20000, () => {
-      req.destroy(new Error('Timeout ao consultar GitHub'));
+      req.destroy(new Error('Timeout ao consultar a atualização'));
     });
   });
 }
@@ -227,6 +228,27 @@ async function launchInstaller(exePath) {
   }
 }
 
+async function fetchCloudUpdate() {
+  try {
+    const data = await httpsGetJson(`${LICENCA_URL}/atualizacao`);
+    const tag = String(data.versao || '').replace(/^v/i, '').trim();
+    if (!data.ok || !tag || !data.exe?.url) return null;
+    return {
+      tag,
+      name: tag,
+      body: data.notas || '',
+      htmlUrl: `${LICENCA_URL}/atualizacao`,
+      asset: {
+        name: data.exe.nome || `gestorestoque-online-${tag}.exe`,
+        url: data.exe.url,
+        size: data.exe.tamanho || 0,
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function fetchRemotePackageVersion() {
   const url = `https://raw.githubusercontent.com/${GH_OWNER}/${GH_REPO}/${GH_BRANCH}/package.json`;
   const text = await httpsGetText(url);
@@ -301,7 +323,37 @@ function getLocalVersion() {
 
 async function checkForGitUpdate() {
   const localVersion = getLocalVersion();
-  const remotePkg = await fetchRemotePackageVersion();
+  const nuvem = await fetchCloudUpdate();
+  if (nuvem?.asset && cmpVersion(nuvem.tag, localVersion) > 0) {
+    return {
+      available: true,
+      pendingPublish: false,
+      localVersion,
+      remoteVersion: nuvem.tag,
+      gitVersion: nuvem.tag,
+      release: nuvem,
+      downloadUrl: nuvem.asset.url,
+      assetName: nuvem.asset.name,
+    };
+  }
+  let remotePkg;
+  try {
+    remotePkg = await fetchRemotePackageVersion();
+  } catch (err) {
+    if (nuvem) {
+      return {
+        available: false,
+        pendingPublish: false,
+        localVersion,
+        remoteVersion: nuvem.tag || localVersion,
+        gitVersion: nuvem.tag || localVersion,
+        release: nuvem,
+        downloadUrl: null,
+        assetName: null,
+      };
+    }
+    throw err;
+  }
   const gitVersion = String(remotePkg.version || '').trim() || '0.0.0';
 
   // Preferência: release com a mesma versão do package.json da main
@@ -351,10 +403,10 @@ async function promptAndUpdate(parentWindow) {
         buttons: ['OK'],
         defaultId: 0,
         title: 'Instalador ainda não publicado',
-        message: `Há versão ${info.gitVersion} no GitHub, mas o instalador ainda não foi publicado.`,
+        message: `Há versão ${info.gitVersion}, mas o instalador ainda não foi publicado.`,
         detail: [
           `Versão instalada: ${info.localVersion}`,
-          `Versão no package.json (main): ${info.gitVersion}`,
+          `Versão publicada: ${info.gitVersion}`,
           '',
           'No PC de build (Windows):',
           '1) git pull',
@@ -371,7 +423,7 @@ async function promptAndUpdate(parentWindow) {
   const win = parentWindow && !parentWindow.isDestroyed() ? parentWindow : BrowserWindow.getFocusedWindow();
   const detail = [
     `Versão instalada: ${info.localVersion}`,
-    `Versão no GitHub: ${info.remoteVersion}`,
+    `Versão disponível: ${info.remoteVersion}`,
     info.downloadUrl
       ? 'Ao confirmar, o instalador abre. Siga os passos na tela para reinstalar. O aplicativo fecha para a instalação concluir e abre de novo no final.'
       : 'Há versão nova no Git, mas o instalador ainda não foi publicado em Releases. Avise a MT Automações.',

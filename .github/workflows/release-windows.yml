@@ -95,3 +95,21 @@ jobs:
           prerelease: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publicar atualização na nuvem
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "Sem token da Cloudflare. O instalador continua no GitHub até o segredo ser cadastrado."
+            exit 0
+          fi
+          VERSION="${{ steps.ver.outputs.version }}"
+          EXE="gestorestoque-online-${VERSION}.exe"
+          APK="gestorestoque-online-${VERSION}.apk"
+          VERSION="$VERSION" EXE="$EXE" APK="$APK" node -e "const fs=require('fs'); fs.writeFileSync('dist/manifest.json', JSON.stringify({versao:process.env.VERSION, notas:'Gestor Estoque Online '+process.env.VERSION+'.', exe:process.env.EXE, apk:process.env.APK}))"
+          npx --yes wrangler@4.147.0 r2 object put "gestor-atualizacao/online/${EXE}" --file="dist/${EXE}" --content-type=application/octet-stream
+          npx --yes wrangler@4.147.0 r2 object put "gestor-atualizacao/online/${APK}" --file="dist/${APK}" --content-type=application/vnd.android.package-archive
+          npx --yes wrangler@4.147.0 r2 object put "gestor-atualizacao/online/manifest.json" --file="dist/manifest.json" --content-type=application/json
