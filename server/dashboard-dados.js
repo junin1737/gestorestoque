@@ -94,6 +94,13 @@ function sqlComFrete() {
   return '(COALESCE(I.VLR_TOTAL, 0) + COALESCE(I.VLR_FRETE, 0))';
 }
 
+function sqlCustoLinha(fonte) {
+  const qtd = 'COALESCE(I.QTD_ITEM, 0)';
+  const cadastro = `COALESCE(EST.PRC_CUSTO, 0) * ${qtd}`;
+  if (fonte.item !== 'TB_NFV_ITEM') return cadastro;
+  return `COALESCE(NULLIF(I.VLR_CUSTO, 0), EST.PRC_CUSTO, 0) * ${qtd}`;
+}
+
 function filtroCartao(coluna, ignorar) {
   if (!ignorar) return '';
   return ` AND NOT (UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTAO' OR UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTÃO' OR UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTÕES')`;
@@ -363,12 +370,13 @@ function variacao(atual, anterior) {
   return Math.round((10000 * (atual - anterior)) / anterior) / 100;
 }
 
-async function agregarGrupo(db, fonte, filtros, tipo, modo, sinal) {
+async function agregarGrupo(db, fonte, filtros, tipo, modo, sinal, comCusto) {
   const classif = sqlClassificacao(fonte, filtros, true);
   const lista = await lerFonte(db, fonte, (f) => `
     SELECT COALESCE(EST.ID_GRUPO, 0) AS ID_GRUPO,
            COALESCE(TRIM(GRP.DESCRICAO), 'Sem grupo') AS DESCRICAO,
            SUM(${sqlValor(f)}) AS VALOR,
+           ${comCusto ? `SUM(${sqlCustoLinha(f)}) AS CUSTO,` : ''}
            SUM(COALESCE(I.QTD_ITEM, 0)) AS QTD,
            COUNT(DISTINCT N.${f.id}) AS NOTAS
     FROM ${f.item} I
@@ -382,6 +390,7 @@ async function agregarGrupo(db, fonte, filtros, tipo, modo, sinal) {
     id: inteiro(r.ID_GRUPO),
     descricao: String(r.DESCRICAO || 'Sem grupo').trim() || 'Sem grupo',
     valor: sinal * centavos(r.VALOR),
+    custo: comCusto ? sinal * centavos(r.CUSTO) : 0,
     qtd: sinal * centavos(r.QTD),
     notas: sinal * inteiro(r.NOTAS),
   }));
@@ -391,8 +400,9 @@ function juntarGrupo(listas) {
   const map = new Map();
   for (const item of listas.flat()) {
     const chave = `${item.id}|${item.descricao}`;
-    const atual = map.get(chave) || { id: item.id, grupo: item.descricao, valor: 0, quantidade: 0, notas: 0 };
+    const atual = map.get(chave) || { id: item.id, grupo: item.descricao, valor: 0, custo: 0, quantidade: 0, notas: 0 };
     atual.valor += item.valor;
+    atual.custo += item.custo || 0;
     atual.quantidade += item.qtd;
     atual.notas += item.notas;
     map.set(chave, atual);
@@ -401,6 +411,7 @@ function juntarGrupo(listas) {
     id: r.id,
     grupo: r.grupo,
     valor: reais(r.valor),
+    margem: reais(r.valor - r.custo),
     quantidade: reais(r.quantidade),
     notas: r.notas,
   }));
@@ -414,10 +425,10 @@ async function porGrupo(db, usaManage, filtros, lado) {
   const listas = [];
   if (lado === 'vendas') {
     for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
-      listas.push(await agregarGrupo(db, fonte, filtros, 'venda', 'venda', 1));
+      listas.push(await agregarGrupo(db, fonte, filtros, 'venda', 'venda', 1, true));
     }
     for (const fonte of fontesCompra(usaManage, filtros)) {
-      listas.push(await agregarGrupo(db, fonte, filtros, 'compra', 'devolucao_venda', -1));
+      listas.push(await agregarGrupo(db, fonte, filtros, 'compra', 'devolucao_venda', -1, true));
     }
   } else {
     for (const fonte of fontesCompra(usaManage, filtros)) {

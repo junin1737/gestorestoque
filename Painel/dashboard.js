@@ -157,15 +157,21 @@ function barras(serie) {
 }
 
 function tabelaGrupo(linhas, lado) {
-  const corpo = (linhas || []).map((r) => `
-    <tr>
+  const vendas = lado === 'das vendas';
+  const corpo = (linhas || []).map((r) => {
+    const margem = Number(r.margem) || 0;
+    const ultima = vendas
+      ? `<strong class="fin-margem ${margem < 0 ? 'neg' : 'pos'}">${brl(r.margem)}</strong>`
+      : `<span class="fin-part">${esc(r.participacao)}%</span><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span>`;
+    return `<tr>
       <td>${esc(r.grupo)}</td>
       <td>${brl(r.valor)}</td>
       <td>${esc(r.quantidade)}</td>
-      <td>${esc(r.notas)}</td>
-      <td><span class="fin-part">${esc(r.participacao)}%</span><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span></td>
-    </tr>`).join('');
-  return `<table class="fin-table"><thead><tr><th>Grupo</th><th>Valor</th><th>Qtd</th><th>Notas</th><th>% ${esc(lado)}</th></tr></thead><tbody>${corpo || '<tr><td colspan="5">Nenhuma movimentação no período</td></tr>'}</tbody></table>`;
+      ${vendas ? '' : `<td>${esc(r.notas)}</td>`}
+      <td>${ultima}</td>
+    </tr>`;
+  }).join('');
+  return `<table class="fin-table"><thead><tr><th>Grupo</th><th>Valor</th><th>Qtd</th>${vendas ? '' : '<th>Notas</th>'}<th>${vendas ? 'Margem' : `% ${esc(lado)}`}</th></tr></thead><tbody>${corpo || `<tr><td colspan="${vendas ? 4 : 5}">Nenhuma movimentação no período</td></tr>`}</tbody></table>`;
 }
 
 function htmlFiltros(perfil) {
