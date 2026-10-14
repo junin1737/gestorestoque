@@ -1434,6 +1434,7 @@ async function consultarDashboard(db, opcoes = {}) {
   }
   const filtrosAba = filtrosDaAba(filtros, aba, usaManage, usaGr);
   const t = await totais(db, usaManage, filtrosAba, aba === 'fiscal' ? 'vendas' : 'ambos');
+  const comprasFiscal = aba === 'fiscal' ? await totais(db, usaManage, filtrosAba, 'compras') : null;
   let vendidoDia = 0;
   let vendidoMes = 0;
   let vendidoDiaComFrete = 0;
@@ -1466,6 +1467,11 @@ async function consultarDashboard(db, opcoes = {}) {
     periodo: { inicio: filtros.inicio, fim: filtros.fim },
     ano: String(filtros.inicio || '').slice(0, 4),
     ...cardsVenda(t),
+    ...(comprasFiscal ? {
+      totalComprado: reais(comprasFiscal.totalComprado),
+      notasEntrada: comprasFiscal.compras.notas,
+      quantidadeComprada: reais(comprasFiscal.compras.qtd),
+    } : {}),
     vendidoDia,
     vendidoMes,
     vendidoDiaComFrete,
