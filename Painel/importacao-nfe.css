@@ -2100,3 +2100,27 @@
   .imp-item-nav { display: none; }
 }
 
+/* Alteração em massa: a grade de 6 colunas da NF-e esmaga o campo e o input vaza no iPhone. */
+#contador-host .massa-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+#contador-host .massa-fields > .imp-field {
+  grid-column: auto;
+  min-width: 0;
+  overflow-wrap: break-word;
+}
+#contador-host .massa-fields > .imp-field input,
+#contador-host .massa-fields > .imp-field select {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+}
+@media (max-width: 720px) {
+  #contador-host .massa-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  #contador-host .imp-vinc-btns .btn {
+    flex: 1 1 calc(50% - 0.35rem);
+  }
+}
+

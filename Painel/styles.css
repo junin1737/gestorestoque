@@ -2321,6 +2321,23 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 .fin-margem.pos, .fin-margem-pct.pos { color: #1f9d55; }
 .fin-margem.neg, .fin-margem-pct.neg { color: #e23d3d; }
 .fin-margem-pct { display: block; margin-top: 0.12rem; font-size: 0.78rem; font-weight: 700; }
+.fin-valor-saida { color: #1f9d55; font-weight: 700; }
+.fin-valor-entrada { color: #e23d3d; font-weight: 700; }
+.fin-bloco-grade {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+.fin-sub {
+  border: 1px solid color-mix(in srgb, var(--primary-2) 22%, var(--border));
+  border-radius: 12px;
+  padding: 0.7rem 0.75rem 0.55rem;
+  background: color-mix(in srgb, var(--bg) 55%, transparent);
+}
+.fin-sub h3 { margin: 0 0 0.45rem; font-size: 0.92rem; }
+.fin-sub .fin-cards { grid-template-columns: 1fr 1fr; margin-bottom: 0; }
+.fin-mov-acoes { display: flex; flex-wrap: wrap; gap: 0.4rem; margin: 0.75rem 0 0; }
+.fin-mov-acoes .btn { width: auto; min-height: 2.2rem; }
 .fin-card small { color: var(--muted); font-size: var(--fs-xs); }
 .fin-card .fin-extra { color: var(--primary-2); font-weight: 700; }
 .pref-check { display: flex; align-items: center; gap: 0.55rem; font-weight: 650; margin: 0; }
@@ -2409,6 +2426,8 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   }
   .fin-filtros input[type="date"] { font-size: 0.78rem; padding-left: 0.2rem; padding-right: 0.2rem; }
   .fin-cards { grid-template-columns: 1fr 1fr; }
+  .fin-bloco-grade { grid-template-columns: 1fr; }
+  .fin-mov-acoes .btn { width: 100%; }
   .fin-card strong { font-size: 1.05rem; }
   .fin-chart { height: 220px; gap: 0.2rem; }
   .fin-col em { font-size: 0.62rem; }

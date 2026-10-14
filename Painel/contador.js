@@ -36,7 +36,7 @@
         <p class="hint">${contador
           ? `Você altera só os campos fiscais de saída desta loja. Regime: ${esc(regime || '—')}. Cadastro, preço e estoque ficam bloqueados.`
           : `Os campos preenchidos na regra passam a valer para os produtos marcados ou filtrados (e, se ligada, só para os que atenderem à condição). Campo em branco não muda o valor atual. Regime: ${esc(regime || '—')}.`}</p>
-        <div class="imp-fields">
+        <div class="imp-fields massa-fields">
           ${campo('massa-q', 'Busca', 'Descrição')}
           ${campo('massa-ncm', 'NCM', '1905')}
           ${campo('massa-cfop', 'CFOP', '5102')}
@@ -61,7 +61,7 @@
           <label><input type="checkbox" id="reg-filtrados" /> Todos os filtrados</label>
           <label><input type="checkbox" id="reg-usar-condicao" /> Só os que atenderem à condição (SE)</label>
         </div>
-        <div class="imp-fields" id="reg-condicao" hidden>
+        <div class="imp-fields massa-fields" id="reg-condicao" hidden>
           ${campo('reg-ncm-igual', 'SE NCM igual a', '19059090')}
           ${campo('reg-ncm-comeca', 'SE NCM começa com', '1905')}
           <label class="imp-field">SE grupo
@@ -70,7 +70,7 @@
         </div>
         <p class="hint" id="reg-escopo-hint"></p>
         <p class="hint">ENTÃO preencher (só o que estiver preenchido):</p>
-        <div class="imp-fields" id="massa-acoes">
+        <div class="imp-fields massa-fields" id="massa-acoes">
           ${campo('ac-ncm', 'NCM', '')}
           ${campo('ac-cest', 'CEST', '')}
           ${campo('ac-cfop', 'CFOP saída', '')}

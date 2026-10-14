@@ -229,30 +229,53 @@ function tabelaContas(linhas, vazio) {
   return `<table class="fin-table"><thead><tr><th>Vencimento</th><th>Documento</th><th>Histórico</th><th>Valor</th><th>Situação</th></tr></thead><tbody>${corpo || `<tr><td colspan="5">${esc(vazio)}</td></tr>`}</tbody></table>`;
 }
 
+function tabelaPlano(linhas) {
+  const corpo = (linhas || []).map((r) => {
+    const nome = [r.codigo, r.plano].filter(Boolean).join(' · ');
+    return `<tr>
+      <td>${esc(nome)}</td>
+      <td class="fin-valor-saida">${brl(r.recebido)}</td>
+      <td class="fin-valor-entrada">${brl(r.pago)}</td>
+    </tr>`;
+  }).join('');
+  return `<table class="fin-table"><thead><tr><th>Plano de contas</th><th>Recebido</th><th>Pago</th></tr></thead><tbody>${corpo || '<tr><td colspan="3">Nenhum pagamento ou recebimento no período</td></tr>'}</tbody></table>`;
+}
+
 function htmlFinanceiro(dados) {
   const aviso = `${dados.ignorarCartao ? '<p class="hint">Contas a receber com cartão no histórico estão fora desta aba.</p>' : ''}
-  <p class="hint">O dia e o mês dos cards seguem a data Até. A lista usa o período De–Até.</p>`;
+  <p class="hint">O dia e o mês dos cards seguem a data Até. A lista e o plano de contas usam o período De–Até.</p>`;
   const corte = (lista, total) => (total > (lista || []).length ? `<p class="hint">Mostrando ${(lista || []).length} de ${total}.</p>` : '');
-  const receber = `${card('A receber no dia', brl(dados.receberDia), dados.referenciaDia || '', '', 'saida')}
-    ${card('A receber no mês', brl(dados.receberMes), dados.referenciaMes || '', '', 'saida')}
-    ${card('Recebidas no dia', brl(dados.recebidasDia), dados.referenciaDia || '', '', 'saida')}
-    ${card('Recebidas no mês', brl(dados.recebidasMes), dados.referenciaMes || '', '', 'saida')}`;
-  const pagar = `${card('A pagar no dia', brl(dados.pagarDia), dados.referenciaDia || '', '', 'entrada')}
-    ${card('A pagar no mês', brl(dados.pagarMes), dados.referenciaMes || '', '', 'entrada')}
-    ${card('Pagas no dia', brl(dados.pagasDia), dados.referenciaDia || '', '', 'entrada')}
-    ${card('Pagas no mês', brl(dados.pagasMes), dados.referenciaMes || '', '', 'entrada')}`;
+  const bloco = (titulo, aberto, liquidado, painel, linhas, vazio, total) => `
+    <section class="fin-box">
+      <h2>${esc(titulo)}</h2>
+      <div class="fin-bloco-grade">
+        <div class="fin-sub"><h3>A ${esc(aberto)}</h3><div class="fin-cards">${painel === 'receber'
+          ? `${card('No dia', brl(dados.receberDia), dados.referenciaDia || '', '', 'saida')}${card('No mês', brl(dados.receberMes), dados.referenciaMes || '', '', 'saida')}`
+          : `${card('No dia', brl(dados.pagarDia), dados.referenciaDia || '', '', 'entrada')}${card('No mês', brl(dados.pagarMes), dados.referenciaMes || '', '', 'entrada')}`}</div></div>
+        <div class="fin-sub"><h3>${esc(liquidado)}</h3><div class="fin-cards">${painel === 'receber'
+          ? `${card('No dia', brl(dados.recebidasDia), dados.referenciaDia || '', '', 'saida')}${card('No mês', brl(dados.recebidasMes), dados.referenciaMes || '', '', 'saida')}`
+          : `${card('No dia', brl(dados.pagasDia), dados.referenciaDia || '', '', 'entrada')}${card('No mês', brl(dados.pagasMes), dados.referenciaMes || '', '', 'entrada')}`}</div></div>
+      </div>
+      <div class="fin-mov-acoes">
+        <button type="button" class="btn" data-fin-painel="fin-mov-${painel}" data-fin-mostrar="Mostrar movimentações" data-fin-ocultar="Ocultar movimentações" aria-expanded="false">Mostrar movimentações</button>
+      </div>
+      <div id="fin-mov-${painel}" hidden>
+        ${tabelaContas(linhas, vazio)}
+        ${corte(linhas, total)}
+      </div>
+    </section>`;
   return `${htmlAbas(dados)}
   ${aviso}
-  <section class="fin-box"><h2>Contas a receber</h2>
-    <div class="fin-cards">${receber}</div>
-    ${tabelaContas(dados.contasReceber, 'Nenhuma conta a receber no período')}
-    ${corte(dados.contasReceber, dados.contasReceberTotal)}
+  <div class="fin-mov-acoes">
+    <button type="button" class="btn" data-fin-painel="fin-plano" data-fin-mostrar="Ver por plano de contas" data-fin-ocultar="Ocultar plano de contas" aria-expanded="false">Ver por plano de contas</button>
+  </div>
+  <section id="fin-plano" class="fin-box" hidden>
+    <h2>Pagamentos e recebimentos por plano de contas</h2>
+    <p class="hint">Baixas do período De–Até, agrupadas pela conta do plano.</p>
+    ${tabelaPlano(dados.porPlano)}
   </section>
-  <section class="fin-box"><h2>Contas a pagar</h2>
-    <div class="fin-cards">${pagar}</div>
-    ${tabelaContas(dados.contasPagar, 'Nenhuma conta a pagar no período')}
-    ${corte(dados.contasPagar, dados.contasPagarTotal)}
-  </section>`;
+  ${bloco('Contas a receber', 'receber', 'Recebidas', 'receber', dados.contasReceber, 'Nenhuma conta a receber no período', dados.contasReceberTotal)}
+  ${bloco('Contas a pagar', 'pagar', 'Pagas', 'pagar', dados.contasPagar, 'Nenhuma conta a pagar no período', dados.contasPagarTotal)}`;
 }
 
 function htmlConteudo(dados) {
@@ -380,6 +403,16 @@ function ligarFiltros() {
       dashCacheChave = '';
       dashCacheHtml = '';
       carregarDash();
+    });
+  });
+  document.querySelectorAll('#dash-financeiro [data-fin-painel]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const alvo = document.getElementById(btn.dataset.finPainel);
+      if (!alvo) return;
+      alvo.hidden = !alvo.hidden;
+      const aberto = !alvo.hidden;
+      btn.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+      btn.textContent = aberto ? btn.dataset.finOcultar : btn.dataset.finMostrar;
     });
   });
 }
