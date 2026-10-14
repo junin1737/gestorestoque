@@ -2007,7 +2007,12 @@
   color: inherit;
   font: inherit;
 }
-.imp-item-row.is-current { background: color-mix(in srgb, var(--accent) 12%, #fff); box-shadow: inset 3px 0 0 var(--accent); }
+.imp-item-row.is-current {
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev));
+  color: var(--text);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.imp-item-row.is-current .imp-item-main strong { color: var(--text); }
 .imp-item-row.ok .imp-item-num { background: var(--ok); color: #fff; font-size: 0.8rem; }
 .imp-item-num {
   width: 1.5rem; height: 1.5rem; border-radius: 50%;
