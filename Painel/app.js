@@ -1806,6 +1806,39 @@ function confirmarConflito(res) {
   );
 }
 
+function modoComManage() {
+  const s = String(state.config?.sistema || '').toLowerCase();
+  return s === 'ambos' || s === 'clipp+managepro';
+}
+
+/** Sim envia a quantidade ao Manage. Não estorna. Fechar o aviso cancela o salvamento. */
+function perguntarEnviarManage() {
+  const dlg = $('#dlg-confirm');
+  const text = $('#dlg-confirm-text');
+  const btnSim = $('#dlg-confirm-sim');
+  const btnNao = $('#dlg-confirm-nao');
+  const mensagem = 'Enviar esta alteração de quantidade para o Manage?';
+  if (!dlg || !text || !btnSim || !btnNao) return Promise.resolve(window.confirm(mensagem));
+  text.textContent = mensagem;
+  btnSim.textContent = 'Sim';
+  btnNao.textContent = 'Não';
+  return new Promise((resolve) => {
+    let escolheu = false;
+    const finish = (value) => {
+      escolheu = true;
+      btnSim.onclick = null;
+      btnNao.onclick = null;
+      dlg.onclose = null;
+      try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
+      resolve(value);
+    };
+    btnSim.onclick = () => finish(true);
+    btnNao.onclick = () => finish(false);
+    dlg.onclose = () => { if (!escolheu) resolve(null); };
+    if (!dlg.open) dlg.showModal();
+  });
+}
+
 $('#btn-salvar-produto').addEventListener('click', async () => {
   const it = state.selecionado;
   if (!it) return;
@@ -1843,6 +1876,11 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
       } else body.qtd_delta = Number((nova - base).toFixed(6));
       const obsQtd = String($('#q-obs')?.value || '').trim();
       if (obsQtd) body.obs_qtd = obsQtd;
+      if (modoComManage()) {
+        const enviar = await perguntarEnviarManage();
+        if (enviar == null) return;
+        body.enviar_manage = enviar;
+      }
     }
   }
   if ($('#t-cfop') && editarFicha) {

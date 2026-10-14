@@ -1071,6 +1071,71 @@ async function prepararEdicao(db, appCfg, id, bruto, usuario) {
   return out;
 }
 
+async function lerManageAntesQtd(db, id) {
+  const prod2 = await query(
+    db,
+    'SELECT FIRST 1 QTD_ATUAL FROM TB_EST_PRODUTO_2 WHERE ID_IDENTIFICADOR = ?',
+    [id]
+  );
+  if (!prod2.length) return null;
+  let maxSaldo = null;
+  if (hasTable('TB_EST_SALDO_ALTERADO_2')) {
+    const mx = await query(
+      db,
+      'SELECT MAX(ID) AS ID FROM TB_EST_SALDO_ALTERADO_2 WHERE ID_IDENTIFICADOR = ?',
+      [id]
+    );
+    maxSaldo = mx[0] && mx[0].ID != null ? Number(mx[0].ID) : null;
+  }
+  return { qtd: Number(prod2[0].QTD_ATUAL || 0), maxSaldo };
+}
+
+/**
+ * No Clipp+Manage a trigger XX_PR_UPD_NIVEL já soma o delta em TB_EST_PRODUTO_2.
+ * Sim: deixa esse envio. Se a trigger não mexeu (redução com MT_ABAIXA_EST_SINC diferente de S), aplica o delta.
+ * Não: devolve a quantidade de antes e apaga só o lançamento novo de TB_EST_SALDO_ALTERADO_2.
+ */
+async function conciliarManageQtd(db, { id, antes, saldoAntigo, novaQtd, enviar }) {
+  if (!antes || novaQtd == null) return;
+  const delta = Number((Number(novaQtd) - Number(saldoAntigo)).toFixed(6));
+  const agora = await query(
+    db,
+    'SELECT FIRST 1 QTD_ATUAL FROM TB_EST_PRODUTO_2 WHERE ID_IDENTIFICADOR = ?',
+    [id]
+  );
+  if (!agora.length) return;
+  const qtd2 = Number(agora[0].QTD_ATUAL || 0);
+  const aplicado = Number((qtd2 - antes.qtd).toFixed(6));
+  if (!enviar) {
+    if (Math.abs(aplicado) > 1e-6) {
+      await query(
+        db,
+        'UPDATE TB_EST_PRODUTO_2 SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?',
+        [antes.qtd, id]
+      );
+    }
+    if (hasTable('TB_EST_SALDO_ALTERADO_2')) {
+      if (antes.maxSaldo == null) {
+        await query(db, 'DELETE FROM TB_EST_SALDO_ALTERADO_2 WHERE ID_IDENTIFICADOR = ?', [id]);
+      } else {
+        await query(
+          db,
+          'DELETE FROM TB_EST_SALDO_ALTERADO_2 WHERE ID_IDENTIFICADOR = ? AND ID > ?',
+          [id, antes.maxSaldo]
+        );
+      }
+    }
+    return;
+  }
+  if (Math.abs(aplicado) <= 1e-6 && Math.abs(delta) > 1e-9) {
+    await query(
+      db,
+      'UPDATE TB_EST_PRODUTO_2 SET QTD_ATUAL = COALESCE(QTD_ATUAL, 0) + ? WHERE ID_IDENTIFICADOR = ?',
+      [delta, id]
+    );
+  }
+}
+
 router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), async (req, res) => {
   try {
     const id = Number(req.params.idIdentificador);
@@ -1197,6 +1262,14 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
         const querDelta = qtdDelta !== null && Number.isFinite(qtdDelta) && qtdDelta !== 0;
         const querAbs = qtdAbs !== null && Number.isFinite(qtdAbs);
         let nextSaldoId = null;
+        let manageAntes = null;
+        const modoSistema = String(appCfg.sistema || '').toLowerCase();
+        const replicarManage = (modoSistema === 'ambos' || modoSistema === 'clipp+managepro')
+          && t.produto === 'TB_EST_PRODUTO'
+          && hasTable('TB_EST_PRODUTO_2');
+        if (replicarManage && (querDelta || querAbs)) {
+          manageAntes = await lerManageAntesQtd(db, id);
+        }
         if ((querDelta || querAbs) && hasTable(t.saldo)) {
           try {
             const gen = await query(db, `SELECT GEN_ID(${t.genSaldo}, 1) AS ID FROM RDB$DATABASE`);
@@ -1247,6 +1320,16 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
               );
             } else throw e;
           }
+        }
+
+        if (manageAntes && novaQtd !== null) {
+          await conciliarManageQtd(db, {
+            id,
+            antes: manageAntes,
+            saldoAntigo,
+            novaQtd,
+            enviar: bruto.enviar_manage !== false,
+          });
         }
 
         if (!snapshotDepois) {
