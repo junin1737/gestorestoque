@@ -828,17 +828,168 @@ async function porRecebimentoConta(db, filtros, ignorarCartao, fontes) {
   return linhasPlano(map);
 }
 
-async function porPlano(db, filtros, ignorarCartao, fontes) {
-  if (!(await relacaoExiste(db, 'TB_PLANO_CONTAS'))) return [];
-  const map = new Map();
-  for (const fonte of fontes) {
+async function colunasTabela(db, tabela) {
+  const rows = await ler(db, `
+    SELECT TRIM(RDB$FIELD_NAME) AS COL
+    FROM RDB$RELATION_FIELDS
+    WHERE TRIM(RDB$RELATION_NAME) = '${tabela}'`);
+  return new Set((rows || []).map((r) => String(r.COL || '').trim()));
+}
+
+async function baixaPagar(db, conta) {
+  const direta = conta === 'TB_CONTA_PAGAR' ? 'TB_CTAPAG_BAIXA' : `${conta.replace('TB_CONTA_PAGAR', 'TB_CTAPAG_BAIXA')}`;
+  if (await relacaoExiste(db, direta) && await colunaExiste(db, direta, 'VLR_PAGO')) return direta;
+  const rows = await ler(db, `
+    SELECT TRIM(RC.RDB$RELATION_NAME) AS NOME
+    FROM RDB$RELATION_CONSTRAINTS RC
+    JOIN RDB$REF_CONSTRAINTS REF ON REF.RDB$CONSTRAINT_NAME = RC.RDB$CONSTRAINT_NAME
+    JOIN RDB$RELATION_CONSTRAINTS PK ON PK.RDB$CONSTRAINT_NAME = REF.RDB$CONST_NAME_UQ
+    WHERE RC.RDB$CONSTRAINT_TYPE = 'FOREIGN KEY'
+      AND TRIM(PK.RDB$RELATION_NAME) = '${conta}'`);
+  for (const r of rows || []) {
+    const nome = String(r.NOME || '').trim();
+    if (nome && await colunaExiste(db, nome, 'VLR_PAGO') && await colunaExiste(db, nome, 'TIP_PAGTO')) return nome;
+  }
+  return '';
+}
+
+async function fontesContaPagar(db, usaManage) {
+  const nomes = ['TB_CONTA_PAGAR'];
+  if (usaManage) {
+    if (await relacaoExiste(db, 'TB_CONTA_PAGAR_2')) nomes.push('TB_CONTA_PAGAR_2');
+    if (await relacaoExiste(db, 'TB_CONTA_PAGAR_3')) nomes.push('TB_CONTA_PAGAR_3');
+  }
+  const fontes = [];
+  for (const conta of nomes) {
+    if (!(await relacaoExiste(db, conta))) continue;
+    fontes.push({ conta, baixa: await baixaPagar(db, conta) });
+  }
+  return fontes;
+}
+
+function acumularValor(map, id, codigo, descricao, cents) {
+  if (!cents) return;
+  const chave = `${id == null ? '' : id}|${codigo}|${descricao}`;
+  const atual = map.get(chave) || {
+    codigo: String(codigo || '').trim(),
+    plano: String(descricao || '').trim() || 'Sem plano de contas',
+    valor: 0,
+  };
+  atual.valor += cents;
+  map.set(chave, atual);
+}
+
+function linhasValor(map) {
+  return [...map.values()]
+    .map((r) => ({ codigo: r.codigo, plano: r.plano, valor: reais(r.valor) }))
+    .filter((r) => r.valor !== 0)
+    .sort((a, b) => `${a.codigo} ${a.plano}`.localeCompare(`${b.codigo} ${b.plano}`, 'pt-BR'));
+}
+
+function exprValorBaixa(cols, bruto) {
+  let expr = `COALESCE(B.${bruto}, 0)`;
+  if (cols.has('VLR_JURO')) expr += ' - COALESCE(B.VLR_JURO, 0)';
+  if (cols.has('VLR_ACRESC')) expr += ' - COALESCE(B.VLR_ACRESC, 0)';
+  if (cols.has('VLR_DESC')) expr += ' + COALESCE(B.VLR_DESC, 0)';
+  return expr;
+}
+
+async function planoPorTexto(db, texto) {
+  const seguro = String(texto || '').replace(/'/g, '').slice(0, 40);
+  if (!seguro) return null;
+  const rows = await ler(db, `
+    SELECT FIRST 1 ID_CTAPLA AS ID,
+           TRIM(COALESCE(COD_CONTA, '')) AS CODIGO,
+           TRIM(COALESCE(DESCRICAO, '')) AS DESCRICAO
+    FROM TB_PLANO_CONTAS
+    WHERE UPPER(DESCRICAO) CONTAINING '${seguro}'
+    ORDER BY ID_CTAPLA`);
+  return rows && rows[0] ? rows[0] : null;
+}
+
+async function idsContraPlano(db) {
+  const caixa = new Set();
+  const controle = new Set();
+  function guardar(set, lista) {
+    for (const r of lista || []) {
+      const n = Number(r.ID);
+      if (Number.isFinite(n) && n) set.add(n);
+    }
+  }
+  if (await relacaoExiste(db, 'TB_BANCO_CTA') && await colunaExiste(db, 'TB_BANCO_CTA', 'ID_CTAPLA')) {
+    guardar(caixa, await ler(db, `SELECT DISTINCT ID_CTAPLA AS ID FROM TB_BANCO_CTA WHERE ID_CTAPLA IS NOT NULL`));
+  }
+  if (await relacaoExiste(db, 'TB_CTAREC_BAIXA') && await colunaExiste(db, 'TB_CTAREC_BAIXA', 'ID_CTAPLA')) {
+    guardar(caixa, await ler(db, `
+      SELECT DISTINCT B.ID_CTAPLA AS ID
+      FROM TB_CTAREC_BAIXA B
+      JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = B.ID_CTAPLA
+      WHERE TRIM(COALESCE(P.COD_CONTA, '')) STARTING WITH '1.01.01'`));
+  }
+  if (await relacaoExiste(db, 'TB_MOVDIARIO') && await relacaoExiste(db, 'TB_CTAREC_MOVTO')) {
+    guardar(controle, await ler(db, `
+      SELECT FIRST 1 M.ID_CTAPLA AS ID
+      FROM TB_MOVDIARIO M
+      JOIN TB_CTAREC_MOVTO L ON L.ID_MOVTO = M.ID_MOVTO
+      WHERE TRIM(COALESCE(M.TIP_MOVTO, '')) = 'D'
+      GROUP BY M.ID_CTAPLA
+      ORDER BY COUNT(*) DESC`));
+  }
+  if (await relacaoExiste(db, 'TB_MOVDIARIO') && await relacaoExiste(db, 'TB_CTAPAG_MOVTO')) {
+    guardar(controle, await ler(db, `
+      SELECT FIRST 1 M.ID_CTAPLA AS ID
+      FROM TB_MOVDIARIO M
+      JOIN TB_CTAPAG_MOVTO L ON L.ID_MOVTO = M.ID_MOVTO
+      WHERE TRIM(COALESCE(M.TIP_MOVTO, '')) = 'C'
+      GROUP BY M.ID_CTAPLA
+      ORDER BY COUNT(*) DESC`));
+  }
+  return { caixa, controle };
+}
+
+async function porPlano(db, filtros, ignorarCartao, fontesReceber, usaManage) {
+  const vazio = { recebidas: [], receber: [], pagar: [], pagas: [] };
+  if (!(await relacaoExiste(db, 'TB_PLANO_CONTAS'))) return vazio;
+  const recebidas = new Map();
+  const receber = new Map();
+  const pagar = new Map();
+  const pagas = new Map();
+  const contra = await idsContraPlano(db);
+  const planoJuros = await planoPorTexto(db, 'RECEBIMENTO DE JUROS') || await planoPorTexto(db, 'JUROS');
+  const planoAcresc = await planoPorTexto(db, 'MULTA') || await planoPorTexto(db, 'ACRESC');
+  const jurosId = planoJuros ? Number(planoJuros.ID) : 0;
+  const acrescId = planoAcresc ? Number(planoAcresc.ID) : 0;
+  let jurosBaixa = 0;
+  let acrescBaixa = 0;
+
+  for (const fonte of fontesReceber) {
     const col = await colunaPlanoTitulo(db, fonte.conta);
-    if (!fonte.baixa || !col) continue;
+    if (!col) continue;
+    const saldo = sqlRestante('C', fonte);
+    const abertos = await ler(db, `
+      SELECT C.${col} AS ID,
+             TRIM(COALESCE(P.COD_CONTA, '')) AS CODIGO,
+             TRIM(COALESCE(P.DESCRICAO, '')) AS DESCRICAO,
+             SUM(${saldo}) AS VALOR
+      FROM ${fonte.conta} C
+      LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.${col}
+      WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
+        AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
+        AND ${saldo} > 0.009
+        ${filtroCartao('C.HISTORICO', ignorarCartao)}
+      GROUP BY C.${col}, P.COD_CONTA, P.DESCRICAO`);
+    for (const r of abertos || []) acumularValor(receber, r.ID, r.CODIGO, r.DESCRICAO, centavos(r.VALOR));
+    if (!fonte.baixa) continue;
+    const cols = await colunasTabela(db, fonte.baixa);
+    if (!cols.has('VLR_RECEB')) continue;
+    const principal = exprValorBaixa(cols, 'VLR_RECEB');
     const rows = await ler(db, `
       SELECT C.${col} AS ID,
              TRIM(COALESCE(P.COD_CONTA, '')) AS CODIGO,
              TRIM(COALESCE(P.DESCRICAO, '')) AS DESCRICAO,
-             SUM(COALESCE(B.VLR_RECEB, 0)) AS VALOR
+             SUM(${principal}) AS VALOR
+             ${cols.has('VLR_JURO') ? ', SUM(COALESCE(B.VLR_JURO, 0)) AS JURO' : ''}
+             ${cols.has('VLR_ACRESC') ? ', SUM(COALESCE(B.VLR_ACRESC, 0)) AS ACRESC' : ''}
       FROM ${fonte.baixa} B
       JOIN ${fonte.conta} C ON C.ID_CTAREC = B.ID_CTAREC
       LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.${col}
@@ -846,24 +997,168 @@ async function porPlano(db, filtros, ignorarCartao, fontes) {
         AND TRIM(COALESCE(B.TIP_RECBTO, '')) = 'T'
         ${filtroCartao('C.HISTORICO', ignorarCartao)}
       GROUP BY C.${col}, P.COD_CONTA, P.DESCRICAO`);
-    for (const r of rows || []) acumularPlano(map, r.ID, r.CODIGO, r.DESCRICAO, 'recebido', centavos(r.VALOR));
+    for (const r of rows || []) {
+      acumularValor(recebidas, r.ID, r.CODIGO, r.DESCRICAO, centavos(r.VALOR));
+      jurosBaixa += centavos(r.JURO);
+      acrescBaixa += centavos(r.ACRESC);
+    }
   }
-  const colPagar = await colunaPlanoTitulo(db, 'TB_CONTA_PAGAR');
-  if (colPagar && await colunaExiste(db, 'TB_CTAPAG_BAIXA', 'ID_CTAPAG')) {
-    const rows = await ler(db, `
-      SELECT C.${colPagar} AS ID,
+
+  for (const fonte of await fontesContaPagar(db, usaManage)) {
+    const col = await colunaPlanoTitulo(db, fonte.conta);
+    if (!col) continue;
+    const baixaSql = fonte.baixa
+      ? `AND NOT EXISTS (
+           SELECT 1 FROM ${fonte.baixa} B
+           WHERE B.ID_CTAPAG = C.ID_CTAPAG AND TRIM(COALESCE(B.TIP_PAGTO, '')) = 'T')`
+      : '';
+    const abertos = await ler(db, `
+      SELECT C.${col} AS ID,
              TRIM(COALESCE(P.COD_CONTA, '')) AS CODIGO,
              TRIM(COALESCE(P.DESCRICAO, '')) AS DESCRICAO,
-             SUM(COALESCE(B.VLR_PAGO, 0)) AS VALOR
-      FROM TB_CTAPAG_BAIXA B
-      JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = B.ID_CTAPAG
-      LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.${colPagar}
+             SUM(COALESCE(C.VLR_CTAPAG, 0)) AS VALOR
+      FROM ${fonte.conta} C
+      LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.${col}
+      WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
+        AND TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'C'
+        ${baixaSql}
+      GROUP BY C.${col}, P.COD_CONTA, P.DESCRICAO`);
+    for (const r of abertos || []) acumularValor(pagar, r.ID, r.CODIGO, r.DESCRICAO, centavos(r.VALOR));
+    if (!fonte.baixa) continue;
+    const cols = await colunasTabela(db, fonte.baixa);
+    if (!cols.has('VLR_PAGO')) continue;
+    const principal = exprValorBaixa(cols, 'VLR_PAGO');
+    const rows = await ler(db, `
+      SELECT C.${col} AS ID,
+             TRIM(COALESCE(P.COD_CONTA, '')) AS CODIGO,
+             TRIM(COALESCE(P.DESCRICAO, '')) AS DESCRICAO,
+             SUM(${principal}) AS VALOR
+             ${cols.has('VLR_ACRESC') ? ', SUM(COALESCE(B.VLR_ACRESC, 0)) AS ACRESC' : ''}
+      FROM ${fonte.baixa} B
+      JOIN ${fonte.conta} C ON C.ID_CTAPAG = B.ID_CTAPAG
+      LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.${col}
       WHERE B.DT_BAIXA >= '${filtros.inicio}' AND B.DT_BAIXA < '${filtros.fimExclusivo}'
         AND TRIM(COALESCE(B.TIP_PAGTO, '')) = 'T'
-      GROUP BY C.${colPagar}, P.COD_CONTA, P.DESCRICAO`);
-    for (const r of rows || []) acumularPlano(map, r.ID, r.CODIGO, r.DESCRICAO, 'pago', centavos(r.VALOR));
+      GROUP BY C.${col}, P.COD_CONTA, P.DESCRICAO`);
+    for (const r of rows || []) {
+      acumularValor(pagas, r.ID, r.CODIGO, r.DESCRICAO, centavos(r.VALOR));
+      acrescBaixa += centavos(r.ACRESC);
+    }
   }
-  return linhasPlano(map);
+
+  if (jurosBaixa && planoJuros) acumularValor(recebidas, planoJuros.ID, planoJuros.CODIGO, planoJuros.DESCRICAO, jurosBaixa);
+  if (acrescBaixa && planoAcresc) acumularValor(pagas, planoAcresc.ID, planoAcresc.CODIGO, planoAcresc.DESCRICAO, acrescBaixa);
+  else if (acrescBaixa) acumularValor(pagas, '', '', 'Acréscimos', acrescBaixa);
+
+  const livros = ['TB_MOVDIARIO'];
+  if (usaManage) {
+    if (await relacaoExiste(db, 'TB_MOVDIARIO_2')) livros.push('TB_MOVDIARIO_2');
+    if (await relacaoExiste(db, 'TB_MOVDIARIO_3')) livros.push('TB_MOVDIARIO_3');
+  }
+  const ligacoes = [];
+  for (const nome of ['TB_CTAREC_MOVTO', 'TB_CTAPAG_MOVTO', 'TB_CTAREC_MOVTO_2', 'TB_CTAPAG_MOVTO_2']) {
+    if (await relacaoExiste(db, nome) && await colunaExiste(db, nome, 'ID_MOVTO')) ligacoes.push(nome);
+  }
+  let jurosLivro = 0;
+  for (const livro of livros) {
+    if (!(await relacaoExiste(db, livro)) || !(await colunaExiste(db, livro, 'ID_CTAPLA'))) continue;
+    const semTitulo = ligacoes.map((t) => `NOT EXISTS (SELECT 1 FROM ${t} L WHERE L.ID_MOVTO = M.ID_MOVTO)`).join(' AND ');
+    const rows = await ler(db, `
+      SELECT M.ID_CTAPLA AS ID,
+             TRIM(COALESCE(P.COD_CONTA, '')) AS CODIGO,
+             TRIM(COALESCE(P.DESCRICAO, '')) AS DESCRICAO,
+             TRIM(COALESCE(M.TIP_MOVTO, '')) AS TIP,
+             SUM(COALESCE(M.VLR_MOVTO, 0)) AS VALOR
+      FROM ${livro} M
+      LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = M.ID_CTAPLA
+      WHERE M.DT_MOVTO >= '${filtros.inicio}' AND M.DT_MOVTO < '${filtros.fimExclusivo}'
+        ${semTitulo ? `AND ${semTitulo}` : ''}
+        ${filtroCartao('M.HISTORICO', ignorarCartao)}
+      GROUP BY M.ID_CTAPLA, P.COD_CONTA, P.DESCRICAO, TRIM(COALESCE(M.TIP_MOVTO, ''))`);
+    for (const r of rows || []) {
+      const id = Number(r.ID);
+      const tip = String(r.TIP || '').trim().toUpperCase();
+      const cents = centavos(r.VALOR);
+      if (contra.caixa.has(id) || contra.controle.has(id)) continue;
+      if (id && id === jurosId && tip === 'C') {
+        jurosLivro += cents;
+        continue;
+      }
+      if (id && id === acrescId) continue;
+      const codigo = String(r.CODIGO || '');
+      const nome = String(r.DESCRICAO || '');
+      const reduzReceita = tip === 'D' && (nome.trim().startsWith('(-)') || codigo.startsWith('4.'));
+      if (tip === 'C' || reduzReceita) {
+        acumularValor(recebidas, r.ID, r.CODIGO, r.DESCRICAO, reduzReceita ? -cents : cents);
+      } else if (tip === 'D') {
+        acumularValor(pagas, r.ID, r.CODIGO, r.DESCRICAO, cents);
+      }
+    }
+  }
+  const jurosExtra = jurosLivro - jurosBaixa;
+  if (jurosExtra > 0 && planoJuros) {
+    acumularValor(recebidas, planoJuros.ID, planoJuros.CODIGO, planoJuros.DESCRICAO, jurosExtra);
+  } else if (jurosLivro > 0 && !jurosBaixa && planoJuros) {
+    acumularValor(recebidas, planoJuros.ID, planoJuros.CODIGO, planoJuros.DESCRICAO, jurosLivro);
+  }
+
+  const bancos = ['TB_BANCO_CTA_MOVTO'];
+  if (usaManage) {
+    if (await relacaoExiste(db, 'TB_BANCO_CTA_MOVTO_2')) bancos.push('TB_BANCO_CTA_MOVTO_2');
+    if (await relacaoExiste(db, 'TB_BANCO_CTA_MOVTO_3')) bancos.push('TB_BANCO_CTA_MOVTO_3');
+  }
+  const temBancoConta = await relacaoExiste(db, 'TB_BANCO_CTA');
+  for (const tabela of bancos) {
+    if (!(await relacaoExiste(db, tabela))) continue;
+    const cols = await colunasTabela(db, tabela);
+    if (!cols.has('VALOR') || !cols.has('DT_MOVTO')) continue;
+    const temPlanoMov = cols.has('ID_CTAPLA');
+    const planId = temPlanoMov && temBancoConta
+      ? 'COALESCE(B.ID_CTAPLA, CTA.ID_CTAPLA)'
+      : (temPlanoMov ? 'B.ID_CTAPLA' : 'CTA.ID_CTAPLA');
+    if (!temPlanoMov && !temBancoConta) continue;
+    const joinConta = temBancoConta && cols.has('ID_CONTA') ? 'LEFT JOIN TB_BANCO_CTA CTA ON CTA.ID_CONTA = B.ID_CONTA' : '';
+    const semTitulo = [
+      cols.has('ID_CONTAS_RECEBER') ? 'B.ID_CONTAS_RECEBER IS NULL' : '',
+      cols.has('ID_CONTAS_PAGAR') ? 'B.ID_CONTAS_PAGAR IS NULL' : '',
+    ].filter(Boolean).join(' AND ');
+    const rows = await ler(db, `
+      SELECT ${planId} AS ID,
+             TRIM(COALESCE(P.COD_CONTA, '')) AS CODIGO,
+             TRIM(COALESCE(P.DESCRICAO, '')) AS DESCRICAO,
+             TRIM(COALESCE(B.TIP_MOVTO, '')) AS TIP,
+             ${temPlanoMov ? 'B.ID_CTAPLA' : 'NULL'} AS PLANO_MOV,
+             ${temBancoConta && cols.has('ID_CONTA') ? 'CTA.ID_CTAPLA' : 'NULL'} AS PLANO_BANCO,
+             SUM(COALESCE(B.VALOR, 0)) AS VALOR
+      FROM ${tabela} B
+      ${joinConta}
+      LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = ${planId}
+      WHERE B.DT_MOVTO >= '${filtros.inicio}' AND B.DT_MOVTO < '${filtros.fimExclusivo}'
+        ${semTitulo ? `AND ${semTitulo}` : ''}
+        ${filtroCartao('B.HISTORICO', ignorarCartao)}
+      GROUP BY ${planId}, P.COD_CONTA, P.DESCRICAO, TRIM(COALESCE(B.TIP_MOVTO, ''))
+               ${temPlanoMov ? ', B.ID_CTAPLA' : ''}
+               ${temBancoConta && cols.has('ID_CONTA') ? ', CTA.ID_CTAPLA' : ''}`);
+    for (const r of rows || []) {
+      const planoMov = Number(r.PLANO_MOV);
+      const planoBanco = Number(r.PLANO_BANCO);
+      const id = Number(r.ID);
+      if (temPlanoMov && planoMov && planoBanco && planoMov === planoBanco) continue;
+      if (contra.controle.has(id)) continue;
+      if (temPlanoMov && planoMov && contra.caixa.has(planoMov)) continue;
+      const tip = String(r.TIP || '').trim().toUpperCase();
+      const destino = tip === 'D' ? pagas : recebidas;
+      if (tip !== 'C' && tip !== 'D') continue;
+      acumularValor(destino, r.ID, r.CODIGO, r.DESCRICAO, centavos(r.VALOR));
+    }
+  }
+
+  return {
+    recebidas: linhasValor(recebidas),
+    receber: linhasValor(receber),
+    pagar: linhasValor(pagar),
+    pagas: linhasValor(pagas),
+  };
 }
 
 async function somaPagas(db, inicio, fimExclusivo) {
@@ -944,7 +1239,7 @@ async function consultarFinanceiro(db, filtros, ignorarCartao, usaManage) {
     contasPagarTotal: totalPagar && totalPagar[0] ? inteiro(totalPagar[0].N) : 0,
     contasReceberTotal,
     porRecebimentoConta: await porRecebimentoConta(db, filtros, ignorarCartao, fontes),
-    porPlano: await porPlano(db, filtros, ignorarCartao, fontes),
+    porPlano: await porPlano(db, filtros, ignorarCartao, fontes, usaManage),
   };
 }
 

@@ -237,21 +237,36 @@ function tabelaRecebimentoConta(linhas) {
   return `<table class="fin-table"><thead><tr><th>Conta</th><th>Recebido</th></tr></thead><tbody>${corpo || '<tr><td colspan="2">Nenhum recebimento no período</td></tr>'}</tbody></table>`;
 }
 
-function tabelaPlano(linhas) {
+function tabelaPlanoValor(linhas, vazio, tom) {
   const corpo = (linhas || []).map((r) => {
     const nome = [r.codigo, r.plano].filter(Boolean).join(' · ');
-    return `<tr>
-      <td>${esc(nome)}</td>
-      <td class="fin-valor-saida">${brl(r.recebido)}</td>
-      <td class="fin-valor-entrada">${brl(r.pago)}</td>
-    </tr>`;
+    const negativo = Number(r.valor) < 0;
+    const cls = tom === 'entrada'
+      ? (negativo ? 'fin-valor-saida' : 'fin-valor-entrada')
+      : (negativo ? 'fin-valor-entrada' : 'fin-valor-saida');
+    return `<tr><td>${esc(nome)}</td><td class="${cls}">${brl(r.valor)}</td></tr>`;
   }).join('');
-  return `<table class="fin-table"><thead><tr><th>Plano de contas</th><th>Recebido</th><th>Pago</th></tr></thead><tbody>${corpo || '<tr><td colspan="3">Nenhum pagamento ou recebimento no período</td></tr>'}</tbody></table>`;
+  return `<table class="fin-table"><thead><tr><th>Plano de contas</th><th>Valor</th></tr></thead><tbody>${corpo || `<tr><td colspan="2">${esc(vazio)}</td></tr>`}</tbody></table>`;
+}
+
+function htmlPlano(dados) {
+  const p = dados.porPlano || {};
+  const blocos = [
+    ['Recebidas por plano de contas', p.recebidas, 'Nenhum recebimento no período', 'saida'],
+    ['A receber por plano de contas', p.receber, 'Nenhuma conta a receber no período', 'saida'],
+    ['A pagar por plano de contas', p.pagar, 'Nenhuma conta a pagar no período', 'entrada'],
+    ['Pagas por plano de contas', p.pagas, 'Nenhum pagamento no período', 'entrada'],
+  ];
+  return blocos.map(([titulo, linhas, vazio, tom]) => `
+    <div class="fin-sub">
+      <h3>${esc(titulo)}</h3>
+      ${tabelaPlanoValor(linhas, vazio, tom)}
+    </div>`).join('');
 }
 
 function htmlFinanceiro(dados) {
   const aviso = `${dados.ignorarCartao ? '<p class="hint">Contas a receber com cartão no histórico estão fora desta aba.</p>' : ''}
-  <p class="hint">O dia e o mês dos cards seguem a data Até. A lista, o recebimento por conta e o plano de contas usam o período De–Até.</p>`;
+  <p class="hint">O dia e o mês dos cards seguem a data Até. A lista e o recebimento por conta usam o período De–Até. No plano de contas, recebidas e pagas usam o período; a receber e a pagar usam o vencimento nesse período.</p>`;
   const corte = (lista, total) => (total > (lista || []).length ? `<p class="hint">Mostrando ${(lista || []).length} de ${total}.</p>` : '');
   const bloco = (titulo, aberto, liquidado, painel, linhas, vazio, total) => `
     <section class="fin-box">
@@ -285,8 +300,8 @@ function htmlFinanceiro(dados) {
   </section>
   <section id="fin-plano" class="fin-box" hidden>
     <h2>Por plano de contas</h2>
-    <p class="hint">Baixas do período De–Até, pela conta de origem do título.</p>
-    ${tabelaPlano(dados.porPlano)}
+    <p class="hint">Recebidas e pagas reúnem a baixa do título, o movimento diário e o movimento do banco. A receber e a pagar são os títulos em aberto. Com o Manage ligado, entram as tabelas que ele movimenta.</p>
+    ${htmlPlano(dados)}
   </section>
   ${bloco('Contas a receber', 'receber', 'Recebidas', 'receber', dados.contasReceber, 'Nenhuma conta a receber no período', dados.contasReceberTotal)}
   ${bloco('Contas a pagar', 'pagar', 'Pagas', 'pagar', dados.contasPagar, 'Nenhuma conta a pagar no período', dados.contasPagarTotal)}`;
