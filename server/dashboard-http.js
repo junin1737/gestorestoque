@@ -16,6 +16,7 @@ function filtrosDe(req) {
     tipoItem: req.query.tipoItem || '',
     ncm: req.query.ncm || '',
     modelo: req.query.modelo || '',
+    aba: req.query.aba || '',
   };
 }
 

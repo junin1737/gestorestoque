@@ -549,6 +549,9 @@ public class MainActivity extends AppCompatActivity {
         settings.setSupportZoom(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
+        webView.setHorizontalScrollBarEnabled(true);
+        webView.setVerticalScrollBarEnabled(true);
+        webView.setNestedScrollingEnabled(true);
 
         webView.addJavascriptInterface(new GestorJsBridge(), "GestorApp");
 

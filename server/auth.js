@@ -385,10 +385,18 @@ function exigirSessao(req, res, next) {
       return next();
     }
   }
-  if (req.path.startsWith('/massa')) {
+  if (req.path.startsWith('/massa') || req.path.startsWith('/dashboard')) {
     const contador = require('./contador').daRequisicao(req);
     if (contador) {
       req.contador = contador;
+      if (req.path.startsWith('/dashboard')) {
+        req.usuario = {
+          id: 0,
+          nome: contador.nome || 'Contador',
+          contador: true,
+          permissoes: { dashboard_contador: { acesso: true }, massa: { acesso: true } },
+        };
+      }
       return next();
     }
   }
@@ -442,6 +450,12 @@ function nivel(u, modulo, acao) {
 
 function temAcesso(u, ...modulos) {
   if (!u) return false;
+  if (modulos.length === 1 && modulos[0] === 'condicionais') {
+    const v = u.permissoes?.condicionais?.acesso;
+    if (v === false || v === 'false' || v === 0) return false;
+    if (u.supervisor || u.mtEntradas) return true;
+    return v === true || v === 'true' || v === 1;
+  }
   if (u.supervisor) return true;
   return modulos.some((m) => !!u.permissoes?.[m]?.acesso);
 }

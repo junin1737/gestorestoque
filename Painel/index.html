@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=242" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=240" />
+  <link rel="stylesheet" href="styles.css?v=244" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=244" />
 </head>
 <body>
   <div id="app">
@@ -616,9 +616,17 @@
           </div>
           <div class="toolbar users-filters">
             <label>Buscar usuário<input type="search" id="busca-usuarios" placeholder="Nome…" autocomplete="off" /></label>
-            <label>Buscar permissão<input type="search" id="busca-permissoes" placeholder="Estoque, NF-e…" autocomplete="off" /></label>
           </div>
           <div id="usuarios-lista" class="users-grid"></div>
+          <button type="button" id="user-drawer-back" class="user-drawer-back" hidden></button>
+          <aside id="user-drawer" class="user-drawer" hidden>
+            <div class="user-drawer-head">
+              <h2 id="user-drawer-titulo">Usuário</h2>
+              <button type="button" class="btn small" id="user-drawer-fechar">Fechar</button>
+            </div>
+            <div id="user-drawer-body" class="user-drawer-body"></div>
+            <button type="button" class="btn primary" id="user-drawer-salvar">Salvar</button>
+          </aside>
         </div>
 
         <div id="page-preferencias" class="page" hidden>
@@ -829,7 +837,7 @@
   <script src="compras.js?v=240"></script>
   <script src="condicionais.js?v=240"></script>
   <script src="contador.js?v=240"></script>
-  <script src="dashboard.js?v=242"></script>
-  <script src="app.js?v=242"></script>
+  <script src="dashboard.js?v=244"></script>
+  <script src="app.js?v=244"></script>
 </body>
 </html>

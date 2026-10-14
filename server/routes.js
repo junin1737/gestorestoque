@@ -370,13 +370,22 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
         nome: prev.nome || 'SUPERVISOR',
         supervisor: true,
         acessoOnline: true,
-        permissoes: comDashboards(fullPermissoes(), origem),
+        permissoes: (() => {
+          const permissoes = comDashboards(fullPermissoes(), origem);
+          permissoes.dashboard_padrao = { acesso: true };
+          if (origem?.permissoes?.condicionais?.acesso === false) permissoes.condicionais = { acesso: false };
+          return permissoes;
+        })(),
       };
     }
     if (isMtEntradas(prev)) {
       const enviado = enviados.get(Number(prev.id));
       const origem = enviado?.permissoes ? { permissoes: enviado.permissoes } : prev;
-      return { ...prev, acessoOnline: onlinePedido(prev), permissoes: comDashboards(prev.permissoes, origem) };
+      const permissoes = comDashboards(prev.permissoes, origem);
+      if (origem?.permissoes?.condicionais && typeof origem.permissoes.condicionais.acesso === 'boolean') {
+        permissoes.condicionais = { acesso: origem.permissoes.condicionais.acesso };
+      }
+      return { ...prev, acessoOnline: onlinePedido(prev), permissoes };
     }
     const u = enviados.get(Number(prev.id));
     if (!u) return prev;

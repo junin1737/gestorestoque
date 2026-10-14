@@ -159,7 +159,8 @@ function fullPermissoes() {
     if (key === 'condicionais') out[key] = { acesso: true };
     if (key === 'massa') out[key] = { acesso: true };
     if (key === 'online') out[key] = { acesso: true };
-    if (CHAVES_DASHBOARD.includes(key)) out[key] = { acesso: false };
+    if (key === 'dashboard_padrao') out[key] = { acesso: true };
+    else if (CHAVES_DASHBOARD.includes(key)) out[key] = { acesso: false };
   }
   return out;
 }
@@ -248,11 +249,14 @@ function loadUsersConfig(appCfg) {
   }
   cfg.usuarios = (cfg.usuarios || []).map((u) => {
     if (u.supervisor) {
+      const permissoes = comDashboards(comAcessoOnline(u, fullPermissoes()), u);
+      permissoes.dashboard_padrao = { acesso: true };
+      if (u.permissoes?.condicionais?.acesso === false) permissoes.condicionais = { acesso: false };
       return {
         ...u,
         id: 0,
         nome: u.nome || 'SUPERVISOR',
-        permissoes: comDashboards(comAcessoOnline(u, fullPermissoes()), u),
+        permissoes,
       };
     }
     return { ...u, permissoes: ensureModulos(u.permissoes) };
@@ -297,7 +301,9 @@ function permissoesMtEntradas(u) {
     estoque: { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'visualizar' },
     dashboard_entradas: { acesso: true },
   });
-  return comAcessoOnline(u, comDashboards(base, { permissoes: base }));
+  const out = comAcessoOnline(u, comDashboards(base, { permissoes: base }));
+  if (u?.permissoes?.condicionais?.acesso === false) out.condicionais = { acesso: false };
+  return out;
 }
 
 function isMtEntradas(u) {

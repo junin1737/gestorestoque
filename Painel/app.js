@@ -537,7 +537,7 @@ async function api(path, options = {}) {
     return data;
   }
   if (data && data.code === 'DISPOSITIVO') showMsg(data.error || 'Dispositivo fora do prazo.');
-  const rotaDoContador = /^\/(contador|massa)(\/|$)/.test(path);
+  const rotaDoContador = /^\/(contador|massa|dashboard)(\/|$)/.test(path);
   if (res.status === 401 && (data?.code === 'AUTH' || data?.code === 'SESSAO_TROCADA') && state.usuario
     && (!state.usuario.contador || rotaDoContador)) {
     sessaoEncerrada(data.error);
@@ -622,6 +622,12 @@ function can(modulo, acao) {
   if (!u) return false;
   if (String(modulo || '').startsWith('dashboard_')) {
     return !!u.permissoes?.[modulo]?.acesso;
+  }
+  if (modulo === 'condicionais') {
+    const v = u.permissoes?.condicionais?.acesso;
+    if (v === false || v === 'false' || v === 0) return false;
+    if (u.supervisor || u.mtEntradas) return true;
+    return v === true || v === 'true' || v === 1;
   }
   if (u.supervisor) return true;
   const p = (u.permissoes && u.permissoes[modulo]) || {};
@@ -1018,7 +1024,10 @@ $('#form-login').addEventListener('submit', async (e) => {
       email: resCont.contador?.email || '',
       contador: true,
       supervisor: false,
-      permissoes: {},
+      permissoes: {
+        dashboard_contador: { acesso: true },
+        massa: { acesso: true },
+      },
     };
     enterApp();
     return;
@@ -1146,8 +1155,13 @@ function enterApp() {
   if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = !showEmp;
   if (window.Dashboard) Dashboard.mostrarMenuDash();
   if (state.usuario?.contador) {
+    state.dashAbertura = { perfil: 'CONTADOR_ACESSA', secao: 'resumo' };
     document.querySelectorAll('.nav-btn, #mobile-nav [data-page], #mais-sheet [data-page]').forEach((btn) => {
-      btn.hidden = btn.dataset.page !== 'contador';
+      const pagina = btn.dataset.page;
+      const perfil = btn.dataset.perfil;
+      const inicio = pagina === 'dashboard' && !perfil;
+      const dashContador = pagina === 'dashboard' && perfil === 'CONTADOR_ACESSA';
+      btn.hidden = !(inicio || dashContador || pagina === 'contador');
     });
   }
   showPage('dashboard');
@@ -1257,8 +1271,10 @@ function setNavActive(page) {
     if (page === 'dashboard') {
       if (b.dataset.perfil) {
         on = !!atual && b.dataset.perfil === atual.perfil && (b.dataset.secao || 'resumo') === (atual.secao || 'resumo');
-      } else {
+      } else if (b.dataset.page === 'dashboard') {
         on = !atual;
+      } else {
+        on = false;
       }
     }
     b.classList.toggle('active', on);
@@ -1274,7 +1290,10 @@ $$('.nav-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
     document.body.classList.remove('sidebar-open');
     if (btn.dataset.perfil) state.dashAbertura = { perfil: btn.dataset.perfil, secao: btn.dataset.secao || 'resumo' };
-    else if (btn.dataset.page === 'dashboard') state.dashInicio = true;
+    else if (btn.dataset.page === 'dashboard') {
+      if (state.usuario?.contador) state.dashAbertura = { perfil: 'CONTADOR_ACESSA', secao: 'resumo' };
+      else state.dashInicio = true;
+    }
     await showPage(btn.dataset.page);
   });
 });
@@ -1344,13 +1363,13 @@ async function showPage(page) {
     showMsg('Entre como contador para abrir esta tela.');
     page = 'dashboard';
   }
-  if (state.usuario?.contador && page !== 'contador') page = 'contador';
+  if (state.usuario?.contador && page !== 'contador' && page !== 'dashboard') page = 'dashboard';
 
   if (page === 'dashboard' && state.dashInicio) {
     state.dashInicio = false;
     state.dashAtual = null;
     state.dashAbertura = null;
-  } else if (page === 'dashboard' && !state.usuario?.contador && window.Dashboard?.dashPerfis().length) {
+  } else if (page === 'dashboard' && window.Dashboard?.dashPerfis().length) {
     const lista = Dashboard.dashPerfis();
     const pedido = state.dashAbertura;
     const alvo = pedido && lista.includes(pedido.perfil)
@@ -2305,10 +2324,18 @@ async function loadUsuarios() {
   renderUsuarios();
 }
 
-function renderUsuarios() {
-  const box = $('#usuarios-lista');
-  box.innerHTML = state.usuarios.map((u, idx) => `
-    <div class="user-card" data-idx="${idx}">
+let usuarioEditando = null;
+
+function fecharUsuario() {
+  usuarioEditando = null;
+  const drawer = $('#user-drawer');
+  const back = $('#user-drawer-back');
+  if (drawer) drawer.hidden = true;
+  if (back) back.hidden = true;
+}
+
+function htmlFormUsuario(u) {
+  return `
       <div class="grid-2">
         <label>Nome<input value="${escapeAttr(u.nome)}" disabled /></label>
         <label>Nova senha<input type="text" class="senha-mascarada" data-field="senha" autocomplete="off" data-1p-ignore="true" data-lpignore="true" placeholder="${u.mtEntradas ? 'Conferida pela MT Automações' : u.supervisor ? 'Definida pela MT Automações' : (u.temSenha ? '••••••' : 'Definir senha')}" ${u.supervisor || u.mtEntradas ? 'disabled' : ''} /></label>
@@ -2366,7 +2393,7 @@ function renderUsuarios() {
           </select>
         </label>
         <label>Condicionais
-          <select data-perm="condicionais.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
+          <select data-perm="condicionais.acesso">
             <option value="true" ${u.permissoes?.condicionais?.acesso !== false ? 'selected' : ''}>Sim</option>
             <option value="false" ${u.permissoes?.condicionais?.acesso === false ? 'selected' : ''}>Não</option>
           </select>
@@ -2378,9 +2405,9 @@ function renderUsuarios() {
           </select>
         </label>
         <label>Dashboard
-          <select data-perm="dashboard_padrao.acesso">
-            <option value="true" ${u.permissoes?.dashboard_padrao?.acesso ? 'selected' : ''}>Sim</option>
-            <option value="false" ${!u.permissoes?.dashboard_padrao?.acesso ? 'selected' : ''}>Não</option>
+          <select data-perm="dashboard_padrao.acesso" ${u.supervisor ? 'disabled' : ''}>
+            <option value="true" ${u.supervisor || u.permissoes?.dashboard_padrao?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.supervisor && !u.permissoes?.dashboard_padrao?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
         <label>Dashboard do contador
@@ -2398,22 +2425,41 @@ function renderUsuarios() {
         <label>CPF/CNPJ do contador
           <input data-field="documento" value="${escapeAttr(u.documento || '')}" inputmode="numeric" placeholder="Comparado com o painel" ${u.supervisor || u.mtEntradas ? 'disabled' : ''} />
         </label>
-      </div>
-    </div>
-  `).join('');
-  applyUsuariosFiltros();
+      </div>`;
+}
+
+function abrirUsuario(idx) {
+  const u = state.usuarios[idx];
+  if (!u) return;
+  usuarioEditando = idx;
+  const titulo = $('#user-drawer-titulo');
+  const corpo = $('#user-drawer-body');
+  if (titulo) titulo.textContent = u.nome || 'Usuário';
+  if (corpo) corpo.innerHTML = `<div class="user-card" data-idx="${idx}">${htmlFormUsuario(u)}</div>`;
+  const drawer = $('#user-drawer');
+  const back = $('#user-drawer-back');
+  if (drawer) drawer.hidden = false;
+  if (back) back.hidden = false;
+}
+
+function renderUsuarios() {
+  const box = $('#usuarios-lista');
+  box.innerHTML = state.usuarios.map((u, idx) => `
+    <button type="button" class="item-row user-row" data-idx="${idx}">
+      <span class="item-avatar">${escapeHtml(String(u.nome || '?').slice(0, 1).toUpperCase())}</span>
+      <strong>${escapeHtml(u.nome || '')}</strong>
+    </button>`).join('');
+  box.querySelectorAll('.user-row').forEach((btn) => {
+    btn.addEventListener('click', () => abrirUsuario(Number(btn.dataset.idx)));
+  });
+  fecharUsuario();
 }
 
 function applyUsuariosFiltros() {
   const qUser = String($('#busca-usuarios')?.value || '').trim().toLowerCase();
-  const qPerm = String($('#busca-permissoes')?.value || '').trim().toLowerCase();
-  $$('.user-card').forEach((card) => {
-    const nome = card.querySelector('input')?.value || '';
-    card.hidden = !!(qUser && !nome.toLowerCase().includes(qUser));
-    $$('.perm-grid label', card).forEach((lab) => {
-      const txt = String(lab.textContent || '').toLowerCase();
-      lab.hidden = !!(qPerm && !txt.includes(qPerm));
-    });
+  $$('.user-row').forEach((row) => {
+    const nome = row.querySelector('strong')?.textContent || '';
+    row.hidden = !!(qUser && !nome.toLowerCase().includes(qUser));
   });
 }
 
@@ -2437,9 +2483,18 @@ function permOptions(list, current) {
 $('#btn-salvar-usuarios').addEventListener('click', async () => {
   const senhaSup = await showPrompt({ message: 'Confirme a senha do supervisor para salvar:', password: true });
   if (senhaSup == null) return;
-  const cards = $$('.user-card');
+  const cardAberto = $('#user-drawer-body .user-card');
   const usuarios = state.usuarios.map((u, idx) => {
-    const card = cards[idx];
+    const card = idx === usuarioEditando ? cardAberto : null;
+    if (!card) {
+      return {
+        id: u.id,
+        nome: u.nome,
+        supervisor: !!u.supervisor,
+        permissoes: u.permissoes,
+        documento: String(u.documento || '').replace(/\D/g, ''),
+      };
+    }
     const next = {
       id: u.id,
       nome: u.nome,
@@ -2462,6 +2517,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         },
         compras: {
           acesso: $('[data-perm="compras.acesso"]', card)?.value === 'true',
+        },
+        condicionais: {
+          acesso: $('[data-perm="condicionais.acesso"]', card)?.value === 'true',
         },
         massa: {
           acesso: $('[data-perm="massa.acesso"]', card)?.value === 'true',
@@ -2493,6 +2551,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
   renderUsuarios();
   showToast('Usuários atualizados.');
 });
+$('#user-drawer-salvar')?.addEventListener('click', () => $('#btn-salvar-usuarios')?.click());
+$('#user-drawer-fechar')?.addEventListener('click', fecharUsuario);
+$('#user-drawer-back')?.addEventListener('click', fecharUsuario);
 
 function fmtDataHora(data, hora, dataHoraPronta) {
   const ready = String(dataHoraPronta || '').trim();

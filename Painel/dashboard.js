@@ -12,6 +12,7 @@ let dashGeracao = 0;
 let dashCacheChave = '';
 let dashCacheHtml = '';
 let dashFiltros = {};
+let dashAba = '';
 
 function dashPerfis() {
   const p = state.usuario?.permissoes || {};
@@ -110,6 +111,7 @@ function queryDash(extra) {
       if (dashFiltros[k]) params.set(k, dashFiltros[k]);
     });
   }
+  if (dashAba) params.set('aba', dashAba);
   Object.entries(extra || {}).forEach(([k, v]) => { if (v) params.set(k, v); });
   return params;
 }
@@ -167,14 +169,38 @@ function htmlFiltros(perfil) {
     <label>De<input type="date" data-filtro="inicio" value="${esc(p.inicio)}" /></label>
     <label>Até<input type="date" data-filtro="fim" value="${esc(p.fim)}" /></label>
     ${extra}
-    <button type="submit" class="btn primary">Atualizar</button>
-    ${exportar}
+    <div class="fin-acoes">
+      <button type="submit" class="btn">Atualizar</button>
+      ${exportar}
+    </div>
   </form>`;
+}
+
+function htmlAbas(dados) {
+  const abas = dados?.abas || [];
+  if (abas.length < 2) return '';
+  const rotulo = {
+    manage: 'Manage',
+    vendas: 'Vendas',
+    fiscal: 'NFe+NFCe',
+  };
+  return `<div class="fin-abas" role="tablist">${abas.map((aba) => `
+    <button type="button" class="tab ${dados.aba === aba ? 'active' : ''}" data-aba="${aba}">${rotulo[aba] || aba}</button>`).join('')}</div>`;
 }
 
 function htmlConteudo(dados) {
   if (!dados) return '<p class="hint">Carregando…</p>';
-  if (dados.vazio) return '<p class="fin-vazio">Nenhuma movimentação no período</p>';
+  if (dados.aba === 'fiscal') {
+    return `${htmlAbas(dados)}
+    <div class="fin-cards">
+      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
+      ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje')}
+      ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual')}
+      ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65')}
+      ${card('NF-e', brl(dados.vendasNfe), 'modelo 55')}
+    </div>`;
+  }
+  if (dados.vazio) return `${htmlAbas(dados)}<p class="fin-vazio">Nenhuma movimentação no período</p>`;
   if (dados.perfil === 'MT_ENTRADAS') {
     return `<div class="fin-cards">
       ${card('Entradas do dia', brl(dados.entradasDia), `${dados.notasDia || 0} notas`)}
@@ -193,16 +219,23 @@ function htmlConteudo(dados) {
       <table class="fin-table"><thead><tr><th>NCM</th><th>Total vendido</th></tr></thead><tbody>${ncm || '<tr><td colspan="2">Nenhuma movimentação no período</td></tr>'}</tbody></table>
     </section>`;
   }
-  const comp = dados.comparativo || {};
-  const varV = comp.variacaoVendido == null ? 'sem base' : `${comp.variacaoVendido}%`;
   const tipos = (dados.porTipo || []).map((r) => `<tr><td>${esc(r.tipo)}</td><td>${r.itens}</td><td>${r.vendas}</td><td>${brl(r.valor)}</td><td>${esc(r.participacao)}%</td></tr>`).join('');
   const pags = (dados.porPagamento || []).map((r) => `
     <div class="fin-pag"><span>${esc(r.forma)}</span><strong>${brl(r.valor)}</strong><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span></div>`).join('');
-  return `<div class="fin-cards">
-    ${card('Total vendido', brl(dados.totalVendido), `Período anterior ${brl(comp.totalVendido)} (${varV})`)}
-    ${card('Vendas fiscais', brl(dados.vendasFiscais), `${dados.notasVenda || 0} notas`)}
-    ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR')}
-    ${dados.usaManage ? card('Vendas Manage', brl(dados.vendasManage), '') : ''}
+  const separados = dados.aba === 'manage'
+    ? `${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
+       ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65')}
+       ${card('NF-e', brl(dados.vendasNfe), 'modelo 55')}`
+    : dados.usaGr
+      ? `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
+         ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas')}
+         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'fora da conversão')}`
+      : `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`)}
+         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'modelos 55 e 65')}
+         ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR')}`;
+  return `${htmlAbas(dados)}
+  <div class="fin-cards">
+    ${separados}
     ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`)}
     ${card('Ticket médio', brl(dados.ticketMedio), 'total vendido ÷ notas')}
   </div>
@@ -258,6 +291,7 @@ async function carregarDash() {
     corpo.innerHTML = `<p class="fin-vazio">${esc(res.error || 'Falha ao consultar.')}</p>`;
     return;
   }
+  if (res.aba) dashAba = res.aba;
   corpo.innerHTML = htmlFiltros(dashPerfil) + htmlConteudo(res);
   preencherGrupos(res);
   ligarFiltros();
@@ -274,6 +308,15 @@ function ligarFiltros() {
   });
   document.querySelectorAll('#dash-financeiro [data-exportar]').forEach((btn) => {
     btn.addEventListener('click', () => exportarDash(btn.dataset.exportar));
+  });
+  document.querySelectorAll('#dash-financeiro [data-aba]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.aba === dashAba) return;
+      dashAba = btn.dataset.aba;
+      dashCacheChave = '';
+      dashCacheHtml = '';
+      carregarDash();
+    });
   });
 }
 
@@ -304,6 +347,7 @@ function abrirDash(origem) {
   if (origem?.secao) dashSecao = origem.secao;
   if (dashPerfil !== anterior) {
     dashFiltros = {};
+    dashAba = '';
     dashCacheChave = '';
     dashCacheHtml = '';
   }
@@ -331,6 +375,7 @@ function abrirDash(origem) {
     dashPerfil = ev.target.value;
     dashSecao = 'resumo';
     dashFiltros = {};
+    dashAba = '';
     dashCacheChave = '';
     dashCacheHtml = '';
     const tituloEl = document.getElementById('page-title');

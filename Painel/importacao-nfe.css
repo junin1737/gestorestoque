@@ -274,11 +274,20 @@
 }
 
 .imp-params-scroll {
-  overflow-x: auto;
+  overflow: auto;
   -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
   margin: 0.5rem 0;
   border: 1px solid var(--border);
   border-radius: 8px;
+  max-width: 100%;
+}
+#cfg-tab-tributos,
+#cfg-tributos-host {
+  max-width: 100%;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x pan-y;
 }
 
 .imp-params-table th,

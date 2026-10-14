@@ -14,7 +14,7 @@ const { lerUsaManage, loadAppConfig } = require('./config');
  * - Venda Manage: TB_NFVENDA_2 + TB_NFV_ITEM_2. Serviço: TB_NFVENDA_3 + TB_NFV_ITEM_3.
  * - Compra: TB_NFCOMPRA + TB_NFC_ITEM. Manage: TB_NFCOMPRA_2 + TB_NFC_ITEM_2. Data: DT_ENTRADA.
  * - Nota válida: STATUS = 'E'. Cancelada = 'C'. Demais status (A, X) ficam de fora.
- * - GR convertida: TB_GR_CONVERTIDO.ID_NFVENDA. Essas GR não entram; a nota fiscal gerada entra pela data dela.
+ * - GR convertida: TB_GR_CONVERTIDO.ID_NFVENDA. A conversão substitui a gerencial: some na aba NFe+NFCe e sai da primeira aba.
  * - NCM e tipo vêm do cadastro (TB_EST_PRODUTO.COD_NCM, TB_ESTOQUE.ID_TIPOITEM). A base não tem descrição de NCM.
  * - Grupo: TB_ESTOQUE.ID_GRUPO + TB_EST_GRUPO. No Manage, identificador/estoque/produto são *_2; o grupo é compartilhado.
  * - Forma de pagamento: detalhe em TB_NFVENDA_FMAPAGTO_NFCE + TB_FORMA_PAGTO_NFCE; senão TB_NFVENDA.ID_FMAPGTO + TB_FORMA_PAGTO_SIS.
@@ -57,6 +57,13 @@ const FONTES_COMPRA = [
 
 function fontesVenda(usaManage) {
   return usaManage ? FONTES_VENDA : FONTES_VENDA.filter((f) => !f.manage);
+}
+
+function fontesVendaEscopo(usaManage, filtros) {
+  const lista = fontesVenda(usaManage);
+  if (filtros?.escopoVenda === 'manage') return lista.filter((f) => f.manage);
+  if (filtros?.escopoVenda === 'clipp') return lista.filter((f) => !f.manage);
+  return lista;
 }
 
 function fontesCompra(usaManage) {
@@ -217,7 +224,7 @@ const SQL_TIPO = `TRIM(CASE
   ELSE 'produto'
 END)`;
 
-function predNota(tipo, filtros) {
+function predNota(tipo, filtros, fonte) {
   const dataCol = tipo === 'compra' ? 'N.DT_ENTRADA' : 'N.DT_EMISSAO';
   const modelos = tipo === 'compra' ? filtros.modelosCompra : filtros.modelosVenda;
   const partes = [
@@ -227,6 +234,9 @@ function predNota(tipo, filtros) {
   ];
   if (tipo === 'venda') {
     partes.push(`NOT (N.NF_MODELO = 'GR' AND EXISTS (SELECT 1 FROM TB_GR_CONVERTIDO G WHERE G.ID_NFVENDA = N.ID_NFVENDA))`);
+    if (filtros.excluirConvertidas && fonte && !fonte.manage) {
+      partes.push(`NOT EXISTS (SELECT 1 FROM TB_GR_CONVERTIDO G WHERE G.ID_NFVENDA = N.${fonte.id})`);
+    }
   }
   if (modelos && modelos.length) {
     partes.push(`N.NF_MODELO IN (${listaSql(modelos)})`);
@@ -253,7 +263,7 @@ async function somar(db, fonte, filtros, tipo, modo) {
     JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
     ${joinsValor(fonte)}
     ${classif.join}
-    WHERE ${predNota(tipo, filtros)}
+    WHERE ${predNota(tipo, filtros, fonte)}
       AND ${predItem(modo)}
       ${classif.where}
     GROUP BY TRIM(N.NF_MODELO)`;
@@ -261,17 +271,20 @@ async function somar(db, fonte, filtros, tipo, modo) {
 }
 
 async function totais(db, usaManage, filtros, escopo) {
-  const vendas = { fiscal: 0, gerencial: 0, manage: 0, notas: 0, itens: 0, qtd: 0 };
+  const vendas = { fiscal: 0, gerencial: 0, manage: 0, nfce: 0, nfe: 0, notas: 0, itens: 0, qtd: 0 };
   const compras = { valor: 0, notas: 0, itens: 0, qtd: 0 };
   let devolucaoVenda = 0;
   let devolucaoCompra = 0;
 
   if (escopo !== 'compras') {
-    for (const fonte of fontesVenda(usaManage)) {
+    for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
       const positivas = await somar(db, fonte, filtros, 'venda', 'venda');
       if (positivas) {
         for (const r of positivas) {
           vendas[bucketModelo(r.MODELO, fonte.manage)] += centavos(r.VALOR);
+          const modelo = String(r.MODELO || '').trim();
+          if (modelo === '65') vendas.nfce += centavos(r.VALOR);
+          if (modelo === '55') vendas.nfe += centavos(r.VALOR);
           vendas.notas += inteiro(r.NOTAS);
           vendas.itens += inteiro(r.ITENS);
           vendas.qtd += centavos(r.QTD);
@@ -325,7 +338,7 @@ async function agregarGrupo(db, fonte, filtros, tipo, modo, sinal) {
     JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
     ${joinsValor(fonte)}
     ${classif.join}
-    WHERE ${predNota(tipo, filtros)}
+    WHERE ${predNota(tipo, filtros, fonte)}
       AND ${predItem(modo)}
       ${classif.where}
     GROUP BY COALESCE(EST.ID_GRUPO, 0), COALESCE(TRIM(GRP.DESCRICAO), 'Sem grupo')`;
@@ -365,7 +378,7 @@ function juntarGrupo(listas) {
 async function porGrupo(db, usaManage, filtros, lado) {
   const listas = [];
   if (lado === 'vendas') {
-    for (const fonte of fontesVenda(usaManage)) {
+    for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
       listas.push(await agregarGrupo(db, fonte, filtros, 'venda', 'venda', 1));
     }
     for (const fonte of fontesCompra(usaManage)) {
@@ -375,7 +388,7 @@ async function porGrupo(db, usaManage, filtros, lado) {
     for (const fonte of fontesCompra(usaManage)) {
       listas.push(await agregarGrupo(db, fonte, filtros, 'compra', 'compra', 1));
     }
-    for (const fonte of fontesVenda(usaManage)) {
+    for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
       listas.push(await agregarGrupo(db, fonte, filtros, 'venda', 'devolucao_compra', -1));
     }
   }
@@ -392,7 +405,7 @@ async function porTipo(db, usaManage, filtros) {
     atual.notas += notas;
     map.set(tipo, atual);
   }
-  for (const fonte of fontesVenda(usaManage)) {
+  for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     const classif = sqlClassificacao(fonte, filtros, true);
     const sql = `
       SELECT ${SQL_TIPO} AS TIPO,
@@ -404,7 +417,7 @@ async function porTipo(db, usaManage, filtros) {
       JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
     ${joinsValor(fonte)}
       ${classif.join}
-      WHERE ${predNota('venda', filtros)}
+      WHERE ${predNota('venda', filtros, fonte)}
         AND ${predItem('venda')}
         ${classif.where}
       GROUP BY ${SQL_TIPO}, CAST(N.DT_EMISSAO AS DATE)`;
@@ -471,13 +484,13 @@ async function porNcm(db, usaManage, filtros) {
       JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
       ${joinsValor(fonte)}
       ${classif.join}
-      WHERE ${predNota(tipo, filtros)}
+      WHERE ${predNota(tipo, filtros, fonte)}
         AND ${predItem(modo)}
         ${classif.where}
       GROUP BY COALESCE(TRIM(PRD.COD_NCM), '')`);
     for (const r of lista || []) add(r.NCM, sinal * centavos(r.VALOR));
   }
-  for (const fonte of fontesVenda(usaManage)) {
+  for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     await lado(fonte, 'venda', 'venda', 1);
   }
   for (const fonte of fontesCompra(usaManage)) {
@@ -503,7 +516,7 @@ async function porPagamento(db, usaManage, filtros, devolucaoVendaCentavos) {
     const chave = nome || 'Não informado';
     acc.set(chave, (acc.get(chave) || 0) + cents);
   }
-  for (const fonte of fontesVenda(usaManage)) {
+  for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     const classif = sqlClassificacao(fonte, filtros, false);
     const notas = await ler(db, `
       SELECT N.${fonte.id} AS ID, N.ID_FMAPGTO AS FORMA, SUM(${sqlValor(fonte)}) AS VALOR
@@ -511,7 +524,7 @@ async function porPagamento(db, usaManage, filtros, devolucaoVendaCentavos) {
       JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
     ${joinsValor(fonte)}
       ${classif.join}
-      WHERE ${predNota('venda', filtros)}
+      WHERE ${predNota('venda', filtros, fonte)}
         AND ${predItem('venda')}
         ${classif.where}
       GROUP BY N.${fonte.id}, N.ID_FMAPGTO`);
@@ -525,7 +538,7 @@ async function porPagamento(db, usaManage, filtros, devolucaoVendaCentavos) {
         FROM TB_NFVENDA_FMAPAGTO_NFCE P
         JOIN ${fonte.nota} N ON N.ID_NFVENDA = P.ID_NFVENDA
         LEFT JOIN TB_FORMA_PAGTO_NFCE F ON F.ID_FMANFCE = P.ID_FMANFCE
-        WHERE ${predNota('venda', filtros)}
+        WHERE ${predNota('venda', filtros, fonte)}
         GROUP BY P.ID_NFVENDA, TRIM(COALESCE(F.DESCRICAO, 'Não informado'))`);
       for (const p of pags || []) {
         const id = inteiro(p.ID);
@@ -577,13 +590,13 @@ async function porDia(db, usaManage, filtros) {
       JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
       ${joinsValor(fonte)}
       ${classif.join}
-      WHERE ${predNota(tipo, filtros)}
+      WHERE ${predNota(tipo, filtros, fonte)}
         AND ${predItem(modo)}
         ${classif.where}
       GROUP BY CAST(${dataCol} AS DATE)`);
     for (const r of lista || []) celula(r.DIA)[campo] += sinal * centavos(r.VALOR);
   }
-  for (const fonte of fontesVenda(usaManage)) {
+  for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     await acumular(fonte, 'venda', 'venda', 'vendido', 1);
     await acumular(fonte, 'venda', 'devolucao_compra', 'comprado', -1);
   }
@@ -614,7 +627,7 @@ async function detalharDashboard(db, opcoes = {}) {
       JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
       ${joinsValor(fonte)}
       ${classif.join}
-      WHERE ${predNota(tipo, filtros)}
+      WHERE ${predNota(tipo, filtros, fonte)}
         AND ${predItem(modo)}
         ${classif.where}`);
     for (const r of lista || []) {
@@ -629,7 +642,7 @@ async function detalharDashboard(db, opcoes = {}) {
       });
     }
   }
-  for (const fonte of fontesVenda(usaManage)) {
+  for (const fonte of fontesVendaEscopo(usaManage, filtros)) {
     await lerLado(fonte, 'venda', 'venda', 'Saída', 1);
   }
   for (const fonte of fontesCompra(usaManage)) {
@@ -647,6 +660,8 @@ function cardsVenda(t) {
     vendasFiscais: reais(t.vendas.fiscal),
     vendasGerenciais: reais(t.vendas.gerencial),
     vendasManage: reais(t.vendas.manage),
+    vendasNfce: reais(t.vendas.nfce),
+    vendasNfe: reais(t.vendas.nfe),
     totalComprado: reais(t.totalComprado),
     notasVenda: notas,
     notasEntrada: t.compras.notas,
@@ -747,35 +762,43 @@ async function consultarDashboard(db, opcoes = {}) {
     };
   }
 
-  const anteriorDatas = periodoAnterior(filtros.inicio, filtros.fim);
-  const filtrosAnt = {
-    ...filtros,
-    inicio: anteriorDatas.inicio,
-    fim: anteriorDatas.fim,
-    fimExclusivo: addDias(anteriorDatas.fim, 1),
-  };
-  const t = await totais(db, usaManage, filtros, 'ambos');
-  const ant = await totais(db, usaManage, filtrosAnt, 'ambos');
-  const gruposVenda = await porGrupo(db, usaManage, filtros, 'vendas');
-  const gruposCompra = await porGrupo(db, usaManage, filtros, 'compras');
-  const tipos = await porTipo(db, usaManage, filtros);
-  const pagamento = await porPagamento(db, usaManage, filtros, t.devolucaoVenda);
-  const serieDiaria = await porDia(db, usaManage, filtros);
-  const vazio = t.totalVendido === 0 && t.totalComprado === 0;
+  const usaGr = await empresaUsaGr(db);
+  const abas = [];
+  if (usaManage) abas.push('manage');
+  if (usaGr || !usaManage) abas.push('vendas');
+  if (usaManage || usaGr) abas.push('fiscal');
+  const pedida = String(opcoes.aba || '').trim().toLowerCase();
+  const aba = abas.includes(pedida) ? pedida : (usaManage ? 'manage' : 'vendas');
+  const filtrosAba = filtrosDaAba(filtros, aba, usaManage, usaGr);
+  const t = await totais(db, usaManage, filtrosAba, aba === 'fiscal' ? 'vendas' : 'ambos');
+  let vendidoDia = 0;
+  let vendidoMes = 0;
+  if (aba === 'fiscal') {
+    const hoje = isoHoje();
+    const diaFiltro = { ...filtrosAba, inicio: hoje, fim: hoje, fimExclusivo: addDias(hoje, 1) };
+    const mesFiltro = { ...filtrosAba, inicio: `${hoje.slice(0, 8)}01`, fim: hoje, fimExclusivo: addDias(hoje, 1) };
+    const dia = await totais(db, usaManage, diaFiltro, 'vendas');
+    const mes = await totais(db, usaManage, mesFiltro, 'vendas');
+    vendidoDia = reais(dia.totalVendido);
+    vendidoMes = reais(mes.totalVendido);
+  }
+  const gruposVenda = aba === 'fiscal' ? [] : await porGrupo(db, usaManage, filtrosAba, 'vendas');
+  const gruposCompra = aba === 'fiscal' ? [] : await porGrupo(db, usaManage, filtrosAba, 'compras');
+  const tipos = aba === 'fiscal' ? { itens: [], evolucao: [] } : await porTipo(db, usaManage, filtrosAba);
+  const pagamento = aba === 'fiscal' ? [] : await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
+  const serieDiaria = aba === 'fiscal' ? [] : await porDia(db, usaManage, filtrosAba);
+  const vazio = t.totalVendido === 0 && (aba === 'fiscal' || t.totalComprado === 0);
   return {
     perfil,
     usaManage,
-    fiscal: false,
+    usaGr,
+    aba,
+    abas,
+    fiscal: aba === 'fiscal',
     periodo: { inicio: filtros.inicio, fim: filtros.fim },
     ...cardsVenda(t),
-    comparativo: {
-      inicio: anteriorDatas.inicio,
-      fim: anteriorDatas.fim,
-      totalVendido: reais(ant.totalVendido),
-      totalComprado: reais(ant.totalComprado),
-      variacaoVendido: variacao(t.totalVendido, ant.totalVendido),
-      variacaoComprado: variacao(t.totalComprado, ant.totalComprado),
-    },
+    vendidoDia,
+    vendidoMes,
     porGrupoVenda: gruposVenda,
     porGrupoCompra: gruposCompra,
     porTipo: tipos.itens,
@@ -785,6 +808,41 @@ async function consultarDashboard(db, opcoes = {}) {
     vazio,
     mensagem: vazio ? 'Nenhuma movimentação no período' : '',
   };
+}
+
+async function empresaUsaGr(db) {
+  const gr = await ler(db, "SELECT FIRST 1 1 AS TEM FROM TB_NFVENDA WHERE TRIM(NF_MODELO) = 'GR'");
+  if (gr && gr.length) return true;
+  const conv = await ler(db, 'SELECT FIRST 1 1 AS TEM FROM TB_GR_CONVERTIDO');
+  return !!(conv && conv.length);
+}
+
+function filtrosDaAba(filtros, aba, usaManage, usaGr) {
+  if (aba === 'manage') {
+    return {
+      ...filtros,
+      escopoVenda: 'manage',
+      excluirConvertidas: false,
+      modelosVenda: ['55', '65'],
+    };
+  }
+  if (aba === 'fiscal') {
+    return {
+      ...filtros,
+      escopoVenda: 'clipp',
+      excluirConvertidas: false,
+      modelosVenda: MODELOS_FISCAIS,
+    };
+  }
+  if (usaGr) {
+    return {
+      ...filtros,
+      escopoVenda: 'clipp',
+      excluirConvertidas: true,
+      modelosVenda: filtros.modelosVenda,
+    };
+  }
+  return { ...filtros, escopoVenda: usaManage ? '' : 'clipp', excluirConvertidas: false };
 }
 
 module.exports = {
