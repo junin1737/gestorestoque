@@ -895,6 +895,8 @@ async function bootstrap() {
 
   const conn = await api('/emitente');
   if (conn.ok) {
+    state.config.tem_manage = !!conn.tem_manage;
+    state.config.sincroniza_produto = !!conn.sincroniza_produto;
     const nomeConn = String(conn.emitente?.nome_fanta || '').trim();
     setServiceStatus(true, nomeConn ? `Conectado • ${nomeConn.toLocaleUpperCase('pt-BR')}` : 'Conectado');
     setEmitenteUI(conn.emitente);
@@ -1757,6 +1759,9 @@ async function abrirNovoProduto() {
     prc_venda: 0.01,
     prc_custo: 0,
     qtd_atual: 0,
+    qtd_manage: 0,
+    sincroniza_produto: !!state.config?.sincroniza_produto,
+    tem_manage: !!state.config?.tem_manage,
     cod_barras: '',
     referencia: '',
     desc_cmpl: '',
@@ -1809,6 +1814,13 @@ function confirmarConflito(res) {
 function modoComManage() {
   const s = String(state.config?.sistema || '').toLowerCase();
   return s === 'ambos' || s === 'clipp+managepro';
+}
+
+function sincronizaProdutoLigado() {
+  if (state.selecionado && typeof state.selecionado.sincroniza_produto === 'boolean') {
+    return state.selecionado.sincroniza_produto;
+  }
+  return !!state.config?.sincroniza_produto;
 }
 
 /** Sim envia a quantidade ao Manage. Não estorna. Fechar o aviso cancela o salvamento. */
@@ -1876,11 +1888,19 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
       } else body.qtd_delta = Number((nova - base).toFixed(6));
       const obsQtd = String($('#q-obs')?.value || '').trim();
       if (obsQtd) body.obs_qtd = obsQtd;
-      if (modoComManage()) {
+      if (modoComManage() && sincronizaProdutoLigado()) {
         const enviar = await perguntarEnviarManage();
         if (enviar == null) return;
         body.enviar_manage = enviar;
       }
+    }
+  }
+  if (editarQtd && $('#q-manage')) {
+    const qtdManage = parseBrMoney($('#q-manage').value);
+    if (state.isNovo) {
+      if (state.manageQtdEditada && Number.isFinite(qtdManage)) body.qtd_manage = qtdManage;
+    } else if (it.qtd_manage != null && Number.isFinite(qtdManage) && Math.abs(qtdManage - Number(it.qtd_manage)) > 1e-9) {
+      body.qtd_manage = qtdManage;
     }
   }
   if ($('#t-cfop') && editarFicha) {
@@ -1941,6 +1961,7 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
     }
   }
   if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
+  if (res.aviso) showMsg(res.aviso);
   showToast(state.isNovo ? 'Produto cadastrado com sucesso.' : 'Dados alterados com sucesso.');
   const keepId = res.item?.id_identificador || it.id_identificador;
   await loadEstoque();
@@ -2098,6 +2119,7 @@ function renderDetalhe() {
       <button class="tab" data-tab="precos">Preços</button>
       <button class="tab" data-tab="quantidade">Quantidade</button>
       ${!state.isNovo ? '<button class="tab" data-tab="fiscal">Fiscal</button>' : ''}
+      ${(state.isNovo ? !!state.config?.tem_manage : it.tem_manage === true) ? '<button class="tab" data-tab="manage">Manage</button>' : ''}
       ${showGrade || showSerial || showLote ? '<button class="tab" data-tab="controle">Grade / Lote</button>' : ''}
     </div>
     <div class="tab-pane" data-pane="ficha">
@@ -2183,6 +2205,23 @@ function renderDetalhe() {
       </label>
       ${!desktop ? `<div class="qty-sticky-save"><button type="button" class="btn primary" id="btn-salvar-contagem">Salvar contagem</button></div>` : ''}
     </div>
+    ${((state.isNovo ? !!state.config?.tem_manage : it.tem_manage === true)) ? `
+    <div class="tab-pane" data-pane="manage" hidden>
+      <div class="qty-hero">
+        <span>Quantidade no Manage</span>
+        <strong>${state.isNovo || it.qtd_manage != null ? `${fmtNum(state.isNovo ? Number(it.qtd_atual || 0) : it.qtd_manage)} ${uni}` : 'Sem cadastro no Manage'}</strong>
+      </div>
+      <label>Quantidade
+        <input id="q-manage" inputmode="decimal" value="${escapeAttr(state.isNovo ? fmtMoney2(it.qtd_atual || 0) : (it.qtd_manage == null ? '' : fmtMoney2(it.qtd_manage)))}" ${editarQtd && (state.isNovo ? !!it.sincroniza_produto : it.qtd_manage != null) ? '' : 'disabled'} />
+      </label>
+      <p class="hint">${it.sincroniza_produto
+        ? (state.isNovo
+          ? 'Só a quantidade. Se você não alterar este campo, o Manage fica com a quantidade do Clipp. O preço fica na aba Preços e grava nos dois.'
+          : 'Só a quantidade. O preço fica na aba Preços e já grava no Clipp e no Manage.')
+        : 'A sincronização está desligada. Esta quantidade altera só o Manage e não mexe no preço.'}</p>
+      ${!state.isNovo && it.qtd_manage == null ? '<p class="hint">Este produto ainda não está no Manage.</p>' : ''}
+      ${state.isNovo && !it.sincroniza_produto ? '<p class="hint">Com a sincronização desligada, o produto novo entra só no Clipp.</p>' : ''}
+    </div>` : ''}
     ${!state.isNovo ? `
     <div class="tab-pane" data-pane="fiscal" hidden>
       <div id="trib-host" class="trib-host"><p class="hint">Carregando última entrada e parâmetros…</p></div>
@@ -2252,6 +2291,7 @@ function renderDetalhe() {
   const uniTxt = it.uni_medida || 'UN';
   let syncing = false;
   state.qtdModo = 'delta';
+  state.manageQtdEditada = false;
 
   function paintDiff(delta) {
     const box = $('#q-diff');
@@ -2277,6 +2317,10 @@ function renderDetalhe() {
     if (qNova && !manterNova) qNova.value = fmtMoney2(base + d);
     syncing = false;
     paintDiff(d);
+    const qManage = $('#q-manage');
+    if (state.isNovo && it.sincroniza_produto && qManage && !state.manageQtdEditada) {
+      qManage.value = fmtMoney2(base + d);
+    }
   }
 
   function updateDiffFromAddRem() {
@@ -2314,6 +2358,7 @@ function renderDetalhe() {
     state.qtdModo = 'delta';
     applyDelta(deltaAtual - 1);
   });
+  $('#q-manage')?.addEventListener('input', () => { state.manageQtdEditada = true; });
   $('#btn-salvar-contagem')?.addEventListener('click', () => $('#btn-salvar-produto')?.click());
   $('#btn-salvar-produto-aside')?.addEventListener('click', () => $('#btn-salvar-produto')?.click());
   $('#btn-cancelar-produto-aside')?.addEventListener('click', () => $('#btn-cancelar-produto')?.click());

@@ -277,12 +277,20 @@ router.get('/emitente', async (_req, res) => {
       const rows = await query(db, `SELECT FIRST 1 NOME_FANTA, NOME, LOGO FROM TB_EMITENTE`);
       const e = rows[0] || {};
       const logo = await blobToDataUrl(e.LOGO);
+      const cfg = loadAppConfig();
       return {
         nome_fanta: String(e.NOME_FANTA || e.NOME || '').trim(),
         logo,
+        tem_manage: baseComManage(cfg),
+        sincroniza_produto: baseComManage(cfg) ? await lerSincronizaProduto(db) : false,
       };
     });
-    res.json({ ok: true, emitente: data });
+    res.json({
+      ok: true,
+      emitente: { nome_fanta: data.nome_fanta, logo: data.logo },
+      tem_manage: data.tem_manage,
+      sincroniza_produto: data.sincroniza_produto,
+    });
   } catch (err) {
     res.json({ ok: false, error: err.message, emitente: { nome_fanta: '', logo: null } });
   }
@@ -745,6 +753,18 @@ router.get('/estoque/:idIdentificador', LER_ESTOQUE, async (req, res) => {
         console.warn('Última alteração:', e.message);
         item.ultima_alteracao = null;
       }
+      item.tem_manage = baseComManage(appCfg);
+      item.sincroniza_produto = false;
+      item.qtd_manage = null;
+      if (item.tem_manage) {
+        item.sincroniza_produto = await lerSincronizaProduto(db);
+        const prod2 = await query(
+          db,
+          'SELECT FIRST 1 QTD_ATUAL FROM TB_EST_PRODUTO_2 WHERE ID_IDENTIFICADOR = ?',
+          [id]
+        );
+        if (prod2.length) item.qtd_manage = Number(prod2[0].QTD_ATUAL || 0);
+      }
       return item;
     });
     if (!data) return res.json({ ok: false, error: 'Produto não encontrado.' });
@@ -855,6 +875,14 @@ router.post('/estoque', exigirModulo('estoque', 'importacao'), async (req, res) 
         );
         if (!first) first = { id_estoque: idEstoque, id_identificador: idIdentificador };
       }
+      let avisoManage = null;
+      const qtdManage = numCampo(body.qtd_manage);
+      if (first && qtdManage != null && baseComManage(appCfg)) {
+        const gravou = await gravarQtdSomenteManage(db, idIdentificador, qtdManage);
+        if (!gravou) {
+          avisoManage = 'Produto gravado no Clipp. Ele ainda não está no Manage, então a quantidade do Manage não foi aplicada.';
+        }
+      }
       if (first) {
         try {
           await logProductCreate(db, {
@@ -877,10 +905,10 @@ router.post('/estoque', exigirModulo('estoque', 'importacao'), async (req, res) 
           console.warn('Falha ao auditar cadastro:', e.message);
         }
       }
-      return first;
+      return { item: first, aviso: avisoManage };
     }));
 
-    res.json({ ok: true, item: created });
+    res.json({ ok: true, item: created && created.item, aviso: created && created.aviso });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -1071,6 +1099,44 @@ async function prepararEdicao(db, appCfg, id, bruto, usuario) {
   return out;
 }
 
+function baseComManage(appCfg) {
+  const modo = String(appCfg?.sistema || '').toLowerCase();
+  return (modo === 'ambos' || modo === 'clipp+managepro')
+    && hasTable('TB_ESTOQUE')
+    && hasTable('TB_EST_PRODUTO_2');
+}
+
+async function lerSincronizaProduto(db) {
+  if (!hasTable('TB_PARAMETRO')) return false;
+  try {
+    const rows = await query(
+      db,
+      `SELECT FIRST 1 CONTEUDO
+       FROM TB_PARAMETRO
+       WHERE INFORMACAO = 'MT_SINCRONIZA_PRODUTO'`
+    );
+    return String(rows[0]?.CONTEUDO || '').trim().toUpperCase() === 'S';
+  } catch {
+    return false;
+  }
+}
+
+/** Só a quantidade do Manage. Preço, custo e ficha ficam como estão. */
+async function gravarQtdSomenteManage(db, id, qtd) {
+  const rows = await query(
+    db,
+    'SELECT FIRST 1 ID_IDENTIFICADOR FROM TB_EST_PRODUTO_2 WHERE ID_IDENTIFICADOR = ?',
+    [id]
+  );
+  if (!rows.length) return false;
+  await query(
+    db,
+    'UPDATE TB_EST_PRODUTO_2 SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?',
+    [qtd, id]
+  );
+  return true;
+}
+
 async function lerManageAntesQtd(db, id) {
   const prod2 = await query(
     db,
@@ -1145,6 +1211,21 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
     const origem = await resolveOrigem(req, bruto);
     const obsQtdExtra = String(bruto.obs_qtd || '').trim().slice(0, 120);
     const result = await withDb(async (db, appCfg) => {
+      const modoDuploAtivo = baseComManage(appCfg);
+      const sincronizaProduto = modoDuploAtivo ? await lerSincronizaProduto(db) : false;
+      const qtdManagePedida = numCampo(bruto.qtd_manage);
+      if (qtdManagePedida != null && modoDuploAtivo) {
+        const nivelQtd = auth.nivel(req.usuario, 'estoque', 'quantidades');
+        if (nivelQtd !== 'editar' && nivelQtd !== 'total') {
+          throw new Error('Sem permissão para alterar a quantidade do Manage.');
+        }
+        const existeManage = await query(
+          db,
+          'SELECT FIRST 1 ID_IDENTIFICADOR FROM TB_EST_PRODUTO_2 WHERE ID_IDENTIFICADOR = ?',
+          [id]
+        );
+        if (!existeManage.length) throw new Error('Este produto não está no Manage.');
+      }
       const body = await prepararEdicao(db, appCfg, id, bruto, req.usuario);
       const barra = body.cod_barras !== undefined ? String(body.cod_barras || '').trim() : '';
       if (barra) {
@@ -1322,7 +1403,7 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
           }
         }
 
-        if (manageAntes && novaQtd !== null) {
+        if (manageAntes && novaQtd !== null && sincronizaProduto) {
           await conciliarManageQtd(db, {
             id,
             antes: manageAntes,
@@ -1330,6 +1411,14 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
             novaQtd,
             enviar: bruto.enviar_manage !== false,
           });
+        }
+
+        if (qtdManagePedida != null && replicarManage) {
+          await query(
+            db,
+            'UPDATE TB_EST_PRODUTO_2 SET QTD_ATUAL = ? WHERE ID_IDENTIFICADOR = ?',
+            [qtdManagePedida, id]
+          );
         }
 
         if (!snapshotDepois) {
