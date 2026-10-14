@@ -113,8 +113,9 @@ function queryDash(extra) {
   return params;
 }
 
-function card(titulo, valor, detalhe, extra) {
-  return `<article class="fin-card"><span>${esc(titulo)}</span><strong>${esc(valor)}</strong><small>${esc(detalhe || '')}</small>${extra ? `<small class="fin-extra">${esc(extra)}</small>` : ''}</article>`;
+function card(titulo, valor, detalhe, extra, tom) {
+  const cls = tom === 'saida' || tom === 'entrada' ? ` fin-${tom}` : '';
+  return `<article class="fin-card${cls}"><span>${esc(titulo)}</span><strong>${esc(valor)}</strong><small>${esc(detalhe || '')}</small>${extra ? `<small class="fin-extra">${esc(extra)}</small>` : ''}</article>`;
 }
 
 function linhaFrete(valor) {
@@ -233,14 +234,14 @@ function htmlFinanceiro(dados) {
   return `${htmlAbas(dados)}
   ${aviso}
   <div class="fin-cards">
-    ${card('A pagar no dia', brl(dados.pagarDia), dados.referenciaDia || '')}
-    ${card('A pagar no mês', brl(dados.pagarMes), dados.referenciaMes || '')}
-    ${card('A receber no dia', brl(dados.receberDia), dados.referenciaDia || '')}
-    ${card('A receber no mês', brl(dados.receberMes), dados.referenciaMes || '')}
-    ${card('Pagas no dia', brl(dados.pagasDia), dados.referenciaDia || '')}
-    ${card('Pagas no mês', brl(dados.pagasMes), dados.referenciaMes || '')}
-    ${card('Recebidas no dia', brl(dados.recebidasDia), dados.referenciaDia || '')}
-    ${card('Recebidas no mês', brl(dados.recebidasMes), dados.referenciaMes || '')}
+    ${card('A pagar no dia', brl(dados.pagarDia), dados.referenciaDia || '', '', 'entrada')}
+    ${card('A pagar no mês', brl(dados.pagarMes), dados.referenciaMes || '', '', 'entrada')}
+    ${card('A receber no dia', brl(dados.receberDia), dados.referenciaDia || '', '', 'saida')}
+    ${card('A receber no mês', brl(dados.receberMes), dados.referenciaMes || '', '', 'saida')}
+    ${card('Pagas no dia', brl(dados.pagasDia), dados.referenciaDia || '', '', 'entrada')}
+    ${card('Pagas no mês', brl(dados.pagasMes), dados.referenciaMes || '', '', 'entrada')}
+    ${card('Recebidas no dia', brl(dados.recebidasDia), dados.referenciaDia || '', '', 'saida')}
+    ${card('Recebidas no mês', brl(dados.recebidasMes), dados.referenciaMes || '', '', 'saida')}
   </div>
   <section class="fin-box"><h2>Contas a pagar</h2>${tabelaContas(dados.contasPagar, 'Nenhuma conta a pagar no período')}${corte(dados.contasPagar, dados.contasPagarTotal)}</section>
   <section class="fin-box"><h2>Contas a receber</h2>${tabelaContas(dados.contasReceber, 'Nenhuma conta a receber no período')}${corte(dados.contasReceber, dados.contasReceberTotal)}</section>`;
@@ -251,11 +252,11 @@ function htmlConteudo(dados) {
   if (dados.aba === 'fiscal') {
     return `${htmlAbas(dados)}
     <div class="fin-cards">
-      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete))}
-      ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', linhaFrete(dados.vendidoDiaComFrete))}
-      ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', linhaFrete(dados.vendidoMesComFrete))}
-      ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65', linhaFrete(dados.comFreteNfce))}
-      ${card('NF-e', brl(dados.vendasNfe), 'modelo 55', linhaFrete(dados.comFreteNfe))}
+      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete), 'saida')}
+      ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', linhaFrete(dados.vendidoDiaComFrete), 'saida')}
+      ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', linhaFrete(dados.vendidoMesComFrete), 'saida')}
+      ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65', linhaFrete(dados.comFreteNfce), 'saida')}
+      ${card('NF-e', brl(dados.vendasNfe), 'modelo 55', linhaFrete(dados.comFreteNfe), 'saida')}
     </div>
     ${htmlMeses(dados)}
     ${htmlRecortes(dados)}`;
@@ -264,37 +265,38 @@ function htmlConteudo(dados) {
   if (dados.vazio) return `${htmlAbas(dados)}<p class="fin-vazio">Nenhuma movimentação no período</p>`;
   if (dados.perfil === 'MT_ENTRADAS') {
     return `<div class="fin-cards">
-      ${card('Entradas do dia', brl(dados.entradasDia), `${dados.notasDia || 0} notas`)}
-      ${card('Entradas do mês', brl(dados.entradasMes), `${dados.notasMes || 0} notas`)}
+      ${card('Entradas do dia', brl(dados.entradasDia), `${dados.notasDia || 0} notas`, '', 'entrada')}
+      ${card('Entradas do mês', brl(dados.entradasMes), `${dados.notasMes || 0} notas`, '', 'entrada')}
     </div>
     <section id="secao-resumo" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupo, 'do mês')}</section>`;
   }
   if (dados.perfil === 'CONTADOR_ACESSA') {
     const ncm = (dados.porNcm || []).map((r) => `<tr><td>${esc(r.ncm)}</td><td>${brl(r.totalVendido)}</td></tr>`).join('');
+    const sinal = Number(dados.diferenca) < 0 ? 'entrada' : 'saida';
     return `<div class="fin-cards">
-      ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`)}
-      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasSaida || 0} notas`)}
-      ${card('Diferença', brl(dados.diferenca), 'vendido − comprado')}
+      ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`, '', 'entrada')}
+      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasSaida || 0} notas`, '', 'saida')}
+      ${card('Saída - Entrada', brl(dados.diferenca), '', '', sinal)}
     </div>
     <section id="secao-ncm" class="fin-box"><h2>Totalizador por NCM</h2>
       <table class="fin-table"><thead><tr><th>NCM</th><th>Total vendido</th></tr></thead><tbody>${ncm || '<tr><td colspan="2">Nenhuma movimentação no período</td></tr>'}</tbody></table>
     </section>`;
   }
   const separados = dados.aba === 'manage'
-    ? `${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete))}
-       ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', linhaFrete(dados.vendidoDiaComFrete))}
-       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', linhaFrete(dados.vendidoMesComFrete))}`
+    ? `${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete), 'saida')}
+       ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', linhaFrete(dados.vendidoDiaComFrete), 'saida')}
+       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', linhaFrete(dados.vendidoMesComFrete), 'saida')}`
     : dados.usaGr
-      ? `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete))}
-         ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas', linhaFrete(dados.comFreteGerenciais))}
-         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'fora da conversão', linhaFrete(dados.comFreteFiscais))}`
-      : `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete))}
-         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'modelos 55 e 65', linhaFrete(dados.comFreteFiscais))}
-         ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR', linhaFrete(dados.comFreteGerenciais))}`;
+      ? `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete), 'saida')}
+         ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas', linhaFrete(dados.comFreteGerenciais), 'saida')}
+         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'fora da conversão', linhaFrete(dados.comFreteFiscais), 'saida')}`
+      : `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete), 'saida')}
+         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'modelos 55 e 65', linhaFrete(dados.comFreteFiscais), 'saida')}
+         ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR', linhaFrete(dados.comFreteGerenciais), 'saida')}`;
   return `${htmlAbas(dados)}
   <div class="fin-cards">
     ${separados}
-    ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`)}
+    ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`, '', 'entrada')}
     ${card('Ticket médio', brl(dados.ticketMedio), 'total vendido ÷ notas')}
   </div>
   ${htmlMeses(dados)}

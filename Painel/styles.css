@@ -2315,6 +2315,8 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 }
 .fin-card span { color: var(--muted); font-size: var(--fs-sm); }
 .fin-card strong { font-size: 1.35rem; letter-spacing: -0.02em; }
+.fin-card.fin-saida strong { color: #1f9d55; }
+.fin-card.fin-entrada strong { color: #e23d3d; }
 .fin-card small { color: var(--muted); font-size: var(--fs-xs); }
 .fin-card .fin-extra { color: var(--primary-2); font-weight: 700; }
 .pref-check { display: flex; align-items: center; gap: 0.55rem; font-weight: 650; margin: 0; }
@@ -2394,6 +2396,14 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 .fin-pag .fin-meter { grid-column: 1 / -1; }
 .fin-vazio { padding: 1.5rem 0.5rem; color: var(--muted); }
 @media (max-width: 720px) {
+  .fin-filtros { grid-template-columns: 1fr 1fr; }
+  .fin-acoes {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
+  .fin-filtros input[type="date"] { font-size: 0.78rem; padding-left: 0.2rem; padding-right: 0.2rem; }
   .fin-cards { grid-template-columns: 1fr 1fr; }
   .fin-card strong { font-size: 1.05rem; }
   .fin-chart { height: 220px; gap: 0.2rem; }

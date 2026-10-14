@@ -251,13 +251,13 @@ function predNota(tipo, filtros, fonte) {
     `${dataCol} < '${filtros.fimExclusivo}'`,
   ];
   if (tipo === 'venda') {
-    partes.push(`NOT (N.NF_MODELO = 'GR' AND EXISTS (SELECT 1 FROM TB_GR_CONVERTIDO G WHERE G.ID_NFVENDA = N.ID_NFVENDA))`);
+    partes.push(`NOT (UPPER(TRIM(N.NF_MODELO)) = 'GR' AND EXISTS (SELECT 1 FROM TB_GR_CONVERTIDO G WHERE G.ID_NFVENDA = N.ID_NFVENDA))`);
     if (filtros.excluirConvertidas && fonte && !fonte.manage) {
       partes.push(`NOT EXISTS (SELECT 1 FROM TB_GR_CONVERTIDO G WHERE G.ID_NFVENDA = N.${fonte.id})`);
     }
   }
   if (modelos && modelos.length) {
-    partes.push(`N.NF_MODELO IN (${listaSql(modelos)})`);
+    partes.push(`UPPER(TRIM(N.NF_MODELO)) IN (${listaSql(modelos)})`);
   }
   return partes.join(' AND ');
 }
@@ -501,21 +501,24 @@ async function porTipo(db, usaManage, filtros) {
 }
 
 async function porNcm(db, usaManage, filtros) {
+  const fiscais = { ...filtros, modelosVenda: MODELOS_FISCAIS, modelosCompra: MODELOS_FISCAIS };
   const map = new Map();
   function add(ncm, cents) {
-    const codigo = String(ncm || '').trim() || 'Sem NCM';
+    const codigo = String(ncm || '').replace(/\D/g, '');
+    if (!codigo) return;
     map.set(codigo, (map.get(codigo) || 0) + cents);
   }
   async function lado(fonte, tipo, modo, sinal) {
-    const classif = sqlClassificacao(fonte, filtros, true);
+    const classif = sqlClassificacao(fonte, fiscais, true);
     const lista = await lerFonte(db, fonte, (f) => `
       SELECT COALESCE(TRIM(PRD.COD_NCM), '') AS NCM,
              SUM(${sqlValor(f)}) AS VALOR
       FROM ${f.item} I
       JOIN ${f.nota} N ON N.${f.id} = I.${f.id}
       ${classif.join}
-      WHERE ${predNota(tipo, filtros, f)}
+      WHERE ${predNota(tipo, fiscais, f)}
         AND ${predItem(modo)}
+        AND TRIM(COALESCE(PRD.COD_NCM, '')) <> ''
         ${classif.where}
       GROUP BY COALESCE(TRIM(PRD.COD_NCM), '')`);
     for (const r of lista || []) add(r.NCM, sinal * centavos(r.VALOR));
