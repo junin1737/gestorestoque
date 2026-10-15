@@ -356,8 +356,14 @@ export class Tunel {
     for (const ws of this.ctx.getWebSockets('gestor')) {
       if (ws.readyState !== WS_ABERTO) continue;
       const desde = Number(ws.deserializeAttachment()?.desde) || 0;
-      const ping = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() || desde;
-      if (agora - Math.max(ping, desde) > SEM_PING_MS) {
+      // O carimbo só existe depois de um ping automático. Na hibernação ele some, e a
+      // conexão aberta da outra loja (sem tráfego) era fechada na hora — a tela dizia
+      // "Loja desconectada" com o Gestor aberto. Sem carimbo, a conexão continua válida.
+      let ping = 0;
+      try {
+        ping = this.ctx.getWebSocketAutoResponseTimestamp(ws)?.getTime() || 0;
+      } catch { /* carimbo indisponível */ }
+      if (ping && agora - ping > SEM_PING_MS) {
         try { ws.close(4001, 'Sem ping'); } catch { /* já fechado */ }
         continue;
       }
