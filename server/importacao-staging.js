@@ -10,7 +10,7 @@ const os = require('os');
 const { getAppDataDir } = require('./config');
 const importacaoParams = require('./importacao-params');
 const { parseNfeXml } = require('./importacao-xml');
-const { aplicarRateiosDoXml, syncSistemaComXmlItem, validarFinanceiroNf } = require('./importacao-rateio');
+const { aplicarRateiosDoXml, syncSistemaComXmlItem, validarFinanceiroNf, completarParcelaVista } = require('./importacao-rateio');
 const { consultarChaveSefaz, fiscalReady } = require('./importacao-sefaz');
 const { getFiscalConfig } = require('./certificado');
 
@@ -1142,7 +1142,7 @@ function updateFinanceiro(sessaoId, financeiro) {
   if (!s) return { ok: false, error: 'Sessão não encontrada' };
   const finPatch = { ...financeiro };
   if (financeiro.parcelas) finPatch.parcelas = financeiro.parcelas;
-  const finMerged = { ...s.financeiro, ...finPatch };
+  const finMerged = completarParcelaVista(s.xml, { ...s.financeiro, ...finPatch }, s.itens);
   const checagemFin = validarFinanceiroNf(s.xml, finMerged, s.itens);
   if (!checagemFin.ok) return { ok: false, error: checagemFin.erro };
   s.financeiro = finMerged;
@@ -1314,6 +1314,7 @@ async function confirmarSessaoInterno(sessaoId, opts = {}) {
     }
   }
 
+  s.financeiro = completarParcelaVista(s.xml, s.financeiro, s.itens);
   const precisaValidarFin = (s.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
   if (precisaValidarFin) {
     const checagemFin = validarFinanceiroNf(s.xml, s.financeiro, s.itens);

@@ -1577,13 +1577,18 @@ const ImportacaoNfe = (() => {
             ${field('Vencimento', `imp-parc-d-${i}`, String(p.dVenc || '').slice(0, 10), { type: 'date' })}
           </div>`).join('');
     }
+    function parcelamentoEhVista(p) {
+      if (!p) return false;
+      return Number(p.n_parcelas || 0) < 1 || /vista/i.test(String(p.descricao || ''));
+    }
     function rebuildParcelasFromParcelamento() {
       const p = state.parcelamentos.find((x) => String(x.id_parcela) === String($('#imp-parcelamento')?.value));
-      const n = Number(p?.n_parcelas || 0);
+      const vista = parcelamentoEhVista(p);
+      const n = vista ? 1 : Number(p?.n_parcelas || 0);
       if (n < 1) return;
       const total = valorAPagarNf(s).alvo;
-      const first = String($('#imp-parc-d-0')?.value || parc[0]?.dVenc || todayLocal()).slice(0, 10);
-      const interval = Number(p.intervalo || 30) || 30;
+      const first = String((vista ? todayLocal() : ($('#imp-parc-d-0')?.value || parc[0]?.dVenc || todayLocal()))).slice(0, 10);
+      const interval = vista ? 0 : (Number(p.intervalo || 30) || 30);
       const each = Number((total / n).toFixed(2));
       const rows = [];
       let acc = 0;
@@ -1596,7 +1601,8 @@ const ImportacaoNfe = (() => {
     }
     $('#imp-parcelamento')?.addEventListener('change', rebuildParcelasFromParcelamento);
     const pSel = state.parcelamentos.find((x) => String(x.id_parcela) === String(idParcela));
-    if (Number(pSel?.n_parcelas) > 1 && parc.length <= 1) rebuildParcelasFromParcelamento();
+    if (!parc.length && parcelamentoEhVista(pSel)) rebuildParcelasFromParcelamento();
+    else if (Number(pSel?.n_parcelas) > 1 && parc.length <= 1) rebuildParcelasFromParcelamento();
     $('#imp-fin-salvar')?.addEventListener('click', async () => {
       const parcelas = $$('#imp-parcelas .imp-parc-row').map((row, i) => ({
         nDup: String(i + 1).padStart(3, '0'),
@@ -4995,11 +5001,17 @@ const ImportacaoNfe = (() => {
         deps.showMsg?.(btn?.title || 'Confira todos os itens e vincule o fornecedor antes de gravar.');
         return;
       }
+      const finConf = state.sessao?.financeiro || {};
+      const formaConf = `${finConf.forma_pagto || ''} ${finConf.parcelamento || ''}`;
+      const tPagConf = String(finConf.tPag || '').replace(/\D/g, '');
+      const aVistaConf = !/prazo|boleto|cart[aã]o|pix|cheque|\d+\s*dias/i.test(formaConf)
+        && !(finConf.parcelamento && !/vista/i.test(finConf.parcelamento))
+        && (/vista/i.test(formaConf) || Number(finConf.id_fmapgto) === 2 || ['01', '90'].includes(tPagConf.padStart(2, '0').slice(-2)));
       try {
         const params = await api('/importacao/params/cfop');
         const obrigar = (params.saida?.obrigar_financeiro || 'S') !== 'N';
         const algumFin = (state.sessao.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
-        if (obrigar && algumFin && !state.sessao?.financeiro_ok) {
+        if (obrigar && algumFin && !state.sessao?.financeiro_ok && !aVistaConf) {
           deps.showMsg?.('Abra a aba Financeiro, confira as parcelas (valor e vencimento) e toque em Salvar financeiro antes de gravar.');
           setTab('financeiro');
           return;
@@ -5009,18 +5021,17 @@ const ImportacaoNfe = (() => {
       const parcConf = state.sessao?.financeiro?.parcelas || [];
       const somaParcConf = parcConf.reduce((acc, p) => acc + Number(p.vDup || 0), 0);
       const geraFinConf = (state.sessao.itens || []).some((it) => (it.sistema?.gera_financeiro || 'S') !== 'N');
-      if (geraFinConf && aPagarConf.vNf > 0.009) {
-        if (!parcConf.length) {
-          deps.showMsg?.(`Informe as parcelas na aba Financeiro (valor a pagar ${aPagarConf.alvo.toFixed(2)}) e salve antes de gravar.`);
-          setTab('financeiro');
-          return;
-        }
+      if (geraFinConf && aPagarConf.vNf > 0.009 && parcConf.length) {
         const erroParcConf = erroParcelasNf(state.sessao, somaParcConf);
         if (erroParcConf) {
           deps.showMsg?.(`${erroParcConf} Ajuste na aba Financeiro.`);
           setTab('financeiro');
           return;
         }
+      } else if (geraFinConf && aPagarConf.vNf > 0.009 && !parcConf.length && !aVistaConf) {
+        deps.showMsg?.(`Informe as parcelas na aba Financeiro (valor a pagar ${aPagarConf.alvo.toFixed(2)}) e salve antes de gravar.`);
+        setTab('financeiro');
+        return;
       }
       const nItens = state.sessao.itens?.length || 0;
       const nNf = state.sessao.xml?.ide?.nNF || state.sessao.cabecalho?.nNF || '—';

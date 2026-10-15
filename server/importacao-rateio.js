@@ -210,6 +210,45 @@ function validarTotaisNf(xml, itensSessao) {
   return { ok: true, vNf, recon, delta };
 }
 
+function dataHojeSql() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+/** Dinheiro/vista não vem com duplicata no XML. Prazo, boleto e cartão continuam exigindo parcela. */
+function pagamentoAVista(fin = {}) {
+  const forma = String(fin.forma_pagto || '');
+  const parc = String(fin.parcelamento || '');
+  const texto = `${forma} ${parc}`;
+  if (/prazo|boleto|cart[aã]o|pix|cheque|dep[oó]sito|transfer|\d+\s*dias/i.test(texto)) return false;
+  if (parc && !/vista/i.test(parc)) return false;
+  if (/vista/i.test(texto)) return true;
+  if (Number(fin.id_fmapgto) === 2) return true;
+  const digits = String(fin.tPag || '').replace(/\D/g, '');
+  const code = digits ? digits.padStart(2, '0').slice(-2) : '';
+  return code === '01' || code === '90';
+}
+
+/** À vista sem duplicata: uma parcela do valor a pagar, vencendo na entrada. */
+function completarParcelaVista(xml, financeiro, itens = []) {
+  const fin = { ...(financeiro || {}) };
+  const parcelas = Array.isArray(fin.parcelas)
+    ? fin.parcelas.filter((p) => Number(p?.vDup) > 0.009)
+    : [];
+  if (parcelas.length || !pagamentoAVista(fin)) return { ...fin, parcelas: fin.parcelas || [] };
+  const vNf = round2(xml?.total?.vNF || 0);
+  const semFin = valorSemFinanceiro(itens);
+  const alvo = semFin > 0.009 ? round2(vNf - semFin) : vNf;
+  if (alvo <= 0.009) return fin;
+  return {
+    ...fin,
+    parcelas: [{ nDup: '001', dVenc: dataHojeSql(), vDup: alvo }],
+  };
+}
+
 /**
  * Parcelas × valor a pagar. Com itens que não geram financeiro, vale o total da NF sem eles
  * (ex.: venda + bonificação 5910: a duplicata vem só com a venda); o total cheio também é aceito.
@@ -258,6 +297,8 @@ module.exports = {
   totalMercadoriaItem,
   validarTotaisNf,
   validarFinanceiroNf,
+  completarParcelaVista,
+  pagamentoAVista,
   valorSemFinanceiro,
   DIFERENCA_MAX_NF,
 };
