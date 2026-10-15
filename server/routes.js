@@ -523,7 +523,7 @@ const LER_ESTOQUE = exigirModulo('estoque', 'importacao', 'alteracoes');
 /** Usuário sem preço "Total" não recebe o custo (nem na resposta da API). */
 function ocultarCusto(req, item) {
   if (!item || auth.podeVerCusto(req.usuario)) return item;
-  return { ...item, prc_custo: null };
+  return { ...item, prc_custo: null, prc_custo_manage: null };
 }
 
 /** Fila única: cadastros simultâneos (balcão + celular) não passam juntos pela checagem de código de barras. */
@@ -764,6 +764,18 @@ router.get('/estoque/:idIdentificador', LER_ESTOQUE, async (req, res) => {
           [id]
         );
         if (prod2.length) item.qtd_manage = Number(prod2[0].QTD_ATUAL || 0);
+        const preco2 = await query(
+          db,
+          `SELECT FIRST 1 E.PRC_VENDA, E.PRC_CUSTO
+           FROM TB_EST_IDENTIFICADOR_2 I
+           JOIN TB_ESTOQUE_2 E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+           WHERE I.ID_IDENTIFICADOR = ?`,
+          [id]
+        );
+        if (preco2.length) {
+          item.prc_venda_manage = Number(preco2[0].PRC_VENDA || 0);
+          item.prc_custo_manage = Number(preco2[0].PRC_CUSTO || 0);
+        }
       }
       return item;
     });
@@ -877,10 +889,33 @@ router.post('/estoque', exigirModulo('estoque', 'importacao'), async (req, res) 
       }
       let avisoManage = null;
       const qtdManage = numCampo(body.qtd_manage);
+      const sincronizaNovo = baseComManage(appCfg) ? await lerSincronizaProduto(db) : false;
       if (first && qtdManage != null && baseComManage(appCfg)) {
         const gravou = await gravarQtdSomenteManage(db, idIdentificador, qtdManage);
         if (!gravou) {
           avisoManage = 'Produto gravado no Clipp. Ele ainda não está no Manage, então a quantidade do Manage não foi aplicada.';
+        } else if (Math.abs(qtdManage - qtd) > 1e-6) {
+          await registrarSaldoManage(db, {
+            id: idIdentificador,
+            antigo: qtd,
+            novo: qtdManage,
+            idFuncionario,
+            usuario: usuarioNome,
+            origem: 'painel',
+          });
+        }
+      }
+      if (first && !sincronizaNovo && baseComManage(appCfg)) {
+        const vendaManage = numCampo(body.prc_venda_manage);
+        const custoManage = auth.podeVerCusto(req.usuario) ? numCampo(body.prc_custo_manage) : null;
+        if (vendaManage != null || custoManage != null) {
+          const gravouPreco = await gravarPrecoSomenteManage(db, idIdentificador, {
+            venda: vendaManage,
+            custo: custoManage,
+          });
+          if (!gravouPreco && !avisoManage) {
+            avisoManage = 'Produto gravado no Clipp. Ele ainda não está no Manage, então o preço do Manage não foi aplicado.';
+          }
         }
       }
       if (first) {
@@ -1121,7 +1156,7 @@ async function lerSincronizaProduto(db) {
   }
 }
 
-/** Só a quantidade do Manage. Preço, custo e ficha ficam como estão. */
+/** Só a quantidade do Manage. Preço entra em outra gravação, e só com a sincronização desligada. */
 async function gravarQtdSomenteManage(db, id, qtd) {
   const rows = await query(
     db,
@@ -1135,6 +1170,80 @@ async function gravarQtdSomenteManage(db, id, qtd) {
     [qtd, id]
   );
   return true;
+}
+
+async function gravarPrecoSomenteManage(db, id, { venda, custo }) {
+  if (!hasTable('TB_ESTOQUE_2') || !hasTable('TB_EST_IDENTIFICADOR_2')) return false;
+  const rows = await query(
+    db,
+    'SELECT FIRST 1 ID_ESTOQUE FROM TB_EST_IDENTIFICADOR_2 WHERE ID_IDENTIFICADOR = ?',
+    [id]
+  );
+  if (!rows.length) return false;
+  const sets = [];
+  const params = [];
+  if (venda != null) { sets.push('PRC_VENDA = ?'); params.push(venda); }
+  if (custo != null) { sets.push('PRC_CUSTO = ?'); params.push(custo); }
+  if (!sets.length) return true;
+  params.push(Number(rows[0].ID_ESTOQUE));
+  await query(db, `UPDATE TB_ESTOQUE_2 SET ${sets.join(', ')} WHERE ID_ESTOQUE = ?`, params);
+  return true;
+}
+
+async function registrarSaldoManage(db, { id, antigo, novo, idFuncionario, usuario, origem, obsExtra }) {
+  if (!hasTable('TB_EST_SALDO_ALTERADO_2')) return;
+  if (Math.abs(Number(novo) - Number(antigo)) < 1e-6) return;
+  const gen = await query(db, 'SELECT GEN_ID(GEN_TB_EST_SALDO_ALTERADO_ID, 1) AS ID FROM RDB$DATABASE');
+  const nextId = Number(gen[0].ID);
+  let prcMedio = 0;
+  try {
+    const pm = await query(db, 'SELECT FIRST 1 PRC_MEDIO FROM TB_EST_PRODUTO_2 WHERE ID_IDENTIFICADOR = ?', [id]);
+    prcMedio = Number(pm[0]?.PRC_MEDIO || 0);
+  } catch { /* coluna ausente */ }
+  const agora = localNow();
+  const obs = `Alterado via painel (${origem || 'painel'}) - ${usuario || ''}${obsExtra ? ` - ${obsExtra}` : ''}`.slice(0, 200);
+  const hasObs = await columnExists(db, 'TB_EST_SALDO_ALTERADO_2', 'OBSERVACAO');
+  if (hasObs) {
+    await query(
+      db,
+      `INSERT INTO TB_EST_SALDO_ALTERADO_2
+        (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO, OBSERVACAO)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [nextId, agora.dataSql, id, antigo, novo, prcMedio, agora.horaSql, idFuncionario || 0, obs]
+    );
+  } else {
+    await query(
+      db,
+      `INSERT INTO TB_EST_SALDO_ALTERADO_2
+        (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [nextId, agora.dataSql, id, antigo, novo, prcMedio, agora.horaSql, idFuncionario || 0]
+    );
+  }
+}
+
+/** Apaga o lançamento automático da trigger e grava um só, com o saldo final do Manage. */
+async function fecharMovimentoManage(db, ctx) {
+  if (ctx.antes == null || !hasTable('TB_EST_PRODUTO_2')) return;
+  const agora = await query(
+    db,
+    'SELECT FIRST 1 QTD_ATUAL FROM TB_EST_PRODUTO_2 WHERE ID_IDENTIFICADOR = ?',
+    [ctx.id]
+  );
+  if (!agora.length) return;
+  const novo = Number(agora[0].QTD_ATUAL || 0);
+  if (hasTable('TB_EST_SALDO_ALTERADO_2')) {
+    if (ctx.maxSaldo == null) {
+      await query(db, 'DELETE FROM TB_EST_SALDO_ALTERADO_2 WHERE ID_IDENTIFICADOR = ?', [ctx.id]);
+    } else {
+      await query(
+        db,
+        'DELETE FROM TB_EST_SALDO_ALTERADO_2 WHERE ID_IDENTIFICADOR = ? AND ID > ?',
+        [ctx.id, ctx.maxSaldo]
+      );
+    }
+  }
+  await registrarSaldoManage(db, { ...ctx, novo });
 }
 
 async function lerManageAntesQtd(db, id) {
@@ -1348,7 +1457,7 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
         const replicarManage = (modoSistema === 'ambos' || modoSistema === 'clipp+managepro')
           && t.produto === 'TB_EST_PRODUTO'
           && hasTable('TB_EST_PRODUTO_2');
-        if (replicarManage && (querDelta || querAbs)) {
+        if (replicarManage && (querDelta || querAbs || qtdManagePedida != null)) {
           manageAntes = await lerManageAntesQtd(db, id);
         }
         if ((querDelta || querAbs) && hasTable(t.saldo)) {
@@ -1421,6 +1530,18 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
           );
         }
 
+        if (manageAntes && replicarManage) {
+          await fecharMovimentoManage(db, {
+            id,
+            antes: manageAntes.qtd,
+            maxSaldo: manageAntes.maxSaldo,
+            idFuncionario,
+            usuario: usuarioNome,
+            origem,
+            obsExtra: obsQtdExtra,
+          });
+        }
+
         if (!snapshotDepois) {
           snapshotDepois = {
             ...antes,
@@ -1442,6 +1563,24 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
         }
 
         updated = { id_identificador: id, id_estoque: idEstoque };
+      }
+
+      if (updated && modoDuploAtivo && !sincronizaProduto) {
+        const vendaManage = numCampo(bruto.prc_venda_manage);
+        const custoManage = auth.podeVerCusto(req.usuario) ? numCampo(bruto.prc_custo_manage) : null;
+        if (vendaManage != null || custoManage != null) {
+          if (vendaManage != null) {
+            const nivelPreco = auth.nivel(req.usuario, 'estoque', 'precos');
+            if (nivelPreco !== 'editar' && nivelPreco !== 'total') {
+              throw new Error('Sem permissão para alterar o preço de venda do Manage.');
+            }
+          }
+          if (custoManage != null && auth.nivel(req.usuario, 'estoque', 'precos') !== 'total') {
+            throw new Error('Sem permissão para alterar o custo do Manage.');
+          }
+          const gravouPreco = await gravarPrecoSomenteManage(db, id, { venda: vendaManage, custo: custoManage });
+          if (!gravouPreco) throw new Error('Este produto não está no Manage.');
+        }
       }
 
       if (updated && (body.trib_nfe || body.trib_nfce)) {
@@ -1484,6 +1623,62 @@ router.put('/estoque/:idIdentificador', exigirModulo('estoque', 'importacao'), a
     });
   }
 });
+
+function segundosHora(hora) {
+  if (hora instanceof Date && !Number.isNaN(hora.getTime())) {
+    return hora.getUTCHours() * 3600 + hora.getUTCMinutes() * 60 + hora.getUTCSeconds();
+  }
+  const m = String(hora || '').match(/(\d{1,2}):(\d{2})(?::(\d{2}))?/);
+  if (!m) return null;
+  return Number(m[1]) * 3600 + Number(m[2]) * 60 + Number(m[3] || 0);
+}
+
+function diaChave(data) {
+  if (data instanceof Date && !Number.isNaN(data.getTime())) {
+    const m = String(data.getMonth() + 1).padStart(2, '0');
+    const d = String(data.getDate()).padStart(2, '0');
+    return `${data.getFullYear()}-${m}-${d}`;
+  }
+  return String(data || '').slice(0, 10);
+}
+
+function movimentoPerto(a, b) {
+  if (Number(a.id_identificador) !== Number(b.id_identificador)) return false;
+  if (diaChave(a.data) !== diaChave(b.data)) return false;
+  const sa = segundosHora(a.hora);
+  const sb = segundosHora(b.hora);
+  if (sa == null || sb == null) return false;
+  return Math.abs(sa - sb) <= 5;
+}
+
+function juntarLadosQuantidade(clipp, manage, itens) {
+  const usados = new Set();
+  for (const c of clipp) {
+    let melhor = null;
+    let dist = 99;
+    for (const m of manage) {
+      if (usados.has(m)) continue;
+      if (!movimentoPerto(c, m)) continue;
+      const d = Math.abs((segundosHora(c.hora) || 0) - (segundosHora(m.hora) || 0));
+      if (d < dist) {
+        dist = d;
+        melhor = m;
+      }
+    }
+    c.clipp_dif = c.diferenca;
+    c.manage_dif = 0;
+    if (melhor) {
+      usados.add(melhor);
+      c.manage_dif = melhor.diferenca;
+    }
+  }
+  for (const m of manage) {
+    if (usados.has(m)) continue;
+    m.clipp_dif = 0;
+    m.manage_dif = m.diferenca;
+    itens.push(m);
+  }
+}
 
 function mapSaldoAlteracao(r) {
   const antigo = Number(r.SALDO_ANTIGO || 0);
@@ -1593,7 +1788,52 @@ router.get('/alteracoes', exigirModulo('alteracoes'), async (req, res) => {
           ORDER BY S.DATA DESC, S.HORA DESC, S.ID DESC`,
           params
         );
-        itens.push(...rows.map(mapSaldoAlteracao));
+        const lancamentosClipp = rows.map(mapSaldoAlteracao);
+        itens.push(...lancamentosClipp);
+        if (baseComManage(appCfg) && hasTable('TB_EST_SALDO_ALTERADO_2')) {
+          try {
+            const hasObs2 = await columnExists(db, 'TB_EST_SALDO_ALTERADO_2', 'OBSERVACAO');
+            const where2 = [`S.DATA >= DATEADD(-${dias} DAY TO CURRENT_DATE)`];
+            const params2 = [];
+            if (!todos) {
+              where2.push('S.ID_FUNCIONARIO = ?');
+              params2.push(idUsuario || 0);
+            }
+            if (busca) {
+              where2.push(`(
+                UPPER(E.DESCRICAO) CONTAINING UPPER(?)
+                OR UPPER(COALESCE(F.NOME, '')) CONTAINING UPPER(?)
+                OR CAST(E.ID_ESTOQUE AS VARCHAR(20)) CONTAINING ?
+                ${hasObs2 ? 'OR UPPER(COALESCE(S.OBSERVACAO, \'\')) CONTAINING UPPER(?)' : ''}
+              )`);
+              params2.push(busca, busca, busca);
+              if (hasObs2) params2.push(busca);
+            }
+            const obs2 = hasObs2 ? 'S.OBSERVACAO' : 'CAST(NULL AS VARCHAR(200)) AS OBSERVACAO';
+            const rows2 = await query(
+              db,
+              `SELECT FIRST 400
+                S.ID, S.DATA, S.HORA, S.ID_IDENTIFICADOR,
+                S.SALDO_ANTIGO, S.SALDO_NOVO, S.ID_FUNCIONARIO,
+                ${obs2},
+                ${extract},
+                E.ID_ESTOQUE, E.DESCRICAO, E.UNI_MEDIDA,
+                P.COD_BARRA AS COD_BARRAS,
+                F.NOME AS FUNCIONARIO
+              FROM TB_EST_SALDO_ALTERADO_2 S
+              JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = S.ID_IDENTIFICADOR
+              JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+              JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+              LEFT JOIN TB_FUNCIONARIO F ON F.ID_FUNCIONARIO = S.ID_FUNCIONARIO
+              WHERE ${where2.join(' AND ')}
+              ORDER BY S.DATA DESC, S.HORA DESC, S.ID DESC`,
+              params2
+            );
+            juntarLadosQuantidade(lancamentosClipp, rows2.map((r) => ({ ...mapSaldoAlteracao(r), id: `q2-${Number(r.ID)}` })), itens);
+          } catch (e) {
+            console.warn('Alterações Manage:', e.message);
+          }
+        }
       }
 
       if (wantGestor) {

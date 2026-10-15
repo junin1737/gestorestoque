@@ -1745,7 +1745,11 @@ async function openProduto(idIdentificador) {
 
 async function abrirNovoProduto() {
   if (!state.unidades.length) await loadUnidades();
-  const [grupos, niveis] = await Promise.all([api('/grupos'), api('/niveis')]);
+  const [grupos, niveis, emitente] = await Promise.all([api('/grupos'), api('/niveis'), api('/emitente')]);
+  if (emitente?.ok) {
+    state.config.tem_manage = !!emitente.tem_manage;
+    state.config.sincroniza_produto = !!emitente.sincroniza_produto;
+  }
   state.grupos = grupos.grupos || [];
   state.niveis = niveis;
   state.isNovo = true;
@@ -1814,6 +1818,11 @@ function confirmarConflito(res) {
 function modoComManage() {
   const s = String(state.config?.sistema || '').toLowerCase();
   return s === 'ambos' || s === 'clipp+managepro';
+}
+
+function exibeAbaManage(it) {
+  if (it?.tem_manage === true || state.config?.tem_manage) return true;
+  return modoComManage();
 }
 
 function sincronizaProdutoLigado() {
@@ -1895,12 +1904,34 @@ $('#btn-salvar-produto').addEventListener('click', async () => {
       }
     }
   }
-  if (editarQtd && $('#q-manage')) {
+  if (editarQtd && $('#q-manage') && !$('#q-manage').disabled) {
     const qtdManage = parseBrMoney($('#q-manage').value);
     if (state.isNovo) {
       if (state.manageQtdEditada && Number.isFinite(qtdManage)) body.qtd_manage = qtdManage;
     } else if (it.qtd_manage != null && Number.isFinite(qtdManage) && Math.abs(qtdManage - Number(it.qtd_manage)) > 1e-9) {
       body.qtd_manage = qtdManage;
+    }
+  }
+  if (!sincronizaProdutoLigado()) {
+    const vendaManage = $('#m-venda');
+    if (vendaManage && !vendaManage.disabled && (state.managePrecoEditado || !state.isNovo)) {
+      const venda = parseBrMoney(vendaManage.value);
+      const baseVenda = state.isNovo ? Number(it.prc_venda || 0) : Number(it.prc_venda_manage);
+      if (state.isNovo) {
+        if (state.managePrecoEditado) body.prc_venda_manage = venda;
+      } else if (it.prc_venda_manage != null && Math.abs(venda - baseVenda) > 0.0001) {
+        body.prc_venda_manage = venda;
+      }
+    }
+    const custoManage = $('#m-custo');
+    if (custoManage && !custoManage.disabled && verCusto && (state.managePrecoEditado || !state.isNovo)) {
+      const custo = parseBrMoney(custoManage.value);
+      const baseCusto = state.isNovo ? Number(it.prc_custo || 0) : Number(it.prc_custo_manage);
+      if (state.isNovo) {
+        if (state.managePrecoEditado) body.prc_custo_manage = custo;
+      } else if (it.prc_custo_manage != null && Math.abs(custo - baseCusto) > 0.0001) {
+        body.prc_custo_manage = custo;
+      }
     }
   }
   if ($('#t-cfop') && editarFicha) {
@@ -2119,7 +2150,7 @@ function renderDetalhe() {
       <button class="tab" data-tab="precos">Preços</button>
       <button class="tab" data-tab="quantidade">Quantidade</button>
       ${!state.isNovo ? '<button class="tab" data-tab="fiscal">Fiscal</button>' : ''}
-      ${(state.isNovo ? !!state.config?.tem_manage : it.tem_manage === true) ? '<button class="tab" data-tab="manage">Manage</button>' : ''}
+      ${(exibeAbaManage(it)) ? '<button class="tab" data-tab="manage">Manage</button>' : ''}
       ${showGrade || showSerial || showLote ? '<button class="tab" data-tab="controle">Grade / Lote</button>' : ''}
     </div>
     <div class="tab-pane" data-pane="ficha">
@@ -2205,23 +2236,47 @@ function renderDetalhe() {
       </label>
       ${!desktop ? `<div class="qty-sticky-save"><button type="button" class="btn primary" id="btn-salvar-contagem">Salvar contagem</button></div>` : ''}
     </div>
-    ${((state.isNovo ? !!state.config?.tem_manage : it.tem_manage === true)) ? `
+    ${(exibeAbaManage(it)) ? (() => {
+      const sinc = !!it.sincroniza_produto;
+      const semProduto = !state.isNovo && it.qtd_manage == null;
+      const qtdOk = editarQtd && !semProduto;
+      const vendaOk = !sinc && !semProduto && editarVenda;
+      const custoOk = !sinc && !semProduto && editarCusto && verCusto;
+      const qtdBase = state.isNovo ? Number(it.qtd_atual || 0) : Number(it.qtd_manage || 0);
+      const vendaValor = state.isNovo ? it.prc_venda : it.prc_venda_manage;
+      const custoValor = state.isNovo ? it.prc_custo : it.prc_custo_manage;
+      return `
     <div class="tab-pane" data-pane="manage" hidden>
       <div class="qty-hero">
         <span>Quantidade no Manage</span>
-        <strong>${state.isNovo || it.qtd_manage != null ? `${fmtNum(state.isNovo ? Number(it.qtd_atual || 0) : it.qtd_manage)} ${uni}` : 'Sem cadastro no Manage'}</strong>
+        <strong id="q-manage-hero">${semProduto ? 'Sem cadastro no Manage' : `${fmtNum(qtdBase)} ${uni}`}</strong>
       </div>
-      <label>Quantidade
-        <input id="q-manage" inputmode="decimal" value="${escapeAttr(state.isNovo ? fmtMoney2(it.qtd_atual || 0) : (it.qtd_manage == null ? '' : fmtMoney2(it.qtd_manage)))}" ${editarQtd && (state.isNovo ? !!it.sincroniza_produto : it.qtd_manage != null) ? '' : 'disabled'} />
-      </label>
-      <p class="hint">${it.sincroniza_produto
-        ? (state.isNovo
-          ? 'Só a quantidade. Se você não alterar este campo, o Manage fica com a quantidade do Clipp. O preço fica na aba Preços e grava nos dois.'
-          : 'Só a quantidade. O preço fica na aba Preços e já grava no Clipp e no Manage.')
-        : 'A sincronização está desligada. Esta quantidade altera só o Manage e não mexe no preço.'}</p>
-      ${!state.isNovo && it.qtd_manage == null ? '<p class="hint">Este produto ainda não está no Manage.</p>' : ''}
-      ${state.isNovo && !it.sincroniza_produto ? '<p class="hint">Com a sincronização desligada, o produto novo entra só no Clipp.</p>' : ''}
-    </div>` : ''}
+      <p class="hint" style="margin:0 0 0.35rem;font-size:0.7rem;letter-spacing:.06em;text-transform:uppercase;font-weight:700">Ajustar</p>
+      <div class="qty-stepper">
+        <button type="button" id="q-manage-minus" ${qtdOk ? '' : 'disabled'}>−</button>
+        <div class="qty-delta" id="q-manage-delta">0</div>
+        <button type="button" id="q-manage-plus" ${qtdOk ? '' : 'disabled'}>+</button>
+      </div>
+      <div class="qty-pair">
+        <label>Nova quantidade
+          <input id="q-manage" inputmode="decimal" value="${escapeAttr(semProduto ? '' : fmtMoney2(qtdBase))}" ${qtdOk ? '' : 'disabled'} />
+        </label>
+        <div id="q-manage-diff" class="diff-box">0</div>
+      </div>
+      <div class="form-grid side-by-side" style="margin-top:0.8rem">
+        <label>Preço de venda
+          <input id="m-venda" inputmode="decimal" value="${escapeAttr(vendaValor == null ? '' : fmtMoney2(vendaValor))}" ${vendaOk ? '' : 'disabled'} />
+        </label>
+        <label>Preço de custo
+          <input id="m-custo" inputmode="decimal" value="${verCusto ? escapeAttr(custoValor == null ? '' : fmtMoney2(custoValor)) : '****'}" ${custoOk ? '' : 'disabled'} class="${verCusto ? '' : 'masked'}" />
+        </label>
+      </div>
+      <p class="hint">${sinc
+        ? 'A sincronização está ligada. O preço muda na aba Preços e grava no Clipp e no Manage.'
+        : 'A sincronização está desligada. Quantidade e preços desta aba alteram só o Manage.'}</p>
+      ${semProduto ? '<p class="hint">Este produto ainda não está no Manage.</p>' : ''}
+    </div>`;
+    })() : ''}
     ${!state.isNovo ? `
     <div class="tab-pane" data-pane="fiscal" hidden>
       <div id="trib-host" class="trib-host"><p class="hint">Carregando última entrada e parâmetros…</p></div>
@@ -2292,6 +2347,7 @@ function renderDetalhe() {
   let syncing = false;
   state.qtdModo = 'delta';
   state.manageQtdEditada = false;
+  state.managePrecoEditado = false;
 
   function paintDiff(delta) {
     const box = $('#q-diff');
@@ -2358,7 +2414,39 @@ function renderDetalhe() {
     state.qtdModo = 'delta';
     applyDelta(deltaAtual - 1);
   });
-  $('#q-manage')?.addEventListener('input', () => { state.manageQtdEditada = true; });
+  const manageBase = state.isNovo ? Number(it.qtd_atual || 0) : Number(it.qtd_manage || 0);
+  let manageDelta = 0;
+  function paintManage(delta, { manterCampo = false } = {}) {
+    const d = Number.isFinite(delta) ? Number(delta.toFixed(6)) : 0;
+    manageDelta = d;
+    const lbl = $('#q-manage-delta');
+    if (lbl) {
+      lbl.textContent = d === 0 ? '0' : `${d > 0 ? '+' : ''}${fmtNum(d)}`;
+      lbl.classList.toggle('is-neg', d < 0);
+    }
+    const campo = $('#q-manage');
+    if (campo && !manterCampo) campo.value = fmtMoney2(manageBase + d);
+    const diff = $('#q-manage-diff');
+    if (diff) {
+      diff.textContent = d === 0 ? '0' : `${d > 0 ? '+' : ''}${fmtNum(d)} ${it.uni_medida || 'UN'}`;
+      diff.className = `diff-box ${d > 0 ? 'pos' : d < 0 ? 'neg' : ''}`;
+    }
+  }
+  $('#q-manage-plus')?.addEventListener('click', () => {
+    state.manageQtdEditada = true;
+    paintManage(manageDelta + 1);
+  });
+  $('#q-manage-minus')?.addEventListener('click', () => {
+    state.manageQtdEditada = true;
+    paintManage(manageDelta - 1);
+  });
+  $('#q-manage')?.addEventListener('input', () => {
+    state.manageQtdEditada = true;
+    const vazio = !String($('#q-manage').value).trim();
+    paintManage(vazio ? 0 : parseBrMoney($('#q-manage').value) - manageBase, { manterCampo: true });
+  });
+  $('#m-venda')?.addEventListener('input', () => { state.managePrecoEditado = true; });
+  $('#m-custo')?.addEventListener('input', () => { state.managePrecoEditado = true; });
   $('#btn-salvar-contagem')?.addEventListener('click', () => $('#btn-salvar-produto')?.click());
   $('#btn-salvar-produto-aside')?.addEventListener('click', () => $('#btn-salvar-produto')?.click());
   $('#btn-cancelar-produto-aside')?.addEventListener('click', () => $('#btn-cancelar-produto')?.click());
@@ -2773,7 +2861,12 @@ function renderAlteracoes() {
     const tipo = it.tipo || 'ficha';
     const isQty = tipo === 'quantidade';
     const diff = Number(it.diferenca || 0);
-    const side = isQty
+    const lados = isQty && it.clipp_dif != null && it.manage_dif != null
+      ? `Clipp ${fmtDeltaQtd(it.clipp_dif)} Manage ${fmtDeltaQtd(it.manage_dif)}`
+      : '';
+    const side = lados
+      ? `<span class="stock-badge ${Number(it.clipp_dif) < 0 || Number(it.manage_dif) < 0 ? 'zero' : (Number(it.clipp_dif) > 0 || Number(it.manage_dif) > 0 ? 'ok' : '')}">${escapeHtml(lados)}</span>`
+      : isQty
       ? `<span class="stock-badge ${diff > 0 ? 'ok' : diff < 0 ? 'zero' : ''}">${diff > 0 ? '+' : ''}${fmtNum(diff)} ${escapeHtml(it.uni_medida || '')}</span>
          <span class="item-price">${fmtNum(it.saldo_antigo)} → ${fmtNum(it.saldo_novo)}</span>`
       : `<span class="chip-tipo ${escapeAttr(tipo)}">${escapeHtml(tipoAlteracaoLabel(tipo))}</span>
@@ -3634,6 +3727,13 @@ function fmtMoney2(n) {
 }
 function fmtNum(n) {
   return Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtDeltaQtd(n) {
+  const v = Number(n || 0);
+  if (Math.abs(v) < 1e-6) return '-';
+  const inteiro = Math.abs(v - Math.trunc(v)) < 1e-6;
+  const abs = inteiro ? String(Math.abs(Math.trunc(v))) : fmtNum(Math.abs(v));
+  return `${v > 0 ? '+' : '-'}${abs}`;
 }
 /** Ex.: "Alterado Celular 31/10/2026 13:25:25 · JOÃO" */
 function textoUltimaAlteracao(u) {
