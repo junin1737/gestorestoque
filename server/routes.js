@@ -1190,15 +1190,19 @@ async function gravarPrecoSomenteManage(db, id, { venda, custo }) {
   return true;
 }
 
-async function registrarSaldoManage(db, { id, antigo, novo, idFuncionario, usuario, origem, obsExtra }) {
+async function registrarSaldoManage(db, { id, antigo, antes, novo, idFuncionario, usuario, origem, obsExtra }) {
   if (!hasTable('TB_EST_SALDO_ALTERADO_2')) return;
-  if (Math.abs(Number(novo) - Number(antigo)) < 1e-6) return;
+  const saldoAntigo = Number(antigo != null ? antigo : antes);
+  const saldoNovo = Number(novo);
+  if (!Number.isFinite(saldoAntigo) || !Number.isFinite(saldoNovo)) return;
+  if (Math.abs(saldoNovo - saldoAntigo) < 1e-6) return;
   const gen = await query(db, 'SELECT GEN_ID(GEN_TB_EST_SALDO_ALTERADO_ID, 1) AS ID FROM RDB$DATABASE');
   const nextId = Number(gen[0].ID);
   let prcMedio = 0;
   try {
     const pm = await query(db, 'SELECT FIRST 1 PRC_MEDIO FROM TB_EST_PRODUTO_2 WHERE ID_IDENTIFICADOR = ?', [id]);
     prcMedio = Number(pm[0]?.PRC_MEDIO || 0);
+    if (!Number.isFinite(prcMedio)) prcMedio = 0;
   } catch { /* coluna ausente */ }
   const agora = localNow();
   const obs = `Alterado via painel (${origem || 'painel'}) - ${usuario || ''}${obsExtra ? ` - ${obsExtra}` : ''}`.slice(0, 200);
@@ -1209,7 +1213,7 @@ async function registrarSaldoManage(db, { id, antigo, novo, idFuncionario, usuar
       `INSERT INTO TB_EST_SALDO_ALTERADO_2
         (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO, OBSERVACAO)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [nextId, agora.dataSql, id, antigo, novo, prcMedio, agora.horaSql, idFuncionario || 0, obs]
+      [nextId, agora.dataSql, id, saldoAntigo, saldoNovo, prcMedio, agora.horaSql, idFuncionario || 0, obs]
     );
   } else {
     await query(
@@ -1217,7 +1221,7 @@ async function registrarSaldoManage(db, { id, antigo, novo, idFuncionario, usuar
       `INSERT INTO TB_EST_SALDO_ALTERADO_2
         (ID, DATA, ID_IDENTIFICADOR, SALDO_ANTIGO, SALDO_NOVO, PRC_MEDIO, HORA, ID_FUNCIONARIO)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      [nextId, agora.dataSql, id, antigo, novo, prcMedio, agora.horaSql, idFuncionario || 0]
+      [nextId, agora.dataSql, id, saldoAntigo, saldoNovo, prcMedio, agora.horaSql, idFuncionario || 0]
     );
   }
 }
@@ -1243,7 +1247,7 @@ async function fecharMovimentoManage(db, ctx) {
       );
     }
   }
-  await registrarSaldoManage(db, { ...ctx, novo });
+  await registrarSaldoManage(db, { ...ctx, antigo: Number(ctx.antes), novo });
 }
 
 async function lerManageAntesQtd(db, id) {
