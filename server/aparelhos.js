@@ -14,7 +14,7 @@ const { getAppDataDir } = require('./config');
 const COOKIE = 'gestor_aparelho';
 const CODIGO_MS = 10 * 60 * 1000;
 /** O cookie dura o máximo aceito pelos navegadores; quem manda no vencimento é o expira_em do servidor. */
-const COOKIE_S = 400 * 24 * 60 * 60;
+const COOKIE_S = 365 * 24 * 60 * 60;
 const DIA_MS = 24 * 60 * 60 * 1000;
 const VALIDADES_DIAS = [1, 7, 15, 30, 60, 90, 180, 365];
 const VALIDADE_PADRAO_DIAS = 30;
@@ -284,7 +284,8 @@ function aparelhoDaRequisicao(req) {
 }
 
 function cookieAparelho(token, maxAgeS = COOKIE_S) {
-  return `${COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeS}; HttpOnly; Secure; SameSite=Lax`;
+  const expira = new Date(Date.now() + maxAgeS * 1000).toUTCString();
+  return `${COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=${maxAgeS}; Expires=${expira}; HttpOnly; Secure; SameSite=Lax`;
 }
 
 function listar() {

@@ -149,7 +149,10 @@ function lerCookie(req, nome) {
 
 function definirCookie(res, valor, maxAgeS) {
   const partes = [`${COOKIE}=${encodeURIComponent(valor)}`, 'Path=/', 'HttpOnly', 'SameSite=Strict'];
-  if (maxAgeS != null) partes.push(`Max-Age=${maxAgeS}`);
+  if (maxAgeS != null) {
+    partes.push(`Max-Age=${maxAgeS}`);
+    if (maxAgeS > 0) partes.push(`Expires=${new Date(Date.now() + maxAgeS * 1000).toUTCString()}`);
+  }
   if (res.req && viaTunel(res.req)) partes.push('Secure');
   res.setHeader('Set-Cookie', partes.join('; '));
 }
@@ -324,7 +327,7 @@ async function login(req, res) {
     tokensMt.set(dados.n, { token: tokenMt.token, exp });
     limparRevogados();
   }
-  definirCookie(res, token);
+  definirCookie(res, token, Math.floor(VALIDADE_MS / 1000));
   res.json({
     ok: true,
     expira_em: new Date(dados.exp).toISOString(),

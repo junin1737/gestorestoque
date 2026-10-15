@@ -109,8 +109,60 @@ function lerCookie(request, nome) {
   return '';
 }
 
-function comSeguranca(resp) {
-  const r = new Response(resp.body, resp);
+/** Cookies do aparelho e da sessão. Sem Expires/Max-Age o navegador apaga ao fechar. */
+const COOKIES_LONGOS = {
+  gestor_aparelho: 365 * 24 * 60 * 60,
+  gestor_sessao: 16 * 60 * 60,
+};
+
+function garantirExpiracao(cookie) {
+  const nome = String(cookie).split('=')[0].trim();
+  const max = COOKIES_LONGOS[nome];
+  if (!max || /(?:^|;)\s*max-age\s*=\s*0\b/i.test(cookie)) return cookie;
+  let out = String(cookie);
+  if (!/(?:^|;)\s*max-age\s*=/i.test(out)) out += `; Max-Age=${max}`;
+  if (!/(?:^|;)\s*expires\s*=/i.test(out)) out += `; Expires=${new Date(Date.now() + max * 1000).toUTCString()}`;
+  if (!/(?:^|;)\s*path\s*=/i.test(out)) out += '; Path=/';
+  if (!/(?:^|;)\s*secure\b/i.test(out)) out += '; Secure';
+  if (!/(?:^|;)\s*httponly\b/i.test(out)) out += '; HttpOnly';
+  if (!/(?:^|;)\s*samesite\s*=/i.test(out)) out += '; SameSite=Lax';
+  return out;
+}
+
+/**
+ * O cookie que sai do Gestor passa pelo túnel e pode chegar sem prazo, virando cookie de sessão.
+ * Aqui ele é regravado com validade, e um cookie já existente é renovado a cada visita.
+ */
+function reforcarCookies(request, resp) {
+  const headers = new Headers();
+  for (const [k, v] of resp.headers) {
+    if (k.toLowerCase() === 'set-cookie') continue;
+    headers.append(k, v);
+  }
+  const lista = typeof resp.headers.getSetCookie === 'function'
+    ? resp.headers.getSetCookie()
+    : [...resp.headers].filter(([k]) => k.toLowerCase() === 'set-cookie').map(([, v]) => v);
+  const definidos = new Set();
+  for (const c of lista) {
+    const ajustado = garantirExpiracao(c);
+    headers.append('Set-Cookie', ajustado);
+    definidos.add(ajustado.split('=')[0].trim());
+  }
+  const raw = request?.headers?.get('Cookie') || '';
+  for (const parte of raw.split(';')) {
+    const i = parte.indexOf('=');
+    if (i <= 0) continue;
+    const nome = parte.slice(0, i).trim();
+    if (!COOKIES_LONGOS[nome] || definidos.has(nome)) continue;
+    const valor = parte.slice(i + 1).trim();
+    if (!valor || valor.length > 2000) continue;
+    headers.append('Set-Cookie', garantirExpiracao(`${nome}=${valor}`));
+  }
+  return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+}
+
+function comSeguranca(resp, request) {
+  const r = request ? reforcarCookies(request, resp) : new Response(resp.body, resp);
   r.headers.set('Strict-Transport-Security', 'max-age=31536000');
   return r;
 }
@@ -224,13 +276,13 @@ export default {
       if (!tunel) {
         // A rota curinga também pega outros subdomínios do site: esses seguem para a origem normal.
         if (!apelido) return fetch(request);
-        return comSeguranca(pagina('Endereço não encontrado', 'Nenhuma loja está usando este endereço. Confira o endereço ou leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja.', 404));
+        return comSeguranca(pagina('Endereço não encontrado', 'Nenhuma loja está usando este endereço. Confira o endereço ou leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja.', 404), request);
       }
       if (url.pathname === '/tunel/saude') {
         const resp = Response.json({ ok: true, tunel: (await sha256Hex(tunel)).slice(0, 16) }, { headers: { 'Cache-Control': 'no-store' } });
-        return comSeguranca(resp);
+        return comSeguranca(resp, request);
       }
-      return comSeguranca(await encaminharAoTunel(env, request, tunel));
+      return comSeguranca(await encaminharAoTunel(env, request, tunel), request);
     }
 
     const estado = url.pathname.match(/^\/t\/([a-z2-7]{20,32})\/estado$/);
@@ -249,14 +301,14 @@ export default {
       else if (url.searchParams.get('contador') === '1') destino = '/?contador=1';
       const resp = new Response(null, { status: 302, headers: { Location: destino } });
       resp.headers.append('Set-Cookie', `${COOKIE_TUNEL}=${entrada[1]}; Path=/; Max-Age=31536000; HttpOnly; Secure; SameSite=Lax`);
-      return comSeguranca(resp);
+      return comSeguranca(resp, request);
     }
 
     const id = lerCookie(request, COOKIE_TUNEL);
     if (!ID_RE.test(id)) {
-      return comSeguranca(pagina('Gestor Estoque', 'Para acessar pela internet, leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja.'));
+      return comSeguranca(pagina('Gestor Estoque', 'Para acessar pela internet, leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja.'), request);
     }
-    return comSeguranca(await encaminharAoTunel(env, request, id));
+    return comSeguranca(await encaminharAoTunel(env, request, id), request);
   },
 };
 
