@@ -339,6 +339,11 @@
   min-width: 14rem;
 }
 
+.imp-nat-busca {
+  position: relative;
+  z-index: 6;
+}
+
 .dev-badge {
   display: inline-block;
   margin-left: 0.35rem;

@@ -4385,9 +4385,11 @@ const ImportacaoNfe = (() => {
         <p class="hint">O 1º dígito do CFOP de entrada é ajustado automaticamente pela UF do fornecedor × UF do emitente (1=mesmo estado, 2=interestadual). CST permanece o da nota.</p>
         <div class="imp-field">
           <span>Natureza padrão de entrada</span>
-          <input type="hidden" id="imp-params-nat-id" value="${esc(natId)}" />
-          <input id="imp-params-nat-busca" type="search" autocomplete="off" placeholder="Pesquisar por descrição ou CFOP…" data-descricao="${esc(natDesc)}" data-cfop="${esc(natCfop)}" value="${esc(natDesc ? `${natDesc}${natCfop ? ` · CFOP ${natCfop}` : ''}` : '')}" />
-          <div id="imp-params-nat-list" class="imp-combo-list" hidden></div>
+          <div class="imp-nat-busca">
+            <input type="hidden" id="imp-params-nat-id" value="${esc(natId)}" />
+            <input id="imp-params-nat-busca" class="imp-combo-input" type="search" autocomplete="off" placeholder="Pesquisar por descrição ou CFOP…" data-descricao="${esc(natDesc)}" data-cfop="${esc(natCfop)}" value="${esc(natDesc ? `${natDesc}${natCfop ? ` · CFOP ${natCfop}` : ''}` : '')}" />
+            <div id="imp-params-nat-list" class="imp-combo-list" hidden></div>
+          </div>
           <p class="hint">Todas as notas abrem com esta natureza. Se você trocar na nota, a gravação usa a que foi alterada.</p>
         </div>
         <h5 class="imp-sub">Conversão por linha (entrada → saída NF-e / CF-e)</h5>
@@ -4736,10 +4738,59 @@ const ImportacaoNfe = (() => {
     const valueEl = $('#imp-params-nat-id');
     const box = $('#imp-params-nat-list');
     if (!displayEl || !valueEl || !box) return;
-    const closeList = () => { box.hidden = true; box.innerHTML = ''; };
-    const renderList = async (term) => {
+    let listaAberta = false;
+    const posicionarLista = () => {
+      const r = displayEl.getBoundingClientRect();
+      const margem = 8;
+      const largura = Math.min(Math.max(r.width, 280), window.innerWidth - margem * 2);
+      let esquerda = r.left;
+      if (esquerda + largura > window.innerWidth - margem) esquerda = window.innerWidth - margem - largura;
+      if (esquerda < margem) esquerda = margem;
+      const abaixo = window.innerHeight - r.bottom - margem;
+      const acima = r.top - margem;
+      const abrirAcima = abaixo < 140 && acima > abaixo;
+      const altura = Math.max(96, Math.min(280, abrirAcima ? acima : abaixo));
+      box.style.position = 'fixed';
+      box.style.left = `${Math.round(esquerda)}px`;
+      box.style.width = `${Math.round(largura)}px`;
+      box.style.right = 'auto';
+      box.style.zIndex = '80';
+      box.style.maxHeight = `${Math.round(altura)}px`;
+      if (abrirAcima) {
+        box.style.top = 'auto';
+        box.style.bottom = `${Math.round(window.innerHeight - r.top + 2)}px`;
+      } else {
+        box.style.bottom = 'auto';
+        box.style.top = `${Math.round(r.bottom + 2)}px`;
+      }
+    };
+    const fecharFora = (e) => {
+      if (box.contains(e.target) || displayEl.contains(e.target)) return;
+      closeList();
+    };
+    const closeList = () => {
+      box.hidden = true;
+      box.innerHTML = '';
+      box.removeAttribute('style');
+      if (!listaAberta) return;
+      listaAberta = false;
+      window.removeEventListener('scroll', posicionarLista, true);
+      window.removeEventListener('resize', posicionarLista);
+      document.removeEventListener('mousedown', fecharFora, true);
+    };
+    const openList = () => {
+      posicionarLista();
       box.hidden = false;
+      if (listaAberta) return;
+      listaAberta = true;
+      window.addEventListener('scroll', posicionarLista, true);
+      window.addEventListener('resize', posicionarLista);
+      document.addEventListener('mousedown', fecharFora, true);
+    };
+    const renderList = async (term) => {
+      openList();
       const res = await api(`/importacao/naturezas?q=${encodeURIComponent(term || '')}`);
+      if (!listaAberta) return;
       const list = res.itens || res.naturezas || [];
       if (!list.length) {
         box.innerHTML = '<p class="hint">Nenhuma natureza</p>';
