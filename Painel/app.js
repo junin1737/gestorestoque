@@ -248,15 +248,15 @@ function formatCnpj(v) {
 }
 
 function nomeLojaGrupo(e) {
+  const nome = e?.nome || 'Empresa';
+  if (e?.papel === 'matriz') return `${nome} - Matriz`;
   const apelido = String(e?.apelido || '').trim();
-  if (e?.papel === 'filial' && apelido) return apelido;
-  return e?.nome || 'Empresa';
+  return apelido ? `${nome} - ${apelido}` : nome;
 }
 
 function detalheLojaGrupo(e, marcaAtual) {
-  const papel = e?.papel === 'matriz' ? 'Matriz' : 'Filial';
   const atual = e?.atual ? ` · ${marcaAtual}` : '';
-  return `${papel} · ${formatCnpj(e?.cnpj)}${atual}`;
+  return `${formatCnpj(e?.cnpj)}${atual}`;
 }
 
 function urlLoginEmpresa(url) {
