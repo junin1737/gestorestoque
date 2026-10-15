@@ -2715,7 +2715,12 @@ router.post('/mt/vinculos', async (req, res) => {
   const token = tokenMt(req, res);
   if (!token) return;
   try {
-    respostaMt(res, await require('./mt-empresas').criarVinculo(token, req.body?.cnpjMatriz, req.body?.cnpjFilial));
+    respostaMt(res, await require('./mt-empresas').criarVinculo(
+      token,
+      req.body?.cnpjMatriz,
+      req.body?.cnpjFilial,
+      req.body?.apelidoFilial
+    ));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

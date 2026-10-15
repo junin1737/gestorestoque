@@ -417,6 +417,7 @@
         </select>
       </label>
       <label>CNPJ da outra empresa<input id="d-vinc-cnpj" inputmode="numeric" placeholder="00.000.000/0000-00" /></label>
+      <label>Apelido da filial<input id="d-vinc-apelido" maxlength="40" placeholder="Ex.: Patos" /></label>
       <button class="btn ghost" id="d-vinc-ligar" type="button">Ligar</button>
     </div>
     <div class="erro" id="d-vinc-erro"></div>
@@ -1145,11 +1146,16 @@ async function carregarVinculosCliente() {
       const outroCnpj = euMatriz ? v.cnpj_filial : v.cnpj_matriz;
       const url = euMatriz ? v.url_filial : v.url_matriz;
       const papel = euMatriz ? 'Filial' : 'Matriz';
+      const apelido = v.apelido_filial || '';
       return `<tr>
         <td>${papel}</td>
-        <td>${esc(outro || '—')}<div class="sub">${fmtCnpj(outroCnpj)}${url ? '' : ' · ainda sem servidor'}</div></td>
+        <td>${esc(outro || '—')}<div class="sub">${fmtCnpj(outroCnpj)}${url ? '' : ' · ainda sem servidor'}${apelido ? ` · ${esc(apelido)}` : ''}</div></td>
         <td>${esc(SIT_VINC[v.status] || v.status || '')}</td>
-        <td><button type="button" class="btn sm ghost" data-vinc-del="${v.id}">Remover</button></td>
+        <td>
+          <input data-vinc-apelido="${v.id}" maxlength="40" placeholder="Apelido da filial" value="${esc(apelido)}" style="width:9rem" />
+          <button type="button" class="btn sm ghost" data-vinc-apelido-salvar="${v.id}">Salvar</button>
+          <button type="button" class="btn sm ghost" data-vinc-del="${v.id}">Remover</button>
+        </td>
       </tr>`;
     }).join('')
     : '<tr><td colspan="4" class="sub">Nenhuma empresa ligada.</td></tr>';
@@ -1172,15 +1178,27 @@ $('#d-vinc-ligar').addEventListener('click', async () => {
       aplicacao: c.app,
       cnpjMatriz: estaEhMatriz ? c.cnpj : outro,
       cnpjFilial: estaEhMatriz ? outro : c.cnpj,
+      apelidoFilial: $('#d-vinc-apelido').value,
     },
   });
   if (!r.ok) { erro.textContent = r.error || 'Falha ao ligar.'; return; }
   $('#d-vinc-cnpj').value = '';
+  $('#d-vinc-apelido').value = '';
   toast('Empresas ligadas. As duas aparecem na escolha do login.');
   carregarVinculosCliente();
 });
 
 $('#d-vinc-lista').addEventListener('click', async (e) => {
+  const salvar = e.target.closest('button[data-vinc-apelido-salvar]');
+  if (salvar) {
+    const id = salvar.dataset.vincApelidoSalvar;
+    const campo = document.querySelector(`[data-vinc-apelido="${id}"]`);
+    const r = await api(`/vinculos/${id}`, { method: 'PATCH', body: { apelidoFilial: campo?.value || '' } });
+    if (!r.ok) { toast(r.error || 'Falha ao salvar o apelido.', true); return; }
+    toast('Apelido da filial salvo.');
+    carregarVinculosCliente();
+    return;
+  }
   const btn = e.target.closest('button[data-vinc-del]');
   if (!btn) return;
   const r = await api(`/vinculos/${btn.dataset.vincDel}`, { method: 'DELETE' });

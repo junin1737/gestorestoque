@@ -99,7 +99,7 @@ async function excluirVinculoDaLoja(id) {
   return comoEstaEmpresa(`/api/mt/vinculos/${Number(id)}`, { method: 'DELETE' });
 }
 
-async function criarVinculo(tokenMt, cnpjMatriz, cnpjFilial) {
+async function criarVinculo(tokenMt, cnpjMatriz, cnpjFilial, apelidoFilial) {
   return chamarLicenca('/api/mt/vinculos', {
     method: 'POST',
     headers: comToken(tokenMt),
@@ -107,6 +107,7 @@ async function criarVinculo(tokenMt, cnpjMatriz, cnpjFilial) {
       aplicacao: APLICACAO,
       cnpjMatriz,
       cnpjFilial,
+      apelidoFilial,
     }),
   });
 }

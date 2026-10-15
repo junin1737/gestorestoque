@@ -247,6 +247,18 @@ function formatCnpj(v) {
   return d || '—';
 }
 
+function nomeLojaGrupo(e) {
+  const apelido = String(e?.apelido || '').trim();
+  if (e?.papel === 'filial' && apelido) return apelido;
+  return e?.nome || 'Empresa';
+}
+
+function detalheLojaGrupo(e, marcaAtual) {
+  const papel = e?.papel === 'matriz' ? 'Matriz' : 'Filial';
+  const atual = e?.atual ? ` · ${marcaAtual}` : '';
+  return `${papel} · ${formatCnpj(e?.cnpj)}${atual}`;
+}
+
 function urlLoginEmpresa(url) {
   try {
     const u = new URL(url, location.origin);
@@ -280,8 +292,8 @@ async function carregarLojasLogin() {
   box.hidden = false;
   lista.innerHTML = empresas.map((e) => `
     <button type="button" class="login-loja${e.atual ? ' is-atual' : ''}" data-loja-url="${escapeAttr(e.url || '')}" data-loja-atual="${e.atual ? '1' : ''}" ${e.atual || e.url ? '' : 'disabled'}>
-      <strong>${escapeHtml(e.nome || 'Empresa')}</strong>
-      <span>${e.papel === 'matriz' ? 'Matriz' : 'Filial'} · ${escapeHtml(formatCnpj(e.cnpj))}${e.atual ? ' · esta loja' : ''}</span>
+      <strong>${escapeHtml(nomeLojaGrupo(e))}</strong>
+      <span>${escapeHtml(detalheLojaGrupo(e, 'esta loja'))}</span>
     </button>
   `).join('');
   $$('.login-loja', lista).forEach((btn) => {
@@ -368,7 +380,7 @@ async function carregarVinculosPainel() {
     <article class="imp-item-row">
       <div class="imp-item-main">
         <strong>${escapeHtml(v.nome_matriz || 'Matriz')} → ${escapeHtml(v.nome_filial || 'Filial')}</strong>
-        <span class="hint">${escapeHtml(formatCnpj(v.cnpj_matriz))} · ${escapeHtml(formatCnpj(v.cnpj_filial))}</span>
+        <span class="hint">${escapeHtml(formatCnpj(v.cnpj_matriz))} · ${escapeHtml(formatCnpj(v.cnpj_filial))}${v.apelido_filial ? ` · ${escapeHtml(v.apelido_filial)}` : ''}</span>
       </div>
       <span class="chip ${v.status === 'ativo' ? 'ok' : 'pending'}">${escapeHtml(ROTULO_VINCULO[v.status] || v.status || '')}</span>
       <button type="button" class="btn small" data-vinc-del="${v.id}">Remover</button>
@@ -381,8 +393,8 @@ function htmlTrocaLoja(e) {
   return `
     <div class="troca-loja-linha">
       <button type="button" class="troca-loja${e.atual ? ' is-atual' : ''}" data-loja-url="${escapeAttr(e.url || '')}" data-loja-atual="${e.atual ? '1' : ''}" ${e.atual || e.url ? '' : 'disabled'}>
-        <strong>${escapeHtml(e.nome || 'Empresa')}</strong>
-        <span>${e.papel === 'matriz' ? 'Matriz' : 'Filial'} · ${escapeHtml(formatCnpj(e.cnpj))}${e.atual ? ' · esta' : ''}</span>
+        <strong>${escapeHtml(nomeLojaGrupo(e))}</strong>
+        <span>${escapeHtml(detalheLojaGrupo(e, 'esta'))}</span>
       </button>
       ${podeRemover ? `<button type="button" class="troca-remover" data-vinc-del="${e.vinculo_id}">Remover</button>` : ''}
     </div>`;
@@ -452,11 +464,15 @@ $('#btn-vincular-empresas')?.addEventListener('click', async () => {
     showMsg('A matriz e a filial precisam ser empresas diferentes.');
     return;
   }
-  const res = await api('/mt/vinculos', { method: 'POST', body: { cnpjMatriz, cnpjFilial } });
+  const res = await api('/mt/vinculos', {
+    method: 'POST',
+    body: { cnpjMatriz, cnpjFilial, apelidoFilial: $('#vinculo-apelido')?.value || '' },
+  });
   if (!res.ok) {
     showMsg(res.error || 'Não foi possível criar o vínculo.');
     return;
   }
+  if ($('#vinculo-apelido')) $('#vinculo-apelido').value = '';
   showMsg(res.ativo ? 'Essas lojas já estão vinculadas.' : 'Vínculo criado. Cada loja precisa aceitar no próprio Gestor.');
   await carregarVinculosPainel();
 });
