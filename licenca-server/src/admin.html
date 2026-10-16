@@ -587,14 +587,62 @@
 'use strict';
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => [...document.querySelectorAll(s)];
-function papelDoToken(token) {
+function dadosToken(token) {
   try {
     const corpo = String(token || '').split('.')[0].replace(/-/g, '+').replace(/_/g, '/');
-    const dados = JSON.parse(atob(corpo));
-    return dados.papel === 'entradas' ? 'entradas' : 'admin';
+    return JSON.parse(atob(corpo)) || {};
   } catch {
-    return 'admin';
+    return {};
   }
+}
+function papelDoToken(token) {
+  const papel = dadosToken(token).papel;
+  if (papel === 'entradas' || papel === 'contador') return papel;
+  return 'admin';
+}
+function chaveFiltroUsuario(token) {
+  const dados = dadosToken(token);
+  if (dados.papel === 'contador') return `contador:${dados.doc || dados.id || ''}`;
+  if (dados.papel === 'entradas') return 'entradas';
+  return 'admin';
+}
+function lerMapaFiltros() {
+  try { return JSON.parse(sessionStorage.getItem('mt_licenca_filtros') || '{}'); }
+  catch { return {}; }
+}
+function gravarFiltrosUsuario() {
+  if (!st.token) return;
+  const mapa = lerMapaFiltros();
+  mapa[chaveFiltroUsuario(st.token)] = {
+    q: st.q || '',
+    status: st.status || '',
+    app: st.app || '',
+    revenda: st.revenda || '',
+  };
+  try { sessionStorage.setItem('mt_licenca_filtros', JSON.stringify(mapa)); } catch { /* ignore */ }
+}
+function restaurarFiltrosSessao() {
+  const salvo = st.token ? (lerMapaFiltros()[chaveFiltroUsuario(st.token)] || {}) : {};
+  st.q = String(salvo.q || '');
+  st.status = String(salvo.status || '');
+  st.app = String(salvo.app || '');
+  st.revenda = String(salvo.revenda || '');
+}
+function aplicarFiltrosNaTela() {
+  const busca = $('#busca');
+  if (busca) busca.value = st.q || '';
+  $$('.tab').forEach((t) => t.classList.toggle('active', (t.dataset.status || '') === (st.status || '')));
+  const app = $('#f-app');
+  if (app && [...app.options].some((o) => o.value === (st.app || ''))) app.value = st.app || '';
+  const rev = $('#f-revenda');
+  if (rev && [...rev.options].some((o) => o.value === (st.revenda || ''))) rev.value = st.revenda || '';
+}
+function limparFiltrosVisiveis() {
+  st.q = '';
+  st.status = '';
+  st.app = '';
+  st.revenda = '';
+  aplicarFiltrosNaTela();
 }
 const st = { token: localStorage.getItem('mt_licenca_token') || '', papel: localStorage.getItem('mt_licenca_papel') || 'admin', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null, contadorEditando: null, contadores: [] };
 st.papel = st.token ? papelDoToken(st.token) : 'admin';
@@ -750,6 +798,10 @@ function irPara(tela) {
 }
 
 function mostrarApp(logado) {
+  if (logado) {
+    restaurarFiltrosSessao();
+    aplicarFiltrosNaTela();
+  }
   $('#login').hidden = logado;
   $('#app').hidden = !logado;
   if (!logado) return;
@@ -797,8 +849,10 @@ $('#btn-voltar-empresas')?.addEventListener('click', () => irPara('clientes'));
 $('#btn-voltar-contadores')?.addEventListener('click', () => irPara('clientes'));
 $('#btn-empresas-atualizar')?.addEventListener('click', () => carregarEmpresas());
 function sair() {
+  gravarFiltrosUsuario();
   st.token = '';
   st.papel = 'admin';
+  limparFiltrosVisiveis();
   localStorage.removeItem('mt_licenca_token');
   localStorage.removeItem('mt_licenca_papel');
   mostrarApp(false);
@@ -981,8 +1035,8 @@ async function onLinhaCliente(e) {
   }
   abrirCliente({ cnpj: tr.dataset.cnpj, app: tr.dataset.app });
 }
-$('#f-app').addEventListener('change', (e) => { st.app = e.target.value; carregar(); });
-$('#f-revenda').addEventListener('change', (e) => { st.revenda = e.target.value; carregar(); });
+$('#f-app').addEventListener('change', (e) => { st.app = e.target.value; gravarFiltrosUsuario(); carregar(); });
+$('#f-revenda').addEventListener('change', (e) => { st.revenda = e.target.value; gravarFiltrosUsuario(); carregar(); });
 
 function opcoesRevenda(atual, { vazio = 'Sem revenda' } = {}) {
   return `<option value="">${esc(vazio)}</option>`
@@ -1063,12 +1117,13 @@ $('#tabs').addEventListener('click', (e) => {
   if (!tab) return;
   $$('.tab').forEach((t) => t.classList.toggle('active', t === tab));
   st.status = tab.dataset.status;
+  gravarFiltrosUsuario();
   carregar();
 });
 let tBusca;
 $('#busca').addEventListener('input', (e) => {
   clearTimeout(tBusca);
-  tBusca = setTimeout(() => { st.q = e.target.value.trim(); carregar(); }, 300);
+  tBusca = setTimeout(() => { st.q = e.target.value.trim(); gravarFiltrosUsuario(); carregar(); }, 300);
 });
 $('#btn-atualizar').addEventListener('click', carregar);
 

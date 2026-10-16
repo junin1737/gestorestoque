@@ -176,7 +176,27 @@ async function listarStatus(db) {
   }));
 }
 
-async function listar(statusFiltro) {
+/** Número do condicional e/ou nome do cliente. Número curto também procura no nome. */
+function montarBuscaPedido(busca) {
+  const termo = String(busca || '').trim();
+  if (!termo) return null;
+  const n = Number(termo);
+  const idOk = /^\d+$/.test(termo) && Number.isSafeInteger(n) && n > 0 && n <= 2147483647;
+  if (idOk) {
+    return {
+      where: ['(P.ID_PEDIDO = ? OR UPPER(COALESCE(CL.NOME, \'\')) CONTAINING UPPER(?))'],
+      params: [n, termo],
+    };
+  }
+  const partes = termo.split(/\s+/).map((p) => p.trim()).filter(Boolean);
+  const lista = partes.length ? partes : [termo];
+  return {
+    where: lista.map(() => 'UPPER(COALESCE(CL.NOME, \'\')) CONTAINING UPPER(?)'),
+    params: lista,
+  };
+}
+
+async function listar(statusFiltro, busca) {
   return withDb(async (db) => {
     if (!hasTable('TB_PEDIDO_VENDA') || !hasTable('TB_PED_VENDA_ITEM')) {
       return { disponivel: false, itens: [], statuses: [], aviso: 'Esta base não tem pedido de venda.' };
@@ -191,6 +211,11 @@ async function listar(statusFiltro) {
     } else if (/^\d+$/.test(filtro)) {
       where.push('P.ID_STATUS = ?');
       params.push(Number(filtro));
+    }
+    const extra = montarBuscaPedido(busca);
+    if (extra) {
+      where.push(...extra.where);
+      params.push(...extra.params);
     }
     const corpo = (await sqlPedido(db)).replace(/^\s*SELECT\s*/i, '');
     const rows = await query(db, `
@@ -747,6 +772,7 @@ function textoWhatsapp(doc) {
 }
 
 module.exports = {
+  montarBuscaPedido,
   listar,
   detalhe,
   doProduto,

@@ -2211,10 +2211,22 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 }
 .cond-form-grid input,
 .cond-form-grid select,
-.cond-filtro select {
+.cond-filtro select,
+.cond-filtro input {
   min-height: 2.45rem;
   font-weight: 550;
   color: var(--text);
+}
+.cond-peca-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.cond-peca-row input { flex: 1; min-width: 0; }
+.cond-peca-row .btn.icon-cam {
+  flex: 0 0 auto;
+  min-width: 2.45rem;
+  min-height: 2.45rem;
 }
 .cond-sugestoes { display: grid; gap: 0.15rem; }
 .cond-pick, .cond-item {

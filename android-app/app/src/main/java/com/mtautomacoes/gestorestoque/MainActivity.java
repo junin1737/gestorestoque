@@ -503,7 +503,7 @@ public class MainActivity extends AppCompatActivity {
                 + "  document.addEventListener('click',function(e){"
                 + "    var n=e.target,t=null;"
                 + "    while(n&&n!==document){"
-                + "      if(n.id==='btn-scan-barras'||n.id==='btn-scan-ficha-barras'"
+                + "      if(n.id==='btn-scan-barras'||n.id==='btn-scan-ficha-barras'||n.id==='btn-scan-cond-peca'"
                 + "||n.id==='imp-btn-scan-chave'||n.id==='imp-btn-scan-prod'||n.id==='imp-btn-scan-ean'){t=n;break;}"
                 + "      n=n.parentElement||n.parentNode;"
                 + "    }"
@@ -511,6 +511,7 @@ public class MainActivity extends AppCompatActivity {
                 + "    e.preventDefault();e.stopImmediatePropagation();"
                 + "    var tgt='search';"
                 + "    if(t.id==='btn-scan-ficha-barras')tgt='ficha';"
+                + "    else if(t.id==='btn-scan-cond-peca')tgt='condicional';"
                 + "    else if(t.id==='imp-btn-scan-chave')tgt='importacao';"
                 + "    else if(t.id==='imp-btn-scan-prod')tgt='importacao-prod';"
                 + "    else if(t.id==='imp-btn-scan-ean')tgt='importacao-ean';"
@@ -779,7 +780,7 @@ public class MainActivity extends AppCompatActivity {
             });
         }
 
-        /** target: search|ficha|importacao|importacao-prod|importacao-ean */
+        /** target: search|ficha|importacao|importacao-prod|importacao-ean|condicional */
         @JavascriptInterface
         public void scanBarcodeFor(String target) {
             final String mode = target == null ? "product" : target;

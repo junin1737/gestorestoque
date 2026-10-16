@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=251" />
+  <link rel="stylesheet" href="styles.css?v=252" />
   <link rel="stylesheet" href="importacao-nfe.css?v=247" />
 </head>
 <body>
@@ -497,6 +497,9 @@
                   <option value="reservado">Reservados</option>
                 </select>
               </label>
+              <label class="cond-filtro">Buscar
+                <input id="cond-busca" type="search" placeholder="Número ou nome do cliente" autocomplete="off" enterkeyhint="search" />
+              </label>
               <div id="cond-lista" class="cond-lista"></div>
             </section>
             <section class="cond-col cond-col-painel">
@@ -531,7 +534,12 @@
                     <input id="cond-obs" maxlength="300" placeholder="Opcional" />
                   </label>
                   <label class="full">Peça
-                    <input id="cond-peca" type="search" placeholder="Nome, identificador, código, barras ou referência" autocomplete="off" />
+                    <span class="cond-peca-row">
+                      <input id="cond-peca" type="search" placeholder="Nome, identificador, código, barras ou referência" autocomplete="off" />
+                      <button type="button" id="btn-scan-cond-peca" class="btn icon-cam" title="Ler código de barras" aria-label="Ler código de barras">
+                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+                      </button>
+                    </span>
                   </label>
                   <p class="hint full" id="cond-peca-estoque"></p>
                   <div id="cond-peca-lista" class="full cond-sugestoes"></div>
@@ -834,9 +842,9 @@
   <script src="vendor/zxing-browser.min.js?v=240"></script>
   <script src="importacao-nfe.js?v=242"></script>
   <script src="compras.js?v=240"></script>
-  <script src="condicionais.js?v=240"></script>
+  <script src="condicionais.js?v=241"></script>
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=257"></script>
-  <script src="app.js?v=256"></script>
+  <script src="app.js?v=257"></script>
 </body>
 </html>

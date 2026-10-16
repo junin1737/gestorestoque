@@ -2953,7 +2953,7 @@ const LANCAR_CONDICIONAL = exigirModulo('condicionais');
 
 router.get('/condicionais', VER_CONDICIONAL, async (req, res) => {
   try {
-    res.json({ ok: true, ...(await condicionais.listar(req.query.status)) });
+    res.json({ ok: true, ...(await condicionais.listar(req.query.status, req.query.q)) });
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }

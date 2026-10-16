@@ -288,8 +288,11 @@ const Condicionais = (() => {
     const sel = $('#cond-status');
     if (!lista) return;
     const filtro = sel?.value || 'reservado';
+    const q = String($('#cond-busca')?.value || '').trim();
     lista.innerHTML = '<p class="hint">Carregando…</p>';
-    const res = await api(`/condicionais?status=${encodeURIComponent(filtro)}`);
+    const qs = new URLSearchParams({ status: filtro });
+    if (q) qs.set('q', q);
+    const res = await api(`/condicionais?${qs}`);
     if (!res.ok) {
       lista.innerHTML = `<p class="hint">${esc(res.error || 'Falha ao listar')}</p>`;
       return;
@@ -310,7 +313,9 @@ const Condicionais = (() => {
     if (aviso && res.aviso) aviso.textContent = res.aviso;
     const itens = res.itens || [];
     if (!itens.length) {
-      lista.innerHTML = '<p class="empty">Nenhum condicional nesta situação.</p>';
+      lista.innerHTML = q
+        ? '<p class="empty">Nenhum condicional com esse número ou cliente.</p>'
+        : '<p class="empty">Nenhum condicional nesta situação.</p>';
       return;
     }
     lista.innerHTML = itens.map((it) => `
@@ -386,6 +391,57 @@ const Condicionais = (() => {
 
   function botaoSugestao(texto, attrs) {
     return `<button type="button" class="cond-pick" ${attrs}>${texto}</button>`;
+  }
+
+  function htmlPecas(itens) {
+    return itens.map((p) => {
+      const extra = [p.cod_barras ? `barras ${p.cod_barras}` : '', p.referencia ? `ref. ${p.referencia}` : '', textoEstoque(p), money(p.prc_venda)].filter(Boolean).join(' · ');
+      const sem = Number(p.qtd_disponivel) <= 0 ? ' is-sem-estoque' : '';
+      return `<button type="button" class="cond-pick${sem}" data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-prc="${p.prc_venda}" data-disp="${p.qtd_disponivel}"><strong>${esc(p.id_identificador)}</strong> ${esc(p.descricao)}<span class="hint"> · cód. ${esc(p.id_estoque)}${extra ? ` · ${esc(extra)}` : ''}</span></button>`;
+    }).join('');
+  }
+
+  function ligarPecas(box) {
+    box.querySelectorAll('[data-id]').forEach((btn) => {
+      btn.addEventListener('click', () => escolherPeca({
+        id_identificador: Number(btn.dataset.id),
+        descricao: btn.dataset.desc,
+        prc_venda: Number(btn.dataset.prc || 0),
+        qtd_disponivel: Number(btn.dataset.disp),
+      }));
+    });
+  }
+
+  async function buscarPecasNaTela(q) {
+    const box = $('#cond-peca-lista');
+    if (!box) return null;
+    const res = await api(`/condicionais/produtos?q=${encodeURIComponent(q)}`);
+    if (!res.ok) {
+      box.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível buscar peças.')}</p>`;
+      return null;
+    }
+    const itens = res.itens || [];
+    if (!itens.length) {
+      box.innerHTML = '<p class="hint">Nenhuma peça encontrada.</p>';
+      return [];
+    }
+    box.innerHTML = htmlPecas(itens);
+    ligarPecas(box);
+    return itens;
+  }
+
+  async function aplicarCodigoBarras(codigo) {
+    const code = String(codigo || '').trim();
+    if (!code) return;
+    const inp = $('#cond-peca');
+    if (inp) inp.value = code;
+    pecaAtual = null;
+    if ($('#cond-peca-estoque')) $('#cond-peca-estoque').textContent = '';
+    const itens = await buscarPecasNaTela(code);
+    if (!itens?.length) return;
+    const exato = itens.filter((p) => String(p.cod_barras || '') === code || String(p.referencia || '') === code);
+    const escolhido = exato.length === 1 ? exato[0] : (itens.length === 1 ? itens[0] : null);
+    if (escolhido) escolherPeca(escolhido);
   }
 
   function escolherPeca(item) {
@@ -505,29 +561,7 @@ const Condicionais = (() => {
           box.innerHTML = '';
           return;
         }
-        const res = await api(`/condicionais/produtos?q=${encodeURIComponent(q)}`);
-        if (!res.ok) {
-          box.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível buscar peças.')}</p>`;
-          return;
-        }
-        const itens = res.itens || [];
-        if (!itens.length) {
-          box.innerHTML = '<p class="hint">Nenhuma peça encontrada.</p>';
-          return;
-        }
-        box.innerHTML = itens.map((p) => {
-          const extra = [p.cod_barras ? `barras ${p.cod_barras}` : '', p.referencia ? `ref. ${p.referencia}` : '', textoEstoque(p), money(p.prc_venda)].filter(Boolean).join(' · ');
-          const sem = Number(p.qtd_disponivel) <= 0 ? ' is-sem-estoque' : '';
-          return `<button type="button" class="cond-pick${sem}" data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-prc="${p.prc_venda}" data-disp="${p.qtd_disponivel}"><strong>${esc(p.id_identificador)}</strong> ${esc(p.descricao)}<span class="hint"> · cód. ${esc(p.id_estoque)}${extra ? ` · ${esc(extra)}` : ''}</span></button>`;
-        }).join('');
-        box.querySelectorAll('[data-id]').forEach((btn) => {
-          btn.addEventListener('click', () => escolherPeca({
-            id_identificador: Number(btn.dataset.id),
-            descricao: btn.dataset.desc,
-            prc_venda: Number(btn.dataset.prc || 0),
-            qtd_disponivel: Number(btn.dataset.disp),
-          }));
-        });
+        await buscarPecasNaTela(q);
       }, 250);
     });
     $('#cond-add-peca')?.addEventListener('click', async () => {
@@ -604,6 +638,17 @@ const Condicionais = (() => {
     });
     $('#cond-cancelar')?.addEventListener('click', () => fecharNovo());
     $('#cond-status')?.addEventListener('change', () => abrirLista());
+    let timerBusca = null;
+    $('#cond-busca')?.addEventListener('input', () => {
+      clearTimeout(timerBusca);
+      timerBusca = setTimeout(() => abrirLista(), 250);
+    });
+    $('#cond-busca')?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      clearTimeout(timerBusca);
+      abrirLista();
+    });
     $('#dlg-condicional-fechar')?.addEventListener('click', () => {
       const dlg = $('#dlg-condicional');
       if (dlg?.close) dlg.close();
@@ -633,7 +678,7 @@ const Condicionais = (() => {
     ligarFormulario();
   }
 
-  return { init, onPageEnter, abrirDoProduto };
+  return { init, onPageEnter, abrirDoProduto, aplicarCodigoBarras };
 })();
 
 window.Condicionais = Condicionais;
