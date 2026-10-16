@@ -115,9 +115,50 @@ const COOKIES_LONGOS = {
   gestor_sessao: 16 * 60 * 60,
 };
 
+function nomeAparelhoLoja(id) {
+  return `gestor_aparelho_${id}`;
+}
+
+function prazoCookie(nome) {
+  if (nome === 'gestor_sessao') return COOKIES_LONGOS.gestor_sessao;
+  if (nome === 'gestor_aparelho' || nome.startsWith('gestor_aparelho_')) return COOKIES_LONGOS.gestor_aparelho;
+  return 0;
+}
+
+/** Cada loja no mesmo endereço guarda o próprio aparelho. O cookie único era trocado ao ir da matriz para a filial. */
+function cookieParaLoja(raw, id) {
+  const nome = nomeAparelhoLoja(id);
+  let token = '';
+  const partes = [];
+  for (const parte of String(raw || '').split(';')) {
+    const i = parte.indexOf('=');
+    if (i <= 0) continue;
+    const n = parte.slice(0, i).trim();
+    if (n === nome) token = parte.slice(i + 1).trim();
+    else if (n === 'gestor_aparelho' || n.startsWith('gestor_aparelho_') || n === COOKIE_TUNEL) continue;
+    else partes.push(parte.trim());
+  }
+  if (token) partes.push(`gestor_aparelho=${token}`);
+  return partes.filter(Boolean).join('; ');
+}
+
+function separarCookieAparelho(resp, id) {
+  const headers = new Headers();
+  for (const [k, v] of resp.headers) {
+    if (k.toLowerCase() !== 'set-cookie') headers.append(k, v);
+  }
+  const lista = typeof resp.headers.getSetCookie === 'function' ? resp.headers.getSetCookie() : [];
+  const nome = nomeAparelhoLoja(id);
+  for (const c of lista) {
+    headers.append('Set-Cookie', /^gestor_aparelho=/.test(c) ? c.replace(/^gestor_aparelho=/, `${nome}=`) : c);
+  }
+  headers.append('Set-Cookie', 'gestor_aparelho=; Path=/; Max-Age=0; Secure; HttpOnly; SameSite=Lax');
+  return new Response(resp.body, { status: resp.status, statusText: resp.statusText, headers });
+}
+
 function garantirExpiracao(cookie) {
   const nome = String(cookie).split('=')[0].trim();
-  const max = COOKIES_LONGOS[nome];
+  const max = prazoCookie(nome);
   if (!max || /(?:^|;)\s*max-age\s*=\s*0\b/i.test(cookie)) return cookie;
   let out = String(cookie);
   if (!/(?:^|;)\s*max-age\s*=/i.test(out)) out += `; Max-Age=${max}`;
@@ -153,7 +194,7 @@ function reforcarCookies(request, resp) {
     const i = parte.indexOf('=');
     if (i <= 0) continue;
     const nome = parte.slice(0, i).trim();
-    if (!COOKIES_LONGOS[nome] || definidos.has(nome)) continue;
+    if (nome === 'gestor_aparelho' || !prazoCookie(nome) || definidos.has(nome)) continue;
     const valor = parte.slice(i + 1).trim();
     if (!valor || valor.length > 2000) continue;
     headers.append('Set-Cookie', garantirExpiracao(`${nome}=${valor}`));
@@ -240,10 +281,13 @@ async function encaminharAoTunel(env, request, id) {
   const headers = new Headers(request.headers);
   for (const k of [...headers.keys()]) if (k.startsWith('x-relay-')) headers.delete(k);
   headers.delete('x-gestor-loja');
+  const cookieLoja = cookieParaLoja(headers.get('Cookie'), id);
+  if (cookieLoja) headers.set('Cookie', cookieLoja);
+  else headers.delete('Cookie');
   const stub = env.TUNEL.get(env.TUNEL.idFromName(id));
   const resp = await stub.fetch(new Request(request, { headers }));
   if (resp.status === 101) return resp;
-  const marcada = new Response(resp.body, resp);
+  const marcada = separarCookieAparelho(resp, id);
   marcada.headers.set('X-Gestor-Loja', loja);
   return marcada;
 }

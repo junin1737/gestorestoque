@@ -153,7 +153,7 @@ function edicaoAtual() {
 
 const EDICAO = edicaoAtual();
 
-function sendPainelHtml(res, filename) {
+function sendPainelHtml(res, filename, req) {
   const file = path.join(__dirname, '..', 'Painel', filename);
   let html = fs.readFileSync(file, 'utf8');
   if (/data-edicao=/.test(html)) {
@@ -161,14 +161,20 @@ function sendPainelHtml(res, filename) {
   } else {
     html = html.replace(/<html\b/i, `<html data-edicao="${EDICAO}"`);
   }
+  const acesso = req && viaTunel(req) ? 'online' : 'local';
+  if (/data-acesso=/.test(html)) {
+    html = html.replace(/data-acesso="[^"]*"/, `data-acesso="${acesso}"`);
+  } else {
+    html = html.replace(/<html\b/i, `<html data-acesso="${acesso}"`);
+  }
   res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
   res.setHeader('Pragma', 'no-cache');
   res.setHeader('Expires', '0');
   res.type('html').send(html);
 }
 
-app.get('/servico.html', (_req, res) => sendPainelHtml(res, 'servico.html'));
-app.get(['/', '/index.html'], (_req, res) => sendPainelHtml(res, 'index.html'));
+app.get('/servico.html', (req, res) => sendPainelHtml(res, 'servico.html', req));
+app.get(['/', '/index.html'], (req, res) => sendPainelHtml(res, 'index.html', req));
 
 app.use(express.static(path.join(__dirname, '..', 'Painel'), {
   etag: false,
@@ -186,8 +192,8 @@ app.get('/favicon.ico', (_req, res) => {
 });
 app.use('/api', licenca.guardLicenca, auth.exigirSessao, idempotencia.middleware, routes);
 
-app.get('*', (_req, res) => {
-  sendPainelHtml(res, 'index.html');
+app.get('*', (req, res) => {
+  sendPainelHtml(res, 'index.html', req);
 });
 
 function lanAddresses() {

@@ -400,7 +400,18 @@ function htmlTrocaLoja(e) {
     </div>`;
 }
 
+function acessoPelaInternet() {
+  return document.documentElement.dataset.acesso === 'online';
+}
+
 async function carregarTrocaEmpresa() {
+  if (acessoPelaInternet()) {
+    const troca = $('#trocar-empresa');
+    const trocaMobile = $('#trocar-empresa-mobile');
+    if (troca) troca.hidden = true;
+    if (trocaMobile) trocaMobile.hidden = true;
+    return;
+  }
   const blocos = [
     [$('#trocar-empresa'), $('#trocar-empresa-lista')],
     [$('#trocar-empresa-mobile'), $('#trocar-empresa-lista-mobile')],
@@ -1188,7 +1199,7 @@ function enterApp() {
   if (state.usuario?.contador) return;
   loadUnidades();
   carregarPedidoVinculo();
-  if (state.usuario?.mtEntradas) {
+  if (state.usuario?.mtEntradas || acessoPelaInternet()) {
     const troca = $('#trocar-empresa');
     const trocaMobile = $('#trocar-empresa-mobile');
     if (troca) troca.hidden = true;
