@@ -43,6 +43,10 @@ const MODULOS = {
     label: 'Condicionais',
     default: { acesso: true },
   },
+  clientes: {
+    label: 'Clientes',
+    default: { acesso: true },
+  },
   massa: {
     label: 'Alteração em massa',
     default: { acesso: false },
@@ -158,6 +162,7 @@ function fullPermissoes() {
     if (key === 'importacao') out[key] = { acesso: true };
     if (key === 'compras') out[key] = { acesso: true };
     if (key === 'condicionais') out[key] = { acesso: true };
+    if (key === 'clientes') out[key] = { acesso: true };
     if (key === 'massa') out[key] = { acesso: true };
     if (key === 'online') out[key] = { acesso: true };
     if (key === 'dashboard_padrao') out[key] = { acesso: true };
@@ -253,6 +258,7 @@ function loadUsersConfig(appCfg) {
       const permissoes = comDashboards(comAcessoOnline(u, fullPermissoes()), u);
       permissoes.dashboard_padrao = { acesso: true };
       if (u.permissoes?.condicionais?.acesso === false) permissoes.condicionais = { acesso: false };
+      if (u.permissoes?.clientes?.acesso === false) permissoes.clientes = { acesso: false };
       return {
         ...u,
         id: 0,
@@ -304,6 +310,7 @@ function permissoesMtEntradas(u) {
   });
   const out = comAcessoOnline(u, comDashboards(base, { permissoes: base }));
   if (u?.permissoes?.condicionais?.acesso === false) out.condicionais = { acesso: false };
+  if (u?.permissoes?.clientes?.acesso === false) out.clientes = { acesso: false };
   return out;
 }
 
@@ -326,6 +333,10 @@ function lerUsaManage(cfg) {
 
 function lerIgnorarReceberCartao(cfg) {
   return Number(cfg && cfg.ignorar_receber_cartao) === 1 ? 1 : 0;
+}
+
+function lerSomenteComEstoque(cfg) {
+  return Number(cfg && cfg.somente_com_estoque) === 1 ? 1 : 0;
 }
 
 function usaManageDoPedido(current, body) {
@@ -353,6 +364,7 @@ module.exports = {
   isMtEntradas,
   lerUsaManage,
   lerIgnorarReceberCartao,
+  lerSomenteComEstoque,
   usaManageDoPedido,
   CHAVES_DASHBOARD,
   PERFIL_DASHBOARD,

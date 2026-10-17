@@ -252,10 +252,9 @@ function predNota(tipo, filtros, fonte) {
     `${dataCol} < '${filtros.fimExclusivo}'`,
   ];
   if (tipo === 'venda') {
+    /* TB_GR_CONVERTIDO guarda a nota fiscal gerada. Só a gerencial de origem sai,
+       para o mês não perder a NFC-e nem contar a mesma venda duas vezes. */
     partes.push(`NOT (UPPER(TRIM(N.NF_MODELO)) = 'GR' AND EXISTS (SELECT 1 FROM TB_GR_CONVERTIDO G WHERE G.ID_NFVENDA = N.ID_NFVENDA))`);
-    if (filtros.excluirConvertidas && fonte && !fonte.manage) {
-      partes.push(`NOT EXISTS (SELECT 1 FROM TB_GR_CONVERTIDO G WHERE G.ID_NFVENDA = N.${fonte.id})`);
-    }
   }
   if (modelos && modelos.length) {
     partes.push(`UPPER(TRIM(N.NF_MODELO)) IN (${listaSql(modelos)})`);
@@ -1439,7 +1438,7 @@ async function consultarDashboard(db, opcoes = {}) {
   let vendidoMes = 0;
   let vendidoDiaComFrete = 0;
   let vendidoMesComFrete = 0;
-  if (aba === 'fiscal' || aba === 'manage') {
+  {
     const hoje = isoHoje();
     const diaFiltro = { ...filtrosAba, inicio: hoje, fim: hoje, fimExclusivo: addDias(hoje, 1) };
     const mesFiltro = { ...filtrosAba, inicio: `${hoje.slice(0, 8)}01`, fim: hoje, fimExclusivo: addDias(hoje, 1) };

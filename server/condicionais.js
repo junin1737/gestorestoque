@@ -1,8 +1,9 @@
 'use strict';
 
 const {
-  withDb, query, hasTable, columnExists, activeTargets, writeTargets, withTransaction, nextGenIdSincronizado,
+  withDb, query, hasTable, columnExists, activeTargets, writeTargets, withTransaction, nextGenIdSincronizado, refreshTables,
 } = require('./db');
+const { loadAppConfig } = require('./config');
 
 /** O Clipp numera pelo primeiro; o trigger XX_TR_INC_PED_I da integração ManagePro, pelo segundo. */
 const GENERATORS_ITEM_PEDIDO = ['GEN_TB_PED_VENDA_ITEM_ID', 'XX_GEN_TB_PEDI_I'];
@@ -254,16 +255,22 @@ async function itensDoPedido(db, appCfg, idPedido) {
     WHERE I.ID_PEDIDO = ?
       AND COALESCE(TRIM(I.ITEM_CANCEL), 'N') <> 'S'
     ORDER BY I.ID_ITEMPED`, [idPedido]);
-  return itens.map((r) => ({
-    id: num(r.ID_ITEMPED),
-    id_identificador: num(r.ID_IDENTIFICADOR),
-    descricao: nomeGrade(r.DESCRICAO, r.GRADE_SERIE, r.COR, r.TAMANHO),
-    qtd: num(r.QTD_ITEM),
-    prc_unit: num(r.VLR_UNIT),
-    desconto: num(r.VLR_DESC),
-    total: num(r.VLR_TOTAL),
-    uni_medida: String(r.UNI_MEDIDA || '').trim(),
-  }));
+  return itens.map((r) => {
+    const qtd = num(r.QTD_ITEM);
+    const unit = num(r.VLR_UNIT);
+    const bruto = Math.round(qtd * unit * 100) / 100;
+    return {
+      id: num(r.ID_ITEMPED),
+      id_identificador: num(r.ID_IDENTIFICADOR),
+      descricao: nomeGrade(r.DESCRICAO, r.GRADE_SERIE, r.COR, r.TAMANHO),
+      qtd,
+      prc_unit: unit,
+      desconto: num(r.VLR_DESC),
+      acrescimo: Math.max(0, Math.round((num(r.VLR_TOTAL) - bruto) * 100) / 100),
+      total: num(r.VLR_TOTAL),
+      uni_medida: String(r.UNI_MEDIDA || '').trim(),
+    };
+  });
 }
 
 async function detalhe(id) {
@@ -275,7 +282,9 @@ async function detalhe(id) {
     if (!cab.length) throw new Error('Condicional não encontrado.');
     const doc = mapPedido(cab[0]);
     doc.itens = await itensDoPedido(db, appCfg, codigo);
-    doc.total = doc.itens.reduce((s, it) => s + num(it.total), 0);
+    Object.assign(doc, await totaisCondicional(db, codigo));
+    doc.subtotal = doc.itens.reduce((s, it) => s + Math.max(0, num(it.total) - num(it.desconto)), 0);
+    doc.total = totalDocumento(doc);
     const idReprovado = await statusReprovado(db);
     doc.pode_reprovar = !!idReprovado && String(idReprovado) !== doc.status;
     return doc;
@@ -335,10 +344,10 @@ async function doProduto(idIdentificador) {
 
 async function buscarClientes(q) {
   const termo = String(q || '').trim();
-  if (termo.length < 2) return [];
+  if (termo.length < 1) return [];
   return withDb(async (db) => {
     const rows = await query(db, `
-      SELECT FIRST 30 ID_CLIENTE, NOME, FONE_CELUL, FONE_RESID
+      SELECT FIRST 12 ID_CLIENTE, NOME, FONE_CELUL, FONE_RESID
       FROM TB_CLIENTE
       WHERE UPPER(NOME) CONTAINING UPPER(?)
       ORDER BY NOME`, [termo]);
@@ -385,6 +394,12 @@ async function buscarPecas(q) {
       params = lista.flatMap((p) => [p, p, p]);
     }
     const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
+    if (Number(appCfg?.somente_com_estoque ?? loadAppConfig().somente_com_estoque) === 1) {
+      const saldo = temReserv
+        ? 'COALESCE(P.QTD_ATUAL, 0) - COALESCE(P.QTD_RESERV, 0)'
+        : 'COALESCE(P.QTD_ATUAL, 0)';
+      where = `(${where}) AND ${saldo} > 0`;
+    }
     const rows = await query(db, `
       SELECT FIRST 20 I.ID_IDENTIFICADOR, E.ID_ESTOQUE, E.DESCRICAO, E.PRC_VENDA,
              P.COD_BARRA, P.REFERENCIA, P.QTD_ATUAL${temReserv ? ', P.QTD_RESERV' : ''},
@@ -452,11 +467,51 @@ async function resolverStatus(db, idStatus) {
   return num(st[0].ID_STATUS);
 }
 
-async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus, idParcela }) {
+async function ensureCondTotal(db) {
+  const tem = await query(db, `
+    SELECT 1 AS OK FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = 'GESTOR_COND_TOTAL'`);
+  if (tem.length) return;
+  await query(db, `
+    CREATE TABLE GESTOR_COND_TOTAL (
+      ID_PEDIDO INTEGER NOT NULL,
+      VLR_FRETE NUMERIC(15,2),
+      VLR_DESC NUMERIC(15,2),
+      VLR_ACRESC NUMERIC(15,2),
+      CONSTRAINT PK_GESTOR_COND_TOTAL PRIMARY KEY (ID_PEDIDO)
+    )`);
+  await refreshTables(db);
+}
+
+async function totaisCondicional(db, idPedido) {
+  const tem = await query(db, `
+    SELECT 1 AS OK FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = 'GESTOR_COND_TOTAL'`);
+  if (!tem.length) return { frete: 0, desconto_geral: 0, acrescimo_geral: 0 };
+  const rows = await query(db, `
+    SELECT VLR_FRETE, VLR_DESC, VLR_ACRESC FROM GESTOR_COND_TOTAL WHERE ID_PEDIDO = ?`, [idPedido]);
+  return {
+    frete: num(rows[0]?.VLR_FRETE),
+    desconto_geral: num(rows[0]?.VLR_DESC),
+    acrescimo_geral: num(rows[0]?.VLR_ACRESC),
+  };
+}
+
+function totalDocumento(doc) {
+  const subtotal = (doc.itens || []).reduce((s, it) => s + Math.max(0, num(it.total) - num(it.desconto)), 0);
+  return Math.max(0, subtotal + num(doc.frete) - num(doc.desconto_geral) + num(doc.acrescimo_geral));
+}
+
+function descontoExibido(doc) {
+  const itens = (doc.itens || []).reduce((s, it) => s + num(it.desconto), 0);
+  return itens + num(doc.desconto_geral);
+}
+
+async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus, idParcela, frete, desconto, acrescimo }) {
   const itensOk = (itens || []).map((it) => ({
     id: num(it.id_identificador || it.id),
     qtd: num(it.qtd),
     prc: num(it.prc_venda != null ? it.prc_venda : it.prc_unit),
+    desconto: Math.max(0, num(it.desconto)),
+    acrescimo: Math.max(0, num(it.acrescimo)),
   })).filter((it) => it.id > 0 && it.qtd > 0);
   if (!num(idCliente)) throw new Error('Selecione o cliente na lista.');
   if (!num(idFuncionario)) throw new Error('Informe o vendedor.');
@@ -479,6 +534,10 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
       JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
       WHERE TRIM(S.RESERVA) = 'S' AND P.ID_MODULO IS NOT NULL`);
     const idModulo = num(mod[0]?.ID_MODULO) || 4;
+    const fretePed = Math.max(0, num(frete));
+    const descPed = Math.max(0, num(desconto));
+    const acresPed = Math.max(0, num(acrescimo));
+    await ensureCondTotal(db);
     let ultimoErro = null;
     for (let tentativa = 0; tentativa < 3; tentativa += 1) {
       try {
@@ -500,6 +559,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
           const pedidoPorId = new Map();
           for (const it of itensOk) pedidoPorId.set(it.id, (pedidoPorId.get(it.id) || 0) + it.qtd);
           const estoqueVisto = new Set();
+          const temFlagDesc = await columnExists(tx, 'TB_PED_VENDA_ITEM', 'EFETUOU_DESCONTO');
           for (const it of itensOk) {
             const prod = await query(tx, `
               SELECT FIRST 1 E.DESCRICAO, E.PRC_VENDA, E.PRC_CUSTO, P.COD_BARRA, P.QTD_ATUAL
@@ -521,16 +581,31 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
             }
             const prc = it.prc > 0 ? it.prc : num(prod[0].PRC_VENDA);
             if (!(prc > 0)) throw new Error(`Informe o preço de ${nome}.`);
+            const bruto = Math.round(it.qtd * prc * 100) / 100;
+            const desc = Math.round(Math.min(it.desconto, bruto) * 100) / 100;
+            const acres = Math.round(Math.max(0, it.acrescimo) * 100) / 100;
             const idItem = await nextGenIdSincronizado(tx, GENERATORS_ITEM_PEDIDO, 'TB_PED_VENDA_ITEM', 'ID_ITEMPED');
             await query(tx, `
               INSERT INTO TB_PED_VENDA_ITEM (
                 ID_ITEMPED, QTD_ITEM, VLR_TOTAL, PRC_CUSTO, PRC_LISTA, VLR_DESC,
                 ID_IDENTIFICADOR, ID_PEDIDO, ITEM_CANCEL, VLR_UNIT, COD_BARRA, UPDATED_INTEGRADORA
-              ) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 'N', ?, ?, CURRENT_TIMESTAMP)`, [
-              idItem, it.qtd, it.qtd * prc, num(prod[0].PRC_CUSTO), prc,
+                ${temFlagDesc ? ', EFETUOU_DESCONTO' : ''}
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, CURRENT_TIMESTAMP${temFlagDesc ? ', ?' : ''})`, [
+              idItem, it.qtd, bruto + acres, num(prod[0].PRC_CUSTO), prc, desc,
               it.id, id, prc, String(prod[0].COD_BARRA || '').slice(0, 20) || null,
+              ...(temFlagDesc ? [desc > 0 ? 1 : 0] : []),
             ]);
           }
+          await query(tx, `
+            UPDATE OR INSERT INTO GESTOR_COND_TOTAL (ID_PEDIDO, VLR_FRETE, VLR_DESC, VLR_ACRESC)
+            VALUES (?, ?, ?, ?)
+            MATCHING (ID_PEDIDO)`, [id, fretePed, descPed, acresPed]);
+          /* O Clipp preenche TB_PED_VENDA_NOME e o total no AFTER UPDATE.
+             Sem esse toque o nome não aparece e a venda não importa o pedido. */
+          await query(tx, `
+            UPDATE TB_PEDIDO_VENDA
+            SET UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+            WHERE ID_PEDIDO = ?`, [id]);
           return { id };
         });
       } catch (err) {
@@ -539,6 +614,162 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
       }
     }
     throw ultimoErro || new Error('Não foi possível lançar o condicional.');
+  });
+}
+
+async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, validade, idStatus, idParcela, frete, desconto, acrescimo }) {
+  const codigo = num(idPedido);
+  if (!codigo) throw new Error('Condicional inválido.');
+  const itensOk = (itens || []).map((it) => ({
+    itemId: num(it.id_item || it.id_itemped),
+    id: num(it.id_identificador || it.id),
+    qtd: num(it.qtd),
+    prc: num(it.prc_venda != null ? it.prc_venda : it.prc_unit),
+    desconto: Math.max(0, num(it.desconto)),
+    acrescimo: Math.max(0, num(it.acrescimo)),
+  })).filter((it) => it.id > 0 && it.qtd > 0);
+  if (!num(idCliente)) throw new Error('Selecione o cliente na lista.');
+  if (!num(idFuncionario)) throw new Error('Informe o vendedor.');
+  if (!itensOk.length) throw new Error('Inclua ao menos uma peça.');
+  const dtValidade = dataInformada(validade);
+  if (!dtValidade) throw new Error('Informe a validade.');
+  if (!num(idParcela)) throw new Error('Informe a forma de pagamento.');
+  return withDb(async (db, appCfg) => {
+    if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
+    const temValidade = await columnExists(db, 'TB_PEDIDO_VENDA', 'DT_VALIDA');
+    const t = writeTargets(appCfg)[0]?.tables;
+    if (!t) throw new Error('Estoque não encontrado nesta base.');
+    const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
+    const temFlagDesc = await columnExists(db, 'TB_PED_VENDA_ITEM', 'EFETUOU_DESCONTO');
+    await ensureCondTotal(db);
+    try {
+      return await withTransaction(db, async (tx) => {
+        const cab = await query(tx, 'SELECT ID_PEDIDO, ID_STATUS FROM TB_PEDIDO_VENDA WHERE ID_PEDIDO = ?', [codigo]);
+        if (!cab.length) throw new Error('Condicional não encontrado.');
+        const reservaDe = async (idSt) => {
+          const rows = await query(tx, 'SELECT TRIM(RESERVA) AS RESERVA FROM TB_PED_VENDA_STATUS WHERE ID_STATUS = ?', [idSt]);
+          return String(rows[0]?.RESERVA || '').toUpperCase() === 'S';
+        };
+        const reservava = await reservaDe(cab[0].ID_STATUS);
+        const idStatusPedido = await resolverStatus(tx, idStatus);
+        const pagamento = await resolverPagamento(tx, idParcela);
+        const atuais = await query(tx, `
+          SELECT ID_ITEMPED, ID_IDENTIFICADOR, QTD_ITEM
+          FROM TB_PED_VENDA_ITEM
+          WHERE ID_PEDIDO = ? AND COALESCE(TRIM(ITEM_CANCEL), 'N') <> 'S'`, [codigo]);
+        const reservadoAntes = new Map();
+        if (reservava) {
+          for (const row of atuais) {
+            const idProd = num(row.ID_IDENTIFICADOR);
+            reservadoAntes.set(idProd, (reservadoAntes.get(idProd) || 0) + num(row.QTD_ITEM));
+          }
+        }
+        const pedidoPorId = new Map();
+        for (const it of itensOk) pedidoPorId.set(it.id, (pedidoPorId.get(it.id) || 0) + it.qtd);
+        for (const [idProd, qtdPed] of pedidoPorId) {
+          const prod = await query(tx, `
+            SELECT FIRST 1 E.DESCRICAO, P.QTD_ATUAL ${temReserv ? ', P.QTD_RESERV' : ''}
+            FROM ${t.produto} P
+            JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
+            JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+            WHERE P.ID_IDENTIFICADOR = ?`, [idProd]);
+          if (!prod.length) throw new Error(`Produto ${idProd} não encontrado.`);
+          const nome = String(prod[0].DESCRICAO || idProd).trim();
+          const folga = reservadoAntes.get(idProd) || 0;
+          const disponivel = disponivelDe(prod[0], temReserv) + folga;
+          if (!(disponivel > 0)) throw new Error(`${nome} está sem estoque. Não é possível lançar.`);
+          if (qtdPed > disponivel + 0.0001) {
+            throw new Error(`${nome} tem ${textoQtd(disponivel)} em estoque. Não é possível lançar ${textoQtd(qtdPed)}.`);
+          }
+        }
+        const mantidos = new Set();
+        const gravarNovo = async (it) => {
+          const prod = await query(tx, `
+            SELECT FIRST 1 E.PRC_CUSTO, P.COD_BARRA
+            FROM ${t.produto} P
+            JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
+            JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+            WHERE P.ID_IDENTIFICADOR = ?`, [it.id]);
+          const prc = it.prc;
+          const bruto = Math.round(it.qtd * prc * 100) / 100;
+          const desc = Math.round(Math.min(it.desconto, bruto) * 100) / 100;
+          const acres = Math.round(Math.max(0, it.acrescimo) * 100) / 100;
+          const idItem = await nextGenIdSincronizado(tx, GENERATORS_ITEM_PEDIDO, 'TB_PED_VENDA_ITEM', 'ID_ITEMPED');
+          await query(tx, `
+            INSERT INTO TB_PED_VENDA_ITEM (
+              ID_ITEMPED, QTD_ITEM, VLR_TOTAL, PRC_CUSTO, PRC_LISTA, VLR_DESC,
+              ID_IDENTIFICADOR, ID_PEDIDO, ITEM_CANCEL, VLR_UNIT, COD_BARRA, UPDATED_INTEGRADORA
+              ${temFlagDesc ? ', EFETUOU_DESCONTO' : ''}
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, CURRENT_TIMESTAMP${temFlagDesc ? ', ?' : ''})`, [
+            idItem, it.qtd, bruto + acres, num(prod[0]?.PRC_CUSTO), prc, desc,
+            it.id, codigo, prc, String(prod[0]?.COD_BARRA || '').slice(0, 20) || null,
+            ...(temFlagDesc ? [desc > 0 ? 1 : 0] : []),
+          ]);
+        };
+        for (const it of itensOk) {
+          const linha = it.itemId ? atuais.find((a) => num(a.ID_ITEMPED) === it.itemId) : null;
+          if (linha && num(linha.ID_IDENTIFICADOR) === it.id) {
+            const prod = await query(tx, `
+              SELECT FIRST 1 P.COD_BARRA, E.PRC_CUSTO
+              FROM ${t.produto} P
+              JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
+              JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+              WHERE P.ID_IDENTIFICADOR = ?`, [it.id]);
+            const bruto = Math.round(it.qtd * it.prc * 100) / 100;
+            const desc = Math.round(Math.min(it.desconto, bruto) * 100) / 100;
+            const acres = Math.round(Math.max(0, it.acrescimo) * 100) / 100;
+            await query(tx, `
+              UPDATE TB_PED_VENDA_ITEM
+              SET QTD_ITEM = ?, VLR_TOTAL = ?, PRC_CUSTO = ?, PRC_LISTA = ?, VLR_DESC = ?,
+                  VLR_UNIT = ?, COD_BARRA = ?, UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+                  ${temFlagDesc ? ', EFETUOU_DESCONTO = ?' : ''}
+              WHERE ID_ITEMPED = ? AND ID_PEDIDO = ?`, [
+              it.qtd, bruto + acres, num(prod[0]?.PRC_CUSTO), it.prc, desc,
+              it.prc, String(prod[0]?.COD_BARRA || '').slice(0, 20) || null,
+              ...(temFlagDesc ? [desc > 0 ? 1 : 0] : []),
+              it.itemId, codigo,
+            ]);
+            mantidos.add(it.itemId);
+          } else {
+            if (linha) {
+              await query(tx, `
+                UPDATE TB_PED_VENDA_ITEM SET ITEM_CANCEL = 'S', UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+                WHERE ID_ITEMPED = ? AND ID_PEDIDO = ?`, [it.itemId, codigo]);
+              mantidos.add(it.itemId);
+            }
+            await gravarNovo(it);
+          }
+        }
+        for (const row of atuais) {
+          const idItem = num(row.ID_ITEMPED);
+          if (mantidos.has(idItem)) continue;
+          await query(tx, `
+            UPDATE TB_PED_VENDA_ITEM SET ITEM_CANCEL = 'S', UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+            WHERE ID_ITEMPED = ? AND ID_PEDIDO = ?`, [idItem, codigo]);
+        }
+        const sets = [
+          'ID_CLIENTE = ?', 'ID_VENDEDOR = ?', 'ID_PARCELA = ?', 'ID_FMAPGTO = ?',
+          'ID_STATUS = ?', 'OBSERVACAO = ?', 'UPDATED_INTEGRADORA = CURRENT_TIMESTAMP',
+        ];
+        const paramsCab = [
+          num(idCliente), num(idFuncionario), pagamento.id_parcela, pagamento.id_fmapgto,
+          idStatusPedido, String(obs || '').slice(0, 300) || null,
+        ];
+        if (temValidade) {
+          sets.push('DT_VALIDA = ?');
+          paramsCab.push(dtValidade);
+        }
+        paramsCab.push(codigo);
+        await query(tx, `UPDATE TB_PEDIDO_VENDA SET ${sets.join(', ')} WHERE ID_PEDIDO = ?`, paramsCab);
+        await query(tx, `
+          UPDATE OR INSERT INTO GESTOR_COND_TOTAL (ID_PEDIDO, VLR_FRETE, VLR_DESC, VLR_ACRESC)
+          VALUES (?, ?, ?, ?)
+          MATCHING (ID_PEDIDO)`, [codigo, Math.max(0, num(frete)), Math.max(0, num(desconto)), Math.max(0, num(acrescimo))]);
+        return { id: codigo };
+      });
+    } catch (err) {
+      throw erroDeBloqueio(err);
+    }
   });
 }
 
@@ -631,7 +862,7 @@ function htmlPdf(doc, empresa, opcoes = {}) {
       <div class="item">
         <strong>${it.id_identificador} · ${esc(it.descricao)}</strong>
         <div>${fmt(it.qtd)} ${esc(it.uni_medida || 'UN')} × ${money(it.prc_unit)}</div>
-        <div class="num">Total ${money(it.total)}</div>
+        <div class="num">Total ${money(Math.max(0, num(it.total) - num(it.desconto)))}</div>
       </div>`).join('')
     : `<table><thead><tr>
         <th>Identificador</th><th>Descrição</th><th>Qtd</th><th>Un</th><th>Unitário</th><th>Total</th>
@@ -642,7 +873,7 @@ function htmlPdf(doc, empresa, opcoes = {}) {
           <td class="num">${fmt(it.qtd)}</td>
           <td>${esc(it.uni_medida || 'UN')}</td>
           <td class="num">${money(it.prc_unit)}</td>
-          <td class="num">${money(it.total)}</td>
+          <td class="num">${money(Math.max(0, num(it.total) - num(it.desconto)))}</td>
         </tr>`).join('')}</tbody></table>`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Condicional ${doc.id}</title>
 <style>
@@ -677,7 +908,14 @@ function htmlPdf(doc, empresa, opcoes = {}) {
   Situação: ${esc(doc.status_label)}</p>
   ${doc.obs ? `<p>Obs.: ${esc(doc.obs)}</p>` : ''}
   ${corpo}
-  <p class="total"><strong>Valor total: ${money(doc.total)}</strong></p>
+  <p class="total">
+    <strong>Peças: ${fmt(itens.reduce((s, it) => s + num(it.qtd), 0))}</strong><br>
+    ${(num(doc.frete) || descontoExibido(doc) || num(doc.acrescimo_geral)) && num(doc.subtotal) ? `<span>Subtotal: ${money(itens.reduce((s, it) => s + num(it.total), 0))}</span><br>` : ''}
+    ${num(doc.frete) ? `<span>Frete: ${money(doc.frete)}</span><br>` : ''}
+    ${descontoExibido(doc) ? `<span>Desconto: ${money(descontoExibido(doc))}</span><br>` : ''}
+    ${num(doc.acrescimo_geral) ? `<span>Acréscimo: ${money(doc.acrescimo_geral)}</span><br>` : ''}
+    <strong>Valor total: ${money(doc.total || totalDocumento(doc))}</strong>
+  </p>
   <div class="assina"><div class="linha"></div><span>Assinatura do cliente</span></div>
 </body></html>`;
 }
@@ -766,6 +1004,9 @@ function textoWhatsapp(doc) {
     [doc.data, doc.horario].filter(Boolean).join(' '),
     doc.vendedor ? `Vendedor: ${doc.vendedor}` : '',
     ...linhas,
+    num(doc.frete) ? `Frete: ${money(doc.frete)}` : '',
+    descontoExibido(doc) ? `Desconto: ${money(descontoExibido(doc))}` : '',
+    num(doc.acrescimo_geral) ? `Acréscimo: ${money(doc.acrescimo_geral)}` : '',
     `Total: ${money(doc.total)}`,
     doc.pagamento ? `Pagamento: ${doc.pagamento}` : '',
   ].filter(Boolean).join('\n');
@@ -781,6 +1022,7 @@ module.exports = {
   listarVendedores,
   listarPagamentos,
   criar,
+  atualizar,
   alterarStatus,
   reprovar,
   htmlPdf,

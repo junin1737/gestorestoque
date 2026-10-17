@@ -18,6 +18,11 @@ const Condicionais = (() => {
     return Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   }
 
+  function descontoDocumento(doc) {
+    const itens = (doc?.itens || []).reduce((s, it) => s + Number(it.desconto || 0), 0);
+    return itens + Number(doc?.desconto_geral || 0);
+  }
+
   function api(path, options = {}) {
     if (deps.api) return deps.api(path, options);
     return Promise.resolve({ ok: false, error: 'Painel ainda não iniciou.' });
@@ -34,7 +39,7 @@ const Condicionais = (() => {
     const itens = (doc.itens || []).map((it) => `
       <div class="item-row">
         <strong>${esc(it.descricao || 'Peça')}</strong>
-        <span class="hint">Qtd ${esc(it.qtd)} · ${money(it.prc_unit)} · ${money(it.total)}</span>
+        <span class="hint">Qtd ${esc(it.qtd)} · ${money(it.prc_unit)}${Number(it.desconto) > 0 ? ` · desc. ${money(it.desconto)}` : ''} · ${money(Math.max(0, Number(it.total || 0) - Number(it.desconto || 0)))}</span>
       </div>`).join('');
     return `
       <div class="cond-ficha">
@@ -134,6 +139,9 @@ const Condicionais = (() => {
   }
 
   function fecharNovo() {
+    const dlg = $('#dlg-cond-item');
+    if (dlg?.open) dlg.close();
+    if (editandoId) limparLancamento();
     painel('vazio');
   }
 
@@ -208,7 +216,7 @@ const Condicionais = (() => {
     const itens = (doc.itens || []).map((it) => `
       <div class="cond-item">
         <strong>${esc(it.descricao || 'Peça')}</strong>
-        <span class="hint">Qtd ${esc(it.qtd)} · ${money(it.prc_unit)} · ${money(it.total)}</span>
+        <span class="hint">Qtd ${esc(it.qtd)} · ${money(it.prc_unit)}${Number(it.desconto) > 0 ? ` · desc. ${money(it.desconto)}` : ''} · ${money(Math.max(0, Number(it.total || 0) - Number(it.desconto || 0)))}</span>
       </div>`).join('');
     box.innerHTML = `
       <div class="cond-form-head">
@@ -227,17 +235,23 @@ const Condicionais = (() => {
           <select id="cond-detalhe-pagamento">${opcoesPagamento(doc.id_parcela)}</select>
         </label>
         <p class="hint" id="cond-detalhe-msg">${esc(aviso)}</p>
-        <div class="banco-actions">
-          <button type="button" class="btn primary small" id="cond-salvar-status">Salvar</button>
-          ${doc.pode_reprovar ? '<button type="button" class="btn danger small" id="cond-reprovar">Reprovar</button>' : ''}
-          <button type="button" class="btn small" data-pdf="${esc(doc.id)}">Gerar PDF</button>
-          <button type="button" class="btn small" data-wa="${esc(doc.id)}" data-fone="${esc(doc.telefone || '')}">WhatsApp</button>
+        <div class="cond-acoes">
+          <button type="button" class="btn" id="cond-editar">Editar</button>
+          <button type="button" class="btn primary" id="cond-salvar-status">Salvar</button>
+          ${doc.pode_reprovar ? '<button type="button" class="btn danger" id="cond-reprovar">Reprovar</button>' : ''}
+          <button type="button" class="btn" data-pdf="${esc(doc.id)}">Gerar PDF</button>
+          <button type="button" class="btn" data-wa="${esc(doc.id)}" data-fone="${esc(doc.telefone || '')}">WhatsApp</button>
         </div>
+        <p><strong>Peças:</strong> ${esc((doc.itens || []).reduce((s, it) => s + Number(it.qtd || 0), 0))}</p>
         ${itens || '<p class="hint">Sem peças.</p>'}
+        ${Number(doc.frete) > 0 ? `<p><strong>Frete:</strong> ${money(doc.frete)}</p>` : ''}
+        ${descontoDocumento(doc) > 0 ? `<p><strong>Desconto:</strong> ${money(descontoDocumento(doc))}</p>` : ''}
+        ${Number(doc.acrescimo_geral) > 0 ? `<p><strong>Acréscimo:</strong> ${money(doc.acrescimo_geral)}</p>` : ''}
         <p><strong>Total:</strong> ${money(doc.total)}</p>
       </div>`;
     ligarAcoes(box);
     $('#cond-fechar-detalhe')?.addEventListener('click', () => fecharNovo());
+    $('#cond-editar')?.addEventListener('click', () => abrirEdicao(doc));
 
     const botoes = ['#cond-salvar-status', '#cond-reprovar'].map((s) => $(s)).filter(Boolean);
     async function gravar(botao, textoBotao, chamada, ok) {
@@ -366,6 +380,8 @@ const Condicionais = (() => {
   let clienteId = 0;
   let clienteNome = '';
   let itensNovos = [];
+  let editandoId = 0;
+  let descontoExtra = 0;
   let pecaAtual = null;
 
   function textoEstoque(p) {
@@ -382,6 +398,105 @@ const Condicionais = (() => {
     return Number(item.qtd_disponivel) - usado;
   }
 
+  function campoMoeda(n) {
+    return Number(n || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function tituloFormulario() {
+    const h = $('#cond-form-titulo');
+    const btn = $('#cond-salvar');
+    if (h) h.textContent = editandoId ? `Editar condicional ${editandoId}` : 'Novo condicional';
+    if (btn) btn.textContent = editandoId ? 'Salvar alterações' : 'Lançar condicional';
+  }
+
+  function somaDescontoItens() {
+    return itensNovos.reduce((s, it) => s + Number(it.desconto || 0), 0);
+  }
+
+  function escreverCampoDesconto() {
+    const el = $('#cond-desc-ped');
+    if (!el || document.activeElement === el) return;
+    const valor = somaDescontoItens() + descontoExtra;
+    el.value = valor > 0 ? campoMoeda(valor) : '';
+  }
+
+  function limparLancamento() {
+    editandoId = 0;
+    descontoExtra = 0;
+    marcarCliente(0, '');
+    itensNovos = [];
+    if ($('#cond-cliente')) $('#cond-cliente').value = '';
+    if ($('#cond-obs')) $('#cond-obs').value = '';
+    if ($('#cond-validade')) $('#cond-validade').value = '';
+    if ($('#cond-pagamento')) $('#cond-pagamento').value = '';
+    if ($('#cond-frete')) $('#cond-frete').value = '';
+    if ($('#cond-desc-ped')) $('#cond-desc-ped').value = '';
+    if ($('#cond-acres-ped')) $('#cond-acres-ped').value = '';
+    if ($('#cond-form-msg')) $('#cond-form-msg').textContent = '';
+    limparDialogoItem();
+    mostrarLista($('#cond-cliente-lista'), '');
+    renderItensNovos();
+    tituloFormulario();
+  }
+
+  async function abrirEdicao(doc) {
+    editandoId = Number(doc.id) || 0;
+    painel('novo');
+    await carregarVendedores();
+    preencherStatusLancamento();
+    await preencherPagamentoLancamento();
+    marcarCliente(doc.id_cliente, doc.cliente);
+    if ($('#cond-cliente')) $('#cond-cliente').value = doc.cliente || '';
+    if ($('#cond-vendedor')) $('#cond-vendedor').value = String(doc.id_funcionario || '');
+    if ($('#cond-validade')) $('#cond-validade').value = doc.validade_iso || '';
+    if ($('#cond-lanc-status')) $('#cond-lanc-status').value = String(doc.status || '');
+    if ($('#cond-pagamento')) {
+      const parcela = Number(doc.id_parcela || 0);
+      $('#cond-pagamento').value = parcela && parcela !== 1 ? String(parcela) : '';
+    }
+    if ($('#cond-obs')) $('#cond-obs').value = doc.obs || '';
+    if ($('#cond-frete')) $('#cond-frete').value = Number(doc.frete) ? campoMoeda(doc.frete) : '';
+    descontoExtra = Number(doc.desconto_geral || 0);
+    if ($('#cond-acres-ped')) $('#cond-acres-ped').value = Number(doc.acrescimo_geral) ? campoMoeda(doc.acrescimo_geral) : '';
+    itensNovos = (doc.itens || []).map((it) => ({
+      id_item: it.id,
+      id_identificador: it.id_identificador,
+      descricao: it.descricao,
+      qtd: it.qtd,
+      prc_venda: it.prc_unit,
+      desconto: it.desconto,
+      acrescimo: it.acrescimo,
+      total: Math.max(0, Number(it.total || 0) - Number(it.desconto || 0)),
+    }));
+    renderItensNovos();
+    tituloFormulario();
+    $('#cond-cliente')?.focus();
+  }
+
+  function perguntarEnvio(id) {
+    const dlg = $('#dlg-cond-fim');
+    const texto = $('#dlg-cond-fim-text');
+    if (texto) texto.textContent = `Condicional ${id} salvo. Deseja gerar o PDF ou enviar no WhatsApp?`;
+    if (!dlg || typeof dlg.showModal !== 'function') return;
+    let fechou = false;
+    const fim = (acao) => {
+      if (fechou) return;
+      fechou = true;
+      $('#cond-fim-pdf').onclick = null;
+      $('#cond-fim-wa').onclick = null;
+      $('#cond-fim-nao').onclick = null;
+      dlg.onclose = null;
+      if (dlg.open) dlg.close();
+      if (acao === 'pdf') abrirPdf(id);
+      if (acao === 'wa') enviarWhatsapp(id, '');
+    };
+    $('#cond-fim-pdf').onclick = () => fim('pdf');
+    $('#cond-fim-wa').onclick = () => fim('wa');
+    $('#cond-fim-nao').onclick = () => fim('');
+    dlg.onclose = () => fim('');
+    if (!dlg.open) dlg.showModal();
+  }
+
   function marcarCliente(id, nome) {
     clienteId = Number(id) || 0;
     clienteNome = clienteId ? String(nome || '') : '';
@@ -389,16 +504,59 @@ const Condicionais = (() => {
     if (aviso) aviso.textContent = clienteId ? `Cliente selecionado: ${clienteNome}` : 'Nenhum cliente selecionado.';
   }
 
-  function botaoSugestao(texto, attrs) {
-    return `<button type="button" class="cond-pick" ${attrs}>${texto}</button>`;
-  }
-
   function htmlPecas(itens) {
     return itens.map((p) => {
       const extra = [p.cod_barras ? `barras ${p.cod_barras}` : '', p.referencia ? `ref. ${p.referencia}` : '', textoEstoque(p), money(p.prc_venda)].filter(Boolean).join(' · ');
       const sem = Number(p.qtd_disponivel) <= 0 ? ' is-sem-estoque' : '';
-      return `<button type="button" class="cond-pick${sem}" data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-prc="${p.prc_venda}" data-disp="${p.qtd_disponivel}"><strong>${esc(p.id_identificador)}</strong> ${esc(p.descricao)}<span class="hint"> · cód. ${esc(p.id_estoque)}${extra ? ` · ${esc(extra)}` : ''}</span></button>`;
+      return `<button type="button" class="cond-combo-opt${sem}" data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-prc="${p.prc_venda}" data-disp="${p.qtd_disponivel}"><strong>${esc(p.descricao)}</strong><span>cód. ${esc(p.id_estoque)} · id. ${esc(p.id_identificador)}${extra ? ` · ${esc(extra)}` : ''}</span></button>`;
     }).join('');
+  }
+
+  function mostrarLista(box, html) {
+    if (!box) return;
+    box.innerHTML = html || '';
+    box.hidden = !html;
+  }
+
+  function fecharListas(exceto) {
+    document.querySelectorAll('.cond-combo-list').forEach((box) => {
+      if (exceto && box === exceto) return;
+      box.hidden = true;
+      box.innerHTML = '';
+    });
+  }
+
+  function marcarOpcao(box, passo) {
+    if (!box) return;
+    const opts = [...box.querySelectorAll('.cond-combo-opt')];
+    if (!opts.length) return;
+    const atual = opts.findIndex((el) => el.classList.contains('is-ativo'));
+    const i = passo == null
+      ? (atual >= 0 ? atual : 0)
+      : (atual < 0 ? (passo > 0 ? 0 : opts.length - 1) : (atual + passo + opts.length) % opts.length);
+    opts.forEach((el, n) => el.classList.toggle('is-ativo', n === i));
+    opts[i].scrollIntoView({ block: 'nearest' });
+  }
+
+  function teclaLista(e, box) {
+    if (!box || box.hidden) return false;
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      e.preventDefault();
+      marcarOpcao(box, e.key === 'ArrowDown' ? 1 : -1);
+      return true;
+    }
+    if (e.key === 'Enter') {
+      const ativo = box.querySelector('.cond-combo-opt.is-ativo');
+      if (!ativo) return false;
+      e.preventDefault();
+      ativo.click();
+      return true;
+    }
+    if (e.key === 'Escape') {
+      mostrarLista(box, '');
+      return true;
+    }
+    return false;
   }
 
   function ligarPecas(box) {
@@ -417,22 +575,25 @@ const Condicionais = (() => {
     if (!box) return null;
     const res = await api(`/condicionais/produtos?q=${encodeURIComponent(q)}`);
     if (!res.ok) {
-      box.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível buscar peças.')}</p>`;
+      mostrarLista(box, `<p class="hint">${esc(res.error || 'Não foi possível buscar peças.')}</p>`);
       return null;
     }
     const itens = res.itens || [];
     if (!itens.length) {
-      box.innerHTML = '<p class="hint">Nenhuma peça encontrada.</p>';
+      mostrarLista(box, '<p class="hint">Nenhuma peça encontrada.</p>');
       return [];
     }
-    box.innerHTML = htmlPecas(itens);
+    mostrarLista(box, htmlPecas(itens));
     ligarPecas(box);
+    marcarOpcao(box);
     return itens;
   }
 
   async function aplicarCodigoBarras(codigo) {
     const code = String(codigo || '').trim();
     if (!code) return;
+    const dlg = $('#dlg-cond-item');
+    if (dlg && !dlg.open && dlg.showModal) dlg.showModal();
     const inp = $('#cond-peca');
     if (inp) inp.value = code;
     pecaAtual = null;
@@ -448,23 +609,86 @@ const Condicionais = (() => {
     pecaAtual = item;
     if ($('#cond-peca')) $('#cond-peca').value = item.descricao || '';
     const preco = $('#cond-preco');
-    if (preco) preco.value = Number(item.prc_venda) > 0 ? String(item.prc_venda) : '';
+    if (preco) {
+      preco.value = Number(item.prc_venda) > 0
+        ? Number(item.prc_venda).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+        : '';
+    }
     const estoque = $('#cond-peca-estoque');
     if (estoque) estoque.textContent = textoEstoque(item);
-    const lista = $('#cond-peca-lista');
-    if (lista) lista.innerHTML = '';
+    fecharListas();
+    atualizarTotalItem();
+  }
+
+  function numTela(v) {
+    const s = String(v ?? '').trim().replace(/\s/g, '');
+    if (!s) return 0;
+    if (s.includes(',') && s.includes('.')) return Number(s.replace(/\./g, '').replace(',', '.')) || 0;
+    if (s.includes(',')) return Number(s.replace(',', '.')) || 0;
+    return Number(s) || 0;
+  }
+
+  function ajusteValor(base, bruto, modo) {
+    const n = Math.max(0, numTela(bruto));
+    if (modo === '%') return base * (n / 100);
+    return n;
+  }
+
+  function totaisItem() {
+    const qtd = Math.max(0, numTela($('#cond-qtd')?.value));
+    const unit = Math.max(0, numTela($('#cond-preco')?.value));
+    const base = qtd * unit;
+    const desc = Math.min(base, ajusteValor(base, $('#cond-desc')?.value, $('#cond-desc-modo')?.value));
+    const acres = ajusteValor(base, $('#cond-acres')?.value, $('#cond-acres-modo')?.value);
+    return { qtd, unit, desc, acres, total: Math.max(0, base - desc + acres) };
+  }
+
+  function atualizarTotalItem() {
+    const el = $('#cond-item-total');
+    if (el) el.textContent = money(totaisItem().total);
+    const descSig = $('#cond-desc-sig');
+    const acresSig = $('#cond-acres-sig');
+    if (descSig) descSig.textContent = $('#cond-desc-modo')?.value === '%' ? '%' : 'R$';
+    if (acresSig) acresSig.textContent = $('#cond-acres-modo')?.value === '%' ? '%' : 'R$';
+  }
+
+  function limparDialogoItem() {
+    pecaAtual = null;
+    if ($('#cond-peca')) $('#cond-peca').value = '';
+    if ($('#cond-qtd')) $('#cond-qtd').value = '1';
+    if ($('#cond-preco')) $('#cond-preco').value = '';
+    if ($('#cond-desc')) $('#cond-desc').value = '';
+    if ($('#cond-acres')) $('#cond-acres').value = '';
+    if ($('#cond-desc-modo')) $('#cond-desc-modo').value = 'R$';
+    if ($('#cond-acres-modo')) $('#cond-acres-modo').value = 'R$';
+    if ($('#cond-peca-estoque')) $('#cond-peca-estoque').textContent = '';
+    if ($('#cond-item-msg')) $('#cond-item-msg').textContent = '';
+    fecharListas();
+    atualizarTotalItem();
+  }
+
+  function abrirDialogoItem() {
+    limparDialogoItem();
+    const dlg = $('#dlg-cond-item');
+    if (dlg?.showModal) dlg.showModal();
+    $('#cond-peca')?.focus();
+  }
+
+  function fecharDialogoItem() {
+    const dlg = $('#dlg-cond-item');
+    if (dlg?.open) dlg.close();
+    limparDialogoItem();
   }
 
   function incluirPeca(item) {
-    const qtd = Number($('#cond-qtd')?.value || 0);
-    const preco = Number($('#cond-preco')?.value || 0);
-    const msg = $('#cond-form-msg');
-    if (!(qtd > 0)) {
+    const tot = totaisItem();
+    const msg = $('#cond-item-msg');
+    if (!(tot.qtd > 0)) {
       if (msg) msg.textContent = 'Informe a quantidade.';
       return;
     }
-    if (!(preco > 0)) {
-      if (msg) msg.textContent = 'Informe o preço.';
+    if (!(tot.unit > 0)) {
+      if (msg) msg.textContent = 'Informe o valor unitário.';
       return;
     }
     if (Number.isFinite(Number(item.qtd_disponivel))) {
@@ -473,7 +697,7 @@ const Condicionais = (() => {
         if (msg) msg.textContent = `${item.descricao} está sem estoque. Não é possível lançar.`;
         return;
       }
-      if (qtd > livre + 0.0001) {
+      if (tot.qtd > livre + 0.0001) {
         if (msg) msg.textContent = `${item.descricao} tem ${livre.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} em estoque.`;
         return;
       }
@@ -481,32 +705,44 @@ const Condicionais = (() => {
     itensNovos.push({
       id_identificador: Number(item.id_identificador),
       descricao: item.descricao,
-      qtd,
-      prc_venda: preco,
+      qtd: tot.qtd,
+      prc_venda: tot.unit,
+      desconto: tot.desc,
+      acrescimo: tot.acres,
+      total: tot.total,
     });
-    pecaAtual = null;
-    if ($('#cond-peca')) $('#cond-peca').value = '';
-    if ($('#cond-preco')) $('#cond-preco').value = '';
-    if ($('#cond-peca-estoque')) $('#cond-peca-estoque').textContent = '';
-    const lista = $('#cond-peca-lista');
-    if (lista) lista.innerHTML = '';
-    if (msg) msg.textContent = '';
     renderItensNovos();
+    fecharDialogoItem();
   }
 
   function renderItensNovos() {
     const box = $('#cond-novos-itens');
+    const rodape = $('#cond-novos-total');
+    const totalEl = $('#cond-grade-total');
     if (!box) return;
     if (!itensNovos.length) {
-      box.innerHTML = '<p class="hint">Nenhuma peça incluída.</p>';
+      box.innerHTML = '<tr><td class="cond-grade-vazio" colspan="7">Nenhum item incluído. Clique em Incluir para pesquisar a peça.</td></tr>';
+      if (rodape) rodape.hidden = true;
+      escreverCampoDesconto();
       return;
     }
+    escreverCampoDesconto();
+    const soma = totaisCabeca().total;
+    const pecas = itensNovos.reduce((s, it) => s + Number(it.qtd || 0), 0);
     box.innerHTML = itensNovos.map((it, i) => `
-      <div class="cond-item">
-        <strong>${esc(it.descricao)}</strong>
-        <span class="hint">Qtd ${esc(it.qtd)} · ${money(it.prc_venda)}</span>
-        <button type="button" class="btn small" data-rm="${i}">Tirar</button>
-      </div>`).join('');
+      <tr>
+        <td class="item">${esc(it.descricao)}</td>
+        <td class="num">${esc(it.qtd)}</td>
+        <td class="num">${money(it.prc_venda)}</td>
+        <td class="num">${money(it.desconto)}</td>
+        <td class="num">${money(it.acrescimo)}</td>
+        <td class="num">${money(it.total)}</td>
+        <td><button type="button" class="btn small" data-rm="${i}">Tirar</button></td>
+      </tr>`).join('');
+    const pecasEl = $('#cond-grade-pecas');
+    if (pecasEl) pecasEl.textContent = String(pecas);
+    if (totalEl) totalEl.textContent = money(soma);
+    if (rodape) rodape.hidden = false;
     box.querySelectorAll('[data-rm]').forEach((btn) => {
       btn.addEventListener('click', () => {
         itensNovos.splice(Number(btn.dataset.rm), 1);
@@ -515,90 +751,162 @@ const Condicionais = (() => {
     });
   }
 
+  function totaisCabeca() {
+    const itens = itensNovos.reduce((s, it) => s + Number(it.total || 0), 0);
+    const frete = Math.max(0, numTela($('#cond-frete')?.value));
+    const acrescimo = Math.max(0, numTela($('#cond-acres-ped')?.value));
+    return {
+      itens, frete, desconto: descontoExtra, acrescimo,
+      total: Math.max(0, itens + frete - descontoExtra + acrescimo),
+    };
+  }
+
   function ligarFormulario() {
     let timerCliente = null;
     let timerPeca = null;
+    const buscarCliente = async () => {
+      const q = String($('#cond-cliente')?.value || '').trim();
+      const box = $('#cond-cliente-lista');
+      if (!box) return;
+      if (q.length < 1) {
+        mostrarLista(box, '');
+        return;
+      }
+      const res = await api(`/condicionais/clientes?q=${encodeURIComponent(q)}`);
+      if (!res.ok) {
+        mostrarLista(box, `<p class="hint">${esc(res.error || 'Não foi possível buscar clientes.')}</p>`);
+        return;
+      }
+      const itens = res.itens || [];
+      if (!itens.length) {
+        mostrarLista(box, '<p class="hint">Nenhum cliente com esse nome.</p>');
+        return;
+      }
+      mostrarLista(box, itens.map((c) => `
+        <button type="button" class="cond-combo-opt" data-cli="${c.id_cliente}" data-nome="${esc(c.nome)}">
+          <strong>${esc(c.nome)}</strong>
+          <span>${esc([c.telefone ? c.telefone : '', `cód. ${c.id_cliente}`].filter(Boolean).join(' · '))}</span>
+        </button>`).join(''));
+      box.querySelectorAll('[data-cli]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          marcarCliente(btn.dataset.cli, btn.dataset.nome);
+          $('#cond-cliente').value = btn.dataset.nome;
+          mostrarLista(box, '');
+        });
+      });
+      marcarOpcao(box);
+    };
     $('#cond-cliente')?.addEventListener('input', () => {
       marcarCliente(0, '');
       clearTimeout(timerCliente);
-      timerCliente = setTimeout(async () => {
-        const q = $('#cond-cliente').value.trim();
-        const box = $('#cond-cliente-lista');
-        if (!box) return;
-        if (q.length < 2) {
-          box.innerHTML = '';
-          return;
-        }
-        const res = await api(`/condicionais/clientes?q=${encodeURIComponent(q)}`);
-        if (!res.ok) {
-          box.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível buscar clientes.')}</p>`;
-          return;
-        }
-        const itens = res.itens || [];
-        if (!itens.length) {
-          box.innerHTML = '<p class="hint">Nenhum cliente com esse nome. Escolha um já cadastrado.</p>';
-          return;
-        }
-        box.innerHTML = itens.map((c) => botaoSugestao(esc(c.nome), `data-cli="${c.id_cliente}" data-nome="${esc(c.nome)}"`)).join('');
-        box.querySelectorAll('[data-cli]').forEach((btn) => {
-          btn.addEventListener('click', () => {
-            marcarCliente(btn.dataset.cli, btn.dataset.nome);
-            $('#cond-cliente').value = btn.dataset.nome;
-            box.innerHTML = '';
-          });
-        });
-      }, 250);
+      timerCliente = setTimeout(buscarCliente, 220);
+    });
+    $('#cond-cliente')?.addEventListener('focus', () => {
+      if (String($('#cond-cliente')?.value || '').trim().length >= 1) buscarCliente();
+    });
+    $('#cond-cliente')?.addEventListener('keydown', (e) => {
+      const box = $('#cond-cliente-lista');
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && (box?.hidden || !box?.querySelector('.cond-combo-opt'))) {
+        e.preventDefault();
+        buscarCliente();
+        return;
+      }
+      teclaLista(e, box);
     });
     $('#cond-peca')?.addEventListener('input', () => {
       pecaAtual = null;
       if ($('#cond-peca-estoque')) $('#cond-peca-estoque').textContent = '';
+      atualizarTotalItem();
       clearTimeout(timerPeca);
       timerPeca = setTimeout(async () => {
         const q = String($('#cond-peca')?.value || '').trim();
         const box = $('#cond-peca-lista');
         if (!box) return;
         if (q.length < 1) {
-          box.innerHTML = '';
+          mostrarLista(box, '');
           return;
         }
         await buscarPecasNaTela(q);
-      }, 250);
+      }, 220);
     });
-    $('#cond-add-peca')?.addEventListener('click', async () => {
+    $('#cond-peca')?.addEventListener('focus', () => {
+      const q = String($('#cond-peca')?.value || '').trim();
+      if (q.length >= 1 && !pecaAtual) buscarPecasNaTela(q);
+    });
+    $('#cond-peca')?.addEventListener('keydown', async (e) => {
       const box = $('#cond-peca-lista');
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && (box?.hidden || !box?.querySelector('.cond-combo-opt'))) {
+        e.preventDefault();
+        const q = String($('#cond-peca')?.value || '').trim();
+        if (q) await buscarPecasNaTela(q);
+        return;
+      }
+      teclaLista(e, box);
+    });
+    ['cond-qtd', 'cond-preco', 'cond-desc', 'cond-acres'].forEach((id) => {
+      document.getElementById(id)?.addEventListener('input', atualizarTotalItem);
+    });
+    ['cond-frete', 'cond-acres-ped'].forEach((id) => {
+      document.getElementById(id)?.addEventListener('input', () => renderItensNovos());
+    });
+    $('#cond-desc-ped')?.addEventListener('input', () => {
+      descontoExtra = Math.max(0, numTela($('#cond-desc-ped')?.value) - somaDescontoItens());
+      const totalEl = $('#cond-grade-total');
+      if (totalEl) totalEl.textContent = money(totaisCabeca().total);
+    });
+    $('#cond-desc-ped')?.addEventListener('blur', () => {
+      descontoExtra = Math.max(0, numTela($('#cond-desc-ped')?.value) - somaDescontoItens());
+      escreverCampoDesconto();
+      const totalEl = $('#cond-grade-total');
+      if (totalEl) totalEl.textContent = money(totaisCabeca().total);
+    });
+    $('#cond-desc-modo')?.addEventListener('change', atualizarTotalItem);
+    $('#cond-acres-modo')?.addEventListener('change', atualizarTotalItem);
+    $('#cond-abrir-item')?.addEventListener('click', () => abrirDialogoItem());
+    $('#cond-item-voltar')?.addEventListener('click', () => fecharDialogoItem());
+    $('#cond-item-fechar')?.addEventListener('click', () => fecharDialogoItem());
+    $('#cond-item-cancelar')?.addEventListener('click', () => fecharDialogoItem());
+    $('#cond-add-peca')?.addEventListener('click', async () => {
+      const msg = $('#cond-item-msg');
       if (pecaAtual) {
         incluirPeca(pecaAtual);
         return;
       }
       const codigo = String($('#cond-peca')?.value || '').trim();
       if (!codigo) {
-        if (box) box.innerHTML = '<p class="hint">Informe o nome, o identificador, o código, as barras ou a referência.</p>';
+        if (msg) msg.textContent = 'Pesquise a peça e escolha uma da lista.';
         return;
       }
-      const res = await api(`/condicionais/produtos?q=${encodeURIComponent(codigo)}`);
-      const itens = res.itens || [];
-      if (!res.ok || !itens.length) {
-        if (box) box.innerHTML = `<p class="hint">${esc(res.error || 'Nenhuma peça encontrada.')}</p>`;
-        return;
-      }
+      const itens = await buscarPecasNaTela(codigo);
+      if (!itens?.length) return;
       if (itens.length === 1) {
         escolherPeca(itens[0]);
         incluirPeca(itens[0]);
         return;
       }
-      if (box) box.innerHTML = '<p class="hint">Há mais de uma peça. Toque na lista para escolher.</p>';
+      if (msg) msg.textContent = 'Há mais de uma peça. Escolha uma da lista.';
+    });
+    document.addEventListener('click', (e) => {
+      const combo = e.target.closest?.('[data-cond-combo]');
+      if (combo) return;
+      fecharListas();
     });
     $('#cond-salvar')?.addEventListener('click', async () => {
       const msg = $('#cond-form-msg');
-      const res = await api('/condicionais', {
+      const idStatus = String($('#cond-lanc-status')?.value || '');
+      const caminho = editandoId ? `/condicionais/${encodeURIComponent(editandoId)}` : '/condicionais';
+      const res = await api(caminho, {
         method: 'POST',
         body: {
           id_cliente: clienteId,
           id_funcionario: Number($('#cond-vendedor')?.value || 0),
           obs: $('#cond-obs')?.value || '',
           validade: $('#cond-validade')?.value || '',
-          id_status: Number($('#cond-lanc-status')?.value || 0),
+          id_status: Number(idStatus || 0),
           id_parcela: Number($('#cond-pagamento')?.value || 0),
+          frete: totaisCabeca().frete,
+          desconto: totaisCabeca().desconto,
+          acrescimo: totaisCabeca().acrescimo,
           itens: itensNovos,
         },
       });
@@ -606,34 +914,23 @@ const Condicionais = (() => {
         if (msg) msg.textContent = res.error || 'Não foi possível lançar.';
         return;
       }
-      marcarCliente(0, '');
-      itensNovos = [];
-      if ($('#cond-cliente')) $('#cond-cliente').value = '';
-      if ($('#cond-obs')) $('#cond-obs').value = '';
-      if ($('#cond-validade')) $('#cond-validade').value = '';
-      if ($('#cond-pagamento')) $('#cond-pagamento').value = '';
-      if ($('#cond-peca')) $('#cond-peca').value = '';
-      if ($('#cond-preco')) $('#cond-preco').value = '';
-      if ($('#cond-peca-estoque')) $('#cond-peca-estoque').textContent = '';
-      if ($('#cond-peca-lista')) $('#cond-peca-lista').innerHTML = '';
-      if ($('#cond-cliente-lista')) $('#cond-cliente-lista').innerHTML = '';
-      pecaAtual = null;
-      renderItensNovos();
-      if (msg) msg.textContent = '';
       const aviso = $('#cond-aviso');
       const rotulo = $('#cond-lanc-status')?.selectedOptions?.[0]?.textContent || '';
-      if (aviso) aviso.textContent = `Condicional ${res.id} lançado${rotulo ? ` (${rotulo})` : ''}.`;
-      const idStatus = String($('#cond-lanc-status')?.value || '');
-      fecharNovo();
+      if (aviso) aviso.textContent = `Condicional ${res.id} salvo${rotulo ? ` (${rotulo})` : ''}.`;
+      editandoId = 0;
+      limparLancamento();
+      painel('vazio');
       const sel = $('#cond-status');
       if (sel && [...sel.options].some((o) => o.value === idStatus)) sel.value = idStatus;
-      abrirLista();
+      await abrirLista();
+      perguntarEnvio(res.id);
     });
     $('#cond-novo-btn')?.addEventListener('click', () => {
       painel('novo');
       preencherStatusLancamento();
       preencherPagamentoLancamento();
       carregarVendedores();
+      renderItensNovos();
       $('#cond-cliente')?.focus();
     });
     $('#cond-cancelar')?.addEventListener('click', () => fecharNovo());

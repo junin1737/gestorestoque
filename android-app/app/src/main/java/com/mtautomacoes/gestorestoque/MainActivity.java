@@ -129,6 +129,16 @@ public class MainActivity extends AppCompatActivity {
                 deliverBarcodeToWeb(raw);
             });
 
+    @Override
+    public void onConfigurationChanged(@NonNull android.content.res.Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (webView == null) return;
+        webView.requestLayout();
+        webView.post(() -> webView.evaluateJavascript(
+                "(function(){var h=window.innerHeight+'px';document.documentElement.style.height=h;document.body.style.height=h;var m=document.querySelector('.main');if(m){m.style.height=h;m.style.maxHeight=h;}})()",
+                null));
+    }
+
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -526,6 +536,8 @@ public class MainActivity extends AppCompatActivity {
                 + "}"
                 + "var cfg=document.getElementById('btn-config-servidor');"
                 + "if(cfg)cfg.hidden=false;"
+                + "var loginSrv=document.getElementById('login-trocar-servidor');"
+                + "if(loginSrv)loginSrv.hidden=false;"
                 + "var m=document.querySelector('meta[name=viewport]');"
                 + "if(m)m.setAttribute('content','width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover');"
                 + "})();";

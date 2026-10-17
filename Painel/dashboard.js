@@ -115,9 +115,8 @@ function card(titulo, valor, detalhe, extra, tom) {
   return `<article class="fin-card${cls}"><span>${esc(titulo)}</span><strong>${esc(valor)}</strong><small>${esc(detalhe || '')}</small>${extra ? `<small class="fin-extra">${esc(extra)}</small>` : ''}</article>`;
 }
 
-function linhaFrete(valor) {
-  if (valor == null || valor === '') return '';
-  return `valor + frete ${brl(valor)}`;
+function linhaFrete() {
+  return '';
 }
 
 function htmlMeses(dados) {
@@ -344,17 +343,20 @@ function htmlConteudo(dados) {
       <table class="fin-table"><thead><tr><th>NCM</th><th>Total vendido</th></tr></thead><tbody>${ncm || '<tr><td colspan="2">Nenhuma movimentação no período</td></tr>'}</tbody></table>
     </section>`;
   }
+  const diaMes = `${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', '', 'saida')}
+       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', '', 'saida')}`;
   const separados = dados.aba === 'manage'
-    ? `${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete), 'saida')}
-       ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', linhaFrete(dados.vendidoDiaComFrete), 'saida')}
-       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', linhaFrete(dados.vendidoMesComFrete), 'saida')}`
+    ? `${diaMes}
+       ${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, '', 'saida')}`
     : dados.usaGr
-      ? `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete), 'saida')}
-         ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas', linhaFrete(dados.comFreteGerenciais), 'saida')}
-         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'fora da conversão', linhaFrete(dados.comFreteFiscais), 'saida')}`
-      : `${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete), 'saida')}
-         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'modelos 55 e 65', linhaFrete(dados.comFreteFiscais), 'saida')}
-         ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR', linhaFrete(dados.comFreteGerenciais), 'saida')}`;
+      ? `${diaMes}
+         ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas no período`, '', 'saida')}
+         ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas', '', 'saida')}
+         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'NFC-e e NF-e', '', 'saida')}`
+      : `${diaMes}
+         ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas no período`, '', 'saida')}
+         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'modelos 55 e 65', '', 'saida')}
+         ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR', '', 'saida')}`;
   return `${htmlAbas(dados)}
   <div class="fin-cards">
     ${separados}
@@ -421,6 +423,8 @@ function ligarFiltros() {
   const form = document.getElementById('fin-filtros');
   form?.addEventListener('submit', (ev) => {
     ev.preventDefault();
+    dashCacheChave = '';
+    dashCacheHtml = '';
     carregarDash();
   });
   document.querySelectorAll('#dash-financeiro [data-exportar]').forEach((btn) => {

@@ -453,6 +453,11 @@ function nivel(u, modulo, acao) {
 
 function temAcesso(u, ...modulos) {
   if (!u) return false;
+  if (modulos.length === 1 && modulos[0] === 'clientes') {
+    const v = u.permissoes?.clientes?.acesso;
+    if (v === false || v === 'false' || v === 0) return false;
+    return true;
+  }
   if (modulos.length === 1 && modulos[0] === 'condicionais') {
     const v = u.permissoes?.condicionais?.acesso;
     if (v === false || v === 'false' || v === 0) return false;

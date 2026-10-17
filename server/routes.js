@@ -1,5 +1,6 @@
 'use strict';
 const express = require('express');
+const historicoProduto = require('./historico-produto');
 const {
   loadAppConfig,
   saveAppConfig,
@@ -11,6 +12,7 @@ const {
   isMtEntradas,
   lerUsaManage,
   lerIgnorarReceberCartao,
+  lerSomenteComEstoque,
   usaManageDoPedido,
   CHAVES_DASHBOARD,
   comDashboards,
@@ -184,10 +186,18 @@ router.get('/config', (req, res) => {
       tema: cfg.tema,
       usa_manage: lerUsaManage(cfg),
       ignorarReceberCartao: lerIgnorarReceberCartao(cfg),
+      somenteComEstoque: lerSomenteComEstoque(cfg),
     },
     modulos: MODULOS,
     demo: DEMO_ATIVO,
   });
+});
+
+router.post('/preferencias/somente-estoque', (req, res) => {
+  const current = loadAppConfig();
+  const somenteComEstoque = req.body?.somenteComEstoque === true || Number(req.body?.somenteComEstoque) === 1 ? 1 : 0;
+  saveAppConfig({ ...current, somente_com_estoque: somenteComEstoque });
+  res.json({ ok: true, somenteComEstoque });
 });
 
 router.post('/dashboard/opcoes', (req, res) => {
@@ -391,6 +401,7 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
           const permissoes = comDashboards(fullPermissoes(), origem);
           permissoes.dashboard_padrao = { acesso: true };
           if (origem?.permissoes?.condicionais?.acesso === false) permissoes.condicionais = { acesso: false };
+          if (origem?.permissoes?.clientes?.acesso === false) permissoes.clientes = { acesso: false };
           return permissoes;
         })(),
       };
@@ -401,6 +412,9 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
       const permissoes = comDashboards(prev.permissoes, origem);
       if (origem?.permissoes?.condicionais && typeof origem.permissoes.condicionais.acesso === 'boolean') {
         permissoes.condicionais = { acesso: origem.permissoes.condicionais.acesso };
+      }
+      if (origem?.permissoes?.clientes && typeof origem.permissoes.clientes.acesso === 'boolean') {
+        permissoes.clientes = { acesso: origem.permissoes.clientes.acesso };
       }
       return { ...prev, acessoOnline: onlinePedido(prev), permissoes };
     }
@@ -584,11 +598,42 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
       if (String(req.query.condicional || '') === '1') {
         where.push('COALESCE(P.QTD_RESERV, 0) > 0');
       }
+      const campoFiltro = String(req.query.campo || '');
+      const opFiltro = String(req.query.op || '');
+      const lerFiltro = (nome) => {
+        const bruto = String(req.query[nome] || '').trim().replace(/\./g, '').replace(',', '.');
+        if (!bruto) return null;
+        const n = Number(bruto);
+        return Number.isFinite(n) ? n : null;
+      };
+      const nFiltro = lerFiltro('valor');
+      const nFiltro2 = lerFiltro('valor2');
+      const colFiltro = campoFiltro === 'quantidade' ? 'COALESCE(P.QTD_ATUAL, 0)'
+        : campoFiltro === 'preco' ? 'COALESCE(E.PRC_VENDA, 0)'
+          : campoFiltro === 'codigo' ? 'E.ID_ESTOQUE'
+            : campoFiltro === 'identificador' ? 'I.ID_IDENTIFICADOR'
+              : '';
+      if (colFiltro && nFiltro != null) {
+        if (opFiltro === 'lt') {
+          where.push(`${colFiltro} < ?`);
+          params.push(nFiltro);
+        } else if (opFiltro === 'eq') {
+          where.push(`${colFiltro} = ?`);
+          params.push(nFiltro);
+        } else if (opFiltro === 'between' && nFiltro2 != null) {
+          where.push(`${colFiltro} BETWEEN ? AND ?`);
+          params.push(Math.min(nFiltro, nFiltro2), Math.max(nFiltro, nFiltro2));
+        } else if (opFiltro !== 'between') {
+          where.push(`${colFiltro} > ?`);
+          params.push(nFiltro);
+        }
+      }
       const orderBy = busca && /^\d+$/.test(busca) && busca.length <= 5
         ? 'I.ID_IDENTIFICADOR ASC'
         : 'E.ID_ESTOQUE DESC, I.ID_IDENTIFICADOR DESC';
+      const limite = colFiltro && nFiltro != null ? 500 : 200;
       const sql = `
-        SELECT FIRST 200
+        SELECT FIRST ${limite}
           E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
           G.DESCRICAO AS GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO,
           P.QTD_ATUAL, P.QTD_RESERV, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
@@ -623,6 +668,28 @@ router.get('/estoque/codigo-barras', LER_ESTOQUE, async (req, res) => {
     res.json({ ok: true, ...out });
   } catch (err) {
     res.json({ ok: false, error: err.message, item: null, referencia: null });
+  }
+});
+
+router.get('/estoque/:idIdentificador/historico/pdf', LER_ESTOQUE, async (req, res) => {
+  try {
+    const doc = await historicoProduto.consultar(req.params.idIdentificador, {
+      inicio: req.query.inicio, fim: req.query.fim,
+    });
+    res.type('html').send(historicoProduto.htmlPdf(doc));
+  } catch (err) {
+    res.status(400).type('html').send(`<p>${err.message}</p>`);
+  }
+});
+
+router.get('/estoque/:idIdentificador/historico', LER_ESTOQUE, async (req, res) => {
+  try {
+    const doc = await historicoProduto.consultar(req.params.idIdentificador, {
+      inicio: req.query.inicio, fim: req.query.fim,
+    });
+    res.json({ ok: true, ...doc, whatsapp: historicoProduto.textoWhatsapp(doc) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, vendas: [], compras: [] });
   }
 });
 
@@ -2948,8 +3015,52 @@ router.post('/compras/notas/:chave/xml', async (req, res) => {
 });
 
 const condicionais = require('./condicionais');
+const clientes = require('./clientes');
 const VER_CONDICIONAL = exigirModulo('condicionais');
 const LANCAR_CONDICIONAL = exigirModulo('condicionais');
+
+const VER_CLIENTE = exigirModulo('clientes');
+
+router.get('/clientes', VER_CLIENTE, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await clientes.listar(req.query)) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/clientes/opcoes', VER_CLIENTE, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await clientes.opcoes()) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, tipos: [], enderecos: [] });
+  }
+});
+
+router.get('/clientes/cidades', VER_CLIENTE, async (req, res) => {
+  try {
+    res.json({ ok: true, itens: await clientes.cidades(req.query.q || '', req.query.uf || '') });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/clientes/:id', VER_CLIENTE, async (req, res) => {
+  try {
+    res.json({ ok: true, cliente: await clientes.detalhe(req.params.id) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/clientes', VER_CLIENTE, async (req, res) => {
+  try {
+    const salvo = await clientes.salvar(req.body || {});
+    res.json({ ok: true, ...salvo, cliente: await clientes.detalhe(salvo.id) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
 
 router.get('/condicionais', VER_CONDICIONAL, async (req, res) => {
   try {
@@ -3033,9 +3144,32 @@ router.post('/condicionais', LANCAR_CONDICIONAL, async (req, res) => {
       itens: req.body?.itens,
       idStatus: req.body?.id_status,
       idParcela: req.body?.id_parcela,
+      frete: req.body?.frete,
+      desconto: req.body?.desconto,
+      acrescimo: req.body?.acrescimo,
       usuario: req.usuario?.nome || '',
     });
     res.json({ ok: true, ...criado });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/condicionais/:id', LANCAR_CONDICIONAL, async (req, res) => {
+  try {
+    const salvo = await condicionais.atualizar(req.params.id, {
+      idCliente: req.body?.id_cliente,
+      idFuncionario: req.body?.id_funcionario,
+      obs: req.body?.obs,
+      validade: req.body?.validade,
+      idStatus: req.body?.id_status,
+      idParcela: req.body?.id_parcela,
+      frete: req.body?.frete,
+      desconto: req.body?.desconto,
+      acrescimo: req.body?.acrescimo,
+      itens: req.body?.itens,
+    });
+    res.json({ ok: true, id: salvo.id });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

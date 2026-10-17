@@ -650,6 +650,11 @@ function can(modulo, acao) {
   if (String(modulo || '').startsWith('dashboard_')) {
     return !!u.permissoes?.[modulo]?.acesso;
   }
+  if (modulo === 'clientes') {
+    const v = u.permissoes?.clientes?.acesso;
+    if (v === false || v === 'false' || v === 0) return false;
+    return true;
+  }
   if (modulo === 'condicionais') {
     const v = u.permissoes?.condicionais?.acesso;
     if (v === false || v === 'false' || v === 0) return false;
@@ -916,6 +921,8 @@ async function bootstrap() {
   if ($('#tema-rapido')) $('#tema-rapido').value = state.config.tema || 'claro';
   const chkCartao = $('#cfg-ignorar-cartao');
   if (chkCartao) chkCartao.checked = Number(state.config.ignorarReceberCartao) === 1;
+  const chkEstoque = $('#cfg-somente-estoque');
+  if (chkEstoque) chkEstoque.checked = Number(state.config.somenteComEstoque) === 1;
 
   const lic = await api('/licenca');
   if (lic.ok && lic.licenca && !lic.licenca.liberado) mostrarBloqueioLicenca(lic.licenca);
@@ -929,7 +936,31 @@ async function bootstrap() {
     setEmitenteUI(conn.emitente);
     applyTheme(state.config.tema, conn.emitente?.logo);
     await loadFuncionarios();
-    // Como o funcionário, o contador digita CPF/CNPJ e senha a cada abertura do painel.
+    const recarregou = performance.getEntriesByType('navigation')[0]?.type === 'reload';
+    if (recarregou) {
+      const sess = await api('/sessao');
+      if (sess.ok && sess.usuario) {
+        state.usuario = sess.usuario;
+        enterApp();
+        return;
+      }
+      const sessCont = await api('/contador/sessao');
+      if (sessCont.ok && sessCont.contador) {
+        state.usuario = {
+          id: 0,
+          nome: sessCont.contador.nome || 'Contador',
+          email: sessCont.contador.email || '',
+          contador: true,
+          supervisor: false,
+          permissoes: {
+            dashboard_contador: { acesso: true },
+            massa: { acesso: true },
+          },
+        };
+        enterApp();
+        return;
+      }
+    }
     await api('/logout', { method: 'POST', body: {} });
     await api('/contador/logout', { method: 'POST', body: {} });
     await carregarLojasLogin();
@@ -1171,6 +1202,10 @@ function enterApp() {
   if ($('#nav-compras')) $('#nav-compras').hidden = !showCompras;
   if ($('#nav-compras-mobile')) $('#nav-compras-mobile').hidden = !showCompras;
   if ($('#dash-compras')) $('#dash-compras').hidden = !showCompras;
+  const showCli = can('clientes', 'acesso');
+  if ($('#nav-clientes')) $('#nav-clientes').hidden = !showCli;
+  if ($('#nav-clientes-mobile')) $('#nav-clientes-mobile').hidden = !showCli;
+  if ($('#dash-clientes')) $('#dash-clientes').hidden = !showCli;
   const showCond = can('condicionais', 'acesso');
   if ($('#nav-condicionais')) $('#nav-condicionais').hidden = !showCond;
   if ($('#nav-condicionais-mobile')) $('#nav-condicionais-mobile').hidden = !showCond;
@@ -1184,6 +1219,8 @@ function enterApp() {
   if ($('#nav-empresas')) $('#nav-empresas').hidden = true;
   if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = true;
   if (window.Dashboard) Dashboard.mostrarMenuDash();
+  const guardada = telaGuardada();
+  if (guardada?.perfil) state.dashAbertura = { perfil: guardada.perfil, secao: guardada.secao || 'resumo' };
   if (state.usuario?.contador) {
     state.dashAbertura = { perfil: 'CONTADOR_ACESSA', secao: 'resumo' };
     document.querySelectorAll('.nav-btn, #mobile-nav [data-page], #mais-sheet [data-page]').forEach((btn) => {
@@ -1194,7 +1231,10 @@ function enterApp() {
       btn.hidden = !(inicio || dashContador || pagina === 'contador');
     });
   }
-  showPage('dashboard');
+  const paginaInicial = state.usuario?.contador && guardada?.page !== 'contador'
+    ? 'dashboard'
+    : (guardada?.page || 'dashboard');
+  showPage(paginaInicial);
   // O contador só tem a sessão de /contador e /massa: as rotas do funcionário responderiam 401.
   if (state.usuario?.contador) return;
   loadUnidades();
@@ -1210,6 +1250,7 @@ function enterApp() {
 }
 
 function trocarUsuario() {
+  window.Clientes?.limparFiltrosVisiveis?.();
   api('/logout', { method: 'POST', body: {} });
   api('/contador/logout', { method: 'POST', body: {} });
   voltarAoLogin();
@@ -1224,8 +1265,29 @@ function sessaoEncerrada(motivo) {
   }
 }
 
+function telaGuardada() {
+  try {
+    const dados = JSON.parse(sessionStorage.getItem('ge-tela') || 'null');
+    if (!dados || typeof dados.page !== 'string') return null;
+    return dados;
+  } catch {
+    return null;
+  }
+}
+
+function lembrarTela(page) {
+  try {
+    sessionStorage.setItem('ge-tela', JSON.stringify({
+      page,
+      perfil: state.dashAtual?.perfil || state.dashAbertura?.perfil || '',
+      secao: state.dashAtual?.secao || state.dashAbertura?.secao || 'resumo',
+    }));
+  } catch { /* ignore */ }
+}
+
 function voltarAoLogin() {
   stopScanner();
+  try { sessionStorage.removeItem('ge-tela'); } catch { /* ignore */ }
   state.usuario = null;
   state.selecionado = null;
   state.isNovo = false;
@@ -1258,21 +1320,63 @@ $('#btn-config-servidor-mais')?.addEventListener('click', () => {
   $('#btn-config-servidor')?.click();
 });
 
+async function trocarServidor() {
+  setSidebarOpen(false);
+  const confirma = await showConfirm('Deseja realmente trocar de servidor?', { okLabel: 'Trocar', cancelLabel: 'Ficar' });
+  if (!confirma) return;
+  try {
+    if (window.GestorApp && typeof window.GestorApp.changeServer === 'function') {
+      window.GestorApp.changeServer();
+      return;
+    }
+  } catch (err) {
+    console.warn('changeServer', err);
+  }
+  const atual = localStorage.getItem('ge-servidor') || window.location.origin;
+  const informado = await showPrompt({
+    message: 'Endereço do servidor (exemplo: http://192.168.0.10:5078)',
+    defaultValue: atual,
+  });
+  if (!informado) return;
+  let url = String(informado).trim();
+  if (!/^https?:\/\//i.test(url)) url = `http://${url}`;
+  try {
+    const destino = new URL(url);
+    localStorage.setItem('ge-servidor', destino.origin);
+    window.location.href = `${destino.origin}/`;
+  } catch {
+    const erro = $('#login-erro');
+    if (erro) {
+      erro.hidden = false;
+      erro.textContent = 'Informe um endereço válido, como http://192.168.0.10:5078';
+    }
+  }
+}
+
 (function wireServerConfig() {
   const btn = $('#btn-config-servidor');
-  if (!btn) return;
-  btn.hidden = !isNativeApk();
-  btn.addEventListener('click', () => {
-    setSidebarOpen(false);
-    try {
-      if (window.GestorApp && typeof window.GestorApp.changeServer === 'function') {
-        window.GestorApp.changeServer();
-      }
-    } catch (err) {
-      console.warn('changeServer', err);
-    }
-  });
+  if (btn) {
+    btn.hidden = !isNativeApk();
+    btn.addEventListener('click', () => { trocarServidor(); });
+  }
+  $('#login-trocar-servidor')?.addEventListener('click', () => { trocarServidor(); });
 })();
+
+function ajustarAlturaTela() {
+  if (window.innerWidth > 980) return;
+  const h = `${window.innerHeight}px`;
+  const app = document.getElementById('app');
+  const view = document.getElementById('view-app');
+  const main = document.querySelector('#view-app .main');
+  if (app) app.style.height = h;
+  if (view && !view.hidden) view.style.height = h;
+  if (main) {
+    main.style.height = h;
+    main.style.maxHeight = h;
+  }
+}
+window.addEventListener('resize', ajustarAlturaTela);
+window.addEventListener('orientationchange', () => setTimeout(ajustarAlturaTela, 200));
 function setSidebarOpen(open) {
   document.body.classList.toggle('sidebar-open', open);
   const bd = $('#sidebar-backdrop');
@@ -1283,6 +1387,16 @@ $('#btn-menu-mobile')?.addEventListener('click', () => {
   setSidebarOpen(!document.body.classList.contains('sidebar-open'));
 });
 $('#sidebar-backdrop')?.addEventListener('click', () => setSidebarOpen(false));
+
+$('#cfg-somente-estoque')?.addEventListener('change', async (e) => {
+  const somenteComEstoque = e.target.checked ? 1 : 0;
+  const res = await api('/preferencias/somente-estoque', { method: 'POST', body: { somenteComEstoque } });
+  if (!res.ok) {
+    e.target.checked = !e.target.checked;
+    return;
+  }
+  state.config.somenteComEstoque = somenteComEstoque;
+});
 
 $('#cfg-ignorar-cartao')?.addEventListener('change', async (e) => {
   const ignorarReceberCartao = e.target.checked ? 1 : 0;
@@ -1330,7 +1444,7 @@ function setNavActive(page) {
   $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page && !atual));
   const mais = $('#btn-mais-mobile');
   if (mais) {
-    mais.classList.toggle('active', ['compras', 'condicionais', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
+    mais.classList.toggle('active', ['clientes', 'compras', 'condicionais', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
   }
 }
 
@@ -1350,6 +1464,7 @@ $$('#mobile-nav [data-page]').forEach((btn) => {
 });
 $('#dash-estoque')?.addEventListener('click', () => showPage('estoque'));
 $('#dash-importacao')?.addEventListener('click', () => showPage('importacao'));
+$('#dash-clientes')?.addEventListener('click', () => showPage('clientes'));
 $('#dash-compras')?.addEventListener('click', () => showPage('compras'));
 $('#dash-alteracoes')?.addEventListener('click', () => showPage('alteracoes'));
 
@@ -1395,6 +1510,10 @@ async function showPage(page) {
     showMsg('Sem permissão para consultar compras.');
     page = 'dashboard';
   }
+  if (page === 'clientes' && !can('clientes', 'acesso')) {
+    showMsg('Sem permissão para clientes.');
+    page = 'dashboard';
+  }
   if (page === 'condicionais' && !can('condicionais', 'acesso')) {
     showMsg('Sem permissão para condicionais.');
     page = 'dashboard';
@@ -1430,11 +1549,13 @@ async function showPage(page) {
   const saiaCompras = $('#page-compras') && !$('#page-compras').hidden && page !== 'compras';
   if (saiaCompras) window.Compras?.onPageLeave?.();
 
+  lembrarTela(page);
   setNavActive(page);
   if ($('#page-dashboard')) $('#page-dashboard').hidden = page !== 'dashboard';
   $('#page-estoque').hidden = page !== 'estoque';
   if ($('#page-importacao')) $('#page-importacao').hidden = page !== 'importacao';
   if ($('#page-compras')) $('#page-compras').hidden = page !== 'compras';
+  if ($('#page-clientes')) $('#page-clientes').hidden = page !== 'clientes';
   if ($('#page-condicionais')) $('#page-condicionais').hidden = page !== 'condicionais';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
@@ -1484,6 +1605,10 @@ async function showPage(page) {
     window.ImportacaoNfe?.onPageEnter();
   } else if (page === 'compras') {
     window.Compras?.onPageEnter();
+  } else if (page === 'clientes') {
+    $('#page-title').textContent = 'Clientes';
+    $('#page-sub').textContent = 'Consulta e cadastro';
+    window.Clientes?.onPageEnter();
   } else if (page === 'condicionais') {
     $('#page-title').textContent = 'Condicionais';
     $('#page-sub').textContent = 'Peças reservadas para o cliente';
@@ -1543,6 +1668,17 @@ $$('#estoque-status-seg .seg-btn').forEach((btn) => {
   });
 });
 $('#estoque-grupo-filtro')?.addEventListener('change', () => renderEstoqueLista());
+let timerFiltroEstoque = null;
+function agendarFiltroEstoque() {
+  const ate = $('#estoque-filtro-valor2');
+  if (ate) ate.hidden = ($('#estoque-filtro-op')?.value || '') !== 'between';
+  clearTimeout(timerFiltroEstoque);
+  timerFiltroEstoque = setTimeout(() => loadEstoque(), 250);
+}
+$('#estoque-filtro-campo')?.addEventListener('change', agendarFiltroEstoque);
+$('#estoque-filtro-op')?.addEventListener('change', agendarFiltroEstoque);
+$('#estoque-filtro-valor')?.addEventListener('input', agendarFiltroEstoque);
+$('#estoque-filtro-valor2')?.addEventListener('input', agendarFiltroEstoque);
 $('#btn-filtro-condicional')?.addEventListener('click', () => {
   state.filtroCondicional = !state.filtroCondicional;
   $('#btn-filtro-condicional').classList.toggle('primary', state.filtroCondicional);
@@ -1613,21 +1749,56 @@ function buscarEstoque(q, opts = {}) {
   return loadEstoque();
 }
 
+function queryFiltroEstoque() {
+  const campo = $('#estoque-filtro-campo')?.value || '';
+  const op = $('#estoque-filtro-op')?.value || 'gt';
+  const valor = String($('#estoque-filtro-valor')?.value || '').trim();
+  const valor2 = String($('#estoque-filtro-valor2')?.value || '').trim();
+  if (!campo || !valor) return '';
+  if (op === 'between' && !valor2) return '';
+  const qs = new URLSearchParams({ campo, op, valor });
+  if (op === 'between') qs.set('valor2', valor2);
+  return `&${qs.toString()}`;
+}
+
 async function loadEstoque() {
   const q = state.buscaAplicada || $('#estoque-busca').value.trim();
   const status = state.estoqueStatus || 'A';
   const barras = state.buscaBarras && String(q).length > 5 ? '&barras=1' : '';
   const cond = state.filtroCondicional ? '&condicional=1' : '';
-  const res = await api(`/estoque?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}${barras}${cond}`);
+  const res = await api(`/estoque?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}${barras}${cond}${queryFiltroEstoque()}`);
   state.estoqueLista = res.itens || [];
   renderEstoqueLista();
 }
 
 function estoqueFiltrado() {
   const grupo = String($('#estoque-grupo-filtro')?.value || '');
-  const list = state.estoqueLista || [];
-  if (!grupo) return list;
-  return list.filter((it) => String(it.grupo || '') === grupo);
+  let list = state.estoqueLista || [];
+  if (grupo) list = list.filter((it) => String(it.grupo || '') === grupo);
+  const campo = $('#estoque-filtro-campo')?.value || '';
+  const op = $('#estoque-filtro-op')?.value || 'gt';
+  const ate = $('#estoque-filtro-valor2');
+  if (ate) ate.hidden = op !== 'between';
+  const lerNum = (el) => {
+    const bruto = String(el?.value || '').trim().replace(/\./g, '').replace(',', '.');
+    if (bruto === '') return null;
+    const n = Number(bruto);
+    return Number.isFinite(n) ? n : null;
+  };
+  const n = lerNum($('#estoque-filtro-valor'));
+  const n2 = lerNum($('#estoque-filtro-valor2'));
+  if (!campo || n == null) return list;
+  if (op === 'between' && n2 == null) return list;
+  return list.filter((it) => {
+    const v = campo === 'quantidade' ? Number(it.qtd_atual || 0)
+      : campo === 'preco' ? Number(it.prc_venda || 0)
+        : campo === 'codigo' ? Number(it.id_estoque || 0)
+          : Number(it.id_identificador || 0);
+    if (op === 'between') return v >= Math.min(n, n2) && v <= Math.max(n, n2);
+    if (op === 'lt') return v < n;
+    if (op === 'eq') return Math.abs(v - n) < 0.0001;
+    return v > n;
+  });
 }
 
 function syncGrupoFiltro() {
@@ -2146,6 +2317,99 @@ async function loadTributosProduto(it, editar) {
   }
 }
 
+function tabelaHistorico(titulo, itens, vazio, colunaQuem) {
+  const linhas = (itens || []).map((it) => `<tr>
+    <td>${escapeHtml(it.data || '')}</td>
+    <td>${escapeHtml(it.pessoa || '—')}</td>
+    <td>${escapeHtml(it.documento || '')}</td>
+    <td class="num">${escapeHtml(fmtNum(it.qtd))}</td>
+    <td class="num">R$ ${escapeHtml(fmtMoney2(it.valor))}</td>
+    <td>${escapeHtml(it.operador || '—')}</td>
+  </tr>`).join('');
+  return `<h3 class="hist-bloco">${titulo}</h3>${linhas
+    ? `<table class="hist-table"><thead><tr><th>Data</th><th>Nome</th><th>Nota</th><th class="num">Qtd</th><th class="num">Valor</th><th>${colunaQuem}</th></tr></thead><tbody>${linhas}</tbody></table>`
+    : `<p class="hint">${vazio}</p>`}`;
+}
+
+function periodoHistorico() {
+  const hoje = new Date();
+  const iso = (d) => {
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dia = String(d.getDate()).padStart(2, '0');
+    return `${d.getFullYear()}-${m}-${dia}`;
+  };
+  return { inicio: `${hoje.getFullYear()}-01-01`, fim: iso(hoje) };
+}
+
+function queryHistorico() {
+  const inicio = $('#hist-inicio')?.value || '';
+  const fim = $('#hist-fim')?.value || '';
+  const qs = new URLSearchParams();
+  if (inicio) qs.set('inicio', inicio);
+  if (fim) qs.set('fim', fim);
+  const texto = qs.toString();
+  return texto ? `?${texto}` : '';
+}
+
+async function carregarHistoricoProduto(id) {
+  const corpo = $('#hist-corpo');
+  if (!corpo) return;
+  corpo.innerHTML = '<p class="hint">Carregando…</p>';
+  const res = await api(`/estoque/${encodeURIComponent(id)}/historico${queryHistorico()}`);
+  if (!res.ok) {
+    corpo.innerHTML = `<p class="hint">${escapeHtml(res.error || 'Não foi possível carregar o histórico.')}</p>`;
+    return;
+  }
+  corpo.innerHTML = tabelaHistorico('Vendas', res.vendas, 'Nenhuma venda neste período.', 'Vendedor')
+    + tabelaHistorico('Compras', res.compras, 'Nenhuma compra neste período.', 'Comprador');
+}
+
+async function abrirHistoricoProduto(it) {
+  const dlg = $('#dlg-historico');
+  const corpo = $('#hist-corpo');
+  if (!dlg || !corpo || it?.id_identificador == null) return;
+  const titulo = $('#hist-titulo');
+  const sub = $('#hist-sub');
+  if (titulo) titulo.textContent = it.descricao_exibicao || it.descricao || 'Histórico';
+  if (sub) sub.textContent = `Identificador ${it.id_identificador}`;
+  const padrao = periodoHistorico();
+  const ini = $('#hist-inicio');
+  const fim = $('#hist-fim');
+  if (ini && !ini.value) ini.value = padrao.inicio;
+  if (fim && !fim.value) fim.value = padrao.fim;
+  if (!dlg.open && dlg.showModal) dlg.showModal();
+  const id = it.id_identificador;
+  const pdf = $('#hist-pdf');
+  const wa = $('#hist-wa');
+  const fechar = $('#hist-fechar');
+  const buscar = $('#hist-buscar');
+  if (fechar) fechar.onclick = () => dlg.close();
+  if (buscar) buscar.onclick = () => carregarHistoricoProduto(id);
+  if (pdf) {
+    pdf.onclick = () => {
+      const frame = $('#dlg-danfe-frame');
+      const danfe = $('#dlg-danfe');
+      const barra = danfe?.querySelector('.dlg-danfe-bar strong');
+      const url = `/api/estoque/${encodeURIComponent(id)}/historico/pdf${queryHistorico()}`;
+      if (frame && danfe?.showModal) {
+        if (barra) barra.textContent = 'Histórico do produto';
+        frame.src = url;
+        if (!danfe.open) danfe.showModal();
+        return;
+      }
+      window.open(url, '_blank', 'noopener');
+    };
+  }
+  if (wa) {
+    wa.onclick = async () => {
+      const res = await api(`/estoque/${encodeURIComponent(id)}/historico${queryHistorico()}`);
+      const texto = res.whatsapp || '';
+      window.open(`https://wa.me/?text=${encodeURIComponent(texto)}`, '_blank', 'noopener');
+    };
+  }
+  await carregarHistoricoProduto(id);
+}
+
 function renderDetalhe() {
   const it = state.selecionado;
   if (!it) return;
@@ -2185,7 +2449,7 @@ function renderDetalhe() {
         <label>ID Estoque<input value="${it.id_estoque ?? 'Novo'}" disabled /></label>
         <label>ID Identificador<input value="${it.id_identificador ?? 'Novo'}" disabled /></label>
         <label class="full">Descrição<input id="f-descricao" maxlength="120" value="${escapeAttr(it.descricao)}" ${editarFicha || state.isNovo ? '' : 'disabled'} /></label>
-        ${!state.isNovo && can('condicionais', 'acesso') ? `<div class="full"><button type="button" class="btn small" id="btn-condicionais-prod" ${Number(it.qtd_reserv) > 0 ? '' : 'disabled'}>Condicionais${Number(it.qtd_reserv) > 0 ? ` (${fmtNum(it.qtd_reserv)})` : ''}</button></div>` : ''}
+        ${!state.isNovo ? `<div class="full ficha-atalhos"><button type="button" class="btn small" id="btn-historico-prod">Histórico</button>${can('condicionais', 'acesso') ? `<button type="button" class="btn small" id="btn-condicionais-prod" ${Number(it.qtd_reserv) > 0 ? '' : 'disabled'}>Condicionais${Number(it.qtd_reserv) > 0 ? ` (${fmtNum(it.qtd_reserv)})` : ''}</button>` : ''}</div>` : ''}
         <label class="full grupo-field">Grupo
           <div class="input-row">
             <select id="f-grupo" ${editarFicha || state.isNovo ? '' : 'disabled'}>
@@ -2510,6 +2774,7 @@ function renderDetalhe() {
   $('#btn-condicionais-prod')?.addEventListener('click', () => {
     if (Number(it.qtd_reserv) > 0) window.Condicionais?.abrirDoProduto(it.id_identificador);
   });
+  $('#btn-historico-prod')?.addEventListener('click', () => abrirHistoricoProduto(it));
   $('#btn-novo-grupo')?.addEventListener('click', async () => {
     const nome = await showPrompt({ message: 'Nome do novo grupo:' });
     if (!nome) return;
@@ -2604,6 +2869,12 @@ function htmlFormUsuario(u) {
           <select data-perm="compras.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.compras?.acesso ? 'selected' : ''}>Sim</option>
             <option value="false" ${!u.permissoes?.compras?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
+        <label>Clientes
+          <select data-perm="clientes.acesso">
+            <option value="true" ${u.permissoes?.clientes?.acesso !== false ? 'selected' : ''}>Sim</option>
+            <option value="false" ${u.permissoes?.clientes?.acesso === false ? 'selected' : ''}>Não</option>
           </select>
         </label>
         <label>Condicionais
@@ -2731,6 +3002,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         },
         compras: {
           acesso: $('[data-perm="compras.acesso"]', card)?.value === 'true',
+        },
+        clientes: {
+          acesso: $('[data-perm="clientes.acesso"]', card)?.value !== 'false',
         },
         condicionais: {
           acesso: $('[data-perm="condicionais.acesso"]', card)?.value === 'true',
@@ -3833,6 +4107,7 @@ window.Compras?.init({
 });
 
 window.Condicionais?.init({ api });
+window.Clientes?.init({ api, showMsg, escapeHtml, getUsuario: () => state.usuario });
 
 (function ligarQuadroPdf() {
   const dlg = $('#dlg-danfe');

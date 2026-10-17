@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=252" />
+  <link rel="stylesheet" href="styles.css?v=260" />
   <link rel="stylesheet" href="importacao-nfe.css?v=247" />
 </head>
 <body>
@@ -90,6 +90,7 @@
             <div class="login-actions">
               <button type="submit" class="btn primary block">Entrar</button>
               <button type="button" id="login-modo-contador" class="btn small block">Entrar como contador</button>
+              <button type="button" id="login-trocar-servidor" class="btn small block">Trocar de servidor</button>
             </div>
             <p id="svc-status" class="hint login-svc">Verificando serviço…</p>
           </form>
@@ -158,6 +159,10 @@
           <button class="nav-btn" data-page="compras" id="nav-compras">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M15 15.5 19.5 20M8 10.5h5M10.5 8v5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Consultar compras
+          </button>
+          <button class="nav-btn" data-page="clientes" id="nav-clientes">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M5 19c.8-3.2 3.2-5 7-5s6.2 1.8 7 5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Clientes
           </button>
           <button class="nav-btn" data-page="condicionais" id="nav-condicionais">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a1 1 0 0 1 1 1v14l-6-3-6 3V5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
@@ -252,6 +257,13 @@
               <strong>Notas de entrada</strong>
               <span>Conferência da NF-e por item</span>
             </button>
+            <button type="button" id="dash-clientes" class="dash-card">
+              <span class="dash-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M5 19c.8-3.2 3.2-5 7-5s6.2 1.8 7 5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+              </span>
+              <strong>Clientes</strong>
+              <span>Consulta e cadastro</span>
+            </button>
             <button type="button" id="dash-compras" class="dash-card">
               <span class="dash-ico" aria-hidden="true">
                 <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="5.5" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M15 15.5 19.5 20M8 10.5h5M10.5 8v5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
@@ -298,10 +310,27 @@
                     <option value="I">Inativos</option>
                     <option value="ALL">Todos</option>
                   </select>
-                  <select id="estoque-grupo-filtro" class="toolbar-select-plain" title="Grupo">
+                  <select id="estoque-grupo-filtro" class="toolbar-select-plain est-curto" title="Grupo">
                     <option value="">Grupo</option>
                   </select>
-                  <button type="button" id="btn-filtro-condicional" class="btn small">Com condicional</button>
+                  <button type="button" id="btn-filtro-condicional" class="btn small btn-compacto">Com condicional</button>
+                </div>
+                <div class="estoque-toolbar-row estoque-filtro-cond">
+                  <select id="estoque-filtro-campo" class="est-curto" title="Campo do filtro">
+                    <option value="">Filtrar por</option>
+                    <option value="identificador">Identificador</option>
+                    <option value="codigo">Código</option>
+                    <option value="quantidade">Quantidade</option>
+                    <option value="preco">Preço</option>
+                  </select>
+                  <select id="estoque-filtro-op" class="est-curto" title="Condição">
+                    <option value="gt">maior que</option>
+                    <option value="lt">menor que</option>
+                    <option value="eq">igual a</option>
+                    <option value="between">entre</option>
+                  </select>
+                  <input id="estoque-filtro-valor" class="est-curto" inputmode="decimal" placeholder="De" />
+                  <input id="estoque-filtro-valor2" class="est-curto" inputmode="decimal" placeholder="Até" hidden />
                 </div>
               </div>
               <div class="panel list-panel list-panel-full">
@@ -482,6 +511,153 @@
           </div>
         </div>
 
+        <div id="page-clientes" class="page" hidden>
+          <div class="cond-split">
+            <section class="cond-col cond-col-lista">
+              <div class="cond-col-head">
+                <div>
+                  <h2>Clientes</h2>
+                  <p class="hint">Busca por nome, apelido, CPF, CNPJ, telefone ou código.</p>
+                </div>
+                <button type="button" class="btn primary" id="cli-novo-btn">Novo</button>
+              </div>
+              <label class="cond-filtro">Buscar
+                <input id="cli-busca" type="search" placeholder="Nome, CPF, CNPJ ou telefone" autocomplete="off" enterkeyhint="search" />
+              </label>
+              <div class="cli-filtros">
+                <label class="cond-filtro">Situação
+                  <select id="cli-status">
+                    <option value="A">Ativos</option>
+                    <option value="I">Inativos</option>
+                    <option value="">Todos</option>
+                  </select>
+                </label>
+                <label class="cond-filtro">Pessoa
+                  <select id="cli-pessoa">
+                    <option value="">Todas</option>
+                    <option value="pf">Física</option>
+                    <option value="pj">Jurídica</option>
+                  </select>
+                </label>
+              </div>
+              <div id="cli-lista" class="cond-lista"></div>
+            </section>
+            <section class="cond-col cond-col-painel">
+              <div id="cli-vazio" class="cond-vazio">
+                <strong>Nenhum cliente aberto</strong>
+                <p>Escolha um na lista ou clique em Novo.</p>
+              </div>
+              <form id="cli-form" class="cond-form" hidden onsubmit="return false">
+                <div class="cond-form-head">
+                  <h3 id="cli-titulo">Novo cliente</h3>
+                  <button type="button" class="btn small" id="cli-fechar">Fechar</button>
+                </div>
+                <div class="cond-form-grid">
+                  <label class="full">Nome
+                    <input id="cli-nome" maxlength="60" required />
+                  </label>
+                  <label class="w-sel">Situação
+                    <select id="cli-status-form">
+                      <option value="A">Ativo</option>
+                      <option value="I">Inativo</option>
+                    </select>
+                  </label>
+                  <label class="w-sel">Tipo
+                    <select id="cli-tipo"></select>
+                  </label>
+                  <label class="w-sel">Pessoa
+                    <select id="cli-pessoa-tipo">
+                      <option value="pf">Física</option>
+                      <option value="pj">Jurídica</option>
+                    </select>
+                  </label>
+                </div>
+                <div id="cli-bloco-pf" class="cond-form-grid">
+                  <label class="w-doc">CPF<input id="cli-cpf" maxlength="14" inputmode="numeric" placeholder="000.000.000-00" /></label>
+                  <label class="w-doc">Identidade<input id="cli-identidade" maxlength="16" /></label>
+                </div>
+                <div id="cli-bloco-pj" class="cond-form-grid" hidden>
+                  <label class="w-cnpj">CNPJ<input id="cli-cnpj" maxlength="18" inputmode="numeric" placeholder="00.000.000/0000-00" /></label>
+                  <label class="w-meio">Nome fantasia<input id="cli-fantasia" maxlength="40" /></label>
+                  <label class="w-doc">Inscrição estadual<input id="cli-ie" maxlength="16" /></label>
+                  <label class="w-doc">Inscrição municipal<input id="cli-im" maxlength="16" /></label>
+                  <label class="w-num">Suframa<input id="cli-suframa" maxlength="9" /></label>
+                  <label class="w-sel">Indicador de IE
+                    <select id="cli-ind-ie">
+                      <option value="">—</option>
+                      <option value="1">Contribuinte</option>
+                      <option value="2">Isento</option>
+                      <option value="9">Não contribuinte</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="cond-form-grid" id="cli-endereco">
+                  <label class="w-cep">CEP<input id="cli-cep" maxlength="9" inputmode="numeric" placeholder="00000-000" /></label>
+                  <label class="w-sel">Tipo do logradouro
+                    <select id="cli-end-tipo">
+                      <option value="">—</option>
+                      <option>Rua</option>
+                      <option>Avenida</option>
+                      <option>Travessa</option>
+                      <option>Alameda</option>
+                      <option>Praça</option>
+                      <option>Rodovia</option>
+                      <option>Estrada</option>
+                      <option>Fazenda</option>
+                      <option>Sítio</option>
+                      <option>Campo</option>
+                      <option>Aeroporto</option>
+                      <option>Residencial</option>
+                      <option>Viela</option>
+                      <option>Largo</option>
+                      <option>Quadra</option>
+                    </select>
+                  </label>
+                  <label class="full">Logradouro<input id="cli-logradouro" maxlength="40" /></label>
+                  <label class="w-num">Número<input id="cli-numero" maxlength="5" /></label>
+                  <label class="w-meio">Bairro<input id="cli-bairro" maxlength="35" /></label>
+                  <label class="w-meio">Complemento<input id="cli-comple" maxlength="30" /></label>
+                  <label class="w-uf">UF
+                    <select id="cli-uf"></select>
+                  </label>
+                  <label class="w-cidade">Cidade
+                    <input id="cli-cidade" autocomplete="off" placeholder="Digite para buscar" />
+                  </label>
+                </div>
+                <div id="cli-bloco-pf-mais" class="cond-form-grid">
+                  <label class="w-data">Nascimento<input id="cli-nascimento" type="date" /></label>
+                  <label class="w-meio">Profissão<input id="cli-profissao" maxlength="30" /></label>
+                  <label class="w-meio">Nome do pai<input id="cli-pai" maxlength="60" /></label>
+                  <label class="w-meio">Nome da mãe<input id="cli-mae" maxlength="60" /></label>
+                </div>
+                <div class="cond-form-grid">
+                  <label class="w-meio">Contato<input id="cli-contato" maxlength="35" /></label>
+                  <label class="w-fone">Celular<input id="cli-celular" maxlength="15" /></label>
+                  <label class="w-fone">Residencial<input id="cli-residencial" maxlength="15" /></label>
+                  <label class="w-fone">Comercial<input id="cli-comercial" maxlength="15" /></label>
+                  <label class="w-meio">E-mail<input id="cli-email" maxlength="70" /></label>
+                  <label class="w-meio">E-mail da NF-e<input id="cli-email-nfe" maxlength="70" /></label>
+                </div>
+                <h3 class="cli-sec">Outros endereços</h3>
+                <p class="hint">Cobrança e entrega, além do endereço principal.</p>
+                <div id="cli-ends"></div>
+                <button type="button" class="btn small" id="cli-add-end">Adicionar endereço</button>
+                <h3 class="cli-sec">Outros contatos</h3>
+                <div id="cli-contatos"></div>
+                <button type="button" class="btn small" id="cli-add-contato">Adicionar contato</button>
+                <h3 class="cli-sec">Referências</h3>
+                <div id="cli-refs"></div>
+                <button type="button" class="btn small" id="cli-add-ref">Adicionar referência</button>
+                <div class="banco-actions cli-salvar-acoes">
+                  <button type="button" class="btn" id="cli-cancelar">Cancelar</button>
+                  <button type="button" class="btn primary" id="cli-salvar">Salvar</button>
+                </div>
+                <p class="hint" id="cli-msg"></p>
+              </form>
+            </section>
+          </div>
+        </div>
+
         <div id="page-condicionais" class="page" hidden>
           <div class="cond-split" id="cond-split">
             <section class="cond-col cond-col-lista">
@@ -509,52 +685,75 @@
               </div>
               <div id="cond-novo" class="cond-form" hidden>
                 <div class="cond-form-head">
-                  <h3>Novo condicional</h3>
+                  <h3 id="cond-form-titulo">Novo condicional</h3>
                   <button type="button" class="btn small" id="cond-cancelar">Fechar</button>
                 </div>
                 <div class="cond-form-grid">
-                  <label class="full">Cliente
-                    <input id="cond-cliente" type="search" placeholder="Nome do cliente" autocomplete="off" />
+                  <label class="full cond-combo" data-cond-combo>Cliente
+                    <input id="cond-cliente" type="search" placeholder="Digite o nome do cliente" autocomplete="off" enterkeyhint="search" />
+                    <div id="cond-cliente-lista" class="cond-combo-list" hidden></div>
                   </label>
                   <p class="hint full" id="cond-cliente-escolhido">Nenhum cliente selecionado.</p>
-                  <div id="cond-cliente-lista" class="full cond-sugestoes"></div>
-                  <label>Vendedor
+                  <label class="w-sel">Vendedor
                     <select id="cond-vendedor"></select>
                   </label>
-                  <label>Validade
+                  <label class="w-data">Validade
                     <input id="cond-validade" type="date" />
                   </label>
-                  <label class="full">Situação
+                  <label class="w-sel">Situação
                     <select id="cond-lanc-status"></select>
                   </label>
-                  <label class="full">Forma de pagamento
+                  <label class="w-sel">Forma de pagamento
                     <select id="cond-pagamento"></select>
                   </label>
                   <label class="full">Observação
                     <input id="cond-obs" maxlength="300" placeholder="Opcional" />
                   </label>
-                  <label class="full">Peça
-                    <span class="cond-peca-row">
-                      <input id="cond-peca" type="search" placeholder="Nome, identificador, código, barras ou referência" autocomplete="off" />
-                      <button type="button" id="btn-scan-cond-peca" class="btn icon-cam" title="Ler código de barras" aria-label="Ler código de barras">
-                        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
-                      </button>
-                    </span>
+                  <label class="w-money">Frete
+                    <input id="cond-frete" inputmode="decimal" placeholder="0,00" />
                   </label>
-                  <p class="hint full" id="cond-peca-estoque"></p>
-                  <div id="cond-peca-lista" class="full cond-sugestoes"></div>
-                  <label>Quantidade
-                    <input id="cond-qtd" type="number" min="0.001" step="1" value="1" />
+                  <label class="w-money">Desconto
+                    <input id="cond-desc-ped" inputmode="decimal" placeholder="0,00" />
                   </label>
-                  <label>Preço
-                    <input id="cond-preco" type="number" min="0.01" step="0.01" placeholder="0,00" />
+                  <label class="w-money">Acréscimo
+                    <input id="cond-acres-ped" inputmode="decimal" placeholder="0,00" />
                   </label>
+                  <div class="full cond-grade-head">
+                    <h3>Itens</h3>
+                    <button type="button" class="btn primary" id="cond-abrir-item">Incluir</button>
+                  </div>
+                  <div class="full cond-grade-wrap">
+                    <table class="cond-grade">
+                      <thead>
+                        <tr>
+                          <th>Item</th>
+                          <th class="num">Qtd</th>
+                          <th class="num">Unitário</th>
+                          <th class="num">Desconto</th>
+                          <th class="num">Acréscimo</th>
+                          <th class="num">Total</th>
+                          <th></th>
+                        </tr>
+                      </thead>
+                      <tbody id="cond-novos-itens"></tbody>
+                      <tfoot id="cond-novos-total" hidden>
+                        <tr>
+                          <td colspan="5">Peças</td>
+                          <td class="num" id="cond-grade-pecas"></td>
+                          <td></td>
+                        </tr>
+                        <tr>
+                          <td colspan="5">Total do condicional</td>
+                          <td class="num" id="cond-grade-total"></td>
+                          <td></td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
                   <div class="banco-actions full">
-                    <button type="button" class="btn" id="cond-add-peca">Incluir peça</button>
                     <button type="button" class="btn primary" id="cond-salvar">Lançar condicional</button>
                   </div>
                   <p class="hint full" id="cond-form-msg"></p>
-                  <div id="cond-novos-itens" class="full"></div>
                 </div>
               </div>
               <div id="cond-detalhe" class="cond-form" hidden></div>
@@ -658,6 +857,14 @@
               </label>
               <p class="hint">Marcado, essas contas saem da aba Financeiro e do recebido do gráfico.</p>
             </div>
+            <div class="pref-card">
+              <h3>Produtos</h3>
+              <label class="pref-check">
+                <input type="checkbox" id="cfg-somente-estoque" />
+                <span>No condicional, pesquisar somente produtos com quantidade no estoque</span>
+              </label>
+              <p class="hint">Marcado, a busca do condicional só traz produto com quantidade maior que zero.</p>
+            </div>
           </div>
           <div id="cfg-tab-tributos" class="cfg-tab" hidden>
             <div id="cfg-tributos-host"></div>
@@ -724,6 +931,7 @@
             <button type="button" data-page="dashboard" data-perfil="PADRAO" data-secao="resumo" id="nav-dash-padrao-mobile" hidden>Dashboard</button>
             <button type="button" data-page="dashboard" data-perfil="CONTADOR_ACESSA" data-secao="resumo" id="nav-dash-contador-mobile" hidden>Dashboard do contador</button>
             <button type="button" data-page="dashboard" data-perfil="MT_ENTRADAS" data-secao="resumo" id="nav-dash-entradas-mobile" hidden>Dashboard de entradas</button>
+            <button type="button" data-page="clientes" id="nav-clientes-mobile">Clientes</button>
             <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
@@ -741,6 +949,71 @@
         <span id="app-conexao-txt">Conectado ao servidor</span>
       </footer>
     </section>
+
+    <dialog id="dlg-cond-item" class="dlg">
+      <div class="dlg-card cond-item-dlg">
+        <header class="cond-item-dlg-head">
+          <button type="button" class="btn small" id="cond-item-voltar">Voltar</button>
+          <h3>Inserir item</h3>
+          <button type="button" class="btn small icon-btn" id="cond-item-fechar" aria-label="Fechar">×</button>
+        </header>
+        <div class="cond-combo" data-cond-combo>
+          <span class="cond-peca-row">
+            <input id="cond-peca" type="search" placeholder="Pesquise por descrição, código, referência ou código de barras..." autocomplete="off" enterkeyhint="search" />
+            <button type="button" id="btn-scan-cond-peca" class="btn icon-cam" title="Ler código de barras" aria-label="Ler código de barras">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7.2 10.1 5.8A1.4 1.4 0 0 1 11.25 5.2h1.5a1.4 1.4 0 0 1 1.15.6L15 7.2h3.1A2.1 2.1 0 0 1 20.2 9.3v8.1A2.1 2.1 0 0 1 18.1 19.5H5.9A2.1 2.1 0 0 1 3.8 17.4V9.3A2.1 2.1 0 0 1 5.9 7.2H9z" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round"/><circle cx="12" cy="13.1" r="3.05" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+            </button>
+          </span>
+          <div id="cond-peca-lista" class="cond-combo-list" hidden></div>
+        </div>
+        <p class="hint" id="cond-peca-estoque"></p>
+        <div class="cond-item-corpo">
+          <div class="cond-item-row">
+            <span>Quantidade</span>
+            <div class="cond-ajuste">
+              <label class="cond-money"><span class="cond-money-sig is-vazio" aria-hidden="true">R$</span><input id="cond-qtd" inputmode="decimal" value="1" /></label>
+              <span class="cond-ajuste-vazio" aria-hidden="true"></span>
+            </div>
+          </div>
+          <div class="cond-item-row">
+            <span>Valor unitário</span>
+            <div class="cond-ajuste">
+              <label class="cond-money"><span class="cond-money-sig">R$</span><input id="cond-preco" inputmode="decimal" placeholder="0,00" /></label>
+              <span class="cond-ajuste-vazio" aria-hidden="true"></span>
+            </div>
+          </div>
+          <div class="cond-item-row">
+            <span>Desconto</span>
+            <div class="cond-ajuste">
+              <label class="cond-money"><span class="cond-money-sig" id="cond-desc-sig">R$</span><input id="cond-desc" inputmode="decimal" placeholder="0,00" /></label>
+              <select id="cond-desc-modo" aria-label="Tipo de desconto">
+                <option value="R$">R$</option>
+                <option value="%">%</option>
+              </select>
+            </div>
+          </div>
+          <div class="cond-item-row">
+            <span>Acréscimo</span>
+            <div class="cond-ajuste">
+              <label class="cond-money"><span class="cond-money-sig" id="cond-acres-sig">R$</span><input id="cond-acres" inputmode="decimal" placeholder="0,00" /></label>
+              <select id="cond-acres-modo" aria-label="Tipo de acréscimo">
+                <option value="R$">R$</option>
+                <option value="%">%</option>
+              </select>
+            </div>
+          </div>
+          <div class="cond-item-row cond-item-total">
+            <span>Valor total</span>
+            <strong id="cond-item-total">R$ 0,00</strong>
+          </div>
+          <p class="hint" id="cond-item-msg"></p>
+        </div>
+        <div class="dlg-actions">
+          <button type="button" class="btn primary" id="cond-add-peca">Salvar item</button>
+          <button type="button" class="btn" id="cond-item-cancelar">Cancelar</button>
+        </div>
+      </div>
+    </dialog>
 
     <dialog id="dlg-condicional" class="dlg">
       <div class="dlg-card">
@@ -803,6 +1076,37 @@
       </div>
     </dialog>
 
+    <dialog id="dlg-cond-fim" class="dlg">
+      <div class="dlg-card msg-card">
+        <p id="dlg-cond-fim-text">Condicional salvo. Deseja gerar o PDF ou enviar no WhatsApp?</p>
+        <div class="dlg-actions dlg-acoes-3">
+          <button type="button" class="btn" id="cond-fim-pdf">Gerar PDF</button>
+          <button type="button" class="btn" id="cond-fim-wa">WhatsApp</button>
+          <button type="button" class="btn" id="cond-fim-nao">Agora não</button>
+        </div>
+      </div>
+    </dialog>
+
+    <dialog id="dlg-historico" class="dlg">
+      <div class="dlg-card hist-card">
+        <div class="cond-form-head">
+          <h3 id="hist-titulo">Histórico</h3>
+          <button type="button" class="btn small" id="hist-fechar">Fechar</button>
+        </div>
+        <p class="hint" id="hist-sub"></p>
+        <div class="hist-periodo">
+          <label>De<input id="hist-inicio" type="date" /></label>
+          <label>Até<input id="hist-fim" type="date" /></label>
+          <button type="button" class="btn small" id="hist-buscar">Buscar</button>
+        </div>
+        <div id="hist-corpo" class="hist-corpo"></div>
+        <div class="cond-acoes">
+          <button type="button" class="btn" id="hist-pdf">Gerar PDF</button>
+          <button type="button" class="btn" id="hist-wa">WhatsApp</button>
+        </div>
+      </div>
+    </dialog>
+
     <dialog id="dlg-danfe" class="dlg dlg-danfe">
       <div class="dlg-card dlg-danfe-card">
         <div class="dlg-danfe-bar">
@@ -842,9 +1146,10 @@
   <script src="vendor/zxing-browser.min.js?v=240"></script>
   <script src="importacao-nfe.js?v=242"></script>
   <script src="compras.js?v=240"></script>
-  <script src="condicionais.js?v=241"></script>
+  <script src="condicionais.js?v=247"></script>
+  <script src="clientes.js?v=3"></script>
   <script src="contador.js?v=241"></script>
-  <script src="dashboard.js?v=257"></script>
-  <script src="app.js?v=257"></script>
+  <script src="dashboard.js?v=259"></script>
+  <script src="app.js?v=263"></script>
 </body>
 </html>
