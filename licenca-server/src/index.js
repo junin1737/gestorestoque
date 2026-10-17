@@ -1593,26 +1593,97 @@ async function rotaAdmin(request, env, url) {
 }
 
 const NOME_ATUALIZACAO = /^gestorestoque-online-\d+\.\d+\.\d+-online\.\d+\.(exe|apk)$/;
+const GIT_PKG = 'https://raw.githubusercontent.com/junin1737/gestorestoque/online/package.json';
+const GIT_RELEASE = 'https://api.github.com/repos/junin1737/gestorestoque/releases/tags/v';
 
 function arquivoAtualizacao(origem, nome) {
   if (!nome || !NOME_ATUALIZACAO.test(nome)) return null;
   return { nome, url: `${origem}/atualizacao/arquivo/${nome}` };
 }
 
+function numeroVersao(parte) {
+  const s = String(parte || '');
+  let v = 0;
+  let i = 0;
+  while (i < s.length && s[i] >= '0' && s[i] <= '9') {
+    v = v * 10 + (s.charCodeAt(i) - 48);
+    i += 1;
+  }
+  return v;
+}
+
+/** "1.2.160-online.1" é maior que "1.2.140-online.1". */
+function cmpVersao(a, b) {
+  const pa = String(a || '').replace(/^v/i, '').split('.');
+  const pb = String(b || '').replace(/^v/i, '').split('.');
+  const n = Math.max(pa.length, pb.length);
+  for (let i = 0; i < n; i += 1) {
+    const da = numeroVersao(pa[i]);
+    const db = numeroVersao(pb[i]);
+    if (da !== db) return da > db ? 1 : -1;
+  }
+  return 0;
+}
+
+async function releaseGithub(versao) {
+  const res = await fetch(`${GIT_RELEASE}${encodeURIComponent(versao)}`, {
+    headers: { 'User-Agent': 'gestor-licenca', Accept: 'application/vnd.github+json' },
+  });
+  if (!res.ok) return null;
+  const data = await res.json();
+  const assets = Array.isArray(data.assets) ? data.assets : [];
+  const achar = (ext) => assets.find((item) => String(item.name || '').toLowerCase().endsWith(ext));
+  const apk = achar('.apk');
+  const exe = achar('.exe');
+  if (!apk?.browser_download_url) return null;
+  return {
+    versao,
+    notas: String(data.body || ''),
+    exe: exe?.browser_download_url ? { nome: exe.name, url: exe.browser_download_url } : null,
+    apk: { nome: apk.name, url: apk.browser_download_url },
+  };
+}
+
+/** A nuvem pode ficar para trás quando o CI não tem o token da Cloudflare. */
+async function atualizacaoMaisNova(publicada) {
+  try {
+    const res = await fetch(GIT_PKG, { headers: { 'User-Agent': 'gestor-licenca', Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const pkg = await res.json();
+    const versao = String(pkg.version || '').replace(/^v/i, '').trim();
+    if (!versao || cmpVersao(versao, publicada) <= 0) return null;
+    return await releaseGithub(versao);
+  } catch {
+    return null;
+  }
+}
+
 async function atualizacaoManifesto(request, env) {
   if (!env.ATUALIZACAO) return json({ ok: false, error: 'Atualização ainda não configurada.' }, 503);
   const obj = await env.ATUALIZACAO.get('online/manifest.json');
-  if (!obj) return json({ ok: true, versao: '', notas: '', exe: null, apk: null });
-  let manifesto;
-  try {
-    manifesto = JSON.parse(await obj.text());
-  } catch {
-    return json({ ok: false, error: 'Manifesto de atualização inválido.' }, 500);
+  let manifesto = {};
+  if (obj) {
+    try {
+      manifesto = JSON.parse(await obj.text());
+    } catch {
+      return json({ ok: false, error: 'Manifesto de atualização inválido.' }, 500);
+    }
+  }
+  const versaoNuvem = String(manifesto.versao || '').replace(/^v/i, '');
+  const git = await atualizacaoMaisNova(versaoNuvem);
+  if (git && cmpVersao(git.versao, versaoNuvem) > 0) {
+    return json({
+      ok: true,
+      versao: git.versao,
+      notas: git.notas,
+      exe: git.exe,
+      apk: git.apk,
+    });
   }
   const origem = new URL(request.url).origin;
   return json({
     ok: true,
-    versao: String(manifesto.versao || '').replace(/^v/i, ''),
+    versao: versaoNuvem,
     notas: String(manifesto.notas || ''),
     exe: arquivoAtualizacao(origem, manifesto.exe),
     apk: arquivoAtualizacao(origem, manifesto.apk),
