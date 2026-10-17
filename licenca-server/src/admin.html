@@ -1024,12 +1024,12 @@ async function onLinhaCliente(e) {
     const solic = tr.classList.contains('solicitacao');
     if (status === 'bloqueado' && !confirm(solic
       ? `Recusar o cadastro de ${nome}? O Gestor continua bloqueado.`
-      : `Bloquear ${nome}? O Gestor deste cliente para em até 2 minutos.`)) return;
+      : `Bloquear ${nome}? O Gestor continua liberado por 20 minutos e bloqueia depois disso.`)) return;
     btn.disabled = true;
     const r = await api(rotaCliente({ cnpj: tr.dataset.cnpj, app: tr.dataset.app }), { method: 'PUT', body: { status } });
     if (!r.ok) toast(r.error || 'Falha.', true);
     else if (solic) toast(status === 'liberado' ? `${nome} aprovado. O Gestor libera em até 1 minuto.` : `Cadastro de ${nome} recusado.`);
-    else toast(status === 'liberado' ? `${nome} liberado. O Gestor libera em até 1 minuto.` : `${nome} bloqueado. O Gestor para em até 2 minutos.`);
+    else toast(status === 'liberado' ? `${nome} liberado. O Gestor libera em até 1 minuto.` : `${nome} bloqueado. O Gestor para em 20 minutos.`);
     carregar();
     return;
   }
@@ -1306,7 +1306,8 @@ $('#d-salvar').addEventListener('click', async () => {
     const r = await api(rotaCliente(st.atual), { method: 'PUT', body });
     if (!r.ok) { toast(r.error || 'Falha ao salvar.', true); return; }
     $('#dlg-cliente').close();
-    toast('Salvo com sucesso.');
+    const bloqueouAgora = body.status === 'bloqueado' && st.atualCliente?.status === 'liberado';
+    toast(bloqueouAgora ? 'Salvo. O bloqueio chega ao Gestor em 20 minutos.' : 'Salvo com sucesso.');
     irPara('clientes');
   } catch (err) {
     toast(err.message || 'Falha ao salvar.', true);

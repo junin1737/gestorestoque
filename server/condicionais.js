@@ -505,6 +505,11 @@ function descontoExibido(doc) {
   return itens + num(doc.desconto_geral);
 }
 
+function acrescimoExibido(doc) {
+  const itens = (doc.itens || []).reduce((s, it) => s + num(it.acrescimo), 0);
+  return itens + num(doc.acrescimo_geral);
+}
+
 async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus, idParcela, frete, desconto, acrescimo }) {
   const itensOk = (itens || []).map((it) => ({
     id: num(it.id_identificador || it.id),
@@ -910,10 +915,10 @@ function htmlPdf(doc, empresa, opcoes = {}) {
   ${corpo}
   <p class="total">
     <strong>Peças: ${fmt(itens.reduce((s, it) => s + num(it.qtd), 0))}</strong><br>
-    ${(num(doc.frete) || descontoExibido(doc) || num(doc.acrescimo_geral)) && num(doc.subtotal) ? `<span>Subtotal: ${money(itens.reduce((s, it) => s + num(it.total), 0))}</span><br>` : ''}
+    ${(num(doc.frete) || descontoExibido(doc) || acrescimoExibido(doc)) && num(doc.subtotal) ? `<span>Subtotal: ${money(itens.reduce((s, it) => s + Math.max(0, num(it.total) - num(it.acrescimo)), 0))}</span><br>` : ''}
     ${num(doc.frete) ? `<span>Frete: ${money(doc.frete)}</span><br>` : ''}
     ${descontoExibido(doc) ? `<span>Desconto: ${money(descontoExibido(doc))}</span><br>` : ''}
-    ${num(doc.acrescimo_geral) ? `<span>Acréscimo: ${money(doc.acrescimo_geral)}</span><br>` : ''}
+    ${acrescimoExibido(doc) ? `<span>Acréscimo: ${money(acrescimoExibido(doc))}</span><br>` : ''}
     <strong>Valor total: ${money(doc.total || totalDocumento(doc))}</strong>
   </p>
   <div class="assina"><div class="linha"></div><span>Assinatura do cliente</span></div>
@@ -1006,7 +1011,7 @@ function textoWhatsapp(doc) {
     ...linhas,
     num(doc.frete) ? `Frete: ${money(doc.frete)}` : '',
     descontoExibido(doc) ? `Desconto: ${money(descontoExibido(doc))}` : '',
-    num(doc.acrescimo_geral) ? `Acréscimo: ${money(doc.acrescimo_geral)}` : '',
+    acrescimoExibido(doc) ? `Acréscimo: ${money(acrescimoExibido(doc))}` : '',
     `Total: ${money(doc.total)}`,
     doc.pagamento ? `Pagamento: ${doc.pagamento}` : '',
   ].filter(Boolean).join('\n');

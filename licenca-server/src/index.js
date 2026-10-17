@@ -103,9 +103,18 @@ function diaBrasilia(dias = 0) {
   return d.toISOString().slice(0, 10);
 }
 
+const ESPERA_BLOQUEIO_MS = 20 * 60 * 1000;
+
+/** Bloqueio marcado no painel só vale 20 minutos depois, para a loja terminar o que está fazendo. */
+function bloqueioAdiado(cli, agora) {
+  if (cli.status !== 'bloqueado' || !cli.bloqueado_em) return false;
+  const em = new Date(cli.bloqueado_em).getTime();
+  return Number.isFinite(em) && agora.getTime() < em + ESPERA_BLOQUEIO_MS;
+}
+
 function situacaoCliente(cli, agora = new Date()) {
   if (cli.status === 'pendente') return { status: 'pendente', mensagem: cli.mensagem || MSG_PENDENTE };
-  if (cli.status !== 'liberado') return { status: 'bloqueado', mensagem: cli.mensagem || MSG_BLOQUEADO };
+  if (cli.status !== 'liberado' && !bloqueioAdiado(cli, agora)) return { status: 'bloqueado', mensagem: cli.mensagem || MSG_BLOQUEADO };
   if (cli.pago_ate && fimDoDiaBrasilia(cli.pago_ate) < agora) {
     const [a, m, d] = cli.pago_ate.split('-');
     const padrao = cli.em_teste
@@ -760,6 +769,8 @@ async function atualizarCliente(cnpj, app, request, env) {
   } catch (e) {
     return json({ ok: false, error: e.message }, 400);
   }
+  if (campos.status === 'bloqueado' && cli.status === 'liberado') campos.bloqueado_em = agoraIso();
+  else if (campos.status && campos.status !== 'bloqueado') campos.bloqueado_em = null;
   const chaves = Object.keys(campos);
   if (!chaves.length) return detalheCliente(cnpj, app, env);
   await env.DB.prepare(
@@ -768,7 +779,7 @@ async function atualizarCliente(cnpj, app, request, env) {
   if (campos.status && campos.status !== cli.status) {
     await registrarEvento(env, cnpj, app, 'status', `${cli.status} → ${campos.status}`);
   }
-  const outros = chaves.filter((k) => k !== 'status' && (campos[k] ?? null) !== (cli[k] ?? null));
+  const outros = chaves.filter((k) => k !== 'status' && k !== 'bloqueado_em' && (campos[k] ?? null) !== (cli[k] ?? null));
   if (outros.length) {
     const ROTULOS = { revenda_id: 'revenda', pago_ate: 'pago até', em_teste: 'teste grátis' };
     const valor = (k) => {

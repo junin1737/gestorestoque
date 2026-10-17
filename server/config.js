@@ -184,6 +184,10 @@ function acessoDashboard(v) {
   return v === true || v === 'true' || v === 1;
 }
 
+function acessoRecusado(v) {
+  return v === false || v === 'false' || v === 0 || v === '0';
+}
+
 function perfisDashboard(u) {
   return CHAVES_DASHBOARD
     .filter((k) => acessoDashboard(u?.permissoes?.[k]?.acesso))
@@ -257,8 +261,8 @@ function loadUsersConfig(appCfg) {
     if (u.supervisor) {
       const permissoes = comDashboards(comAcessoOnline(u, fullPermissoes()), u);
       permissoes.dashboard_padrao = { acesso: true };
-      if (u.permissoes?.condicionais?.acesso === false) permissoes.condicionais = { acesso: false };
-      if (u.permissoes?.clientes?.acesso === false) permissoes.clientes = { acesso: false };
+      if (acessoRecusado(u.permissoes?.condicionais?.acesso)) permissoes.condicionais = { acesso: false };
+      if (acessoRecusado(u.permissoes?.clientes?.acesso)) permissoes.clientes = { acesso: false };
       return {
         ...u,
         id: 0,
@@ -309,8 +313,8 @@ function permissoesMtEntradas(u) {
     dashboard_entradas: { acesso: true },
   });
   const out = comAcessoOnline(u, comDashboards(base, { permissoes: base }));
-  if (u?.permissoes?.condicionais?.acesso === false) out.condicionais = { acesso: false };
-  if (u?.permissoes?.clientes?.acesso === false) out.clientes = { acesso: false };
+  if (acessoRecusado(u?.permissoes?.condicionais?.acesso)) out.condicionais = { acesso: false };
+  if (acessoRecusado(u?.permissoes?.clientes?.acesso)) out.clientes = { acesso: false };
   return out;
 }
 
@@ -371,6 +375,7 @@ module.exports = {
   comDashboards,
   perfisDashboard,
   ensureModulos,
+  acessoRecusado,
   fullPermissoes,
   addModulo,
 };

@@ -2966,8 +2966,6 @@ function permOptions(list, current) {
 }
 
 $('#btn-salvar-usuarios').addEventListener('click', async () => {
-  const senhaSup = await showPrompt({ message: 'Confirme a senha do supervisor para salvar:', password: true });
-  if (senhaSup == null) return;
   const cardAberto = $('#user-drawer-body .user-card');
   const usuarios = state.usuarios.map((u, idx) => {
     const card = idx === usuarioEditando ? cardAberto : null;
@@ -3030,12 +3028,21 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     if (senha) next.senha = senha;
     return next;
   });
+  const senhaSup = await showPrompt({ message: 'Confirme a senha do supervisor para salvar:', password: true });
+  if (senhaSup == null) return;
   const res = await api('/usuarios', {
     method: 'POST',
     body: { supervisorSenha: senhaSup, usuarios },
   });
   if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
   state.usuarios = res.usuarios;
+  const eu = (res.usuarios || []).find((u) => Number(u.id) === Number(state.usuario?.id));
+  if (eu?.permissoes && state.usuario) {
+    state.usuario.permissoes = eu.permissoes;
+    const showCond = can('condicionais', 'acesso');
+    if ($('#nav-condicionais')) $('#nav-condicionais').hidden = !showCond;
+    if ($('#nav-condicionais-mobile')) $('#nav-condicionais-mobile').hidden = !showCond;
+  }
   renderUsuarios();
   showToast('Usuários atualizados.');
 });

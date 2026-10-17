@@ -17,6 +17,7 @@ const {
   CHAVES_DASHBOARD,
   comDashboards,
   perfisDashboard,
+  acessoRecusado,
 } = require('./config');
 const {
   withDb,
@@ -43,7 +44,7 @@ const {
   hasAuditTable,
 } = require('./audit');
 const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora } = require('./datetime');
-const { resolveOrigem, somenteServidorLocal, isServidorLocal } = require('./origem');
+const { resolveOrigem, somenteServidorLocal, isServidorLocal, viaTunel } = require('./origem');
 const licenca = require('./licenca');
 const auth = require('./auth');
 const { gerarHashSenha } = require('./senha');
@@ -75,6 +76,14 @@ function temSenha(u) {
 /** Lista da tela de login: sem permissões. */
 function usuarioLogin(u) {
   return { id: u.id, nome: u.nome, supervisor: !!u.supervisor, temSenha: temSenha(u) };
+}
+
+/** Pela internet o combo só mostra quem tem Acesso online. No computador da loja a lista continua completa. */
+function listaLogin(usuarios, req) {
+  const visiveis = viaTunel(req)
+    ? usuarios.filter((u) => u.supervisor || u.permissoes?.online?.acesso === true || u.acessoOnline === true)
+    : usuarios;
+  return visiveis.map(usuarioLogin);
 }
 
 router.get('/health', (_req, res) => {
@@ -343,16 +352,16 @@ router.get('/funcionarios', async (req, res) => {
     }
     if (changed) saveUsersConfig(appCfg, usersCfg);
 
-    // Mesma lista na loja e pela internet: dá para achar o nome no combo.
-    // Quem não tem "Acesso online" continua barrado no POST /login.
-    const list = loadUsersConfig(appCfg).usuarios
-      .filter((u) => u.supervisor || u.mtEntradas || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id)))
-      .map(usuarioLogin);
+    const list = listaLogin(
+      loadUsersConfig(appCfg).usuarios
+        .filter((u) => u.supervisor || u.mtEntradas || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id))),
+      req
+    );
 
     res.json({ ok: true, funcionarios: list });
   } catch (err) {
     const appCfg = loadAppConfig();
-    const list = loadUsersConfig(appCfg).usuarios.map(usuarioLogin);
+    const list = listaLogin(loadUsersConfig(appCfg).usuarios, req);
     res.json({ ok: false, error: err.message, funcionarios: list });
   }
 });
@@ -400,8 +409,8 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
         permissoes: (() => {
           const permissoes = comDashboards(fullPermissoes(), origem);
           permissoes.dashboard_padrao = { acesso: true };
-          if (origem?.permissoes?.condicionais?.acesso === false) permissoes.condicionais = { acesso: false };
-          if (origem?.permissoes?.clientes?.acesso === false) permissoes.clientes = { acesso: false };
+          if (acessoRecusado(origem?.permissoes?.condicionais?.acesso)) permissoes.condicionais = { acesso: false };
+          if (acessoRecusado(origem?.permissoes?.clientes?.acesso)) permissoes.clientes = { acesso: false };
           return permissoes;
         })(),
       };
@@ -410,11 +419,11 @@ router.post('/usuarios', somenteSupervisor, async (req, res) => {
       const enviado = enviados.get(Number(prev.id));
       const origem = enviado?.permissoes ? { permissoes: enviado.permissoes } : prev;
       const permissoes = comDashboards(prev.permissoes, origem);
-      if (origem?.permissoes?.condicionais && typeof origem.permissoes.condicionais.acesso === 'boolean') {
-        permissoes.condicionais = { acesso: origem.permissoes.condicionais.acesso };
+      if (origem?.permissoes?.condicionais && 'acesso' in origem.permissoes.condicionais) {
+        permissoes.condicionais = { acesso: !acessoRecusado(origem.permissoes.condicionais.acesso) && (origem.permissoes.condicionais.acesso === true || origem.permissoes.condicionais.acesso === 'true' || origem.permissoes.condicionais.acesso === 1) };
       }
-      if (origem?.permissoes?.clientes && typeof origem.permissoes.clientes.acesso === 'boolean') {
-        permissoes.clientes = { acesso: origem.permissoes.clientes.acesso };
+      if (origem?.permissoes?.clientes && 'acesso' in origem.permissoes.clientes) {
+        permissoes.clientes = { acesso: !acessoRecusado(origem.permissoes.clientes.acesso) };
       }
       return { ...prev, acessoOnline: onlinePedido(prev), permissoes };
     }

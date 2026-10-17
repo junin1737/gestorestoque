@@ -2274,7 +2274,17 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 .cond-form-grid > .w-sel { flex: 0 1 13.5rem; max-width: 15rem; }
 .cond-form-grid > .w-fone { flex: 0 1 11rem; max-width: 12rem; }
 .cond-form-grid > .w-data { flex: 0 1 11rem; max-width: 12rem; }
-.cond-form-grid > .w-money { flex: 0 1 9rem; max-width: 10rem; }
+.cond-form-grid > .w-money { flex: 0 1 9rem; max-width: 10rem; position: relative; margin-bottom: 1.7rem; }
+.cond-parte {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 0.12rem);
+  font-size: 0.68rem;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--muted);
+}
 .cond-form-grid > .w-cidade,
 .cond-form-grid > .w-meio { flex: 1 1 14rem; max-width: 22rem; }
 .cond-form-grid label,

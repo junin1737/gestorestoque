@@ -23,6 +23,11 @@ const Condicionais = (() => {
     return itens + Number(doc?.desconto_geral || 0);
   }
 
+  function acrescimoDocumento(doc) {
+    const itens = (doc?.itens || []).reduce((s, it) => s + Number(it.acrescimo || 0), 0);
+    return itens + Number(doc?.acrescimo_geral || 0);
+  }
+
   function api(path, options = {}) {
     if (deps.api) return deps.api(path, options);
     return Promise.resolve({ ok: false, error: 'Painel ainda não iniciou.' });
@@ -246,7 +251,7 @@ const Condicionais = (() => {
         ${itens || '<p class="hint">Sem peças.</p>'}
         ${Number(doc.frete) > 0 ? `<p><strong>Frete:</strong> ${money(doc.frete)}</p>` : ''}
         ${descontoDocumento(doc) > 0 ? `<p><strong>Desconto:</strong> ${money(descontoDocumento(doc))}</p>` : ''}
-        ${Number(doc.acrescimo_geral) > 0 ? `<p><strong>Acréscimo:</strong> ${money(doc.acrescimo_geral)}</p>` : ''}
+        ${acrescimoDocumento(doc) > 0 ? `<p><strong>Acréscimo:</strong> ${money(acrescimoDocumento(doc))}</p>` : ''}
         <p><strong>Total:</strong> ${money(doc.total)}</p>
       </div>`;
     ligarAcoes(box);
@@ -382,6 +387,7 @@ const Condicionais = (() => {
   let itensNovos = [];
   let editandoId = 0;
   let descontoExtra = 0;
+  let acrescimoExtra = 0;
   let pecaAtual = null;
 
   function textoEstoque(p) {
@@ -413,16 +419,43 @@ const Condicionais = (() => {
     return itensNovos.reduce((s, it) => s + Number(it.desconto || 0), 0);
   }
 
+  function somaAcrescimoItens() {
+    return itensNovos.reduce((s, it) => s + Number(it.acrescimo || 0), 0);
+  }
+
+  function textoParte(itens, geral) {
+    return `Itens ${money(itens)}<br>Geral ${money(geral)}`;
+  }
+
+  function escreverPartes() {
+    const desc = $('#cond-desc-partes');
+    const acres = $('#cond-acres-partes');
+    if (desc) desc.innerHTML = textoParte(somaDescontoItens(), descontoExtra);
+    if (acres) acres.innerHTML = textoParte(somaAcrescimoItens(), acrescimoExtra);
+  }
+
   function escreverCampoDesconto() {
     const el = $('#cond-desc-ped');
-    if (!el || document.activeElement === el) return;
-    const valor = somaDescontoItens() + descontoExtra;
-    el.value = valor > 0 ? campoMoeda(valor) : '';
+    if (el && document.activeElement !== el) {
+      const valor = somaDescontoItens() + descontoExtra;
+      el.value = valor > 0 ? campoMoeda(valor) : '';
+    }
+    escreverPartes();
+  }
+
+  function escreverCampoAcrescimo() {
+    const el = $('#cond-acres-ped');
+    if (el && document.activeElement !== el) {
+      const valor = somaAcrescimoItens() + acrescimoExtra;
+      el.value = valor > 0 ? campoMoeda(valor) : '';
+    }
+    escreverPartes();
   }
 
   function limparLancamento() {
     editandoId = 0;
     descontoExtra = 0;
+    acrescimoExtra = 0;
     marcarCliente(0, '');
     itensNovos = [];
     if ($('#cond-cliente')) $('#cond-cliente').value = '';
@@ -457,7 +490,7 @@ const Condicionais = (() => {
     if ($('#cond-obs')) $('#cond-obs').value = doc.obs || '';
     if ($('#cond-frete')) $('#cond-frete').value = Number(doc.frete) ? campoMoeda(doc.frete) : '';
     descontoExtra = Number(doc.desconto_geral || 0);
-    if ($('#cond-acres-ped')) $('#cond-acres-ped').value = Number(doc.acrescimo_geral) ? campoMoeda(doc.acrescimo_geral) : '';
+    acrescimoExtra = Number(doc.acrescimo_geral || 0);
     itensNovos = (doc.itens || []).map((it) => ({
       id_item: it.id,
       id_identificador: it.id_identificador,
@@ -724,9 +757,11 @@ const Condicionais = (() => {
       box.innerHTML = '<tr><td class="cond-grade-vazio" colspan="7">Nenhum item incluído. Clique em Incluir para pesquisar a peça.</td></tr>';
       if (rodape) rodape.hidden = true;
       escreverCampoDesconto();
+      escreverCampoAcrescimo();
       return;
     }
     escreverCampoDesconto();
+    escreverCampoAcrescimo();
     const soma = totaisCabeca().total;
     const pecas = itensNovos.reduce((s, it) => s + Number(it.qtd || 0), 0);
     box.innerHTML = itensNovos.map((it, i) => `
@@ -754,10 +789,9 @@ const Condicionais = (() => {
   function totaisCabeca() {
     const itens = itensNovos.reduce((s, it) => s + Number(it.total || 0), 0);
     const frete = Math.max(0, numTela($('#cond-frete')?.value));
-    const acrescimo = Math.max(0, numTela($('#cond-acres-ped')?.value));
     return {
-      itens, frete, desconto: descontoExtra, acrescimo,
-      total: Math.max(0, itens + frete - descontoExtra + acrescimo),
+      itens, frete, desconto: descontoExtra, acrescimo: acrescimoExtra,
+      total: Math.max(0, itens + frete - descontoExtra + acrescimoExtra),
     };
   }
 
@@ -846,17 +880,28 @@ const Condicionais = (() => {
     ['cond-qtd', 'cond-preco', 'cond-desc', 'cond-acres'].forEach((id) => {
       document.getElementById(id)?.addEventListener('input', atualizarTotalItem);
     });
-    ['cond-frete', 'cond-acres-ped'].forEach((id) => {
-      document.getElementById(id)?.addEventListener('input', () => renderItensNovos());
-    });
+    document.getElementById('cond-frete')?.addEventListener('input', () => renderItensNovos());
     $('#cond-desc-ped')?.addEventListener('input', () => {
       descontoExtra = Math.max(0, numTela($('#cond-desc-ped')?.value) - somaDescontoItens());
+      escreverPartes();
       const totalEl = $('#cond-grade-total');
       if (totalEl) totalEl.textContent = money(totaisCabeca().total);
     });
     $('#cond-desc-ped')?.addEventListener('blur', () => {
       descontoExtra = Math.max(0, numTela($('#cond-desc-ped')?.value) - somaDescontoItens());
       escreverCampoDesconto();
+      const totalEl = $('#cond-grade-total');
+      if (totalEl) totalEl.textContent = money(totaisCabeca().total);
+    });
+    $('#cond-acres-ped')?.addEventListener('input', () => {
+      acrescimoExtra = Math.max(0, numTela($('#cond-acres-ped')?.value) - somaAcrescimoItens());
+      escreverPartes();
+      const totalEl = $('#cond-grade-total');
+      if (totalEl) totalEl.textContent = money(totaisCabeca().total);
+    });
+    $('#cond-acres-ped')?.addEventListener('blur', () => {
+      acrescimoExtra = Math.max(0, numTela($('#cond-acres-ped')?.value) - somaAcrescimoItens());
+      escreverCampoAcrescimo();
       const totalEl = $('#cond-grade-total');
       if (totalEl) totalEl.textContent = money(totaisCabeca().total);
     });
