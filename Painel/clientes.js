@@ -7,6 +7,7 @@ const Clientes = (() => {
   let tipos = [];
   let tiposEnd = [];
   let abertoId = 0;
+  let editando = false;
   let timerBusca = null;
   let timerCidade = null;
 
@@ -273,7 +274,55 @@ const Clientes = (() => {
     if (msg) msg.textContent = '';
     preencherListas(cliente || {});
     mostrarPessoa();
-    $('#cli-nome')?.focus();
+    editando = !cliente?.id;
+    aplicarModo();
+    atualizarAvisoAniversario();
+    if (editando) $('#cli-nome')?.focus();
+  }
+
+  function aplicarModo() {
+    const form = $('#cli-form');
+    if (!form) return;
+    form.classList.toggle('is-leitura', !editando);
+    form.querySelectorAll('input, select, textarea').forEach((el) => {
+      el.disabled = !editando;
+    });
+    form.querySelectorAll('button').forEach((b) => {
+      if (['cli-fechar', 'cli-cancelar', 'cli-editar', 'cli-salvar'].includes(b.id)) return;
+      b.disabled = !editando;
+    });
+    const salvar = $('#cli-salvar');
+    const editar = $('#cli-editar');
+    if (salvar) salvar.disabled = !editando;
+    if (editar) editar.hidden = !abertoId || editando;
+  }
+
+  function classificarNascimento(iso) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso || ''))) {
+      return 'Informe o nascimento para classificar o aniversário.';
+    }
+    const mes = Number(iso.slice(5, 7));
+    const dia = Number(iso.slice(8, 10));
+    const hoje = new Date();
+    const alvo = new Date(hoje.getFullYear(), mes - 1, dia);
+    if (alvo.getMonth() !== mes - 1 || alvo.getDate() !== dia) return 'Data de nascimento inválida.';
+    const chave = (data) => data.getMonth() * 100 + data.getDate();
+    const doAniversario = (mes - 1) * 100 + dia;
+    const quando = `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}`;
+    if (doAniversario === chave(hoje)) return 'Aniversário hoje.';
+    const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+    inicio.setDate(inicio.getDate() - ((inicio.getDay() + 6) % 7));
+    for (let i = 0; i < 7; i += 1) {
+      const dt = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
+      if (chave(dt) === doAniversario) return `Aniversário nesta semana, dia ${quando}.`;
+    }
+    if (mes === hoje.getMonth() + 1) return `Aniversário neste mês, dia ${quando}.`;
+    return 'O aniversário não cai neste mês.';
+  }
+
+  function atualizarAvisoAniversario() {
+    const aviso = $('#cli-aniv-aviso');
+    if (aviso) aviso.textContent = classificarNascimento($('#cli-nascimento')?.value || '');
   }
 
   async function carregarOpcoes() {
@@ -461,20 +510,21 @@ const Clientes = (() => {
       lista.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível listar os aniversariantes.')}</p>`;
       return;
     }
-    const itens = res.itens || [];
-    if (!itens.length) {
-      lista.innerHTML = '<p class="empty">Nenhum cliente faz aniversário hoje.</p>';
-      return;
-    }
-    lista.innerHTML = itens.map((it) => `
+    const card = (it) => `
       <article class="cond-card">
-        <span class="cond-card-top"><strong>${esc(it.nome)}</strong></span>
+        <span class="cond-card-top"><strong>${esc(it.nome)}</strong><span class="cond-pill">${esc(it.quando || '')}</span></span>
         <span class="hint">${esc([it.apelido ? `Apelido ${it.apelido}` : 'Sem apelido', it.telefone || 'Sem celular'].join(' · '))}</span>
         <p class="hint">${esc(it.mensagem || '')}</p>
         <div class="cli-aniv-acoes">
           <button type="button" class="btn small primary" data-wa="${esc(it.telefone || '')}" data-msg="${esc(it.mensagem || '')}" ${it.telefone ? '' : 'disabled'}>Enviar WhatsApp</button>
         </div>
-      </article>`).join('');
+      </article>`;
+    const grupo = (titulo, itens) => `
+      <section class="cli-aniv-grupo">
+        <h3>${titulo}</h3>
+        <div class="cli-aniv-cards">${(itens || []).length ? itens.map(card).join('') : '<p class="empty">Nenhum cliente.</p>'}</div>
+      </section>`;
+    lista.innerHTML = `<div class="cli-aniv-grupos">${grupo('Hoje', res.dia)}${grupo('Esta semana', res.semana)}${grupo('Este mês', res.mes)}</div>`;
     lista.querySelectorAll('[data-wa]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const url = waLink(btn.dataset.wa, btn.dataset.msg);
@@ -493,7 +543,18 @@ const Clientes = (() => {
       abrirForm(null);
     });
     $('#cli-fechar')?.addEventListener('click', () => fecharForm());
-    $('#cli-cancelar')?.addEventListener('click', () => fecharForm());
+    $('#cli-cancelar')?.addEventListener('click', () => {
+      if (abertoId && editando) abrir(abertoId);
+      else fecharForm();
+    });
+    $('#cli-editar')?.addEventListener('click', () => {
+      editando = true;
+      aplicarModo();
+      atualizarAvisoAniversario();
+      $('#cli-nome')?.focus();
+    });
+    $('#cli-nascimento')?.addEventListener('input', atualizarAvisoAniversario);
+    $('#cli-nascimento')?.addEventListener('change', atualizarAvisoAniversario);
     prepararUfs();
     $('#cli-ends')?.addEventListener('change', (e) => {
       if (e.target?.dataset?.k !== 'uf') return;
@@ -545,7 +606,7 @@ const Clientes = (() => {
       }
       abertoId = res.id;
       if (res.cliente) abrirForm(res.cliente);
-      if (msg) msg.textContent = `Cliente ${res.id} gravado.`;
+      if (msg) msg.textContent = `Cliente ${res.id} gravado. ${classificarNascimento(res.cliente?.nascimento || $('#cli-nascimento')?.value || '')}`;
       listar();
     });
     ligarCidade($('#cli-cidade'));

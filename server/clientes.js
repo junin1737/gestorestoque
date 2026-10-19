@@ -22,6 +22,17 @@ function dataIso(v) {
   return s;
 }
 
+function dataCampo(v) {
+  if (!v) return '';
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    const mes = String(v.getMonth() + 1).padStart(2, '0');
+    const dia = String(v.getDate()).padStart(2, '0');
+    return `${v.getFullYear()}-${mes}-${dia}`;
+  }
+  const iso = String(v).match(/^(\d{4}-\d{2}-\d{2})/);
+  return iso ? iso[1] : '';
+}
+
 function cpf(v) {
   const d = digitos(v);
   if (!d) return null;
@@ -198,7 +209,7 @@ function mapDetalhe(r, enderecos, contatos, referencias) {
     uf: String(r.UF || '').trim(),
     cpf: cpfVal,
     identidade: String(r.IDENTIDADE || '').trim(),
-    nascimento: r.DT_NASCTO ? String(r.DT_NASCTO).slice(0, 10) : '',
+    nascimento: dataCampo(r.DT_NASCTO),
     profissao: String(r.PROFISSAO || '').trim(),
     nome_pai: String(r.NOME_PAI || '').trim(),
     nome_mae: String(r.NOME_MAE || '').trim(),
@@ -466,36 +477,72 @@ function textoAniversario(modelo, apelido, nome) {
   return String(modelo || lerMensagemAniversario(null)).replace(/\{apelido\}/gi, tratamento);
 }
 
+function chaveMesDia(data) {
+  return data.getMonth() * 100 + data.getDate();
+}
+
+function inicioSemana(hoje) {
+  const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
+  const distanciaSegunda = (inicio.getDay() + 6) % 7;
+  inicio.setDate(inicio.getDate() - distanciaSegunda);
+  return inicio;
+}
+
+function grupoAniversario(mes, dia, hoje = new Date()) {
+  const alvo = new Date(hoje.getFullYear(), mes - 1, dia);
+  if (alvo.getMonth() !== mes - 1 || alvo.getDate() !== dia) return '';
+  const chave = (mes - 1) * 100 + dia;
+  if (chave === chaveMesDia(hoje)) return 'dia';
+  const inicio = inicioSemana(hoje);
+  for (let i = 0; i < 7; i += 1) {
+    const dt = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
+    if (chaveMesDia(dt) === chave) return 'semana';
+  }
+  if (mes === hoje.getMonth() + 1) return 'mes';
+  return '';
+}
+
 async function aniversariantes() {
-  const agora = new Date();
+  const hoje = new Date();
   const modelo = lerMensagemAniversario(loadAppConfig());
+  const inicio = inicioSemana(hoje);
+  const meses = new Set([hoje.getMonth() + 1]);
+  for (let i = 0; i < 7; i += 1) {
+    const dt = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
+    meses.add(dt.getMonth() + 1);
+  }
+  const listaMeses = [...meses];
   return withDb(async (db) => {
     await ensureApelido(db);
     const rows = await query(db, `
       SELECT C.ID_CLIENTE, C.NOME, AP.APELIDO,
-             C.DDD_CELUL, C.FONE_CELUL, C.DDD_RESID, C.FONE_RESID, C.DDD_COMER, C.FONE_COMER
+             C.DDD_CELUL, C.FONE_CELUL, C.DDD_RESID, C.FONE_RESID, C.DDD_COMER, C.FONE_COMER,
+             EXTRACT(MONTH FROM PF.DT_NASCTO) AS MES, EXTRACT(DAY FROM PF.DT_NASCTO) AS DIA
       FROM TB_CLIENTE C
       JOIN TB_CLI_PF PF ON PF.ID_CLIENTE = C.ID_CLIENTE
       LEFT JOIN GESTOR_CLI_APELIDO AP ON AP.ID_CLIENTE = C.ID_CLIENTE
       WHERE UPPER(TRIM(COALESCE(C.STATUS, 'A'))) <> 'I'
         AND PF.DT_NASCTO IS NOT NULL
-        AND EXTRACT(MONTH FROM PF.DT_NASCTO) = ?
-        AND EXTRACT(DAY FROM PF.DT_NASCTO) = ?
-      ORDER BY C.NOME`, [agora.getMonth() + 1, agora.getDate()]);
-    return {
-      mensagem: modelo,
-      itens: rows.map((r) => {
-        const nome = String(r.NOME || '').trim();
-        const apelido = String(r.APELIDO || '').trim();
-        return {
-          id: Number(r.ID_CLIENTE),
-          nome,
-          apelido,
-          telefone: foneDe(r),
-          mensagem: textoAniversario(modelo, apelido, nome),
-        };
-      }),
-    };
+        AND EXTRACT(MONTH FROM PF.DT_NASCTO) IN (${listaMeses.map(() => '?').join(',')})
+      ORDER BY EXTRACT(MONTH FROM PF.DT_NASCTO), EXTRACT(DAY FROM PF.DT_NASCTO), C.NOME`, listaMeses);
+    const grupos = { dia: [], semana: [], mes: [] };
+    for (const r of rows) {
+      const grupo = grupoAniversario(Number(r.MES), Number(r.DIA), hoje);
+      if (!grupo) continue;
+      const nome = String(r.NOME || '').trim();
+      const apelido = String(r.APELIDO || '').trim();
+      const dia = String(Number(r.DIA)).padStart(2, '0');
+      const mes = String(Number(r.MES)).padStart(2, '0');
+      grupos[grupo].push({
+        id: Number(r.ID_CLIENTE),
+        nome,
+        apelido,
+        telefone: foneDe(r),
+        quando: `${dia}/${mes}`,
+        mensagem: textoAniversario(modelo, apelido, nome),
+      });
+    }
+    return grupos;
   });
 }
 

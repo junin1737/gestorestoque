@@ -2847,5 +2847,8 @@ html[data-theme="escuro"] .compras-row:hover {
 .pref-card.larga { max-width: 40rem; }
 .cli-aniv { flex: 1; min-height: 0; display: flex; }
 .cli-aniv .cond-col { flex: 1; }
+.cli-aniv-grupos { display: grid; gap: 1rem; }
+.cli-aniv-grupo h3 { margin: 0; font-size: 0.95rem; }
+.cli-aniv-cards { display: grid; gap: 0.55rem; }
 .cli-aniv-acoes { display: flex; justify-content: flex-end; margin-top: 0.35rem; }
 
