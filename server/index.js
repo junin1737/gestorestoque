@@ -236,6 +236,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     console.warn('Consultar compras:', err.message);
   }
   setTimeout(() => {
+    require('./condicionais').selarCondicionaisAntigos()
+      .then((n) => { if (n) console.log(`Condicionais protegidos para não irem no próximo lançamento do sistema: ${n}.`); })
+      .catch((err) => console.warn('Proteção dos condicionais:', err.message));
+  }, 8000).unref();
+  setTimeout(() => {
     require('./importacao-gravar').corrigirTransportadoresNf()
       .then((n) => { if (n) console.log(`Transportador corrigido em ${n} nota(s) de compra importada(s).`); })
       .catch((err) => console.warn('Correção de transportadores:', err.message));

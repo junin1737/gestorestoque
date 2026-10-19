@@ -1,5 +1,6 @@
 'use strict';
 
+const crypto = require('crypto');
 const {
   withDb, query, hasTable, columnExists, activeTargets, writeTargets, withTransaction, nextGenIdSincronizado, refreshTables,
 } = require('./db');
@@ -467,6 +468,199 @@ async function resolverStatus(db, idStatus) {
   return num(st[0].ID_STATUS);
 }
 
+/** 32 hex, no mesmo formato da CHAVE que o Clipp grava ao fechar o DAV. */
+function chaveClipp() {
+  return crypto.randomBytes(16).toString('hex').toUpperCase();
+}
+
+function textoVazio(v) {
+  return v == null || String(v).trim() === '';
+}
+
+async function colunasFechamento(db) {
+  const item = ['ID_SEQUENCIA_DAV', 'CHAVE', 'DT_LACTO', 'CASAS_QTD', 'CASAS_VLR', 'ST', 'ALIQUOTA', 'VLR_IPI', 'ID_AGRUPAMENTO', 'USOU_VALOR_PROMOCIONAL'];
+  const tem = {};
+  for (const nome of item) tem[nome] = await columnExists(db, 'TB_PED_VENDA_ITEM', nome);
+  tem.CHAVE_PEDIDO = await columnExists(db, 'TB_PEDIDO_VENDA', 'CHAVE');
+  return tem;
+}
+
+async function casasClipp(db) {
+  let qtd = '2';
+  let vlr = '2';
+  if (hasTable('TB_PARAMETRO')) {
+    const rows = await query(db, `
+      SELECT TRIM(INFORMACAO) AS I, TRIM(CONTEUDO) AS C
+      FROM TB_PARAMETRO
+      WHERE INFORMACAO IN ('CASAS_DEC_QTDE', 'CASAS_DEC_PRECO')`);
+    const map = new Map(rows.map((r) => [String(r.I || '').trim(), String(r.C || '').trim()]));
+    qtd = (map.get('CASAS_DEC_QTDE') || qtd).replace(/\D/g, '').slice(0, 1) || '2';
+    vlr = (map.get('CASAS_DEC_PRECO') || vlr).replace(/\D/g, '').slice(0, 1) || '2';
+  }
+  return { qtd, vlr };
+}
+
+async function tributoPadrao(tx, cache) {
+  if (cache.has(0)) return cache.get(0);
+  const rows = await query(tx, `
+    SELECT FIRST 1 TRIM(ST) AS ST, ALIQUOTA
+    FROM TB_PED_VENDA_ITEM
+    WHERE ST IS NOT NULL AND DT_LACTO IS NOT NULL
+    ORDER BY ID_ITEMPED DESC`);
+  const padrao = {
+    st: String(rows[0]?.ST || 'T').trim().slice(0, 1) || 'T',
+    aliquota: rows.length ? num(rows[0].ALIQUOTA) : 0,
+  };
+  cache.set(0, padrao);
+  return padrao;
+}
+
+async function tributoProduto(tx, idIdentificador, cache) {
+  const id = num(idIdentificador);
+  if (cache.has(id)) return cache.get(id);
+  const rows = await query(tx, `
+    SELECT FIRST 1 TRIM(ST) AS ST, ALIQUOTA
+    FROM TB_PED_VENDA_ITEM
+    WHERE ID_IDENTIFICADOR = ? AND ST IS NOT NULL AND DT_LACTO IS NOT NULL
+    ORDER BY ID_ITEMPED DESC`, [id]);
+  const padrao = await tributoPadrao(tx, cache);
+  const achou = String(rows[0]?.ST || '').trim();
+  const out = achou
+    ? { st: achou.slice(0, 1), aliquota: num(rows[0].ALIQUOTA) }
+    : padrao;
+  cache.set(id, out);
+  return out;
+}
+
+/**
+ * O Clipp só considera o item preso a este condicional quando a linha tem chave,
+ * sequência e data de lançamento. Sem isso, o próximo condicional aberto no sistema
+ * reaproveita estas peças.
+ */
+async function fecharItensNoPedido(tx, cols, casas, idPedido) {
+  const id = num(idPedido);
+  const itens = await query(tx, `
+    SELECT ID_ITEMPED, ID_IDENTIFICADOR
+    FROM TB_PED_VENDA_ITEM
+    WHERE ID_PEDIDO = ?
+    ORDER BY ID_ITEMPED`, [id]);
+  if (!itens.length) return;
+  const cache = new Map();
+  let sequencia = 0;
+  if (cols.ID_SEQUENCIA_DAV) {
+    const max = await query(tx, `
+      SELECT COALESCE(MAX(ID_SEQUENCIA_DAV), 0) AS M
+      FROM TB_PED_VENDA_ITEM WHERE ID_PEDIDO = ?`, [id]);
+    sequencia = num(max[0]?.M);
+  }
+  for (const it of itens) {
+    const campos = ['CHAVE', 'DT_LACTO', 'CASAS_QTD', 'CASAS_VLR', 'ST', 'ALIQUOTA', 'VLR_IPI', 'ID_AGRUPAMENTO', 'USOU_VALOR_PROMOCIONAL', 'ID_SEQUENCIA_DAV']
+      .filter((nome) => cols[nome]);
+    if (!campos.length) continue;
+    const row = (await query(tx, `
+      SELECT ${campos.join(', ')}
+      FROM TB_PED_VENDA_ITEM
+      WHERE ID_ITEMPED = ? AND ID_PEDIDO = ?`, [num(it.ID_ITEMPED), id]))[0];
+    if (!row) continue;
+    const sets = [];
+    const params = [];
+    if (cols.CHAVE && textoVazio(row.CHAVE)) {
+      sets.push('CHAVE = ?');
+      params.push(chaveClipp());
+    }
+    if (cols.DT_LACTO && !row.DT_LACTO) sets.push('DT_LACTO = CURRENT_DATE');
+    if (cols.CASAS_QTD && textoVazio(row.CASAS_QTD)) {
+      sets.push('CASAS_QTD = ?');
+      params.push(casas.qtd);
+    }
+    if (cols.CASAS_VLR && textoVazio(row.CASAS_VLR)) {
+      sets.push('CASAS_VLR = ?');
+      params.push(casas.vlr);
+    }
+    if (cols.ST && textoVazio(row.ST)) {
+      const trib = await tributoProduto(tx, it.ID_IDENTIFICADOR, cache);
+      sets.push('ST = ?');
+      params.push(trib.st);
+      if (cols.ALIQUOTA && row.ALIQUOTA == null) {
+        sets.push('ALIQUOTA = ?');
+        params.push(trib.aliquota);
+      }
+    } else if (cols.ALIQUOTA && row.ALIQUOTA == null) {
+      sets.push('ALIQUOTA = 0');
+    }
+    if (cols.VLR_IPI && row.VLR_IPI == null) sets.push('VLR_IPI = 0');
+    if (cols.ID_AGRUPAMENTO && row.ID_AGRUPAMENTO == null) sets.push('ID_AGRUPAMENTO = 0');
+    if (cols.USOU_VALOR_PROMOCIONAL && row.USOU_VALOR_PROMOCIONAL == null) sets.push('USOU_VALOR_PROMOCIONAL = 0');
+    if (cols.ID_SEQUENCIA_DAV && !num(row.ID_SEQUENCIA_DAV)) {
+      sequencia += 1;
+      sets.push('ID_SEQUENCIA_DAV = ?');
+      params.push(sequencia);
+    }
+    if (!sets.length) continue;
+    params.push(num(it.ID_ITEMPED), id);
+    await query(tx, `
+      UPDATE TB_PED_VENDA_ITEM
+      SET ${sets.join(', ')}
+      WHERE ID_ITEMPED = ? AND ID_PEDIDO = ?`, params);
+  }
+  if (!cols.CHAVE_PEDIDO) return;
+  const cab = await query(tx, 'SELECT CHAVE FROM TB_PEDIDO_VENDA WHERE ID_PEDIDO = ?', [id]);
+  if (!cab.length || !textoVazio(cab[0].CHAVE)) return;
+  await query(tx, `
+    UPDATE TB_PEDIDO_VENDA
+    SET CHAVE = ?
+    WHERE ID_PEDIDO = ? AND (CHAVE IS NULL OR TRIM(CHAVE) = '')`, [chaveClipp(), id]);
+}
+
+let selagemFeita = false;
+
+/** Condicionais já gravados sem chave continuariam vazando no próximo lançamento do Clipp. */
+async function selarCondicionaisAntigos(db) {
+  if (selagemFeita) return 0;
+  if (!hasTable('GESTOR_COND_TOTAL') || !hasTable('TB_PEDIDO_VENDA') || !hasTable('TB_PED_VENDA_ITEM')) {
+    selagemFeita = true;
+    return 0;
+  }
+  const cols = await colunasFechamento(db);
+  const partes = [];
+  if (cols.CHAVE_PEDIDO) partes.push("(P.CHAVE IS NULL OR TRIM(P.CHAVE) = '')");
+  const solto = [];
+  if (cols.CHAVE) solto.push("(I.CHAVE IS NULL OR TRIM(I.CHAVE) = '')");
+  if (cols.ID_SEQUENCIA_DAV) solto.push('I.ID_SEQUENCIA_DAV IS NULL');
+  if (cols.DT_LACTO) solto.push('I.DT_LACTO IS NULL');
+  if (solto.length) {
+    partes.push(`EXISTS (
+      SELECT 1 FROM TB_PED_VENDA_ITEM I
+      WHERE I.ID_PEDIDO = T.ID_PEDIDO AND (${solto.join(' OR ')})
+    )`);
+  }
+  if (!partes.length) {
+    selagemFeita = true;
+    return 0;
+  }
+  const casas = await casasClipp(db);
+  const pedidos = await query(db, `
+    SELECT T.ID_PEDIDO
+    FROM GESTOR_COND_TOTAL T
+    JOIN TB_PEDIDO_VENDA P ON P.ID_PEDIDO = T.ID_PEDIDO
+    WHERE ${partes.join(' OR ')}`);
+  let fechados = 0;
+  let pulados = 0;
+  for (const pedido of pedidos) {
+    try {
+      await withTransaction(db, async (tx) => {
+        await fecharItensNoPedido(tx, cols, casas, pedido.ID_PEDIDO);
+      }, { waitTimeout: 3 });
+      fechados += 1;
+    } catch (err) {
+      pulados += 1;
+      if (!/deadlock|lock conflict|lock time-?out|concurrent update/i.test(String(err?.message || err))) throw err;
+    }
+  }
+  if (!pulados) selagemFeita = true;
+  return fechados;
+}
+
 async function ensureCondTotal(db) {
   const tem = await query(db, `
     SELECT 1 AS OK FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = 'GESTOR_COND_TOTAL'`);
@@ -543,6 +737,9 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
     const descPed = Math.max(0, num(desconto));
     const acresPed = Math.max(0, num(acrescimo));
     await ensureCondTotal(db);
+    try { await selarCondicionaisAntigos(db); } catch (err) { console.warn('Proteção dos condicionais:', err.message); }
+    const colsFechamento = await colunasFechamento(db);
+    const casas = await casasClipp(db);
     let ultimoErro = null;
     for (let tentativa = 0; tentativa < 3; tentativa += 1) {
       try {
@@ -611,6 +808,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
             UPDATE TB_PEDIDO_VENDA
             SET UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
             WHERE ID_PEDIDO = ?`, [id]);
+          await fecharItensNoPedido(tx, colsFechamento, casas, id);
           return { id };
         });
       } catch (err) {
@@ -647,6 +845,9 @@ async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, valid
     const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
     const temFlagDesc = await columnExists(db, 'TB_PED_VENDA_ITEM', 'EFETUOU_DESCONTO');
     await ensureCondTotal(db);
+    try { await selarCondicionaisAntigos(db); } catch (err) { console.warn('Proteção dos condicionais:', err.message); }
+    const colsFechamento = await colunasFechamento(db);
+    const casas = await casasClipp(db);
     try {
       return await withTransaction(db, async (tx) => {
         const cab = await query(tx, 'SELECT ID_PEDIDO, ID_STATUS FROM TB_PEDIDO_VENDA WHERE ID_PEDIDO = ?', [codigo]);
@@ -770,6 +971,7 @@ async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, valid
           UPDATE OR INSERT INTO GESTOR_COND_TOTAL (ID_PEDIDO, VLR_FRETE, VLR_DESC, VLR_ACRESC)
           VALUES (?, ?, ?, ?)
           MATCHING (ID_PEDIDO)`, [codigo, Math.max(0, num(frete)), Math.max(0, num(desconto)), Math.max(0, num(acrescimo))]);
+        await fecharItensNoPedido(tx, colsFechamento, casas, codigo);
         return { id: codigo };
       });
     } catch (err) {
@@ -1028,6 +1230,7 @@ module.exports = {
   listarPagamentos,
   criar,
   atualizar,
+  selarCondicionaisAntigos: () => withDb((db) => selarCondicionaisAntigos(db)),
   alterarStatus,
   reprovar,
   htmlPdf,
