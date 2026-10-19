@@ -8,8 +8,8 @@ const { loadAppConfig } = require('./config');
 
 /** O Clipp numera pelo primeiro; o trigger XX_TR_INC_PED_I da integração ManagePro, pelo segundo. */
 const GENERATORS_ITEM_PEDIDO = ['GEN_TB_PED_VENDA_ITEM_ID', 'XX_GEN_TB_PEDI_I'];
-/** O Clipp numera o pedido por MAX+1; a integração ManagePro pode ter este generator. */
-const GENERATORS_PEDIDO = ['XX_GEN_ID_PEDIDO'];
+/** O Clipp abre o próximo pedido com GEN_TB_DAV_ID. A integração ManagePro pode ter XX_GEN_ID_PEDIDO. */
+const GENERATORS_PEDIDO = ['GEN_TB_DAV_ID', 'XX_GEN_ID_PEDIDO'];
 
 /** Espera curta: o Clipp/ManagePro com o pedido ou a peça aberta em edição segura a linha. */
 const ESPERA_BLOQUEIO_S = 8;
@@ -20,16 +20,25 @@ function erroDeBloqueio(err) {
   return new Error('O condicional ou o estoque de uma peça está aberto em outro programa (Clipp ou ManagePro). Feche a tela do pedido lá e tente de novo.');
 }
 
+async function geradoresPedido(db) {
+  const gens = await query(db, `
+    SELECT TRIM(RDB$GENERATOR_NAME) AS G FROM RDB$GENERATORS
+    WHERE RDB$GENERATOR_NAME IN (${GENERATORS_PEDIDO.map(() => '?').join(',')})`, GENERATORS_PEDIDO);
+  return gens
+    .map((r) => String(r.G || '').trim())
+    .filter((g) => /^[A-Z0-9_]+$/.test(g));
+}
+
+async function valorGerador(db, nome) {
+  return num((await query(db, `SELECT GEN_ID(${nome}, 0) AS V FROM RDB$DATABASE`))[0]?.V);
+}
+
 async function proximoIdPedido(tx) {
   const seq = await query(tx, 'SELECT COALESCE(MAX(ID_PEDIDO), 0) + 1 AS ID FROM TB_PEDIDO_VENDA');
   let id = num(seq[0]?.ID);
-  const gens = await query(tx, `
-    SELECT TRIM(RDB$GENERATOR_NAME) AS G FROM RDB$GENERATORS
-    WHERE RDB$GENERATOR_NAME IN (${GENERATORS_PEDIDO.map(() => '?').join(',')})`, GENERATORS_PEDIDO);
   const atuais = [];
-  for (const r of gens) {
-    const g = String(r.G || '').trim();
-    const v = num((await query(tx, `SELECT GEN_ID(${g}, 0) AS V FROM RDB$DATABASE`))[0]?.V);
+  for (const g of await geradoresPedido(tx)) {
+    const v = await valorGerador(tx, g);
     atuais.push({ g, v });
     if (v + 1 > id) id = v + 1;
   }
@@ -37,6 +46,22 @@ async function proximoIdPedido(tx) {
     if (v < id) await query(tx, `SELECT GEN_ID(${g}, ${id - v}) AS V FROM RDB$DATABASE`);
   }
   return id;
+}
+
+/** O Clipp mostra o próximo número como GEN_ID(GEN_TB_DAV_ID, 0) + 1 e carrega as peças desse pedido. */
+async function alinharGeradorPedido(db) {
+  if (!hasTable('TB_PEDIDO_VENDA')) return 0;
+  const max = num((await query(db, 'SELECT COALESCE(MAX(ID_PEDIDO), 0) AS ID FROM TB_PEDIDO_VENDA'))[0]?.ID);
+  let movidos = 0;
+  for (const g of await geradoresPedido(db)) {
+    let v = await valorGerador(db, g);
+    if (v >= max) continue;
+    await query(db, `SELECT GEN_ID(${g}, ${max - v}) AS V FROM RDB$DATABASE`);
+    v = await valorGerador(db, g);
+    if (v < max) await query(db, `SELECT GEN_ID(${g}, ${max - v}) AS V FROM RDB$DATABASE`);
+    movidos += 1;
+  }
+  return movidos;
 }
 
 function num(v) {
@@ -1231,6 +1256,7 @@ module.exports = {
   criar,
   atualizar,
   selarCondicionaisAntigos: () => withDb((db) => selarCondicionaisAntigos(db)),
+  alinharGeradorPedido: () => withDb((db) => alinharGeradorPedido(db)),
   alterarStatus,
   reprovar,
   htmlPdf,
