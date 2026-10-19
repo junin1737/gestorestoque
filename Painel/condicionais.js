@@ -651,6 +651,11 @@ const Condicionais = (() => {
     if (estoque) estoque.textContent = textoEstoque(item);
     fecharListas();
     atualizarTotalItem();
+    const qtd = $('#cond-qtd');
+    if (qtd) {
+      qtd.focus();
+      qtd.select();
+    }
   }
 
   function numTela(v) {
@@ -745,7 +750,10 @@ const Condicionais = (() => {
       total: tot.total,
     });
     renderItensNovos();
-    fecharDialogoItem();
+    limparDialogoItem();
+    const dlg = $('#dlg-cond-item');
+    if (dlg && !dlg.open && dlg.showModal) dlg.showModal();
+    $('#cond-peca')?.focus();
   }
 
   function renderItensNovos() {
@@ -875,10 +883,22 @@ const Condicionais = (() => {
         if (q) await buscarPecasNaTela(q);
         return;
       }
-      teclaLista(e, box);
+      if (teclaLista(e, box)) return;
+      if (e.key === 'Enter' && pecaAtual) {
+        e.preventDefault();
+        const qtd = $('#cond-qtd');
+        qtd?.focus();
+        qtd?.select();
+      }
     });
     ['cond-qtd', 'cond-preco', 'cond-desc', 'cond-acres'].forEach((id) => {
-      document.getElementById(id)?.addEventListener('input', atualizarTotalItem);
+      const el = document.getElementById(id);
+      el?.addEventListener('input', atualizarTotalItem);
+      el?.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter') return;
+        e.preventDefault();
+        if (pecaAtual) incluirPeca(pecaAtual);
+      });
     });
     document.getElementById('cond-frete')?.addEventListener('input', () => renderItensNovos());
     $('#cond-desc-ped')?.addEventListener('input', () => {

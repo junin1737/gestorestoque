@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=261" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=247" />
+  <link rel="stylesheet" href="styles.css?v=262" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=248" />
 </head>
 <body>
   <div id="app">
@@ -512,7 +512,22 @@
         </div>
 
         <div id="page-clientes" class="page" hidden>
-          <div class="cond-split">
+          <div class="tabs" id="cli-abas">
+            <button type="button" class="tab active" data-cli-aba="cadastro">Cadastro</button>
+            <button type="button" class="tab" data-cli-aba="aniversario">Aniversariantes do dia</button>
+          </div>
+          <div id="cli-aba-aniversario" class="cli-aniv" hidden>
+            <section class="cond-col">
+              <div class="cond-col-head">
+                <div>
+                  <h2>Aniversariantes do dia</h2>
+                  <p class="hint">A mensagem é a das Configurações, com o apelido de cada cliente.</p>
+                </div>
+              </div>
+              <div id="cli-aniv-lista" class="cond-lista"></div>
+            </section>
+          </div>
+          <div id="cli-aba-cadastro" class="cond-split">
             <section class="cond-col cond-col-lista">
               <div class="cond-col-head">
                 <div>
@@ -555,6 +570,9 @@
                 <div class="cond-form-grid">
                   <label class="full">Nome
                     <input id="cli-nome" maxlength="60" required />
+                  </label>
+                  <label class="w-meio">Apelido
+                    <input id="cli-apelido" maxlength="40" placeholder="Como chamar na mensagem" />
                   </label>
                   <label class="w-sel">Situação
                     <select id="cli-status-form">
@@ -831,6 +849,7 @@
             <button type="button" class="tab active" data-cfg-tab="tema">Tema</button>
             <button type="button" class="tab" data-cfg-tab="tributos">Conversão de Tributos</button>
             <button type="button" class="tab" data-cfg-tab="saida">Saída</button>
+            <button type="button" class="tab" data-cfg-tab="clientes">Clientes</button>
           </div>
           <div id="cfg-tab-tema" class="cfg-tab">
             <div class="pref-card">
@@ -873,6 +892,17 @@
           </div>
           <div id="cfg-tab-saida" class="cfg-tab" hidden>
             <div id="cfg-saida-host"></div>
+          </div>
+          <div id="cfg-tab-clientes" class="cfg-tab" hidden>
+            <div class="pref-card larga">
+              <h3>Mensagem de aniversário</h3>
+              <p class="hint">Onde estiver {apelido} entra o apelido do cadastro. Sem apelido, entra o primeiro nome.</p>
+              <label>Mensagem
+                <textarea id="cfg-aniv-msg" rows="5" maxlength="500"></textarea>
+              </label>
+              <button type="button" class="btn primary" id="cfg-aniv-salvar">Salvar mensagem</button>
+              <p class="hint" id="cfg-aniv-aviso"></p>
+            </div>
           </div>
           <div class="toolbar">
             <button type="button" class="btn primary" id="cfg-params-salvar">Salvar parâmetros</button>
@@ -1012,7 +1042,7 @@
         </div>
         <div class="dlg-actions">
           <button type="button" class="btn primary" id="cond-add-peca">Salvar item</button>
-          <button type="button" class="btn" id="cond-item-cancelar">Cancelar</button>
+          <button type="button" class="btn" id="cond-item-cancelar">Fechar</button>
         </div>
       </div>
     </dialog>
@@ -1148,10 +1178,10 @@
   <script src="vendor/zxing-browser.min.js?v=240"></script>
   <script src="importacao-nfe.js?v=242"></script>
   <script src="compras.js?v=240"></script>
-  <script src="condicionais.js?v=248"></script>
-  <script src="clientes.js?v=3"></script>
+  <script src="condicionais.js?v=249"></script>
+  <script src="clientes.js?v=4"></script>
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=259"></script>
-  <script src="app.js?v=266"></script>
+  <script src="app.js?v=267"></script>
 </body>
 </html>

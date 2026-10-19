@@ -13,6 +13,7 @@ const {
   lerUsaManage,
   lerIgnorarReceberCartao,
   lerSomenteComEstoque,
+  lerMensagemAniversario,
   usaManageDoPedido,
   CHAVES_DASHBOARD,
   comDashboards,
@@ -196,10 +197,18 @@ router.get('/config', (req, res) => {
       usa_manage: lerUsaManage(cfg),
       ignorarReceberCartao: lerIgnorarReceberCartao(cfg),
       somenteComEstoque: lerSomenteComEstoque(cfg),
+      mensagemAniversario: lerMensagemAniversario(cfg),
     },
     modulos: MODULOS,
     demo: DEMO_ATIVO,
   });
+});
+
+router.post('/preferencias/aniversario', (req, res) => {
+  const current = loadAppConfig();
+  const mensagem = String(req.body?.mensagem || '').trim().slice(0, 500);
+  saveAppConfig({ ...current, mensagem_aniversario: mensagem });
+  res.json({ ok: true, mensagemAniversario: lerMensagemAniversario({ mensagem_aniversario: mensagem }) });
 });
 
 router.post('/preferencias/somente-estoque', (req, res) => {
@@ -3033,6 +3042,14 @@ const VER_CLIENTE = exigirModulo('clientes');
 router.get('/clientes', VER_CLIENTE, async (req, res) => {
   try {
     res.json({ ok: true, ...(await clientes.listar(req.query)) });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, itens: [] });
+  }
+});
+
+router.get('/clientes/aniversariantes', VER_CLIENTE, async (req, res) => {
+  try {
+    res.json({ ok: true, ...(await clientes.aniversariantes()) });
   } catch (err) {
     res.json({ ok: false, error: err.message, itens: [] });
   }

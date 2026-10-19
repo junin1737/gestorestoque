@@ -343,6 +343,13 @@ function lerSomenteComEstoque(cfg) {
   return Number(cfg && cfg.somente_com_estoque) === 1 ? 1 : 0;
 }
 
+const MENSAGEM_ANIVERSARIO_PADRAO = 'Olá {apelido}, feliz aniversário! A loja deseja um dia especial.';
+
+function lerMensagemAniversario(cfg) {
+  const texto = String(cfg?.mensagem_aniversario || '').trim();
+  return (texto || MENSAGEM_ANIVERSARIO_PADRAO).slice(0, 500);
+}
+
 function usaManageDoPedido(current, body) {
   if (!body || body.usa_manage === undefined) return lerUsaManage(current);
   return body.usa_manage === true || Number(body.usa_manage) === 1 ? 1 : 0;
@@ -369,6 +376,8 @@ module.exports = {
   lerUsaManage,
   lerIgnorarReceberCartao,
   lerSomenteComEstoque,
+  lerMensagemAniversario,
+  MENSAGEM_ANIVERSARIO_PADRAO,
   usaManageDoPedido,
   CHAVES_DASHBOARD,
   PERFIL_DASHBOARD,

@@ -185,12 +185,12 @@ function setCfgTab(tab) {
   stateCfgTab = tab || 'tema';
   state.cfgTab = stateCfgTab;
   $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
-  ['tema', 'tributos', 'saida'].forEach((id) => {
+  ['tema', 'tributos', 'saida', 'clientes'].forEach((id) => {
     const pane = $(`#cfg-tab-${id}`);
     if (pane) pane.hidden = id !== stateCfgTab;
   });
   const salvar = $('#cfg-params-salvar');
-  if (salvar) salvar.hidden = stateCfgTab === 'tema';
+  if (salvar) salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'clientes';
   if (stateCfgTab !== 'tema' && !cfgMontada) {
     cfgMontada = true;
     window.ImportacaoNfe?.mountConfig?.();
@@ -923,6 +923,8 @@ async function bootstrap() {
   if (chkCartao) chkCartao.checked = Number(state.config.ignorarReceberCartao) === 1;
   const chkEstoque = $('#cfg-somente-estoque');
   if (chkEstoque) chkEstoque.checked = Number(state.config.somenteComEstoque) === 1;
+  const msgAniv = $('#cfg-aniv-msg');
+  if (msgAniv) msgAniv.value = state.config.mensagemAniversario || 'Olá {apelido}, feliz aniversário! A loja deseja um dia especial.';
 
   const lic = await api('/licenca');
   if (lic.ok && lic.licenca && !lic.licenca.liberado) mostrarBloqueioLicenca(lic.licenca);
@@ -1423,6 +1425,18 @@ $$('#cfg-tabs .tab').forEach((btn) => {
   btn.addEventListener('click', () => setCfgTab(btn.dataset.cfgTab));
 });
 $('#cfg-params-salvar')?.addEventListener('click', () => window.ImportacaoNfe?.saveConfig?.());
+$('#cfg-aniv-salvar')?.addEventListener('click', async () => {
+  const aviso = $('#cfg-aniv-aviso');
+  const mensagem = $('#cfg-aniv-msg')?.value || '';
+  const res = await api('/preferencias/aniversario', { method: 'POST', body: { mensagem } });
+  if (!res.ok) {
+    if (aviso) aviso.textContent = res.error || 'Não foi possível gravar a mensagem.';
+    return;
+  }
+  state.config.mensagemAniversario = res.mensagemAniversario || mensagem;
+  if ($('#cfg-aniv-msg') && res.mensagemAniversario) $('#cfg-aniv-msg').value = res.mensagemAniversario;
+  if (aviso) aviso.textContent = 'Mensagem gravada.';
+});
 $('#btn-empresas-atualizar')?.addEventListener('click', () => loadEmpresas());
 initUiScale();
 

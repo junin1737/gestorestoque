@@ -1,6 +1,7 @@
 'use strict';
 
-const { withDb, withTransaction, query, nextGenId, columnExists } = require('./db');
+const { withDb, withTransaction, query, nextGenId, columnExists, refreshTables } = require('./db');
+const { loadAppConfig, lerMensagemAniversario } = require('./config');
 
 const PAIS_BRASIL = '1058';
 
@@ -84,9 +85,10 @@ function montarFiltro(q, situacao, pessoa) {
         OR REPLACE(COALESCE(C.FONE_COMER, ''), ' ', '') CONTAINING ?
         OR UPPER(C.NOME) CONTAINING UPPER(?)
         OR UPPER(COALESCE(PJ.NOME_FANTA, '')) CONTAINING UPPER(?)
+        OR UPPER(COALESCE(AP.APELIDO, '')) CONTAINING UPPER(?)
       )`);
       if (idOk) params.push(Number(termo));
-      params.push(nums, nums, nums, nums, nums, termo, termo);
+      params.push(nums, nums, nums, nums, nums, termo, termo, termo);
     } else {
       const partes = termo.split(/\s+/).map((p) => p.trim()).filter(Boolean);
       for (const p of partes) {
@@ -94,8 +96,9 @@ function montarFiltro(q, situacao, pessoa) {
           UPPER(C.NOME) CONTAINING UPPER(?)
           OR UPPER(COALESCE(PJ.NOME_FANTA, '')) CONTAINING UPPER(?)
           OR UPPER(COALESCE(C.CONTATO, '')) CONTAINING UPPER(?)
+          OR UPPER(COALESCE(AP.APELIDO, '')) CONTAINING UPPER(?)
         )`);
-        params.push(p, p, p);
+        params.push(p, p, p, p);
       }
     }
   }
@@ -107,6 +110,7 @@ function mapLista(r) {
     id: Number(r.ID_CLIENTE),
     nome: String(r.NOME || '').trim(),
     fantasia: String(r.NOME_FANTA || '').trim(),
+    apelido: String(r.APELIDO || '').trim(),
     status: String(r.STATUS || '').trim(),
     cpf: String(r.CPF || '').trim(),
     cnpj: String(r.CNPJ || '').trim(),
@@ -118,15 +122,17 @@ function mapLista(r) {
 
 async function listar({ q, status: situacao, pessoa } = {}) {
   return withDb(async (db) => {
+    await ensureApelido(db);
     const sit = String(situacao || 'A').trim().toUpperCase();
     const pes = String(pessoa || '').trim().toLowerCase();
     const filtro = montarFiltro(q, sit === 'TODOS' || sit === '' ? '' : sit, pes);
     const rows = await query(db, `
       SELECT FIRST 80 C.ID_CLIENTE, C.NOME, C.STATUS, C.DDD_CELUL, C.FONE_CELUL,
-             PF.CPF, PJ.CNPJ, PJ.NOME_FANTA, CID.NOME AS CIDADE, CID.SIGLA_UF AS UF
+             PF.CPF, PJ.CNPJ, PJ.NOME_FANTA, AP.APELIDO, CID.NOME AS CIDADE, CID.SIGLA_UF AS UF
       FROM TB_CLIENTE C
       LEFT JOIN TB_CLI_PF PF ON PF.ID_CLIENTE = C.ID_CLIENTE
       LEFT JOIN TB_CLI_PJ PJ ON PJ.ID_CLIENTE = C.ID_CLIENTE
+      LEFT JOIN GESTOR_CLI_APELIDO AP ON AP.ID_CLIENTE = C.ID_CLIENTE
       LEFT JOIN TB_CIDADE_SIS CID ON CID.ID_CIDADE = C.ID_CIDADE
       ${filtro.where.length ? `WHERE ${filtro.where.join(' AND ')}` : ''}
       ORDER BY C.ID_CLIENTE DESC`, filtro.params);
@@ -171,6 +177,7 @@ function mapDetalhe(r, enderecos, contatos, referencias) {
   return {
     id: Number(r.ID_CLIENTE),
     nome: String(r.NOME || '').trim(),
+    apelido: String(r.APELIDO || '').trim(),
     status: String(r.STATUS || 'A').trim() || 'A',
     id_tipo: r.ID_TIPO == null ? null : Number(r.ID_TIPO),
     pessoa: cnpjVal ? 'pj' : 'pf',
@@ -211,16 +218,18 @@ async function detalhe(id) {
   const codigo = idNum(id);
   if (!codigo) throw new Error('Cliente inválido.');
   return withDb(async (db) => {
+    await ensureApelido(db);
     const rows = await query(db, `
       SELECT C.ID_CLIENTE, C.NOME, C.STATUS, C.ID_TIPO, C.CONTATO, C.EMAIL_CONT, C.EMAIL_NFE,
              C.DDD_CELUL, C.FONE_CELUL, C.DDD_RESID, C.FONE_RESID, C.DDD_COMER, C.FONE_COMER,
              C.END_CEP, C.END_TIPO, C.END_LOGRAD, C.END_NUMERO, C.END_BAIRRO, C.END_COMPLE, C.ID_CIDADE,
-             CID.NOME AS CIDADE, CID.SIGLA_UF AS UF,
+             CID.NOME AS CIDADE, CID.SIGLA_UF AS UF, AP.APELIDO,
              PF.CPF, PF.IDENTIDADE, PF.DT_NASCTO, PF.PROFISSAO, PF.NOME_PAI, PF.NOME_MAE,
              PJ.CNPJ, PJ.NOME_FANTA, PJ.INSC_ESTAD, PJ.INSC_MUNIC, PJ.INSC_SUFRAMA, PJ.IND_IE_DEST
       FROM TB_CLIENTE C
       LEFT JOIN TB_CLI_PF PF ON PF.ID_CLIENTE = C.ID_CLIENTE
       LEFT JOIN TB_CLI_PJ PJ ON PJ.ID_CLIENTE = C.ID_CLIENTE
+      LEFT JOIN GESTOR_CLI_APELIDO AP ON AP.ID_CLIENTE = C.ID_CLIENTE
       LEFT JOIN TB_CIDADE_SIS CID ON CID.ID_CIDADE = C.ID_CIDADE
       WHERE C.ID_CLIENTE = ?`, [codigo]);
     if (!rows.length) throw new Error('Cliente não encontrado.');
@@ -379,7 +388,9 @@ async function salvar(body) {
   const docPf = cpf(body?.cpf);
   const docPj = cnpj(body?.cnpj);
   const idInformado = idNum(body?.id);
-  return withDb(async (db) => withTransaction(db, async (tx) => {
+  return withDb(async (db) => {
+    await ensureApelido(db);
+    return withTransaction(db, async (tx) => {
     await documentoLivre(tx, 'TB_CLI_PF', 'CPF', docPf, idInformado);
     await documentoLivre(tx, 'TB_CLI_PJ', 'CNPJ', docPj, idInformado);
     if (dados.idCidade) {
@@ -415,8 +426,77 @@ async function salvar(body) {
       ]);
     }
     await gravarFilhos(tx, id, body || {}, docPf, docPj);
+    await query(tx, `
+      UPDATE OR INSERT INTO GESTOR_CLI_APELIDO (ID_CLIENTE, APELIDO)
+      VALUES (?, ?)
+      MATCHING (ID_CLIENTE)`, [id, txt(body?.apelido, 40)]);
     return { id };
-  }));
+    });
+  });
+}
+
+async function ensureApelido(db) {
+  const tem = await query(db, `
+    SELECT 1 AS OK FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = 'GESTOR_CLI_APELIDO'`);
+  if (tem.length) return;
+  await query(db, `
+    CREATE TABLE GESTOR_CLI_APELIDO (
+      ID_CLIENTE INTEGER NOT NULL,
+      APELIDO VARCHAR(40),
+      CONSTRAINT PK_GESTOR_CLI_APELIDO PRIMARY KEY (ID_CLIENTE)
+    )`);
+  await refreshTables(db);
+}
+
+function foneDe(r) {
+  const pares = [
+    [r.DDD_CELUL, r.FONE_CELUL],
+    [r.DDD_RESID, r.FONE_RESID],
+    [r.DDD_COMER, r.FONE_COMER],
+  ];
+  for (const [ddd, fone] of pares) {
+    const n = [String(ddd || '').trim(), String(fone || '').trim()].filter(Boolean).join(' ');
+    if (digitos(n)) return n;
+  }
+  return '';
+}
+
+function textoAniversario(modelo, apelido, nome) {
+  const tratamento = String(apelido || '').trim() || String(nome || '').trim().split(/\s+/)[0] || '';
+  return String(modelo || lerMensagemAniversario(null)).replace(/\{apelido\}/gi, tratamento);
+}
+
+async function aniversariantes() {
+  const agora = new Date();
+  const modelo = lerMensagemAniversario(loadAppConfig());
+  return withDb(async (db) => {
+    await ensureApelido(db);
+    const rows = await query(db, `
+      SELECT C.ID_CLIENTE, C.NOME, AP.APELIDO,
+             C.DDD_CELUL, C.FONE_CELUL, C.DDD_RESID, C.FONE_RESID, C.DDD_COMER, C.FONE_COMER
+      FROM TB_CLIENTE C
+      JOIN TB_CLI_PF PF ON PF.ID_CLIENTE = C.ID_CLIENTE
+      LEFT JOIN GESTOR_CLI_APELIDO AP ON AP.ID_CLIENTE = C.ID_CLIENTE
+      WHERE UPPER(TRIM(COALESCE(C.STATUS, 'A'))) <> 'I'
+        AND PF.DT_NASCTO IS NOT NULL
+        AND EXTRACT(MONTH FROM PF.DT_NASCTO) = ?
+        AND EXTRACT(DAY FROM PF.DT_NASCTO) = ?
+      ORDER BY C.NOME`, [agora.getMonth() + 1, agora.getDate()]);
+    return {
+      mensagem: modelo,
+      itens: rows.map((r) => {
+        const nome = String(r.NOME || '').trim();
+        const apelido = String(r.APELIDO || '').trim();
+        return {
+          id: Number(r.ID_CLIENTE),
+          nome,
+          apelido,
+          telefone: foneDe(r),
+          mensagem: textoAniversario(modelo, apelido, nome),
+        };
+      }),
+    };
+  });
 }
 
 module.exports = {
@@ -426,4 +506,5 @@ module.exports = {
   cidades,
   detalhe,
   salvar,
+  aniversariantes,
 };

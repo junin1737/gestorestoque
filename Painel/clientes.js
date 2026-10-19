@@ -232,6 +232,7 @@ const Clientes = (() => {
     abertoId = cliente?.id || 0;
     $('#cli-titulo').textContent = abertoId ? `Cliente ${abertoId}` : 'Novo cliente';
     setVal('cli-nome', cliente?.nome || '');
+    setVal('cli-apelido', cliente?.apelido || '');
     setVal('cli-status-form', cliente?.status === 'I' ? 'I' : 'A');
     preencherTipos(cliente?.id_tipo);
     setVal('cli-pessoa-tipo', cliente?.pessoa === 'pj' ? 'pj' : 'pf');
@@ -308,7 +309,7 @@ const Clientes = (() => {
       const lugar = [it.cidade, it.uf].filter(Boolean).join('/');
       return `<button type="button" class="cond-card${it.id === abertoId ? ' is-ativo' : ''}" data-cli="${it.id}">
         <span class="cond-card-top"><strong>${esc(it.nome)}</strong><span class="cond-pill">${it.status === 'I' ? 'Inativo' : 'Ativo'}</span></span>
-        <span class="hint">${esc([doc, it.fantasia, it.fone, lugar].filter(Boolean).join(' · ') || `Cód. ${it.id}`)}</span>
+        <span class="hint">${esc([it.apelido ? `apelido ${it.apelido}` : '', doc, it.fantasia, it.fone, lugar].filter(Boolean).join(' · ') || `Cód. ${it.id}`)}</span>
       </button>`;
     }).join('') + (itens.length >= 80 ? '<p class="hint">Mostrando 80. Afine a busca para ver outros.</p>' : '');
     lista.querySelectorAll('[data-cli]').forEach((btn) => {
@@ -347,6 +348,7 @@ const Clientes = (() => {
     return {
       id: abertoId || undefined,
       nome: $('#cli-nome')?.value || '',
+      apelido: $('#cli-apelido')?.value || '',
       status: $('#cli-status-form')?.value || 'A',
       id_tipo: $('#cli-tipo')?.value || '',
       pessoa: $('#cli-pessoa-tipo')?.value || 'pf',
@@ -431,7 +433,60 @@ const Clientes = (() => {
     });
   }
 
+  function waLink(telefone, texto) {
+    const digits = String(telefone || '').replace(/\D/g, '');
+    const fone = digits ? (digits.startsWith('55') ? digits : `55${digits}`) : '';
+    const q = encodeURIComponent(texto || '');
+    return fone ? `https://wa.me/${fone}?text=${q}` : '';
+  }
+
+  function mostrarAba(aba) {
+    const qual = aba === 'aniversario' ? 'aniversario' : 'cadastro';
+    document.querySelectorAll('#cli-abas .tab').forEach((b) => {
+      b.classList.toggle('active', b.dataset.cliAba === qual);
+    });
+    const cad = $('#cli-aba-cadastro');
+    const aniv = $('#cli-aba-aniversario');
+    if (cad) cad.hidden = qual !== 'cadastro';
+    if (aniv) aniv.hidden = qual !== 'aniversario';
+    if (qual === 'aniversario') carregarAniversariantes();
+  }
+
+  async function carregarAniversariantes() {
+    const lista = $('#cli-aniv-lista');
+    if (!lista) return;
+    lista.innerHTML = '<p class="hint">Carregando…</p>';
+    const res = await api('/clientes/aniversariantes');
+    if (!res.ok) {
+      lista.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível listar os aniversariantes.')}</p>`;
+      return;
+    }
+    const itens = res.itens || [];
+    if (!itens.length) {
+      lista.innerHTML = '<p class="empty">Nenhum cliente faz aniversário hoje.</p>';
+      return;
+    }
+    lista.innerHTML = itens.map((it) => `
+      <article class="cond-card">
+        <span class="cond-card-top"><strong>${esc(it.nome)}</strong></span>
+        <span class="hint">${esc([it.apelido ? `Apelido ${it.apelido}` : 'Sem apelido', it.telefone || 'Sem celular'].join(' · '))}</span>
+        <p class="hint">${esc(it.mensagem || '')}</p>
+        <div class="cli-aniv-acoes">
+          <button type="button" class="btn small primary" data-wa="${esc(it.telefone || '')}" data-msg="${esc(it.mensagem || '')}" ${it.telefone ? '' : 'disabled'}>Enviar WhatsApp</button>
+        </div>
+      </article>`).join('');
+    lista.querySelectorAll('[data-wa]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const url = waLink(btn.dataset.wa, btn.dataset.msg);
+        if (url) window.open(url, '_blank', 'noopener');
+      });
+    });
+  }
+
   function ligar() {
+    document.querySelectorAll('#cli-abas .tab').forEach((btn) => {
+      btn.addEventListener('click', () => mostrarAba(btn.dataset.cliAba));
+    });
     $('#cli-pessoa-tipo')?.addEventListener('change', mostrarPessoa);
     $('#cli-novo-btn')?.addEventListener('click', async () => {
       await carregarOpcoes();

@@ -1917,15 +1917,21 @@ html[data-theme="escuro"] .toolbar-select select {
 }
 .est-table td {
   padding: 0.62rem 0.7rem;
-  border-bottom: 1px solid #eef1f6;
+  border-bottom: 1px solid var(--border);
   vertical-align: middle;
+  color: var(--text);
 }
 .est-table tr { cursor: pointer; }
-.est-table tbody tr:hover { background: #f6f8fc; }
+.est-table tbody tr:hover { background: color-mix(in srgb, var(--text) 7%, var(--bg-elev)); }
 .est-table tr.is-active {
-  background: color-mix(in srgb, var(--accent) 12%, #fff);
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-elev));
   box-shadow: inset 3px 0 0 var(--accent);
+  color: var(--text);
 }
+.est-table tbody tr:hover .prod-name,
+.est-table tr.is-active .prod-name,
+.est-table tbody tr:hover td,
+.est-table tr.is-active td { color: var(--text); }
 .est-table .prod-name { font-weight: 700; color: var(--text); }
 .est-table .prod-sub { color: var(--muted); font-size: 0.75rem; margin-top: 0.1rem; }
 .est-qtd { font-weight: 800; font-variant-numeric: tabular-nums; }
@@ -1938,12 +1944,22 @@ html[data-theme="escuro"] .toolbar-select select {
   gap: 0.7rem;
   align-items: center;
   padding: 0.75rem 0.85rem;
-  border-bottom: 1px solid #eef1f6;
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
+  color: var(--text);
 }
+.est-card:hover,
+.est-card.is-active {
+  background: color-mix(in srgb, var(--accent) 22%, var(--bg-elev));
+  color: var(--text);
+}
+.est-card:hover strong,
+.est-card.is-active strong,
+.est-card:hover .prod-sub,
+.est-card.is-active .prod-sub { color: var(--text); }
 .est-card-ico {
   width: 2.2rem; height: 2.2rem; border-radius: 10px;
-  background: color-mix(in srgb, var(--accent) 12%, #fff); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev)); color: var(--accent);
   display: grid; place-items: center;
 }
 .est-card-ico svg { width: 1.1rem; height: 1.1rem; }
@@ -1984,7 +2000,7 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   height: 3rem; border-radius: 12px; border: 1px solid var(--border);
   display: grid; place-items: center;
   font-size: 1.35rem; font-weight: 800;
-  background: color-mix(in srgb, var(--accent) 12%, #fff); color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev)); color: var(--accent);
 }
 .qty-stepper .qty-delta.is-neg { background: var(--danger-bg); color: var(--danger); }
 .qty-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0.65rem; align-items: end; margin-bottom: 0.85rem; }
@@ -2808,4 +2824,28 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   .fin-bar { width: min(9px, 42%); border-radius: 5px 5px 2px 2px; }
   .fin-table { display: block; overflow-x: auto; }
 }
+
+html[data-theme="escuro"] select,
+html[data-theme="escuro"] option,
+html[data-theme="escuro"] option:checked {
+  background-color: var(--bg-elev);
+  color: var(--text);
+}
+html[data-theme="escuro"] ::selection {
+  background: #3d6ec9;
+  color: #fff;
+}
+html[data-theme="escuro"] .item-row.active,
+html[data-theme="escuro"] .item-row:hover,
+html[data-theme="escuro"] .cond-card.is-ativo,
+html[data-theme="escuro"] .cond-combo-opt:hover,
+html[data-theme="escuro"] .cond-combo-opt.is-ativo,
+html[data-theme="escuro"] .alt-row:hover,
+html[data-theme="escuro"] .compras-row:hover {
+  color: var(--text);
+}
+.pref-card.larga { max-width: 40rem; }
+.cli-aniv { flex: 1; min-height: 0; display: flex; }
+.cli-aniv .cond-col { flex: 1; }
+.cli-aniv-acoes { display: flex; justify-content: flex-end; margin-top: 0.35rem; }
 
