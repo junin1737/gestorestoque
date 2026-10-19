@@ -510,26 +510,28 @@ const Clientes = (() => {
       lista.innerHTML = `<p class="hint">${esc(res.error || 'Não foi possível listar os aniversariantes.')}</p>`;
       return;
     }
-    const card = (it) => `
-      <article class="cond-card">
+    const icone = `<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12.04 2C6.58 2 2.15 6.4 2.15 11.83c0 1.74.46 3.44 1.34 4.94L2 22l5.39-1.41a10 10 0 0 0 4.65 1.18h.01c5.46 0 9.89-4.4 9.89-9.83C21.94 6.4 17.5 2 12.04 2zm0 17.96h-.01a8.2 8.2 0 0 1-4.18-1.15l-.3-.18-3.2.84.85-3.12-.2-.32a8.16 8.16 0 0 1-1.25-4.36c0-4.52 3.7-8.2 8.24-8.2 2.2 0 4.27.86 5.82 2.41a8.14 8.14 0 0 1 2.41 5.8c0 4.53-3.7 8.21-8.18 8.21zm4.5-6.15c-.25-.12-1.46-.72-1.68-.8-.23-.08-.39-.12-.56.12-.16.25-.64.8-.79.96-.14.17-.29.19-.54.06-.25-.12-1.05-.39-2-1.23-.74-.66-1.24-1.47-1.38-1.72-.15-.25-.02-.38.1-.5.11-.11.25-.29.37-.43.12-.14.16-.25.25-.41.08-.17.04-.31-.02-.43-.06-.12-.56-1.34-.76-1.84-.2-.48-.41-.42-.56-.42h-.48c-.17 0-.43.06-.66.31-.23.25-.86.84-.86 2.05s.88 2.38 1 2.54c.12.17 1.73 2.64 4.2 3.7.59.25 1.05.4 1.41.52.59.19 1.13.16 1.56.1.48-.07 1.46-.6 1.67-1.18.21-.58.21-1.07.14-1.18-.06-.1-.23-.16-.48-.28z"/></svg>`;
+    const card = (it) => {
+      const href = it.telefone ? waLink(it.telefone, it.mensagem) : '';
+      const acao = href
+        ? `<a class="cli-wa" href="${esc(href)}" target="_blank" rel="noopener noreferrer" aria-label="Enviar WhatsApp">${icone}</a>`
+        : `<button type="button" class="cli-wa" data-sem-celular aria-label="Enviar WhatsApp">${icone}</button>`;
+      return `
+      <article class="cond-card cli-aniv-card">
         <span class="cond-card-top"><strong>${esc(it.nome)}</strong><span class="cond-pill">${esc(it.quando || '')}</span></span>
-        <span class="hint">${esc([it.apelido ? `Apelido ${it.apelido}` : 'Sem apelido', it.telefone || 'Sem celular'].join(' · '))}</span>
+        <span class="hint">${esc(it.apelido ? `Apelido ${it.apelido}` : it.nome)}</span>
         <p class="hint">${esc(it.mensagem || '')}</p>
-        <div class="cli-aniv-acoes">
-          <button type="button" class="btn small primary" data-wa="${esc(it.telefone || '')}" data-msg="${esc(it.mensagem || '')}" ${it.telefone ? '' : 'disabled'}>Enviar WhatsApp</button>
-        </div>
+        <div class="cli-aniv-acoes">${acao}</div>
       </article>`;
-    const grupo = (titulo, itens) => `
-      <section class="cli-aniv-grupo">
+    };
+    const grupo = (titulo, itens, extra) => `
+      <section class="cli-aniv-grupo${extra ? ` ${extra}` : ''}">
         <h3>${titulo}</h3>
         <div class="cli-aniv-cards">${(itens || []).length ? itens.map(card).join('') : '<p class="empty">Nenhum cliente.</p>'}</div>
       </section>`;
-    lista.innerHTML = `<div class="cli-aniv-grupos">${grupo('Hoje', res.dia)}${grupo('Esta semana', res.semana)}${grupo('Este mês', res.mes)}</div>`;
-    lista.querySelectorAll('[data-wa]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const url = waLink(btn.dataset.wa, btn.dataset.msg);
-        if (url) window.open(url, '_blank', 'noopener');
-      });
+    lista.innerHTML = `<div class="cli-aniv-grupos">${grupo('Hoje', res.dia)}${grupo('Esta semana', res.semana)}${grupo('Este mês', res.mes, 'is-mes')}</div>`;
+    lista.querySelectorAll('[data-sem-celular]').forEach((btn) => {
+      btn.addEventListener('click', () => deps.showMsg?.('Cliente sem celular cadastrado.'));
     });
   }
 

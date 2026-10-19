@@ -2847,8 +2847,36 @@ html[data-theme="escuro"] .compras-row:hover {
 .pref-card.larga { max-width: 40rem; }
 .cli-aniv { flex: 1; min-height: 0; display: flex; }
 .cli-aniv .cond-col { flex: 1; }
-.cli-aniv-grupos { display: grid; gap: 1rem; }
+.cli-aniv-grupos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.9rem;
+  align-items: start;
+}
 .cli-aniv-grupo h3 { margin: 0; font-size: 0.95rem; }
+.cli-aniv-grupo.is-mes { grid-column: 1 / -1; }
 .cli-aniv-cards { display: grid; gap: 0.55rem; }
+.cli-aniv-card { cursor: default; }
+.cli-aniv-grupo.is-mes .cli-aniv-cards {
+  grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+}
 .cli-aniv-acoes { display: flex; justify-content: flex-end; margin-top: 0.35rem; }
+.cli-wa {
+  width: 2.45rem;
+  height: 2.45rem;
+  border: 0;
+  border-radius: 999px;
+  background: #25d366;
+  color: #fff;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: none;
+}
+.cli-wa svg { width: 1.4rem; height: 1.4rem; }
+@media (max-width: 800px) {
+  .cli-aniv-grupos { grid-template-columns: 1fr; }
+  .cli-aniv-grupo.is-mes { grid-column: auto; }
+}
 

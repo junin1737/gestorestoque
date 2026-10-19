@@ -459,17 +459,8 @@ async function ensureApelido(db) {
   await refreshTables(db);
 }
 
-function foneDe(r) {
-  const pares = [
-    [r.DDD_CELUL, r.FONE_CELUL],
-    [r.DDD_RESID, r.FONE_RESID],
-    [r.DDD_COMER, r.FONE_COMER],
-  ];
-  for (const [ddd, fone] of pares) {
-    const n = [String(ddd || '').trim(), String(fone || '').trim()].filter(Boolean).join(' ');
-    if (digitos(n)) return n;
-  }
-  return '';
+function celularDe(r) {
+  return digitos([String(r.DDD_CELUL || '').trim(), String(r.FONE_CELUL || '').trim()].filter(Boolean).join(''));
 }
 
 function textoAniversario(modelo, apelido, nome) {
@@ -537,7 +528,7 @@ async function aniversariantes() {
         id: Number(r.ID_CLIENTE),
         nome,
         apelido,
-        telefone: foneDe(r),
+        telefone: celularDe(r),
         quando: `${dia}/${mes}`,
         mensagem: textoAniversario(modelo, apelido, nome),
       });
