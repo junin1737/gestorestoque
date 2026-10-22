@@ -84,17 +84,29 @@ function salvarConfig(cfg) {
   cfgCache = cfg;
 }
 
+/**
+ * Endereço que o cliente salva nos favoritos. Não leva o código de pareamento e não muda
+ * quando o túnel reconecta: /f/<nse> aponta de novo para o computador da loja.
+ */
+function linkFavoritos() {
+  const apelido = apelidoDaLicenca();
+  if (apelido) return `${LINK_BASE}/f/${apelido}`;
+  const cfg = carregarConfig();
+  if (!ID_RE_TUNEL.test(String(cfg.tunelId || ''))) return '';
+  return `${LINK_BASE}/t/${cfg.tunelId}`;
+}
+
 /** Link que funciona sem DNS do NSE: o computador do cliente é quem conhece o id do túnel. */
 function linkEstavel() {
   const cfg = carregarConfig();
   if (!cfg.ativo || !estado.conectado || !ID_RE_TUNEL.test(String(cfg.tunelId || ''))) return '';
-  return `${LINK_BASE}/t/${cfg.tunelId}`;
+  return linkFavoritos();
 }
 
 function status() {
   const cfg = carregarConfig();
   const linkTunel = `${LINK_BASE}/t/${cfg.tunelId}`;
-  const link = estado.apelido || linkTunel;
+  const link = linkFavoritos();
   const out = {
     ativo: !!cfg.ativo,
     conectado: estado.conectado,
@@ -107,7 +119,7 @@ function status() {
   };
   if (cfg.ativo) {
     const p = aparelhos.codigoAtual();
-    const pareamento = estado.apelido ? `${estado.apelido}/parear?c=${p.codigo}` : `${linkTunel}?p=${p.codigo}`;
+    const pareamento = `${linkTunel}?p=${p.codigo}`;
     out.pareamento = { link: pareamento, expira_em: p.expira_em };
     out.pedidos = aparelhos.listarPedidos();
   }

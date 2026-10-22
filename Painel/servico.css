@@ -227,6 +227,13 @@ button, input, select, textarea {
   word-break: break-all;
   font-size: 0.95rem;
 }
+.link-fixo-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+.link-fixo-row .url-link { flex: 1; min-width: 12rem; }
 .muted { color: var(--muted); }
 .hint { color: var(--muted); font-size: 0.85rem; margin: 0.35rem 0 0; }
 .hint.center { text-align: center; }

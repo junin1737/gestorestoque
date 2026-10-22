@@ -1039,8 +1039,30 @@ $('#chk-online')?.addEventListener('change', async (e) => {
   setTimeout(refreshOnline, 2500);
 });
 
+$('#btn-online-copiar')?.addEventListener('click', async () => {
+  const link = $('#online-link');
+  const url = link?.href || '';
+  if (!url || url.endsWith('#')) return;
+  const btn = $('#btn-online-copiar');
+  try {
+    await navigator.clipboard.writeText(url);
+  } catch {
+    const sel = window.getSelection();
+    const faixa = document.createRange();
+    faixa.selectNodeContents(link);
+    sel.removeAllRanges();
+    sel.addRange(faixa);
+    document.execCommand('copy');
+    sel.removeAllRanges();
+  }
+  if (!btn) return;
+  const antigo = btn.textContent;
+  btn.textContent = 'Copiado';
+  setTimeout(() => { btn.textContent = antigo; }, 1500);
+});
+
 $('#btn-online-novo')?.addEventListener('click', async () => {
-  if (!confirm('Gerar um novo endereço online? O link atual para de funcionar e TODOS os aparelhos autorizados são removidos (precisarão ler o QR Code novo).')) return;
+  if (!confirm('Gerar um novo endereço interno? O link fixo dos favoritos continua o mesmo, mas TODOS os aparelhos autorizados são removidos e precisam ler o QR Code de novo.')) return;
   const res = await api('/online', { method: 'POST', body: { novoEndereco: true } });
   if (res.ok) renderOnline(res.online);
   setTimeout(refreshOnline, 2500);

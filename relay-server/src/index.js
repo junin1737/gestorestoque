@@ -208,13 +208,17 @@ function comSeguranca(resp, request) {
   return r;
 }
 
-function pagina(titulo, texto, status = 200) {
+function pagina(titulo, texto, status = 200, recarregar = false) {
+  const acao = recarregar
+    ? `<p><button type="button" onclick="location.reload()" style="margin-top:8px;padding:10px 16px;border:0;border-radius:8px;background:#1e3a5f;color:#fff;font-weight:600;cursor:pointer">Tentar de novo</button></p>
+<script>setTimeout(function(){location.reload()},5000)</script>`
+    : '';
   const html = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1"><title>${titulo}</title>
 <style>body{margin:0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:#f4f6f9;color:#1a1f26;display:grid;place-items:center;min-height:100vh}
 main{max-width:420px;padding:28px;text-align:center}h1{color:#1e3a5f;font-size:22px}p{color:#5a6577;line-height:1.5}
 .logo{width:72px;height:72px;border-radius:18px;background:#1e3a5f;color:#fff;font:700 28px system-ui;display:grid;place-items:center;margin:0 auto 16px}</style>
-</head><body><main><div class="logo">MT</div><h1>${titulo}</h1><p>${texto}</p><p style="font-size:13px">MT Automações · (34) 3674-1937</p></main></body></html>`;
+</head><body><main><div class="logo">MT</div><h1>${titulo}</h1><p>${texto}</p>${acao}<p style="font-size:13px">MT Automações · (34) 3674-1937</p></main></body></html>`;
   return new Response(html, {
     status,
     headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
@@ -235,6 +239,60 @@ function apelidoDoHost(hostname, dominio) {
 }
 
 const cacheApelidos = new Map();
+async function registroApelido(env, apelido) {
+  let tunel = '';
+  let anterior = '';
+  try {
+    const r = await env.APELIDO.get(env.APELIDO.idFromName(apelido)).fetch('https://apelido/');
+    const j = await r.json();
+    tunel = String(j.tunel || '');
+    anterior = String(j.anterior || '');
+  } catch { /* trata como inexistente */ }
+  if (!ID_RE.test(tunel)) tunel = '';
+  if (!ID_RE.test(anterior)) anterior = '';
+  return { tunel, anterior };
+}
+
+function cookiesDaRequisicao(request) {
+  const map = new Map();
+  for (const parte of (request.headers.get('Cookie') || '').split(';')) {
+    const i = parte.indexOf('=');
+    if (i <= 0) continue;
+    map.set(parte.slice(0, i).trim(), parte.slice(i + 1).trim());
+  }
+  return map;
+}
+
+function cookieLongo(nome, valor) {
+  return `${nome}=${valor}; Path=/; Max-Age=31536000; Secure; HttpOnly; SameSite=Lax`;
+}
+
+/** /f/<nse> é o link dos favoritos: a cada abertura aponta para o túnel atual e mantém o aparelho já autorizado. */
+function entradaFavorito(request, apelido, reg) {
+  const url = new URL(request.url);
+  let destino = '/';
+  if (url.searchParams.get('mt') === '1') destino = '/?mt=1';
+  else if (url.searchParams.get('contador') === '1') destino = '/?contador=1';
+  const resp = new Response(null, {
+    status: 302,
+    headers: { Location: destino, 'Cache-Control': 'no-store' },
+  });
+  resp.headers.append('Set-Cookie', cookieLongo(COOKIE_TUNEL, reg.tunel));
+  const cookies = cookiesDaRequisicao(request);
+  const nomes = [`gestor_aparelho_${apelido}`, `gestor_aparelho_${reg.tunel}`];
+  if (reg.anterior) nomes.push(`gestor_aparelho_${reg.anterior}`);
+  let token = '';
+  for (const nome of nomes) {
+    const valor = cookies.get(nome);
+    if (valor) { token = valor; break; }
+  }
+  if (token) {
+    resp.headers.append('Set-Cookie', cookieLongo(`gestor_aparelho_${reg.tunel}`, token));
+    resp.headers.append('Set-Cookie', cookieLongo(`gestor_aparelho_${apelido}`, token));
+  }
+  return resp;
+}
+
 async function tunelDoApelido(env, apelido) {
   const hit = cacheApelidos.get(apelido);
   if (hit && Date.now() - hit.em < CACHE_APELIDO_MS) return hit.tunel;
@@ -306,6 +364,7 @@ export default {
       const headers = new Headers(request.headers);
       headers.set('X-Relay-Cnpj', String(lic.dados.cnpj));
       headers.set('X-Relay-Nse', String(lic.dados.nse || ''));
+      headers.set('X-Relay-Apelido', apelidoDaNse(lic.dados.nse));
       const stub = env.TUNEL.get(env.TUNEL.idFromName(id));
       const resp = await stub.fetch(new Request(request, { headers }));
       // O NSE vem da licença assinada: só a instalação dona dele aponta o endereço para o seu túnel.
@@ -348,6 +407,19 @@ export default {
       return comSeguranca(resp, request);
     }
 
+    const favorito = url.pathname.match(/^\/f\/([a-z0-9]{4,40})\/?$/);
+    if (favorito && request.method === 'GET') {
+      const apelido = favorito[1];
+      if (!APELIDO_RE.test(apelido) || RESERVADOS.has(apelido)) {
+        return comSeguranca(pagina('Endereço não encontrado', 'Nenhuma loja está usando este endereço. Confira o link fixo na tela do Gestor Estoque, no computador da loja.', 404), request);
+      }
+      const reg = await registroApelido(env, apelido);
+      if (!reg.tunel) {
+        return comSeguranca(pagina('Loja desconectada', 'O computador da loja ainda não conectou com este endereço. A página tenta de novo sozinha.', 503, true), request);
+      }
+      return comSeguranca(entradaFavorito(request, apelido, reg), request);
+    }
+
     const id = lerCookie(request, COOKIE_TUNEL);
     if (!ID_RE.test(id)) {
       return comSeguranca(pagina('Gestor Estoque', 'Para acessar pela internet, leia o QR Code de acesso online na tela do Gestor Estoque, no computador da loja.'), request);
@@ -376,12 +448,15 @@ export class Apelido {
       const atual = await this.ctx.storage.get('apelido');
       if (atual && atual.cnpj !== cnpj) return new Response('Endereço pertence a outra empresa.', { status: 409 });
       if (!atual || atual.tunel !== tunel) {
-        await this.ctx.storage.put('apelido', { tunel, cnpj, desde: new Date().toISOString() });
+        const proximo = { tunel, cnpj, desde: new Date().toISOString() };
+        if (atual?.tunel && atual.tunel !== tunel) proximo.anterior = atual.tunel;
+        else if (atual?.anterior) proximo.anterior = atual.anterior;
+        await this.ctx.storage.put('apelido', proximo);
       }
       return new Response('ok');
     }
     const atual = await this.ctx.storage.get('apelido');
-    return Response.json({ tunel: atual?.tunel || '' });
+    return Response.json({ tunel: atual?.tunel || '', anterior: atual?.anterior || '' });
   }
 }
 
@@ -418,6 +493,12 @@ export class Tunel {
       await this.ctx.storage.put('vinculo', { hash, cnpj, criado_em: new Date().toISOString() });
     } else if (!iguaisTempoConstante(vinculo.hash, hash) || vinculo.cnpj !== cnpj) {
       return new Response('Túnel pertence a outra instalação.', { status: 403 });
+    }
+
+    const apelidoRota = String(request.headers.get('X-Relay-Apelido') || '');
+    const tunelId = String(request.headers.get('X-Tunel-Id') || '');
+    if (APELIDO_RE.test(apelidoRota) && ID_RE.test(tunelId)) {
+      await this.ctx.storage.put('rota', { apelido: apelidoRota, tunelId });
     }
 
     for (const antigo of this.ctx.getWebSockets('gestor')) {
@@ -471,7 +552,18 @@ export class Tunel {
   async encaminhar(request) {
     const conexoes = this.conexoesVivas();
     if (!conexoes.length) {
-      return pagina('Loja desconectada', 'O computador da loja não está conectado à internet agora (ou o Gestor Estoque está fechado). Tente novamente em instantes.', 503);
+      const rota = await this.ctx.storage.get('rota');
+      if (rota?.apelido && rota?.tunelId && this.env?.APELIDO) {
+        try {
+          const r = await this.env.APELIDO.get(this.env.APELIDO.idFromName(rota.apelido)).fetch('https://apelido/');
+          const atual = String((await r.json()).tunel || '');
+          if (ID_RE.test(atual) && atual !== rota.tunelId) {
+            const dominio = String(this.env.DOMINIO || 'smsjrdeveloper.com.br');
+            return Response.redirect(`https://acesso.${dominio}/f/${rota.apelido}`, 302);
+          }
+        } catch { /* mostra a página abaixo */ }
+      }
+      return pagina('Loja desconectada', 'O computador da loja não está conectado à internet agora (ou o Gestor Estoque está fechado). A página tenta de novo sozinha.', 503, true);
     }
     const ip = request.headers.get('CF-Connecting-IP') || '';
     if (this.limitado(ip)) return new Response('Muitas requisições. Aguarde um minuto.', { status: 429 });

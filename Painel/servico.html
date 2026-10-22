@@ -86,8 +86,12 @@
             <p class="hint"><span id="online-dot" class="dot off"></span> <strong id="online-status">Desligado</strong></p>
             <p class="hint msg-line" id="online-erro" hidden></p>
             <div class="field" id="online-link-box" hidden>
-              <label>Endereço online (aparelhos já autorizados)</label>
-              <a id="online-link" class="url-link" href="#" target="_blank" rel="noopener">—</a>
+              <label>Link fixo (salve nos favoritos do celular)</label>
+              <div class="link-fixo-row">
+                <a id="online-link" class="url-link" href="#" target="_blank" rel="noopener">—</a>
+                <button type="button" id="btn-online-copiar" class="btn-outline small">Copiar</button>
+              </div>
+              <p class="hint">Este endereço não muda. O aparelho já autorizado abre o Gestor por ele, sem ler o QR Code de novo.</p>
             </div>
             <div id="online-pedidos-box" hidden>
               <label class="online-aparelhos-titulo">Pedidos de acesso aguardando</label>
@@ -351,6 +355,6 @@
       </div>
     </div>
   </div>
-  <script src="servico.js?v=242"></script>
+  <script src="servico.js?v=243"></script>
 </body>
 </html>
