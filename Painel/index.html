@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=264" />
+  <link rel="stylesheet" href="styles.css?v=265" />
   <link rel="stylesheet" href="importacao-nfe.css?v=248" />
 </head>
 <body>
@@ -682,20 +682,20 @@
           <div class="cond-split" id="cond-split">
             <section class="cond-col cond-col-lista">
               <div class="cond-col-head">
-                <div>
-                  <h2>Condicionais</h2>
-                  <p class="hint" id="cond-aviso">Reservado segura o estoque. Sem quantidade disponível o lançamento não entra.</p>
-                </div>
+                <h2>Condicionais</h2>
                 <button type="button" class="btn primary" id="cond-novo-btn">Novo</button>
               </div>
-              <label class="cond-filtro">Situação
-                <select id="cond-status">
-                  <option value="reservado">Reservados</option>
-                </select>
-              </label>
-              <label class="cond-filtro">Buscar
-                <input id="cond-busca" type="search" placeholder="Número ou nome do cliente" autocomplete="off" enterkeyhint="search" />
-              </label>
+              <p class="hint" id="cond-aviso" hidden></p>
+              <div class="cond-filtros">
+                <label class="cond-filtro">Situação
+                  <select id="cond-status">
+                    <option value="todos" selected>Todos</option>
+                  </select>
+                </label>
+                <label class="cond-filtro cond-filtro-busca">Buscar
+                  <input id="cond-busca" type="search" placeholder="Número ou cliente" autocomplete="off" enterkeyhint="search" />
+                </label>
+              </div>
               <div id="cond-lista" class="cond-lista"></div>
             </section>
             <section class="cond-col cond-col-painel">
@@ -1180,7 +1180,7 @@
   <script src="vendor/zxing-browser.min.js?v=240"></script>
   <script src="importacao-nfe.js?v=242"></script>
   <script src="compras.js?v=240"></script>
-  <script src="condicionais.js?v=249"></script>
+  <script src="condicionais.js?v=250"></script>
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=259"></script>

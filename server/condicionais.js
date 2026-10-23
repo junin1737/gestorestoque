@@ -228,12 +228,12 @@ async function listar(statusFiltro, busca) {
     if (!hasTable('TB_PEDIDO_VENDA') || !hasTable('TB_PED_VENDA_ITEM')) {
       return { disponivel: false, itens: [], statuses: [], aviso: 'Esta base não tem pedido de venda.' };
     }
-    const filtro = String(statusFiltro || 'reservado').trim().toLowerCase();
+    const filtro = String(statusFiltro || 'todos').trim().toLowerCase();
     const where = [];
     const params = [];
-    if (filtro === 'todos') {
+    if (filtro === 'todos' || filtro === '') {
       /* sem filtro de status */
-    } else if (filtro === 'reservado' || filtro === '') {
+    } else if (filtro === 'reservado') {
       where.push(`TRIM(S.RESERVA) = 'S'`);
     } else if (/^\d+$/.test(filtro)) {
       where.push('P.ID_STATUS = ?');

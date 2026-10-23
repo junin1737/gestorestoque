@@ -2244,6 +2244,81 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   background: var(--ok-bg);
   color: var(--ok);
 }
+#page-condicionais .cond-split {
+  grid-template-columns: minmax(248px, 320px) minmax(0, 1fr);
+  gap: 0.55rem;
+}
+#page-condicionais .cond-col-head {
+  align-items: center;
+  padding: 0.5rem 0.7rem 0.3rem;
+}
+#page-condicionais .cond-col-head h2 { margin: 0; font-size: 1rem; }
+#page-condicionais #cond-aviso { margin: 0 0.7rem 0.3rem; }
+#page-condicionais .cond-filtros {
+  display: grid;
+  grid-template-columns: minmax(7.2rem, 0.8fr) minmax(0, 1.2fr);
+  gap: 0.4rem;
+  margin: 0 0.65rem 0.4rem;
+}
+#page-condicionais .cond-filtros .cond-filtro { margin: 0; }
+#page-condicionais .cond-filtros select,
+#page-condicionais .cond-filtros input {
+  min-height: 2rem;
+  height: 2rem;
+}
+#page-condicionais .cond-lista {
+  gap: 0.28rem;
+  padding: 0 0.5rem 0.55rem;
+}
+#page-condicionais .cond-card {
+  gap: 0;
+  padding: 0.32rem 0.5rem;
+  border-radius: 8px;
+}
+#page-condicionais .cond-card-top { gap: 0.35rem; align-items: baseline; }
+#page-condicionais .cond-card-top strong {
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+}
+#page-condicionais .cond-card-nome {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-condicionais .cond-card .hint {
+  font-size: 0.7rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#page-condicionais .cond-pill { font-size: 0.62rem; padding: 0.02rem 0.35rem; }
+#page-condicionais .cond-form { padding: 0.6rem 0.75rem 0.85rem; }
+#page-condicionais .cond-form-head { margin-bottom: 0.45rem; }
+#page-condicionais .cond-meta { margin: 0 0 0.15rem; }
+#page-condicionais .cond-detalhe-campos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem 0.55rem;
+  margin-top: 0.35rem;
+}
+#page-condicionais .cond-detalhe-campos .cond-filtro { max-width: none; margin: 0; }
+#page-condicionais .cond-acoes {
+  grid-template-columns: repeat(auto-fit, minmax(5.6rem, 1fr));
+  gap: 0.3rem;
+  margin: 0.4rem 0 0.2rem;
+}
+#page-condicionais .cond-item {
+  margin: 0.12rem 0;
+  padding: 0.28rem 0.45rem;
+  border-radius: 8px;
+}
+@media (max-width: 720px) {
+  #page-condicionais .cond-detalhe-campos { grid-template-columns: 1fr; }
+}
 .cond-vazio {
   margin: auto;
   max-width: 18rem;
@@ -2624,6 +2699,7 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 .cond-ficha p { margin: 0.2rem 0; }
 @media (max-width: 980px) {
   .cond-split { grid-template-columns: 1fr; }
+  #page-condicionais .cond-split { grid-template-columns: 1fr; }
   .cond-split:not(.is-aberto) .cond-col-painel { display: none; }
   .cond-split.is-aberto .cond-col-lista { display: none; }
   .cond-form-grid > .w-sel,

@@ -229,16 +229,16 @@ const Condicionais = (() => {
         <button type="button" class="btn small" id="cond-fechar-detalhe">Fechar</button>
       </div>
       <div class="cond-ficha">
-        <p><strong>${esc(doc.cliente || 'Sem cliente')}</strong></p>
-        <p class="hint">${esc(doc.data || '—')} ${esc(doc.horario || '')} · ${esc(doc.vendedor || 'sem vendedor')}</p>
-        <p><strong>Validade:</strong> ${esc(doc.validade || '—')}</p>
-        ${doc.obs ? `<p><strong>Obs.:</strong> ${esc(doc.obs)}</p>` : ''}
-        <label class="cond-filtro">Situação
-          <select id="cond-detalhe-status">${opcoesStatus(doc.status)}</select>
-        </label>
-        <label class="cond-filtro">Forma de pagamento
-          <select id="cond-detalhe-pagamento">${opcoesPagamento(doc.id_parcela)}</select>
-        </label>
+        <p class="cond-meta"><strong>${esc(doc.cliente || 'Sem cliente')}</strong> · ${esc(doc.data || '—')} ${esc(doc.horario || '')} · ${esc(doc.vendedor || 'sem vendedor')}</p>
+        <p class="hint">Validade ${esc(doc.validade || '—')}${doc.obs ? ` · ${esc(doc.obs)}` : ''}</p>
+        <div class="cond-detalhe-campos">
+          <label class="cond-filtro">Situação
+            <select id="cond-detalhe-status">${opcoesStatus(doc.status)}</select>
+          </label>
+          <label class="cond-filtro">Pagamento
+            <select id="cond-detalhe-pagamento">${opcoesPagamento(doc.id_parcela)}</select>
+          </label>
+        </div>
         <p class="hint" id="cond-detalhe-msg">${esc(aviso)}</p>
         <div class="cond-acoes">
           <button type="button" class="btn" id="cond-editar">Editar</button>
@@ -306,7 +306,7 @@ const Condicionais = (() => {
     const aviso = $('#cond-aviso');
     const sel = $('#cond-status');
     if (!lista) return;
-    const filtro = sel?.value || 'reservado';
+    const filtro = sel?.value || 'todos';
     const q = String($('#cond-busca')?.value || '').trim();
     lista.innerHTML = '<p class="hint">Carregando…</p>';
     const qs = new URLSearchParams({ status: filtro });
@@ -318,18 +318,23 @@ const Condicionais = (() => {
     }
     if (Array.isArray(res.statuses)) statuses = res.statuses;
     if (sel && res.statuses && sel.dataset.pronto !== '1') {
-      const atual = sel.value || 'reservado';
-      const opts = ['<option value="reservado">Reservados (seguram estoque)</option>'];
+      const atual = sel.value || 'todos';
+      const opts = [
+        '<option value="todos">Todos</option>',
+        '<option value="reservado">Reservados</option>',
+      ];
       for (const st of res.statuses) {
         opts.push(`<option value="${st.id}">${esc(st.descricao)}${st.reserva ? ' · reserva' : ''}</option>`);
       }
-      opts.push('<option value="todos">Todos</option>');
       sel.innerHTML = opts.join('');
-      sel.value = [...sel.options].some((o) => o.value === atual) ? atual : 'reservado';
+      sel.value = [...sel.options].some((o) => o.value === atual) ? atual : 'todos';
       sel.dataset.pronto = '1';
       preencherStatusLancamento();
     }
-    if (aviso && res.aviso) aviso.textContent = res.aviso;
+    if (aviso) {
+      aviso.hidden = !res.aviso;
+      if (res.aviso) aviso.textContent = res.aviso;
+    }
     const itens = res.itens || [];
     if (!itens.length) {
       lista.innerHTML = q
@@ -340,11 +345,11 @@ const Condicionais = (() => {
     lista.innerHTML = itens.map((it) => `
       <button type="button" class="cond-card${Number(it.id) === abertoId ? ' is-ativo' : ''}" data-cond="${esc(it.id)}">
         <span class="cond-card-top">
-          <strong>Nº ${esc(it.id)}</strong>
+          <strong>${esc(it.id)}</strong>
+          <span class="cond-card-nome">${esc(it.cliente || 'Sem cliente')}</span>
           <span class="cond-pill${it.reserva ? ' is-reserva' : ''}">${esc(it.status_label)}</span>
         </span>
-        <span class="cond-card-nome">${esc(it.cliente || 'Sem cliente')}</span>
-        <span class="hint">${esc(it.data)} ${esc(it.horario)} · ${esc(it.vendedor || 'sem vendedor')} · ${money(it.total)}${it.pagamento ? ` · ${esc(it.pagamento)}` : ''}</span>
+        <span class="hint">${esc(it.data)} ${esc(it.horario)} · ${money(it.total)}</span>
       </button>`).join('');
     ligarAcoes(lista);
   }
@@ -981,12 +986,13 @@ const Condicionais = (() => {
       }
       const aviso = $('#cond-aviso');
       const rotulo = $('#cond-lanc-status')?.selectedOptions?.[0]?.textContent || '';
-      if (aviso) aviso.textContent = `Condicional ${res.id} salvo${rotulo ? ` (${rotulo})` : ''}.`;
+      if (aviso) {
+        aviso.hidden = false;
+        aviso.textContent = `Condicional ${res.id} salvo${rotulo ? ` (${rotulo})` : ''}.`;
+      }
       editandoId = 0;
       limparLancamento();
       painel('vazio');
-      const sel = $('#cond-status');
-      if (sel && [...sel.options].some((o) => o.value === idStatus)) sel.value = idStatus;
       await abrirLista();
       perguntarEnvio(res.id);
     });
