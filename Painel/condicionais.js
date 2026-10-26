@@ -18,6 +18,15 @@ const Condicionais = (() => {
     return Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   }
 
+  function classeStatus(label) {
+    const s = String(label || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (s.includes('edit')) return 'is-editando';
+    if (s.includes('reprov')) return 'is-reprovado';
+    if (s.includes('reserv')) return 'is-reservado';
+    if (s.includes('aprov') || s.includes('final')) return 'is-concluido';
+    return 'is-outro';
+  }
+
   function descontoDocumento(doc) {
     const itens = (doc?.itens || []).reduce((s, it) => s + Number(it.desconto || 0), 0);
     return itens + Number(doc?.desconto_geral || 0);
@@ -54,7 +63,7 @@ const Condicionais = (() => {
         <p><strong>Validade:</strong> ${esc(doc.validade || '—')}</p>
         <p><strong>Vendedor:</strong> ${esc(doc.vendedor || '—')}</p>
         ${doc.pagamento ? `<p><strong>Pagamento:</strong> ${esc(doc.pagamento)}</p>` : ''}
-        <p><strong>Situação:</strong> ${esc(doc.status_label || '')}</p>
+        <p><strong>Situação:</strong> <span class="cond-pill ${classeStatus(doc.status_label)}">${esc(doc.status_label || '')}</span></p>
         ${doc.obs ? `<p><strong>Obs.:</strong> ${esc(doc.obs)}</p>` : ''}
         ${doc.qtd != null ? `<p><strong>Quantidade desta peça:</strong> ${esc(doc.qtd)}</p>` : ''}
         ${extra || ''}
@@ -225,7 +234,7 @@ const Condicionais = (() => {
       </div>`).join('');
     box.innerHTML = `
       <div class="cond-form-head">
-        <h3>Condicional ${esc(doc.id)}</h3>
+        <h3>Condicional ${esc(doc.id)} <span class="cond-pill ${classeStatus(doc.status_label)}">${esc(doc.status_label || '')}</span></h3>
         <button type="button" class="btn small" id="cond-fechar-detalhe">Fechar</button>
       </div>
       <div class="cond-ficha">
@@ -347,7 +356,7 @@ const Condicionais = (() => {
         <span class="cond-card-top">
           <strong>${esc(it.id)}</strong>
           <span class="cond-card-nome">${esc(it.cliente || 'Sem cliente')}</span>
-          <span class="cond-pill${it.reserva ? ' is-reserva' : ''}">${esc(it.status_label)}</span>
+          <span class="cond-pill ${classeStatus(it.status_label)}">${esc(it.status_label)}</span>
         </span>
         <span class="hint">${esc(it.data)} ${esc(it.horario)} · ${money(it.total)}</span>
       </button>`).join('');

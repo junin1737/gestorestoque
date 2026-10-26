@@ -2237,13 +2237,18 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   font-weight: 750;
   padding: 0.12rem 0.45rem;
   border-radius: 999px;
-  background: color-mix(in srgb, var(--primary-2) 14%, var(--bg-elev));
-  color: var(--primary-2);
+  background: #d5dbe3;
+  color: #2f3846;
 }
-.cond-pill.is-reserva {
-  background: var(--ok-bg);
-  color: var(--ok);
-}
+.cond-pill.is-editando { background: #d7e4ff; color: #1d4ed8; }
+.cond-pill.is-reprovado { background: #fcdada; color: #b91c1c; }
+.cond-pill.is-reservado { background: #e6dbfb; color: #6d28d9; }
+.cond-pill.is-concluido { background: #cfe8d8; color: #14532d; }
+html[data-theme="escuro"] .cond-pill { background: #4a5568; color: #f2f5f8; }
+html[data-theme="escuro"] .cond-pill.is-editando { background: #1e3a6e; color: #d6e4ff; }
+html[data-theme="escuro"] .cond-pill.is-reprovado { background: #7f1d1d; color: #ffd6d6; }
+html[data-theme="escuro"] .cond-pill.is-reservado { background: #5b21b6; color: #f3e8ff; }
+html[data-theme="escuro"] .cond-pill.is-concluido { background: #14532d; color: #d8f5e4; }
 #page-condicionais .cond-split {
   grid-template-columns: minmax(248px, 320px) minmax(0, 1fr);
   gap: 0.55rem;
@@ -2298,6 +2303,7 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
 #page-condicionais .cond-pill { font-size: 0.62rem; padding: 0.02rem 0.35rem; }
 #page-condicionais .cond-form { padding: 0.6rem 0.75rem 0.85rem; }
 #page-condicionais .cond-form-head { margin-bottom: 0.45rem; }
+#page-condicionais .cond-form-head h3 { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }
 #page-condicionais .cond-meta { margin: 0 0 0.15rem; }
 #page-condicionais .cond-detalhe-campos {
   display: grid;
