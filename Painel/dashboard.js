@@ -216,94 +216,124 @@ function htmlAbas(dados) {
     <button type="button" class="tab ${dados.aba === aba ? 'active' : ''}" data-aba="${aba}">${rotulo[aba] || aba}</button>`).join('')}</div>`;
 }
 
-function tabelaContas(linhas, vazio) {
-  const corpo = (linhas || []).map((r) => `
-    <tr>
-      <td>${esc(r.vencimento ? r.vencimento.split('-').reverse().join('/') : '')}</td>
-      <td>${esc(r.documento)}</td>
-      <td>${esc(r.historico)}</td>
-      <td>${brl(r.valor)}</td>
-      <td>${esc(r.situacao)}</td>
-    </tr>`).join('');
-  return `<table class="fin-table"><thead><tr><th>Vencimento</th><th>Documento</th><th>Histórico</th><th>Valor</th><th>Situação</th></tr></thead><tbody>${corpo || `<tr><td colspan="5">${esc(vazio)}</td></tr>`}</tbody></table>`;
+const CORES_PIZZA = ['#1f9d55', '#2f6fed', '#e23d3d', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#4f46e5', '#ea580c', '#0f766e', '#9333ea'];
+
+function itensPizza(lista, nomeDe) {
+  return (lista || [])
+    .map((item) => ({ nome: nomeDe(item), total: Number(item.total) || 0 }))
+    .filter((item) => item.total !== 0);
 }
 
-function tabelaRecebimentoConta(linhas) {
-  const corpo = (linhas || []).map((r) => {
-    const nome = [r.codigo, r.plano].filter(Boolean).join(' · ');
-    return `<tr><td>${esc(nome)}</td><td class="fin-valor-saida">${brl(r.recebido)}</td></tr>`;
+function planosDaPizza(grupos) {
+  const map = new Map();
+  (grupos || []).forEach((g) => {
+    (g.planos || []).forEach((p) => {
+      const nome = [p.codigo, p.plano].filter(Boolean).join(' · ') || 'Sem plano de contas';
+      map.set(nome, (map.get(nome) || 0) + (Number(p.total) || 0));
+    });
+  });
+  return [...map.entries()]
+    .map(([nome, total]) => ({ nome, total }))
+    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+}
+
+function htmlPizza(id, itens) {
+  const lista = itens || [];
+  const total = lista.reduce((s, item) => s + Math.abs(item.total), 0);
+  if (!total) return '<p class="fin-vazio">Sem valores para o gráfico</p>';
+  let ang = -Math.PI / 2;
+  const fatias = lista.map((item, i) => {
+    const frac = Math.abs(item.total) / total;
+    const fim = ang + frac * Math.PI * 2;
+    const cor = CORES_PIZZA[i % CORES_PIZZA.length];
+    let path = '';
+    if (frac >= 0.999) {
+      path = '<circle cx="0" cy="0" r="1"></circle>';
+    } else {
+      const x1 = Math.cos(ang).toFixed(4);
+      const y1 = Math.sin(ang).toFixed(4);
+      const x2 = Math.cos(fim).toFixed(4);
+      const y2 = Math.sin(fim).toFixed(4);
+      const grande = frac > 0.5 ? 1 : 0;
+      path = `<path d="M 0 0 L ${x1} ${y1} A 1 1 0 ${grande} 1 ${x2} ${y2} Z"></path>`;
+    }
+    ang = fim;
+    const pct = (frac * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+    return { path, cor, nome: item.nome, pct, total: item.total };
+  });
+  const desenhos = fatias.map((f) => f.path.replace('<path ', `<path fill="${f.cor}" `).replace('<circle ', `<circle fill="${f.cor}" `)).join('');
+  const legenda = fatias.map((f) => `
+    <li><i style="background:${f.cor}"></i><span>${esc(f.nome)}</span><strong>${brl(f.total)}</strong><em>${f.pct}%</em></li>`).join('');
+  return `<figure class="dre-pizza" id="${id}">
+    <svg viewBox="-1.05 -1.05 2.1 2.1" role="img" aria-label="Gráfico de pizza">${desenhos}</svg>
+    <ul class="dre-legenda">${legenda}</ul>
+  </figure>`;
+}
+
+function htmlLadoDre(prefixo, titulo, total, grupos, tom) {
+  const cls = tom === 'saida' ? 'fin-valor-saida' : 'fin-valor-entrada';
+  const centros = (grupos || []).map((g, i) => {
+    const planos = (g.planos || []).map((p, j) => {
+      const nome = [p.codigo, p.plano].filter(Boolean).join(' · ');
+      const linhas = (p.linhas || []).map((l) => `
+        <tr>
+          <td>${esc(l.data ? l.data.split('-').reverse().join('/') : '')}</td>
+          <td>${esc(l.historico || '')}</td>
+          <td class="${cls}">${brl(l.valor)}</td>
+        </tr>`).join('');
+      const idPlano = `${prefixo}-p-${i}-${j}`;
+      return `<div class="dre-plano">
+        <div class="dre-nivel">
+          <button type="button" class="dre-mais" data-dre-abre="${idPlano}" aria-expanded="false">+</button>
+          <span>${esc(nome)}</span>
+          <strong class="${cls}">${brl(p.total)}</strong>
+        </div>
+        <div id="${idPlano}" hidden>
+          <table class="fin-table dre-linhas"><tbody>${linhas}</tbody></table>
+        </div>
+      </div>`;
+    }).join('');
+    const idCentro = `${prefixo}-c-${i}`;
+    return `<article class="dre-centro">
+      <div class="dre-nivel">
+        <button type="button" class="dre-mais" data-dre-abre="${idCentro}" aria-expanded="false">+</button>
+        <h3>${esc(g.centro)}</h3>
+        <strong class="${cls}">${brl(g.total)}</strong>
+      </div>
+      <div id="${idCentro}" hidden>${planos}</div>
+    </article>`;
   }).join('');
-  return `<table class="fin-table"><thead><tr><th>Conta</th><th>Recebido</th></tr></thead><tbody>${corpo || '<tr><td colspan="2">Nenhum recebimento no período</td></tr>'}</tbody></table>`;
-}
-
-function tabelaPlanoValor(linhas, vazio, tom) {
-  const corpo = (linhas || []).map((r) => {
-    const nome = [r.codigo, r.plano].filter(Boolean).join(' · ');
-    const negativo = Number(r.valor) < 0;
-    const cls = tom === 'entrada'
-      ? (negativo ? 'fin-valor-saida' : 'fin-valor-entrada')
-      : (negativo ? 'fin-valor-entrada' : 'fin-valor-saida');
-    return `<tr><td>${esc(nome)}</td><td class="${cls}">${brl(r.valor)}</td></tr>`;
-  }).join('');
-  return `<table class="fin-table"><thead><tr><th>Plano de contas</th><th>Valor</th></tr></thead><tbody>${corpo || `<tr><td colspan="2">${esc(vazio)}</td></tr>`}</tbody></table>`;
-}
-
-function htmlPlano(dados) {
-  const p = dados.porPlano || {};
-  const blocos = [
-    ['Recebidas por plano de contas', p.recebidas, 'Nenhum recebimento no período', 'saida'],
-    ['A receber por plano de contas', p.receber, 'Nenhuma conta a receber no período', 'saida'],
-    ['A pagar por plano de contas', p.pagar, 'Nenhuma conta a pagar no período', 'entrada'],
-    ['Pagas por plano de contas', p.pagas, 'Nenhum pagamento no período', 'entrada'],
-  ];
-  return blocos.map(([titulo, linhas, vazio, tom]) => `
-    <div class="fin-sub">
-      <h3>${esc(titulo)}</h3>
-      ${tabelaPlanoValor(linhas, vazio, tom)}
-    </div>`).join('');
+  const idLista = `${prefixo}-lista`;
+  const idCentroPizza = `${prefixo}-pizza-centro`;
+  const idPlanoPizza = `${prefixo}-pizza-plano`;
+  return `<section class="fin-box dre-lado">
+    <div class="dre-nivel dre-topo">
+      <button type="button" class="dre-mais" data-dre-abre="${idLista}" aria-expanded="false">+</button>
+      <h2>${esc(titulo)} <span class="${cls}">${brl(total)}</span></h2>
+    </div>
+    <div id="${idLista}" hidden>
+      ${centros || '<p class="fin-vazio">Nenhuma movimentação no período</p>'}
+    </div>
+    ${htmlPizza(idCentroPizza, itensPizza(grupos, (g) => g.centro))}
+    <div id="${idPlanoPizza}" hidden>${htmlPizza(`${idPlanoPizza}-g`, planosDaPizza(grupos))}</div>
+    <button type="button" class="btn dre-troca" data-dre-pizza="${prefixo}" data-modo="centro">Mostrar por plano de contas</button>
+  </section>`;
 }
 
 function htmlFinanceiro(dados) {
-  const aviso = `${dados.ignorarCartao ? '<p class="hint">Contas a receber com cartão no histórico estão fora desta aba.</p>' : ''}
-  <p class="hint">O dia e o mês dos cards seguem a data Até. A lista e o recebimento por conta usam o período De–Até. No plano de contas, recebidas e pagas usam o período; a receber e a pagar usam o vencimento nesse período.</p>`;
-  const corte = (lista, total) => (total > (lista || []).length ? `<p class="hint">Mostrando ${(lista || []).length} de ${total}.</p>` : '');
-  const bloco = (titulo, aberto, liquidado, painel, linhas, vazio, total) => `
-    <section class="fin-box">
-      <h2>${esc(titulo)}</h2>
-      <div class="fin-bloco-grade">
-        <div class="fin-sub"><h3>A ${esc(aberto)}</h3><div class="fin-cards">${painel === 'receber'
-          ? `${card('No dia', brl(dados.receberDia), dados.referenciaDia || '', '', 'saida')}${card('No mês', brl(dados.receberMes), dados.referenciaMes || '', '', 'saida')}`
-          : `${card('No dia', brl(dados.pagarDia), dados.referenciaDia || '', '', 'entrada')}${card('No mês', brl(dados.pagarMes), dados.referenciaMes || '', '', 'entrada')}`}</div></div>
-        <div class="fin-sub"><h3>${esc(liquidado)}</h3><div class="fin-cards">${painel === 'receber'
-          ? `${card('No dia', brl(dados.recebidasDia), dados.referenciaDia || '', '', 'saida')}${card('No mês', brl(dados.recebidasMes), dados.referenciaMes || '', '', 'saida')}`
-          : `${card('No dia', brl(dados.pagasDia), dados.referenciaDia || '', '', 'entrada')}${card('No mês', brl(dados.pagasMes), dados.referenciaMes || '', '', 'entrada')}`}</div></div>
-      </div>
-      <div class="fin-mov-acoes">
-        <button type="button" class="btn" data-fin-painel="fin-mov-${painel}" data-fin-mostrar="Mostrar movimentações" data-fin-ocultar="Ocultar movimentações" aria-expanded="false">Mostrar movimentações</button>
-      </div>
-      <div id="fin-mov-${painel}" hidden>
-        ${tabelaContas(linhas, vazio)}
-        ${corte(linhas, total)}
-      </div>
-    </section>`;
+  if (dados.erro) return `${htmlAbas(dados)}<p class="fin-vazio">${esc(dados.erro)}</p>`;
+  const resultado = Number(dados.resultado) || 0;
   return `${htmlAbas(dados)}
-  ${aviso}
-  <div class="fin-mov-acoes">
-    <button type="button" class="btn" data-fin-painel="fin-recebimento" data-fin-mostrar="Recebimento por conta" data-fin-ocultar="Ocultar recebimento por conta" aria-expanded="false">Recebimento por conta</button>
-    <button type="button" class="btn" data-fin-painel="fin-plano" data-fin-mostrar="Por plano de contas" data-fin-ocultar="Ocultar plano de contas" aria-expanded="false">Por plano de contas</button>
+  <p class="hint">Valores pela data do pagamento. Mercadorias para Revenda entra nas entradas, porque é a receita. Nas saídas esse custo fica de fora, porque já está no CMV.</p>
+  <div class="fin-cards">
+    ${card('Entradas', brl(dados.totalEntradas), 'recebido no período', '', 'saida')}
+    ${card('Saídas', brl(dados.totalSaidas), 'pago no período', '', 'entrada')}
+    ${card('Entradas − saídas', brl(resultado), 'no período', '', resultado < 0 ? 'entrada' : 'saida')}
   </div>
-  <section id="fin-recebimento" class="fin-box" hidden>
-    <h2>Recebimento por conta</h2>
-    <p class="hint">Baixas do período De–Até, pela conta em que o valor entrou.</p>
-    ${tabelaRecebimentoConta(dados.porRecebimentoConta)}
-  </section>
-  <section id="fin-plano" class="fin-box" hidden>
-    <h2>Por plano de contas</h2>
-    <p class="hint">Recebidas e pagas reúnem a baixa do título, o movimento diário e o movimento do banco. A receber e a pagar são os títulos em aberto. Com o Manage ligado, entram as tabelas que ele movimenta.</p>
-    ${htmlPlano(dados)}
-  </section>
-  ${bloco('Contas a receber', 'receber', 'Recebidas', 'receber', dados.contasReceber, 'Nenhuma conta a receber no período', dados.contasReceberTotal)}
-  ${bloco('Contas a pagar', 'pagar', 'Pagas', 'pagar', dados.contasPagar, 'Nenhuma conta a pagar no período', dados.contasPagarTotal)}`;
+  <div class="dre-split">
+    ${htmlLadoDre('ent', 'Entradas', dados.totalEntradas, dados.entradas, 'saida')}
+    ${htmlLadoDre('sai', 'Saídas', dados.totalSaidas, dados.saidas, 'entrada')}
+  </div>`;
 }
 
 function htmlConteudo(dados) {
@@ -437,6 +467,28 @@ function ligarFiltros() {
       dashCacheChave = '';
       dashCacheHtml = '';
       carregarDash();
+    });
+  });
+  document.querySelectorAll('#dash-financeiro [data-dre-abre]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const alvo = document.getElementById(btn.dataset.dreAbre);
+      if (!alvo) return;
+      alvo.hidden = !alvo.hidden;
+      const aberto = !alvo.hidden;
+      btn.textContent = aberto ? '−' : '+';
+      btn.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+    });
+  });
+  document.querySelectorAll('#dash-financeiro [data-dre-pizza]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const prefixo = btn.dataset.drePizza;
+      const porPlano = btn.dataset.modo !== 'plano';
+      const centro = document.getElementById(`${prefixo}-pizza-centro`);
+      const plano = document.getElementById(`${prefixo}-pizza-plano`);
+      if (centro) centro.hidden = porPlano;
+      if (plano) plano.hidden = !porPlano;
+      btn.dataset.modo = porPlano ? 'plano' : 'centro';
+      btn.textContent = porPlano ? 'Mostrar por centro de custo' : 'Mostrar por plano de contas';
     });
   });
   document.querySelectorAll('#dash-financeiro [data-fin-painel]').forEach((btn) => {

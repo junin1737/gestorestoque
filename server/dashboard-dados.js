@@ -1,6 +1,7 @@
 'use strict';
 
-const { query } = require('./db');
+const Firebird = require('node-firebird');
+const { query, buildFbOptions, detach } = require('./db');
 const { lerUsaManage, loadAppConfig } = require('./config');
 
 /**
@@ -182,6 +183,15 @@ function inteiro(v) {
 
 function diaIso(v) {
   if (v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().slice(0, 10);
+  return String(v || '').slice(0, 10);
+}
+
+function diaMovimento(v) {
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${v.getFullYear()}-${m}-${d}`;
+  }
   return String(v || '').slice(0, 10);
 }
 
@@ -616,6 +626,15 @@ async function porMes(db, usaManage, filtros) {
     await acumular(fonte, 'compra', 'devolucao_venda', 'vendido', -1);
   }
   return meses.map((r) => ({ mes: r.mes, nome: r.nome, vendido: reais(r.vendido), comprado: reais(r.comprado) }));
+}
+
+async function procedimentoExiste(db, nome) {
+  const seguro = String(nome || '').toUpperCase().replace(/[^A-Z0-9_]/g, '');
+  if (!seguro) return false;
+  const rows = await ler(db, `
+    SELECT 1 AS OK FROM RDB$PROCEDURES
+    WHERE TRIM(RDB$PROCEDURE_NAME) = '${seguro}'`);
+  return !!(rows && rows.length);
 }
 
 async function relacaoExiste(db, nome) {
@@ -1169,77 +1188,191 @@ async function somaPagas(db, inicio, fimExclusivo) {
   return rows && rows[0] ? centavos(rows[0].VALOR) : 0;
 }
 
-async function consultarFinanceiro(db, filtros, ignorarCartao, usaManage) {
-  const fontes = await fontesContaReceber(db, usaManage);
-  const dia = filtros.fim;
-  const diaFim = addDias(dia, 1);
-  const mes = intervaloMes(dia);
-  const pagarDia = await somaPagarAberto(db, dia, diaFim);
-  const pagarMes = await somaPagarAberto(db, mes.inicio, mes.fimExclusivo);
-  const receberDia = await somaReceberAberto(db, fontes, dia, diaFim, ignorarCartao);
-  const receberMes = await somaReceberAberto(db, fontes, mes.inicio, mes.fimExclusivo, ignorarCartao);
-  const pagasDia = await somaPagas(db, dia, diaFim);
-  const pagasMes = await somaPagas(db, mes.inicio, mes.fimExclusivo);
-  const recebidasDia = await somaRecebidas(db, fontes, dia, diaFim, ignorarCartao);
-  const recebidasMes = await somaRecebidas(db, fontes, mes.inicio, mes.fimExclusivo, ignorarCartao);
-  const pagar = await ler(db, `
-    SELECT FIRST 200 TRIM(CAST(C.DOCUMENTO AS VARCHAR(40))) AS DOCUMENTO,
-           TRIM(COALESCE(C.HISTORICO, '')) AS HISTORICO,
-           C.DT_VENCTO, C.VLR_CTAPAG AS VALOR,
-           CASE WHEN EXISTS (
-             SELECT 1 FROM TB_CTAPAG_BAIXA B
-             WHERE B.ID_CTAPAG = C.ID_CTAPAG AND TRIM(COALESCE(B.TIP_PAGTO, '')) = 'T'
-           ) THEN 'Paga' ELSE 'Em aberto' END AS SITUACAO
-    FROM TB_CONTA_PAGAR C
-    WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
-      AND TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'C'
-    ORDER BY C.DT_VENCTO, C.ID_CTAPAG`);
-  const receber = [];
-  let contasReceberTotal = 0;
-  for (const fonte of fontes) {
-    const saldoReceber = sqlRestante('C', fonte);
-    const lista = await ler(db, `
-      SELECT FIRST 200 TRIM(CAST(C.DOCUMENTO AS VARCHAR(40))) AS DOCUMENTO,
-             TRIM(COALESCE(C.HISTORICO, '')) AS HISTORICO,
-             C.DT_VENCTO, C.VLR_CTAREC AS VALOR,
-             CASE WHEN ${saldoReceber} > 0.009 THEN 'Em aberto' ELSE 'Recebida' END AS SITUACAO
-      FROM ${fonte.conta} C
-      WHERE C.DT_VENCTO >= '${filtros.inicio}' AND C.DT_VENCTO < '${filtros.fimExclusivo}'
-        AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
-        ${filtroCartao('C.HISTORICO', ignorarCartao)}
-      ORDER BY C.DT_VENCTO, C.ID_CTAREC`);
-    receber.push(...(lista || []));
-    const total = await ler(db, `
-      SELECT COUNT(*) AS N FROM ${fonte.conta}
-      WHERE DT_VENCTO >= '${filtros.inicio}' AND DT_VENCTO < '${filtros.fimExclusivo}'
-        AND TRIM(COALESCE(TIP_CTAREC, '')) <> 'C'
-        ${filtroCartao('HISTORICO', ignorarCartao)}`);
-    contasReceberTotal += total && total[0] ? inteiro(total[0].N) : 0;
+function texto(v) {
+  if (v == null) return '';
+  const s = Buffer.isBuffer(v) ? v.toString('latin1') : String(v);
+  return s.replace(/\u0000/g, '').replace(/\s+/g, ' ').trim();
+}
+
+function ladoDre(rows) {
+  const centros = new Map();
+  for (const r of rows || []) {
+    const cents = centavos(r.VALOR);
+    if (!cents) continue;
+    const centro = texto(r.CENTRO) || 'Sem centro de custo';
+    const codigo = texto(r.CODIGO);
+    const plano = texto(r.PLANO) || 'Sem plano de contas';
+    const id = r.ID == null ? '' : String(r.ID).trim();
+    const chave = `${id}|${codigo}|${plano}`;
+    if (!centros.has(centro)) centros.set(centro, { centro, total: 0, planos: new Map() });
+    const grupo = centros.get(centro);
+    grupo.total += cents;
+    if (!grupo.planos.has(chave)) grupo.planos.set(chave, { codigo: codigo === '0' ? '' : codigo, plano, total: 0, linhas: [] });
+    const item = grupo.planos.get(chave);
+    item.total += cents;
+    item.linhas.push({
+      data: diaMovimento(r.DATA),
+      historico: texto(r.HISTORICO),
+      valor: reais(cents),
+    });
   }
-  receber.sort((a, b) => String(diaIso(a.DT_VENCTO)).localeCompare(String(diaIso(b.DT_VENCTO))));
-  const totalPagar = await ler(db, `
-    SELECT COUNT(*) AS N FROM TB_CONTA_PAGAR
-    WHERE DT_VENCTO >= '${filtros.inicio}' AND DT_VENCTO < '${filtros.fimExclusivo}'
-      AND TRIM(COALESCE(TIP_CTAPAG, '')) <> 'C'`);
+  return [...centros.values()].map((g) => ({
+    centro: g.centro,
+    total: reais(g.total),
+    planos: [...g.planos.values()].map((p) => ({
+      codigo: p.codigo,
+      plano: p.plano,
+      total: reais(p.total),
+      linhas: p.linhas.sort((a, b) => a.data.localeCompare(b.data) || a.historico.localeCompare(b.historico, 'pt-BR')),
+    })).sort((a, b) => centavos(b.total) - centavos(a.total) || a.plano.localeCompare(b.plano, 'pt-BR')),
+  })).sort((a, b) => centavos(b.total) - centavos(a.total) || a.centro.localeCompare(b.centro, 'pt-BR'));
+}
+
+function somarLado(grupos) {
+  return (grupos || []).reduce((s, g) => s + centavos(g.total), 0);
+}
+
+async function nomesPlanosFora(db) {
+  if (!(await relacaoExiste(db, 'XX_TB_PL_SERV')) || !(await relacaoExiste(db, 'TB_PLANO_CONTAS'))) return [];
+  const rows = await ler(db, `
+    SELECT DISTINCT CAST(P.DESCRICAO AS VARCHAR(120) CHARACTER SET OCTETS) AS NOME
+    FROM XX_TB_PL_SERV S
+    JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = S.ID_CTAPLA
+    ORDER BY 1`);
+  return (rows || []).map((r) => texto(r.NOME)).filter(Boolean);
+}
+
+function anexar(appCfg, charset) {
+  const opts = { ...buildFbOptions(appCfg || loadAppConfig(), '2.5'), charset };
+  return new Promise((resolve, reject) => {
+    Firebird.attach(opts, (err, conn) => (err ? reject(err) : resolve(conn)));
+  });
+}
+
+async function lerRelatorio(db, sql, appCfg) {
+  try {
+    return await query(db, sql);
+  } catch (err) {
+    if (!/malformed string/i.test(String(err && err.message || ''))) throw err;
+  }
+  let ultimo = null;
+  for (const charset of ['WIN1252', 'NONE']) {
+    let alt = null;
+    try {
+      alt = await anexar(appCfg, charset);
+      return await query(alt, sql);
+    } catch (err) {
+      ultimo = err;
+      if (!/malformed string/i.test(String(err && err.message || ''))) throw err;
+    } finally {
+      if (alt) await detach(alt);
+    }
+  }
+  throw ultimo || new Error('Falha ao ler o relatório financeiro');
+}
+
+function sqlOctets(expr, tam) {
+  return `CAST(${expr} AS VARCHAR(${tam}) CHARACTER SET OCTETS)`;
+}
+
+async function lerMovimentoDre(db, filtros, usaManage, appCfg) {
+  const inicio = parseIso(filtros.inicio);
+  const fim = parseIso(filtros.fimExclusivo);
+  const leitura = usaManage ? 'manage' : 'clipp';
+  const temIgnorados = await relacaoExiste(db, 'XX_TB_PL_SERV');
+  const fora = temIgnorados
+    ? 'NOT IN (SELECT ID_CTAPLA FROM XX_TB_PL_SERV)'
+    : `NOT IN (SELECT ID_CTAPLA FROM TB_PLANO_CONTAS WHERE UPPER(DESCRICAO) CONTAINING 'MERCADORIAS PARA REVENDA')`;
+  const temCentroPag = await colunaExiste(db, 'TB_CONTA_PAGAR', 'CC_CUSTO');
+  const temCentroRec = await colunaExiste(db, 'TB_CONTA_RECEBER', 'CC_CUSTO');
+  const temCentroBanco = await colunaExiste(db, 'TB_BANCO_CTA_MOVTO', 'ID_CCUSTO');
+  const centro = (tem, coluna) => (tem
+    ? sqlOctets(coluna, 80)
+    : 'CAST(NULL AS VARCHAR(80) CHARACTER SET OCTETS)');
+  const joinCentro = (tem, coluna) => (tem ? `LEFT JOIN TB_CENTRO_CUSTO CC ON CC.ID = ${coluna}` : '');
+  const plano = `
+             ${sqlOctets('P.COD_CONTA', 40)} AS CODIGO,
+             ${sqlOctets('P.DESCRICAO', 120)} AS PLANO`;
+  const sql = `
+    SELECT ${sqlOctets(`'ENTRADAS'`, 20)} AS TIPO, C.ID_CTAPLA AS ID,
+           ${plano},
+           ${centro(temCentroRec, 'CC.NOME')} AS CENTRO,
+           ${sqlOctets('C.HISTORICO', 250)} AS HISTORICO,
+           B.VLR_RECEB AS VALOR, B.DT_BAIXA AS DATA
+    FROM TB_CTAREC_BAIXA B
+    JOIN TB_CONTA_RECEBER C ON C.ID_CTAREC = B.ID_CTAREC
+    LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.ID_CTAPLA
+    ${joinCentro(temCentroRec, 'C.CC_CUSTO')}
+    WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
+      AND TRIM(COALESCE(B.TIP_RECBTO, '')) NOT IN ('C', 'B')
+      AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'E'
+    UNION ALL
+    SELECT ${sqlOctets(`'SAIDAS'`, 20)}, C.ID_CTAPLA,
+           ${plano},
+           ${centro(temCentroPag, 'CC.NOME')},
+           ${sqlOctets('C.HISTORICO', 250)},
+           B.VLR_PAGO, B.DT_BAIXA
+    FROM TB_CTAPAG_BAIXA B
+    JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = B.ID_CTAPAG
+    LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.ID_CTAPLA
+    ${joinCentro(temCentroPag, 'C.CC_CUSTO')}
+    WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
+      AND TRIM(COALESCE(B.TIP_PAGTO, '')) NOT IN ('C', 'B')
+      AND TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'E'
+      AND C.ID_CTAPLA ${fora}
+    UNION ALL
+    SELECT ${sqlOctets(`CASE WHEN B.VALOR > 0 THEN 'ENTRADAS' ELSE 'SAIDAS' END`, 20)}, B.ID_CTAPLA,
+           ${plano},
+           ${centro(temCentroBanco, 'CC.NOME')},
+           ${sqlOctets('B.HISTORICO', 250)},
+           CASE WHEN B.VALOR < 0 THEN B.VALOR * -1 ELSE B.VALOR END, B.DT_MOVTO
+    FROM TB_BANCO_CTA_MOVTO B
+    LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = B.ID_CTAPLA
+    ${joinCentro(temCentroBanco, 'B.ID_CCUSTO')}
+    WHERE B.DT_MOVTO >= '${inicio}' AND B.DT_MOVTO < '${fim}'
+      AND B.ID_CTAPLA IS NOT NULL
+      AND COALESCE(B.ID_CTA_DEST, 0) <> 5
+      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Transferencia.%'
+      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno Transf.%'
+      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno de pagamen%'
+      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno de Receb%'
+      AND (B.VALOR > 0 OR B.ID_CTAPLA ${fora})`;
+  const rows = await lerRelatorio(db, sql, appCfg);
+  const entradas = ladoDre((rows || []).filter((r) => texto(r.TIPO).toUpperCase() === 'ENTRADAS'));
+  const saidas = ladoDre((rows || []).filter((r) => texto(r.TIPO).toUpperCase() === 'SAIDAS'));
+  const totalEntradas = somarLado(entradas);
+  const totalSaidas = somarLado(saidas);
+  const porCentro = [...entradas, ...saidas].some((g) => g.centro !== 'Sem centro de custo');
   return {
-    referenciaDia: dataBr(dia),
-    referenciaMes: mes.rotulo,
-    ignorarCartao: !!ignorarCartao,
-    pagarDia: reais(pagarDia),
-    pagarMes: reais(pagarMes),
-    receberDia: reais(receberDia),
-    receberMes: reais(receberMes),
-    pagasDia: reais(pagasDia),
-    pagasMes: reais(pagasMes),
-    recebidasDia: reais(recebidasDia),
-    recebidasMes: reais(recebidasMes),
-    contasPagar: (pagar || []).map(linhaConta),
-    contasReceber: receber.slice(0, 200).map(linhaConta),
-    contasPagarTotal: totalPagar && totalPagar[0] ? inteiro(totalPagar[0].N) : 0,
-    contasReceberTotal,
-    porRecebimentoConta: await porRecebimentoConta(db, filtros, ignorarCartao, fontes),
-    porPlano: await porPlano(db, filtros, ignorarCartao, fontes, usaManage),
+    leitura,
+    totalEntradas: reais(totalEntradas),
+    totalSaidas: reais(totalSaidas),
+    resultado: reais(totalEntradas - totalSaidas),
+    entradas,
+    saidas,
+    porCentro,
+    planosFora: await nomesPlanosFora(db),
+    erro: '',
   };
+}
+
+async function consultarFinanceiro(db, filtros, ignorarCartao, usaManage, appCfg) {
+  void ignorarCartao;
+  try {
+    return await lerMovimentoDre(db, filtros, usaManage, appCfg);
+  } catch (err) {
+    return {
+      leitura: usaManage ? 'manage' : 'clipp',
+      totalEntradas: 0,
+      totalSaidas: 0,
+      resultado: 0,
+      entradas: [],
+      saidas: [],
+      porCentro: false,
+      planosFora: [],
+      erro: err.message || 'Falha ao ler o financeiro',
+    };
+  }
 }
 
 async function detalharDashboard(db, opcoes = {}) {
@@ -1416,7 +1549,7 @@ async function consultarDashboard(db, opcoes = {}) {
   const aba = abas.includes(pedida) ? pedida : (usaManage ? 'manage' : 'vendas');
   const ignorarCartao = Number((opcoes.appCfg || loadAppConfig()).ignorar_receber_cartao) === 1;
   if (aba === 'financeiro') {
-    const fin = await consultarFinanceiro(db, filtros, ignorarCartao, usaManage);
+    const fin = await consultarFinanceiro(db, filtros, ignorarCartao, usaManage, opcoes.appCfg || loadAppConfig());
     return {
       perfil,
       usaManage,
@@ -1425,7 +1558,6 @@ async function consultarDashboard(db, opcoes = {}) {
       abas,
       fiscal: false,
       periodo: { inicio: filtros.inicio, fim: filtros.fim },
-      ano: String(filtros.inicio || '').slice(0, 4),
       ...fin,
       vazio: false,
       mensagem: '',
