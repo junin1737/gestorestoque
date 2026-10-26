@@ -2998,24 +2998,26 @@ html[data-theme="escuro"] .compras-row:hover {
 }
 .cli-wa svg { width: 1.4rem; height: 1.4rem; }
 
-.gond-tela, .ofer-layout { display: flex; flex-direction: column; gap: 0.75rem; }
-.gond-head, .ofer-topo, .gond-head-acoes, .gond-filtros, .etiq-botoes, .etiq-medidas {
-  display: flex; flex-wrap: wrap; gap: 0.55rem; align-items: end;
+.gond-tela { display: flex; flex-direction: column; gap: 0.75rem; }
+.gond-head, .ofer-topo { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; flex-wrap: wrap; }
+.gond-head h2, .etiq-layout h3, .ofer-layout h3, .etiq-visor h3 { margin: 0; }
+.gond-head-acoes { display: flex; align-items: flex-end; gap: 0.5rem; flex-wrap: wrap; }
+.gond-head-acoes label, .gond-filtros label, .etiq-medidas label, #ofer-form label, #etiq-form > label, .etiq-empresa label {
+  margin: 0; min-width: 0;
 }
-.gond-head, .ofer-topo { justify-content: space-between; align-items: center; }
-.gond-head h2, .etiq-layout h3, .ofer-layout h3 { margin: 0; }
-.gond-head-acoes label, .gond-filtros label, .etiq-medidas label, .ofer-layout label {
-  display: flex; flex-direction: column; gap: 0.2rem; font-size: var(--fs-sm); color: var(--muted);
+.gond-head-acoes label { width: 14rem; }
+.gond-head-acoes select, .gond-head-acoes .btn, .gond-filtros .btn { min-height: 2.55rem; }
+.gond-filtros {
+  display: grid;
+  grid-template-columns: minmax(0, 1.7fr) 8.2rem 8.2rem minmax(11rem, 1fr) auto;
+  gap: 0.55rem;
+  align-items: end;
 }
-.gond-head-acoes select, .gond-filtros input, .etiq-medidas input, .ofer-layout input, .gond-novo-preco, .gond-promo {
-  min-height: 2.35rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev);
-  color: var(--text); padding: 0.35rem 0.55rem;
+.gond-filtros input, .gond-head-acoes select, .etiq-medidas input, #ofer-form input, #ofer-form select, .gond-novo-preco, .gond-promo, .ofer-item input {
+  width: 100%; min-height: 2.45rem; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--bg-elev); color: var(--text); padding: 0.35rem 0.55rem;
 }
-.gond-filtros { align-items: end; }
-.gond-filtros #gond-q { flex: 1 1 16rem; }
-.gond-filtros #gond-id-de, .gond-filtros #gond-id-ate { width: 7rem; }
-.gond-grupo { position: relative; flex: 1 1 14rem; }
-.gond-grupo > input, #ofer-q { width: 100%; }
+.gond-grupo { position: relative; }
 .gond-grupo-lista, .ofer-achados {
   position: absolute; z-index: 5; left: 0; right: 0; top: calc(100% + 0.2rem);
   background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px;
@@ -3083,7 +3085,8 @@ html[data-theme="escuro"] .compras-row:hover {
 .gond-aviso { color: var(--muted); font-size: var(--fs-sm); }
 .gond-promo, .gond-novo-preco { width: 6.5rem; }
 .ofer-layout { display: grid; grid-template-columns: minmax(260px, 360px) 1fr; align-items: start; }
-#ofer-form { position: relative; }
+#ofer-form h3 { margin: 0.85rem 0 0.35rem; font-size: 1rem; }
+#ofer-form h3:first-child { margin-top: 0; }
 .ofer-dias { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .ofer-dias button {
   border: 1px solid var(--border); background: var(--bg-elev); color: var(--text);
@@ -3108,38 +3111,53 @@ html[data-theme="escuro"] .compras-row:hover {
 }
 .etiq-modelo span { display: block; color: var(--muted); font-size: var(--fs-sm); }
 .etiq-modelo.is-on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
-.etiq-form label, #etiq-form label { display: flex; flex-direction: column; gap: 0.2rem; margin: 0.35rem 0; }
+.etiq-medidas {
+  display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 0.55rem; align-items: end;
+}
+.etiq-medidas input[type="color"] { width: 2.8rem; min-height: 2.45rem; padding: 0.15rem; }
+.etiq-botoes { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+.etiq-opcoes { display: grid; grid-template-columns: 1fr 1fr; gap: 0.35rem 0.8rem; }
+#etiq-form label.pref-check { display: flex; flex-direction: row; align-items: center; gap: 0.45rem; margin: 0; }
+#etiq-form label.pref-check input { width: auto; min-height: 0; }
+.etiq-empresa { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; align-items: end; }
+.etiq-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 460px); gap: 0.8rem; align-items: start; }
+.etiq-visor { min-width: 0; }
+.etiq-visor .gond-etiqueta { margin-top: 0.6rem; }
+.ofer-item {
+  display: grid; grid-template-columns: minmax(0, 1fr) 7rem auto; gap: 0.45rem; align-items: center;
+  padding: 0.4rem 0; border-top: 1px solid var(--border);
+}
+.ofer-item span { display: block; }
+#gond-impressao { display: none; }
 #etiq-form input[type="text"], #etiq-form input:not([type="checkbox"]):not([type="color"]) {
   min-height: 2.3rem; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); padding: 0.3rem 0.5rem;
 }
 
-@media (max-width: 800px) {
-  .ofer-layout, .etiq-layout, .ofer-card { grid-template-columns: 1fr; }
+@media (max-width: 980px) {
+  .gond-filtros, .etiq-editor, .etiq-empresa, .etiq-medidas, .ofer-layout, .etiq-layout, .ofer-card, .ofer-item { grid-template-columns: 1fr; }
+  .gond-campo-busca, .gond-campo-grupo { grid-column: auto; }
   .gond-preco strong { font-size: 1.35rem; }
 }
 
 @media print {
-  body.imprimindo-gondola .sidebar,
-  body.imprimindo-gondola .sidebar-backdrop,
-  body.imprimindo-gondola .topbar,
-  body.imprimindo-gondola .mobile-nav,
-  body.imprimindo-gondola .mais-sheet,
-  body.imprimindo-gondola .app-conexao,
-  body.imprimindo-gondola .vinculo-pedido,
-  body.imprimindo-gondola .gond-tela,
-  body.imprimindo-gondola .gond-modal-bar,
-  body.imprimindo-gondola .gond-item-acoes { display: none !important; }
-  body.imprimindo-gondola .page,
-  body.imprimindo-gondola #page-gondola { overflow: visible !important; height: auto !important; display: block !important; }
-  body.imprimindo-gondola .main { padding: 0 !important; overflow: visible !important; }
-  body.imprimindo-gondola .gond-modal {
-    position: static; background: #fff; padding: 0; display: block !important; overflow: visible;
+  body.imprimindo-gondola { margin: 0 !important; background: #fff !important; }
+  body.imprimindo-gondola #app { display: none !important; }
+  body.imprimindo-gondola #gond-impressao { display: block !important; }
+  body.imprimindo-gondola #gond-impressao .gond-etiqueta {
+    width: var(--etiq-w, 110mm) !important;
+    height: var(--etiq-h, 30mm) !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    break-after: page;
+    page-break-after: always;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
   }
-  body.imprimindo-gondola .gond-modal-card { box-shadow: none; padding: 0; width: auto; background: #fff; }
-  body.imprimindo-gondola .gond-etiqueta {
-    width: var(--etiq-w, 110mm); height: var(--etiq-h, 30mm); break-inside: avoid; page-break-inside: avoid;
+  body.imprimindo-gondola #gond-impressao .gond-etiqueta:last-child {
+    break-after: auto;
+    page-break-after: auto;
   }
-  body.imprimindo-gondola .gond-folha { gap: 3mm; }
 }
 
 @media (max-width: 800px) {

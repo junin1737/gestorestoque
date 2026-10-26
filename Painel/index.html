@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=269" />
+  <link rel="stylesheet" href="styles.css?v=270" />
   <link rel="stylesheet" href="importacao-nfe.css?v=248" />
 </head>
 <body>
@@ -371,17 +371,19 @@
               </div>
             </div>
             <div class="gond-filtros">
-              <input id="gond-q" type="search" placeholder="Buscar por código de barras, descrição, identificador ou referência" enterkeyhint="search" />
+              <label class="gond-campo-busca">Busca
+                <input id="gond-q" type="search" placeholder="Código de barras, descrição, identificador ou referência" enterkeyhint="search" />
+              </label>
               <label>Identificador de
                 <input id="gond-id-de" inputmode="numeric" />
               </label>
               <label>até
                 <input id="gond-id-ate" inputmode="numeric" />
               </label>
-              <div class="gond-grupo">
+              <label class="gond-grupo gond-campo-grupo">Grupo
                 <input id="gond-grupo-q" type="search" placeholder="Pesquisar por grupo" />
                 <div id="gond-grupo-lista" class="gond-grupo-lista" hidden></div>
-              </div>
+              </label>
               <button type="button" class="btn" id="gond-buscar">Buscar</button>
             </div>
             <div id="gond-grupo-chips" class="gond-chips"></div>
@@ -409,6 +411,7 @@
                 <div>
                   <h2>Pré-visualização de etiquetas de gôndola</h2>
                   <p class="hint" id="gond-modal-medida"></p>
+                <p class="hint">Cada etiqueta sai sozinha, no tamanho do modelo. Na Elgin, Bematech, Zebra ou Argox, escolha esse papel e margem zero.</p>
                 </div>
               </header>
               <div id="gond-folha" class="gond-folha"></div>
@@ -427,20 +430,15 @@
           </div>
           <div class="ofer-layout">
             <form class="pref-card" id="ofer-form" onsubmit="return false">
-              <h3>Produto em oferta</h3>
-              <label>Produto
-                <input id="ofer-q" type="search" placeholder="Descrição, código, barras ou referência" />
-              </label>
-              <div id="ofer-achados" class="gond-grupo-lista ofer-achados" hidden></div>
-              <p id="ofer-produto" class="hint">Nenhum produto selecionado</p>
-              <label>Preço promocional
-                <input id="ofer-promo" inputmode="decimal" placeholder="0,00" />
+              <h3>Oferta</h3>
+              <label>Nome
+                <input id="ofer-nome" maxlength="80" placeholder="Ex.: Cerveja de segunda" />
               </label>
               <div class="etiq-medidas">
                 <label>De <input id="ofer-inicio" type="date" /></label>
                 <label>Até <input id="ofer-fim" type="date" /></label>
               </div>
-              <p class="hint">Dias da semana</p>
+              <p class="hint">Dias da semana. Sem dia marcado, vale todos os dias do período.</p>
               <div id="ofer-dias" class="ofer-dias">
                 <button type="button" data-dia="1" aria-pressed="false">Seg</button>
                 <button type="button" data-dia="2" aria-pressed="false">Ter</button>
@@ -450,6 +448,12 @@
                 <button type="button" data-dia="6" aria-pressed="false">Sáb</button>
                 <button type="button" data-dia="0" aria-pressed="false">Dom</button>
               </div>
+              <h3>Produtos da oferta</h3>
+              <label>Adicionar produto
+                <input id="ofer-q" type="search" placeholder="Descrição, código, barras ou referência" />
+              </label>
+              <div id="ofer-achados" class="gond-grupo-lista ofer-achados" hidden></div>
+              <div id="ofer-itens" class="ofer-itens"></div>
               <div class="etiq-botoes">
                 <button type="button" class="btn primary" id="ofer-salvar">Salvar oferta</button>
                 <button type="button" class="btn" id="ofer-limpar">Limpar</button>
@@ -1287,6 +1291,7 @@
 
     <div id="app-toast" class="toast" hidden></div>
   </div>
+  <div id="gond-impressao" aria-hidden="true"></div>
   <script src="vendor/zxing-browser.min.js?v=240"></script>
   <script src="importacao-nfe.js?v=242"></script>
   <script src="compras.js?v=240"></script>
@@ -1294,7 +1299,7 @@
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=261"></script>
-  <script src="gondola.js?v=1"></script>
+  <script src="gondola.js?v=2"></script>
   <script src="app.js?v=268"></script>
 </body>
 </html>

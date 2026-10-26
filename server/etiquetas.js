@@ -12,6 +12,8 @@ function modeloPadrao() {
     fundo: '#ffe14a',
     tinta: '#1a1a1a',
     mostrarEmpresa: false,
+    empresaOrigem: 'fantasia',
+    empresaTexto: '',
     mostrarDescricao: true,
     abreviarDescricao: false,
     maxDescricao: 42,
@@ -54,6 +56,8 @@ function sanitizarModelo(bruto, idForcado) {
     fundo: corHex(src.fundo, base.fundo),
     tinta: corHex(src.tinta, base.tinta),
     mostrarEmpresa: bool(src.mostrarEmpresa),
+    empresaOrigem: src.empresaOrigem === 'personalizado' ? 'personalizado' : 'fantasia',
+    empresaTexto: String(src.empresaTexto || '').trim().slice(0, 40),
     mostrarDescricao: src.mostrarDescricao === undefined ? true : bool(src.mostrarDescricao),
     abreviarDescricao: bool(src.abreviarDescricao),
     maxDescricao: Math.round(clamp(src.maxDescricao, 8, 80, base.maxDescricao)),
@@ -132,6 +136,13 @@ function montar(router, deps) {
   } = deps;
   const ler = auth.exigirModulo('estoque');
 
+  async function temColuna(db, tabela, coluna) {
+    const rows = await query(db, `
+      SELECT 1 AS OK FROM RDB$RELATION_FIELDS
+      WHERE TRIM(RDB$RELATION_NAME) = ? AND TRIM(RDB$FIELD_NAME) = ?`, [tabela, coluna]);
+    return rows.length > 0;
+  }
+
   async function ensureOferta(db) {
     const tem = await query(db, `
       SELECT 1 AS OK FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = 'GESTOR_OFERTA'`);
@@ -139,14 +150,38 @@ function montar(router, deps) {
       await query(db, `
         CREATE TABLE GESTOR_OFERTA (
           ID_OFERTA INTEGER NOT NULL,
-          ID_IDENTIFICADOR INTEGER NOT NULL,
-          PRC_PROMO NUMERIC(15,2) NOT NULL,
+          NOME VARCHAR(80),
           DT_INICIO DATE,
           DT_FIM DATE,
           DIAS_SEMANA VARCHAR(20),
           ATIVO CHAR(1) DEFAULT 'S',
           CONSTRAINT PK_GESTOR_OFERTA PRIMARY KEY (ID_OFERTA)
         )`);
+    }
+    if (!(await temColuna(db, 'GESTOR_OFERTA', 'NOME'))) {
+      await query(db, 'ALTER TABLE GESTOR_OFERTA ADD NOME VARCHAR(80)');
+    }
+    const temItem = await query(db, `
+      SELECT 1 AS OK FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = 'GESTOR_OFERTA_ITEM'`);
+    if (!temItem.length) {
+      await query(db, `
+        CREATE TABLE GESTOR_OFERTA_ITEM (
+          ID_OFERTA INTEGER NOT NULL,
+          ID_IDENTIFICADOR INTEGER NOT NULL,
+          PRC_PROMO NUMERIC(15,2) NOT NULL,
+          CONSTRAINT PK_GESTOR_OFERTA_ITEM PRIMARY KEY (ID_OFERTA, ID_IDENTIFICADOR)
+        )`);
+    }
+    if (await temColuna(db, 'GESTOR_OFERTA', 'ID_IDENTIFICADOR')) {
+      await query(db, `
+        INSERT INTO GESTOR_OFERTA_ITEM (ID_OFERTA, ID_IDENTIFICADOR, PRC_PROMO)
+        SELECT O.ID_OFERTA, O.ID_IDENTIFICADOR, O.PRC_PROMO
+        FROM GESTOR_OFERTA O
+        WHERE O.ID_IDENTIFICADOR IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM GESTOR_OFERTA_ITEM I
+            WHERE I.ID_OFERTA = O.ID_OFERTA AND I.ID_IDENTIFICADOR = O.ID_IDENTIFICADOR
+          )`);
     }
     try {
       const gen = await query(db, `
@@ -178,11 +213,12 @@ function montar(router, deps) {
   }
 
   async function ofertasPorIdentificador(db, ids) {
-    if (!ids.length || !hasTable('GESTOR_OFERTA')) return new Map();
+    if (!ids.length || !hasTable('GESTOR_OFERTA') || !hasTable('GESTOR_OFERTA_ITEM')) return new Map();
     const rows = await query(db, `
-      SELECT ID_OFERTA, ID_IDENTIFICADOR, PRC_PROMO, DT_INICIO, DT_FIM, DIAS_SEMANA
-      FROM GESTOR_OFERTA
-      WHERE ATIVO = 'S' AND ID_IDENTIFICADOR IN (${ids.map(() => '?').join(',')})`, ids);
+      SELECT I.ID_OFERTA, I.ID_IDENTIFICADOR, I.PRC_PROMO, O.DT_INICIO, O.DT_FIM, O.DIAS_SEMANA
+      FROM GESTOR_OFERTA_ITEM I
+      JOIN GESTOR_OFERTA O ON O.ID_OFERTA = I.ID_OFERTA
+      WHERE O.ATIVO = 'S' AND I.ID_IDENTIFICADOR IN (${ids.map(() => '?').join(',')})`, ids);
     const mapa = new Map();
     for (const r of rows) {
       const inicio = isoDe(r.DT_INICIO);
@@ -293,12 +329,8 @@ function montar(router, deps) {
     }
   });
 
-  function mapOferta(r) {
-    const inicio = isoDe(r.DT_INICIO);
-    const fim = isoDe(r.DT_FIM);
-    const dias = diasDe(r.DIAS_SEMANA);
+  function mapItemOferta(r) {
     return {
-      id_oferta: Number(r.ID_OFERTA),
       id_identificador: Number(r.ID_IDENTIFICADOR),
       id_estoque: r.ID_ESTOQUE == null ? null : Number(r.ID_ESTOQUE),
       descricao: descricaoExibicao(r.DESCRICAO, r.GRADE_SERIE, r.COR, r.TAMANHO),
@@ -306,10 +338,6 @@ function montar(router, deps) {
       cod_barras: String(r.COD_BARRA || '').trim(),
       prc_venda: Number(r.PRC_VENDA || 0),
       prc_promo: Number(r.PRC_PROMO || 0),
-      inicio,
-      fim,
-      dias,
-      vigencia: vigenciaDe(inicio, fim, dias),
     };
   }
 
@@ -318,20 +346,45 @@ function montar(router, deps) {
       const ofertas = await withDb(async (db, appCfg) => {
         await ensureOferta(db);
         const t = tabelas(appCfg);
-        const rows = await query(db, `
-          SELECT FIRST 500
-            O.ID_OFERTA, O.ID_IDENTIFICADOR, O.PRC_PROMO, O.DT_INICIO, O.DT_FIM, O.DIAS_SEMANA,
-            E.ID_ESTOQUE, E.DESCRICAO, E.PRC_VENDA, E.GRADE_SERIE,
-            P.REFERENCIA, P.COD_BARRA, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
-          FROM GESTOR_OFERTA O
-          LEFT JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = O.ID_IDENTIFICADOR
+        const capas = await query(db, `
+          SELECT FIRST 200 ID_OFERTA, NOME, DT_INICIO, DT_FIM, DIAS_SEMANA
+          FROM GESTOR_OFERTA
+          WHERE ATIVO = 'S'
+          ORDER BY DT_INICIO, ID_OFERTA DESC`);
+        if (!capas.length) return [];
+        const ids = capas.map((r) => Number(r.ID_OFERTA));
+        const itens = await query(db, `
+          SELECT IT.ID_OFERTA, IT.ID_IDENTIFICADOR, IT.PRC_PROMO,
+                 E.ID_ESTOQUE, E.DESCRICAO, E.PRC_VENDA, E.GRADE_SERIE,
+                 P.REFERENCIA, P.COD_BARRA, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
+          FROM GESTOR_OFERTA_ITEM IT
+          LEFT JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = IT.ID_IDENTIFICADOR
           LEFT JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
           LEFT JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
           LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
           LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
-          WHERE O.ATIVO = 'S'
-          ORDER BY O.DT_INICIO, O.ID_OFERTA DESC`);
-        return rows.map(mapOferta);
+          WHERE IT.ID_OFERTA IN (${ids.map(() => '?').join(',')})
+          ORDER BY IT.ID_OFERTA, E.DESCRICAO`, ids);
+        const porOferta = new Map();
+        for (const row of itens) {
+          const id = Number(row.ID_OFERTA);
+          if (!porOferta.has(id)) porOferta.set(id, []);
+          porOferta.get(id).push(mapItemOferta(row));
+        }
+        return capas.map((r) => {
+          const inicio = isoDe(r.DT_INICIO);
+          const fim = isoDe(r.DT_FIM);
+          const dias = diasDe(r.DIAS_SEMANA);
+          return {
+            id_oferta: Number(r.ID_OFERTA),
+            nome: String(r.NOME || '').trim(),
+            inicio,
+            fim,
+            dias,
+            vigencia: vigenciaDe(inicio, fim, dias),
+            itens: porOferta.get(Number(r.ID_OFERTA)) || [],
+          };
+        });
       });
       res.json({ ok: true, ofertas });
     } catch (err) {
@@ -340,22 +393,26 @@ function montar(router, deps) {
   });
 
   function lerCorpoOferta(body) {
-    const idIdentificador = Number(body?.id_identificador);
-    const prc = Math.round(Number(body?.prc_promo) * 100) / 100;
+    const nome = String(body?.nome || '').trim().slice(0, 80);
     const inicio = dataLocal(body?.inicio);
     const fim = dataLocal(body?.fim);
     const dias = diasDe(body?.dias);
-    if (!Number.isInteger(idIdentificador) || idIdentificador <= 0) throw new Error('Selecione o produto.');
-    if (!Number.isFinite(prc) || prc <= 0 || prc > 999999.99) throw new Error('Informe o preço promocional.');
+    const itens = [];
+    const vistos = new Set();
+    for (const bruto of (Array.isArray(body?.itens) ? body.itens : []).slice(0, 200)) {
+      const id = Number(bruto?.id_identificador);
+      const prc = Math.round(Number(bruto?.prc_promo) * 100) / 100;
+      if (!Number.isInteger(id) || id <= 0 || vistos.has(id)) continue;
+      if (!Number.isFinite(prc) || prc <= 0 || prc > 999999.99) {
+        throw new Error('Informe o preço promocional de cada produto.');
+      }
+      vistos.add(id);
+      itens.push({ id, prc });
+    }
+    if (!itens.length) throw new Error('Adicione ao menos um produto na oferta.');
     if (!inicio || !fim) throw new Error('Informe o período da oferta.');
     if (isoDe(inicio) > isoDe(fim)) throw new Error('A data inicial não pode passar da data final.');
-    return {
-      idIdentificador,
-      prc,
-      inicio,
-      fim,
-      dias: dias.join(','),
-    };
+    return { nome, inicio, fim, dias: dias.join(','), itens };
   }
 
   async function produtoExiste(db, appCfg, id) {
@@ -375,14 +432,31 @@ function montar(router, deps) {
       const corpo = lerCorpoOferta(req.body);
       const oferta = await withDb(async (db, appCfg) => {
         await ensureOferta(db);
-        if (!(await produtoExiste(db, appCfg, corpo.idIdentificador))) throw new Error('Produto não encontrado.');
+        for (const item of corpo.itens) {
+          if (!(await produtoExiste(db, appCfg, item.id))) throw new Error('Produto não encontrado.');
+        }
         const id = await nextGenId(db, 'GEN_GESTOR_OFERTA_ID', 'GESTOR_OFERTA', 'ID_OFERTA');
-        await query(db, `
-          INSERT INTO GESTOR_OFERTA
-            (ID_OFERTA, ID_IDENTIFICADOR, PRC_PROMO, DT_INICIO, DT_FIM, DIAS_SEMANA, ATIVO)
-          VALUES (?, ?, ?, ?, ?, ?, 'S')`, [
-          id, corpo.idIdentificador, corpo.prc, corpo.inicio, corpo.fim, corpo.dias || null,
-        ]);
+        const legado = await temColuna(db, 'GESTOR_OFERTA', 'ID_IDENTIFICADOR');
+        if (legado) {
+          await query(db, `
+            INSERT INTO GESTOR_OFERTA
+              (ID_OFERTA, ID_IDENTIFICADOR, PRC_PROMO, NOME, DT_INICIO, DT_FIM, DIAS_SEMANA, ATIVO)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'S')`, [
+            id, corpo.itens[0].id, corpo.itens[0].prc, corpo.nome || null,
+            corpo.inicio, corpo.fim, corpo.dias || null,
+          ]);
+        } else {
+          await query(db, `
+            INSERT INTO GESTOR_OFERTA (ID_OFERTA, NOME, DT_INICIO, DT_FIM, DIAS_SEMANA, ATIVO)
+            VALUES (?, ?, ?, ?, ?, 'S')`, [
+            id, corpo.nome || null, corpo.inicio, corpo.fim, corpo.dias || null,
+          ]);
+        }
+        for (const item of corpo.itens) {
+          await query(db, `
+            INSERT INTO GESTOR_OFERTA_ITEM (ID_OFERTA, ID_IDENTIFICADOR, PRC_PROMO)
+            VALUES (?, ?, ?)`, [id, item.id, item.prc]);
+        }
         return id;
       });
       res.json({ ok: true, id_oferta: oferta });
@@ -401,15 +475,34 @@ function montar(router, deps) {
       const corpo = lerCorpoOferta(req.body);
       await withDb(async (db, appCfg) => {
         await ensureOferta(db);
-        if (!(await produtoExiste(db, appCfg, corpo.idIdentificador))) throw new Error('Produto não encontrado.');
+        for (const item of corpo.itens) {
+          if (!(await produtoExiste(db, appCfg, item.id))) throw new Error('Produto não encontrado.');
+        }
         const atual = await query(db, 'SELECT FIRST 1 ID_OFERTA FROM GESTOR_OFERTA WHERE ID_OFERTA = ? AND ATIVO = \'S\'', [id]);
         if (!atual.length) throw new Error('Oferta não encontrada.');
-        await query(db, `
-          UPDATE GESTOR_OFERTA
-          SET ID_IDENTIFICADOR = ?, PRC_PROMO = ?, DT_INICIO = ?, DT_FIM = ?, DIAS_SEMANA = ?
-          WHERE ID_OFERTA = ?`, [
-          corpo.idIdentificador, corpo.prc, corpo.inicio, corpo.fim, corpo.dias || null, id,
-        ]);
+        const legado = await temColuna(db, 'GESTOR_OFERTA', 'ID_IDENTIFICADOR');
+        if (legado) {
+          await query(db, `
+            UPDATE GESTOR_OFERTA
+            SET ID_IDENTIFICADOR = ?, PRC_PROMO = ?, NOME = ?, DT_INICIO = ?, DT_FIM = ?, DIAS_SEMANA = ?
+            WHERE ID_OFERTA = ?`, [
+            corpo.itens[0].id, corpo.itens[0].prc, corpo.nome || null,
+            corpo.inicio, corpo.fim, corpo.dias || null, id,
+          ]);
+        } else {
+          await query(db, `
+            UPDATE GESTOR_OFERTA
+            SET NOME = ?, DT_INICIO = ?, DT_FIM = ?, DIAS_SEMANA = ?
+            WHERE ID_OFERTA = ?`, [
+            corpo.nome || null, corpo.inicio, corpo.fim, corpo.dias || null, id,
+          ]);
+        }
+        await query(db, 'DELETE FROM GESTOR_OFERTA_ITEM WHERE ID_OFERTA = ?', [id]);
+        for (const item of corpo.itens) {
+          await query(db, `
+            INSERT INTO GESTOR_OFERTA_ITEM (ID_OFERTA, ID_IDENTIFICADOR, PRC_PROMO)
+            VALUES (?, ?, ?)`, [id, item.id, item.prc]);
+        }
       });
       res.json({ ok: true, id_oferta: id });
     } catch (err) {

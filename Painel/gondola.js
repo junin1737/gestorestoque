@@ -12,7 +12,7 @@ const Gondola = (() => {
   let preview = [];
   let ofertas = [];
   let ofertaEdit = 0;
-  let produtoOferta = null;
+  let itensOferta = [];
   let timerBusca = null;
   let buscando = false;
 
@@ -140,8 +140,14 @@ const Gondola = (() => {
     return `<div class="gond-barras">${svgDeBits(bits)}<span>${esc(legenda)}</span></div>`;
   }
 
+  function nomeEmpresa(modelo) {
+    if (!modelo?.mostrarEmpresa) return '';
+    if (modelo.empresaOrigem === 'personalizado') return String(modelo.empresaTexto || '').trim();
+    return deps.getEmitente?.()?.nome_fanta || '';
+  }
+
   function htmlEtiqueta(item, modelo) {
-    const empresa = deps.getEmitente?.()?.nome_fanta || '';
+    const empresa = nomeEmpresa(modelo);
     const promo = !!(modelo.mostrarOferta && item.usarPromo && Number(item.prc_promo) > 0);
     const desc = modelo.abreviarDescricao ? abreviar(item.descricao, modelo.maxDescricao) : item.descricao;
     const preco = promo ? item.prc_promo : item.prc_etiqueta;
@@ -402,14 +408,29 @@ const Gondola = (() => {
 
   function imprimir() {
     if (!preview.length) return;
+    const modelo = modeloAtual();
+    const destino = document.getElementById('gond-impressao');
+    const etiquetas = document.querySelectorAll('#gond-folha .gond-etiqueta');
+    if (!destino || !etiquetas.length) return;
+    destino.innerHTML = [...etiquetas].map((el) => el.outerHTML).join('');
+    let estilo = document.getElementById('gond-page-size');
+    if (!estilo) {
+      estilo = document.createElement('style');
+      estilo.id = 'gond-page-size';
+      document.head.appendChild(estilo);
+    }
+    const largura = Number(modelo?.larguraMm) || 110;
+    const altura = Number(modelo?.alturaMm) || 30;
+    estilo.textContent = `@page { size: ${largura}mm ${altura}mm; margin: 0; }`;
     document.body.classList.add('imprimindo-gondola');
     const limpar = () => {
       document.body.classList.remove('imprimindo-gondola');
+      destino.innerHTML = '';
       window.removeEventListener('afterprint', limpar);
     };
     window.addEventListener('afterprint', limpar);
     window.print();
-    setTimeout(limpar, 1200);
+    setTimeout(limpar, 1500);
   }
 
   function ligarGondola() {
@@ -525,14 +546,24 @@ const Gondola = (() => {
   }
 
   function renderOfertaForm() {
-    const nome = $('#ofer-produto');
-    if (nome) {
-      nome.textContent = produtoOferta
-        ? `${produtoOferta.descricao} · cód. ${produtoOferta.id_estoque}`
-        : 'Nenhum produto selecionado';
-    }
     const salvar = $('#ofer-salvar');
     if (salvar) salvar.textContent = ofertaEdit ? 'Atualizar oferta' : 'Salvar oferta';
+    const box = $('#ofer-itens');
+    if (!box) return;
+    if (!itensOferta.length) {
+      box.innerHTML = '<p class="hint">Nenhum produto nesta oferta.</p>';
+      return;
+    }
+    box.innerHTML = itensOferta.map((it) => `
+      <div class="ofer-item">
+        <div>
+          <strong>${esc(it.descricao)}</strong>
+          <span class="hint">cód. ${esc(it.id_estoque || '—')} · venda ${esc(money(it.prc_venda))}</span>
+        </div>
+        <input data-promo-item="${it.id_identificador}" inputmode="decimal" value="${esc(valor(it.prc_promo))}" aria-label="Preço promocional" />
+        <button type="button" class="btn small" data-tirar-item="${it.id_identificador}">Tirar</button>
+      </div>
+    `).join('');
   }
 
   function renderOfertas() {
@@ -542,30 +573,29 @@ const Gondola = (() => {
       box.innerHTML = '<p class="empty">Nenhuma oferta cadastrada.</p>';
       return;
     }
-    box.innerHTML = ofertas.map((o) => `
-      <article class="ofer-card">
-        <div>
-          <strong>${esc(o.descricao || `Identificador ${o.id_identificador}`)}</strong>
-          <p class="hint">${o.inicio ? esc(o.inicio.split('-').reverse().join('/')) : ''} até ${o.fim ? esc(o.fim.split('-').reverse().join('/')) : ''}${o.dias?.length ? ` · ${esc(o.dias.map((n) => DIAS.find((d) => d.n === n)?.nome || n).join(', '))}` : ' · todos os dias'}</p>
-        </div>
-        <div class="ofer-precos">
-          <span>${esc(money(o.prc_venda))}</span>
-          <strong>${esc(money(o.prc_promo))}</strong>
+    box.innerHTML = ofertas.map((o) => {
+      const qtd = o.itens?.length || 0;
+      const nome = o.nome || (o.itens?.[0]?.descricao ? o.itens[0].descricao : `Oferta ${o.id_oferta}`);
+      return `
+        <article class="ofer-card">
+          <div>
+            <strong>${esc(nome)}</strong>
+            <p class="hint">${o.inicio ? esc(o.inicio.split('-').reverse().join('/')) : ''} até ${o.fim ? esc(o.fim.split('-').reverse().join('/')) : ''} · ${qtd} produto${qtd === 1 ? '' : 's'}${o.dias?.length ? ` · ${esc(o.dias.map((n) => DIAS.find((d) => d.n === n)?.nome || n).join(', '))}` : ' · todos os dias'}</p>
+          </div>
           <em class="gond-pill is-${esc(o.vigencia)}">${esc(VIGENCIA[o.vigencia] || o.vigencia)}</em>
-        </div>
-        <div class="ofer-acoes">
-          <button type="button" class="btn small" data-editar-oferta="${o.id_oferta}">Editar</button>
-          <button type="button" class="btn small" data-remover-oferta="${o.id_oferta}">Remover</button>
-        </div>
-      </article>
-    `).join('');
+          <div class="ofer-acoes">
+            <button type="button" class="btn small" data-editar-oferta="${o.id_oferta}">Editar</button>
+            <button type="button" class="btn small" data-remover-oferta="${o.id_oferta}">Remover</button>
+          </div>
+        </article>`;
+    }).join('');
   }
 
   function limparOfertaForm() {
     ofertaEdit = 0;
-    produtoOferta = null;
+    itensOferta = [];
+    if ($('#ofer-nome')) $('#ofer-nome').value = '';
     if ($('#ofer-q')) $('#ofer-q').value = '';
-    if ($('#ofer-promo')) $('#ofer-promo').value = '';
     if ($('#ofer-inicio')) $('#ofer-inicio').value = '';
     if ($('#ofer-fim')) $('#ofer-fim').value = '';
     document.querySelectorAll('#ofer-dias button').forEach((b) => b.setAttribute('aria-pressed', 'false'));
@@ -576,13 +606,8 @@ const Gondola = (() => {
 
   function preencherOferta(o) {
     ofertaEdit = o.id_oferta;
-    produtoOferta = {
-      id_identificador: o.id_identificador,
-      id_estoque: o.id_estoque,
-      descricao: o.descricao,
-      prc_venda: o.prc_venda,
-    };
-    if ($('#ofer-promo')) $('#ofer-promo').value = valor(o.prc_promo);
+    itensOferta = (o.itens || []).map((it) => ({ ...it }));
+    if ($('#ofer-nome')) $('#ofer-nome').value = o.nome || '';
     if ($('#ofer-inicio')) $('#ofer-inicio').value = o.inicio || '';
     if ($('#ofer-fim')) $('#ofer-fim').value = o.fim || '';
     document.querySelectorAll('#ofer-dias button').forEach((b) => {
@@ -616,21 +641,28 @@ const Gondola = (() => {
   }
 
   async function salvarOferta() {
-    if (!produtoOferta) {
-      deps.showMsg?.('Selecione o produto.');
+    itensOferta.forEach((it) => {
+      const input = document.querySelector(`[data-promo-item="${it.id_identificador}"]`);
+      const prc = parsePreco(input?.value);
+      if (prc != null) it.prc_promo = prc;
+    });
+    if (!itensOferta.length) {
+      deps.showMsg?.('Adicione ao menos um produto na oferta.');
       return;
     }
-    const prc = parsePreco($('#ofer-promo')?.value);
-    if (prc == null || prc <= 0) {
-      deps.showMsg?.('Informe o preço promocional.');
+    if (itensOferta.some((it) => !(Number(it.prc_promo) > 0))) {
+      deps.showMsg?.('Informe o preço promocional de cada produto.');
       return;
     }
     const corpo = {
-      id_identificador: produtoOferta.id_identificador,
-      prc_promo: prc,
+      nome: $('#ofer-nome')?.value || '',
       inicio: $('#ofer-inicio')?.value || '',
       fim: $('#ofer-fim')?.value || '',
       dias: diasMarcados(),
+      itens: itensOferta.map((it) => ({
+        id_identificador: it.id_identificador,
+        prc_promo: it.prc_promo,
+      })),
     };
     const res = ofertaEdit
       ? await api(`/ofertas/${ofertaEdit}`, { method: 'PUT', body: corpo })
@@ -655,12 +687,31 @@ const Gondola = (() => {
       const lista = $('#ofer-achados');
       const item = (lista?._itens || []).find((it) => it.id_identificador === Number(btn.dataset.ofertaProd));
       if (!item) return;
-      produtoOferta = item;
-      ofertaEdit = 0;
       lista.hidden = true;
-      if ($('#ofer-q')) $('#ofer-q').value = item.descricao;
-      if ($('#ofer-promo') && !$('#ofer-promo').value && item.oferta) $('#ofer-promo').value = valor(item.oferta.prc_promo);
+      if ($('#ofer-q')) $('#ofer-q').value = '';
+      if (!itensOferta.some((it) => it.id_identificador === item.id_identificador)) {
+        itensOferta.push({
+          id_identificador: item.id_identificador,
+          id_estoque: item.id_estoque,
+          descricao: item.descricao,
+          prc_venda: item.prc_venda,
+          prc_promo: item.oferta?.prc_promo > 0 ? item.oferta.prc_promo : item.prc_venda,
+        });
+      }
       renderOfertaForm();
+    });
+    $('#ofer-itens')?.addEventListener('click', (ev) => {
+      const btn = ev.target.closest?.('[data-tirar-item]');
+      if (!btn) return;
+      itensOferta = itensOferta.filter((it) => it.id_identificador !== Number(btn.dataset.tirarItem));
+      renderOfertaForm();
+    });
+    $('#ofer-itens')?.addEventListener('change', (ev) => {
+      const id = ev.target?.dataset?.promoItem;
+      if (id == null) return;
+      const item = itensOferta.find((it) => it.id_identificador === Number(id));
+      const prc = parsePreco(ev.target.value);
+      if (item && prc != null) item.prc_promo = prc;
     });
     $('#ofer-dias')?.addEventListener('click', (ev) => {
       const btn = ev.target.closest?.('button');
@@ -691,6 +742,37 @@ const Gondola = (() => {
     });
   }
 
+  function modeloDoFormulario() {
+    const id = $('#etiq-host')?.dataset.id;
+    const atual = modelos.find((m) => m.id === id) || modelos[0] || {};
+    const bruto = lerFormulario(id);
+    return {
+      ...atual,
+      ...bruto,
+      larguraMm: Number(bruto.larguraMm) || atual.larguraMm || 110,
+      alturaMm: Number(bruto.alturaMm) || atual.alturaMm || 30,
+      maxDescricao: Number(bruto.maxDescricao) || atual.maxDescricao || 42,
+      fundo: bruto.fundo || atual.fundo || '#ffe14a',
+      tinta: bruto.tinta || atual.tinta || '#1a1a1a',
+    };
+  }
+
+  function mostrarPreviewModelo() {
+    const visor = $('#etiq-visor');
+    if (!visor || !$('#etiq-form')) return;
+    const modelo = modeloDoFormulario();
+    visor.innerHTML = htmlEtiqueta({
+      descricao: 'REFRIGERANTE COCA-COLA PET 2L',
+      referencia: 'REF-CC2L',
+      cod_barras: '7891000100103',
+      id_identificador: 10342,
+      uni_medida: 'UN',
+      prc_etiqueta: 9.9,
+      usarPromo: !!modelo.mostrarOferta,
+      prc_promo: 7.5,
+    }, modelo);
+  }
+
   function renderEtiquetas() {
     const host = $('#etiq-host');
     if (!host || !modelos.length) return;
@@ -713,31 +795,53 @@ const Gondola = (() => {
           </div>
           <button type="button" class="btn" id="etiq-novo">Novo modelo</button>
         </div>
-        <form class="pref-card larga" id="etiq-form">
-          <h3>Editar modelo</h3>
-          <label>Nome <input data-campo="nome" value="${esc(atual.nome)}" maxlength="60" /></label>
-          <div class="etiq-medidas">
-            <label>Largura (mm) <input data-campo="larguraMm" inputmode="numeric" value="${esc(atual.larguraMm)}" /></label>
-            <label>Altura (mm) <input data-campo="alturaMm" inputmode="numeric" value="${esc(atual.alturaMm)}" /></label>
-            <label>Fundo <input data-campo="fundo" type="color" value="${esc(atual.fundo)}" /></label>
-            <label>Texto <input data-campo="tinta" type="color" value="${esc(atual.tinta)}" /></label>
+        <div class="etiq-editor">
+          <form class="pref-card larga" id="etiq-form">
+            <h3>Editar modelo</h3>
+            <label>Nome <input data-campo="nome" value="${esc(atual.nome)}" maxlength="60" /></label>
+            <div class="etiq-medidas">
+              <label>Largura (mm) <input data-campo="larguraMm" inputmode="numeric" value="${esc(atual.larguraMm)}" /></label>
+              <label>Altura (mm) <input data-campo="alturaMm" inputmode="numeric" value="${esc(atual.alturaMm)}" /></label>
+              <label>Fundo <input data-campo="fundo" type="color" value="${esc(atual.fundo)}" /></label>
+              <label>Texto <input data-campo="tinta" type="color" value="${esc(atual.tinta)}" /></label>
+            </div>
+            <div class="etiq-opcoes">
+              ${check('mostrarEmpresa', 'Nome da empresa')}
+              ${check('mostrarDescricao', 'Descrição')}
+              ${check('abreviarDescricao', 'Abreviar descrição')}
+              ${check('mostrarReferencia', 'Referência')}
+              ${check('mostrarBarras', 'Código de barras')}
+              ${check('mostrarIdentificador', 'Identificador')}
+              ${check('mostrarPreco', 'Preço')}
+              ${check('mostrarOferta', 'Balão OFERTA!')}
+              ${check('mostrarUnidade', 'Unidade de medida')}
+            </div>
+            <label>Máximo de caracteres da descrição <input data-campo="maxDescricao" inputmode="numeric" value="${esc(atual.maxDescricao)}" /></label>
+            <div class="etiq-empresa">
+              <label>Nome na etiqueta
+                <select data-campo="empresaOrigem">
+                  <option value="fantasia" ${atual.empresaOrigem === 'personalizado' ? '' : 'selected'}>Fantasia do emitente</option>
+                  <option value="personalizado" ${atual.empresaOrigem === 'personalizado' ? 'selected' : ''}>Texto personalizado</option>
+                </select>
+              </label>
+              <label>Texto personalizado
+                <input data-campo="empresaTexto" maxlength="40" value="${esc(atual.empresaTexto || '')}" placeholder="Fica gravado neste modelo" />
+              </label>
+            </div>
+            <div class="etiq-botoes">
+              <button type="button" class="btn" id="etiq-preview">Pré-visualizar</button>
+              <button type="submit" class="btn primary">Salvar modelo</button>
+              ${modelos.length > 1 ? '<button type="button" class="btn" id="etiq-excluir">Excluir</button>' : ''}
+            </div>
+          </form>
+          <div class="etiq-visor">
+            <h3>Prévia</h3>
+            <div id="etiq-visor"></div>
+            <p class="hint">Produto de exemplo. A impressão manda só a etiqueta, no tamanho do modelo, para Elgin, Bematech, Zebra, Argox e as demais.</p>
           </div>
-          ${check('mostrarEmpresa', 'Nome da empresa')}
-          ${check('mostrarDescricao', 'Descrição')}
-          ${check('abreviarDescricao', 'Abreviar descrição')}
-          <label>Máximo de caracteres da descrição <input data-campo="maxDescricao" inputmode="numeric" value="${esc(atual.maxDescricao)}" /></label>
-          ${check('mostrarReferencia', 'Referência')}
-          ${check('mostrarBarras', 'Código de barras')}
-          ${check('mostrarIdentificador', 'Identificador')}
-          ${check('mostrarPreco', 'Preço')}
-          ${check('mostrarOferta', 'Balão OFERTA! para preço promocional')}
-          ${check('mostrarUnidade', 'Unidade de medida')}
-          <div class="etiq-botoes">
-            <button type="submit" class="btn primary">Salvar modelo</button>
-            ${modelos.length > 1 ? '<button type="button" class="btn" id="etiq-excluir">Excluir</button>' : ''}
-          </div>
-        </form>
+        </div>
       </div>`;
+    mostrarPreviewModelo();
   }
 
   function lerFormulario(id) {
@@ -767,6 +871,7 @@ const Gondola = (() => {
         $('#etiq-host').dataset.id = modelo.dataset.modelo;
         renderEtiquetas();
       }
+      if (ev.target.closest?.('#etiq-preview')) mostrarPreviewModelo();
       if (ev.target.closest?.('#etiq-novo')) {
         const base = modelos.find((m) => m.id === $('#etiq-host').dataset.id) || modelos[0];
         const novo = {
@@ -786,13 +891,19 @@ const Gondola = (() => {
         salvarModelos(lista);
       }
     });
+    $('#etiq-host')?.addEventListener('input', (ev) => {
+      if (ev.target?.closest?.('#etiq-form')) mostrarPreviewModelo();
+    });
+    $('#etiq-host')?.addEventListener('change', (ev) => {
+      if (ev.target?.closest?.('#etiq-form')) mostrarPreviewModelo();
+    });
     $('#etiq-host')?.addEventListener('submit', (ev) => {
       ev.preventDefault();
-    const id = $('#etiq-host').dataset.id;
-    const atual = modelos.find((m) => m.id === id);
-    const bruto = lerFormulario(id);
-    bruto.tipo = atual?.tipo || 'gondola';
-    const lista = modelos.map((m) => (m.id === id ? { ...m, ...bruto, id } : m));
+      const id = $('#etiq-host').dataset.id;
+      const atual = modelos.find((m) => m.id === id);
+      const bruto = lerFormulario(id);
+      bruto.tipo = atual?.tipo || 'gondola';
+      const lista = modelos.map((m) => (m.id === id ? { ...m, ...bruto, id } : m));
       salvarModelos(lista);
     });
   }
