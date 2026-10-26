@@ -570,7 +570,6 @@ async function obterXmlParaImportar(chave) {
   const baixado = await sefaz.obterXmlCompleto(ch);
   if (nota) {
     nota.temXml = true;
-    if (!nota.cienciaEm) nota.cienciaEm = new Date().toISOString();
     saveStore(store);
   }
   gravarXmlArquivo(ch, baixado.xmlText);
