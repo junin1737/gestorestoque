@@ -185,13 +185,14 @@ function setCfgTab(tab) {
   stateCfgTab = tab || 'tema';
   state.cfgTab = stateCfgTab;
   $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
-  ['tema', 'tributos', 'saida', 'clientes'].forEach((id) => {
+  ['tema', 'tributos', 'saida', 'clientes', 'etiquetas'].forEach((id) => {
     const pane = $(`#cfg-tab-${id}`);
     if (pane) pane.hidden = id !== stateCfgTab;
   });
   const salvar = $('#cfg-params-salvar');
-  if (salvar) salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'clientes';
-  if (stateCfgTab !== 'tema' && !cfgMontada) {
+  if (salvar) salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas';
+  if (stateCfgTab === 'etiquetas') window.Gondola?.onEtiquetas();
+  if (stateCfgTab !== 'tema' && stateCfgTab !== 'etiquetas' && !cfgMontada) {
     cfgMontada = true;
     window.ImportacaoNfe?.mountConfig?.();
   }
@@ -1442,8 +1443,9 @@ initUiScale();
 
 function setNavActive(page) {
   const atual = state.dashAtual;
+  const pagina = page === 'gondola' || page === 'ofertas' ? 'estoque' : page;
   $$('.nav-btn').forEach((b) => {
-    let on = b.dataset.page === page;
+    let on = b.dataset.page === pagina;
     if (page === 'dashboard') {
       if (b.dataset.perfil) {
         on = !!atual && b.dataset.perfil === atual.perfil && (b.dataset.secao || 'resumo') === (atual.secao || 'resumo');
@@ -1455,7 +1457,7 @@ function setNavActive(page) {
     }
     b.classList.toggle('active', on);
   });
-  $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === page && !atual));
+  $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === pagina && !atual));
   const mais = $('#btn-mais-mobile');
   if (mais) {
     mais.classList.toggle('active', ['clientes', 'compras', 'condicionais', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
@@ -1513,6 +1515,10 @@ async function showPage(page) {
     page = 'dashboard';
   }
   if (page === 'estoque' && !can('estoque', 'acesso')) {
+    showMsg('Sem permissão de estoque.');
+    page = 'dashboard';
+  }
+  if ((page === 'gondola' || page === 'ofertas') && !can('estoque', 'acesso')) {
     showMsg('Sem permissão de estoque.');
     page = 'dashboard';
   }
@@ -1576,6 +1582,8 @@ async function showPage(page) {
   if ($('#page-contador')) $('#page-contador').hidden = page !== 'contador';
   if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
   if ($('#page-empresas')) $('#page-empresas').hidden = page !== 'empresas';
+  if ($('#page-gondola')) $('#page-gondola').hidden = page !== 'gondola';
+  if ($('#page-ofertas')) $('#page-ofertas').hidden = page !== 'ofertas';
   const estActions = $('#topbar-estoque-actions');
   if (estActions) estActions.hidden = page !== 'estoque';
 
@@ -1600,7 +1608,7 @@ async function showPage(page) {
     loadUsuarios();
   } else if (page === 'preferencias') {
     $('#page-title').textContent = 'Configurações';
-    $('#page-sub').textContent = 'Tema, tributos e saída';
+    $('#page-sub').textContent = 'Tema, tributos, saída e etiquetas';
     setCfgTab(state.cfgTab || 'tema');
   } else if (page === 'empresas') {
     $('#page-title').textContent = 'Empresas';
@@ -1627,6 +1635,14 @@ async function showPage(page) {
     $('#page-title').textContent = 'Condicionais';
     $('#page-sub').textContent = 'Peças reservadas para o cliente';
     window.Condicionais?.onPageEnter();
+  } else if (page === 'gondola') {
+    $('#page-title').textContent = 'Gôndola';
+    $('#page-sub').textContent = 'Etiquetas de preço';
+    window.Gondola?.onGondola();
+  } else if (page === 'ofertas') {
+    $('#page-title').textContent = 'Ofertas';
+    $('#page-sub').textContent = 'Preço promocional por período e dia da semana';
+    window.Gondola?.onOfertas();
   }
   scrollAppTop();
 }
@@ -4129,6 +4145,16 @@ window.Compras?.init({
 
 window.Condicionais?.init({ api });
 window.Clientes?.init({ api, showMsg, escapeHtml, getUsuario: () => state.usuario });
+window.Gondola?.init({
+  api,
+  showMsg,
+  showConfirm,
+  escapeHtml,
+  fmtMoney,
+  showPage,
+  podeEditarPreco: podeEditarPrecoVenda,
+  getEmitente: () => state.emitente,
+});
 
 (function ligarQuadroPdf() {
   const dlg = $('#dlg-danfe');

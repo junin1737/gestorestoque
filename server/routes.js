@@ -3467,4 +3467,16 @@ router.post('/massa/aplicar', async (req, res) => {
   }
 });
 
+require('./etiquetas').montar(router, {
+  withDb,
+  query,
+  activeTargets,
+  hasTable,
+  refreshTables,
+  nextGenId,
+  loadAppConfig,
+  saveAppConfig,
+  auth,
+});
+
 module.exports = router;

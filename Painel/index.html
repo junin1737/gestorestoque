@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=268" />
+  <link rel="stylesheet" href="styles.css?v=269" />
   <link rel="stylesheet" href="importacao-nfe.css?v=248" />
 </head>
 <body>
@@ -300,6 +300,8 @@
                   <button type="button" id="btn-buscar-estoque" class="btn primary desktop-only">Buscar</button>
                 </div>
                 <div class="estoque-toolbar-row actions-row">
+                  <button type="button" id="btn-gondola" class="btn small btn-compacto">Gôndola</button>
+                  <button type="button" id="btn-ofertas" class="btn small btn-compacto">Ofertas</button>
                   <div class="seg" id="estoque-status-seg" role="tablist">
                     <button type="button" class="seg-btn active" data-status="A">Ativos</button>
                     <button type="button" class="seg-btn" data-status="I">Inativos</button>
@@ -350,6 +352,110 @@
               </div>
               <div class="panel detail-panel" id="estoque-detalhe"></div>
             </div>
+          </div>
+        </div>
+
+        <div id="page-gondola" class="page" hidden>
+          <div class="gond-tela">
+            <div class="gond-head">
+              <div>
+                <h2>Busca de produtos</h2>
+                <p class="hint">Marque um, alguns ou todos os produtos do filtro.</p>
+              </div>
+              <div class="gond-head-acoes">
+                <label>Modelo
+                  <select id="gond-modelo"></select>
+                </label>
+                <button type="button" class="btn" id="gond-voltar">Voltar</button>
+                <button type="button" class="btn primary" id="gond-gerar" disabled>Gerar gôndola</button>
+              </div>
+            </div>
+            <div class="gond-filtros">
+              <input id="gond-q" type="search" placeholder="Buscar por código de barras, descrição, identificador ou referência" enterkeyhint="search" />
+              <label>Identificador de
+                <input id="gond-id-de" inputmode="numeric" />
+              </label>
+              <label>até
+                <input id="gond-id-ate" inputmode="numeric" />
+              </label>
+              <div class="gond-grupo">
+                <input id="gond-grupo-q" type="search" placeholder="Pesquisar por grupo" />
+                <div id="gond-grupo-lista" class="gond-grupo-lista" hidden></div>
+              </div>
+              <button type="button" class="btn" id="gond-buscar">Buscar</button>
+            </div>
+            <div id="gond-grupo-chips" class="gond-chips"></div>
+            <div class="gond-tabela-wrap">
+              <table class="gond-tabela">
+                <thead>
+                  <tr>
+                    <th><input type="checkbox" id="gond-todos" aria-label="Marcar todos" /></th>
+                    <th>Código</th>
+                    <th>Código de barras</th>
+                    <th>Descrição</th>
+                    <th>Referência</th>
+                    <th>Preço de venda</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody id="gond-corpo"></tbody>
+              </table>
+            </div>
+            <p class="hint" id="gond-foot">Pesquise por código de barras, descrição, identificador, referência, intervalo ou grupo.</p>
+          </div>
+          <div id="gond-modal" class="gond-modal" hidden>
+            <div class="gond-modal-card">
+              <header class="gond-modal-bar gond-modal-titulo">
+                <div>
+                  <h2>Pré-visualização de etiquetas de gôndola</h2>
+                  <p class="hint" id="gond-modal-medida"></p>
+                </div>
+              </header>
+              <div id="gond-folha" class="gond-folha"></div>
+              <footer class="gond-modal-bar">
+                <button type="button" class="btn" id="gond-cancelar">Cancelar</button>
+                <button type="button" class="btn primary" id="gond-imprimir">Imprimir etiquetas</button>
+              </footer>
+            </div>
+          </div>
+        </div>
+
+        <div id="page-ofertas" class="page" hidden>
+          <div class="ofer-topo">
+            <p class="hint">A oferta vale no período. Se marcar dias da semana, ela só entra nesses dias. A etiqueta em vigor mostra o preço atual e o promocional.</p>
+            <button type="button" class="btn" id="ofer-voltar">Voltar ao estoque</button>
+          </div>
+          <div class="ofer-layout">
+            <form class="pref-card" id="ofer-form" onsubmit="return false">
+              <h3>Produto em oferta</h3>
+              <label>Produto
+                <input id="ofer-q" type="search" placeholder="Descrição, código, barras ou referência" />
+              </label>
+              <div id="ofer-achados" class="gond-grupo-lista ofer-achados" hidden></div>
+              <p id="ofer-produto" class="hint">Nenhum produto selecionado</p>
+              <label>Preço promocional
+                <input id="ofer-promo" inputmode="decimal" placeholder="0,00" />
+              </label>
+              <div class="etiq-medidas">
+                <label>De <input id="ofer-inicio" type="date" /></label>
+                <label>Até <input id="ofer-fim" type="date" /></label>
+              </div>
+              <p class="hint">Dias da semana</p>
+              <div id="ofer-dias" class="ofer-dias">
+                <button type="button" data-dia="1" aria-pressed="false">Seg</button>
+                <button type="button" data-dia="2" aria-pressed="false">Ter</button>
+                <button type="button" data-dia="3" aria-pressed="false">Qua</button>
+                <button type="button" data-dia="4" aria-pressed="false">Qui</button>
+                <button type="button" data-dia="5" aria-pressed="false">Sex</button>
+                <button type="button" data-dia="6" aria-pressed="false">Sáb</button>
+                <button type="button" data-dia="0" aria-pressed="false">Dom</button>
+              </div>
+              <div class="etiq-botoes">
+                <button type="button" class="btn primary" id="ofer-salvar">Salvar oferta</button>
+                <button type="button" class="btn" id="ofer-limpar">Limpar</button>
+              </div>
+            </form>
+            <div id="ofer-lista" class="ofer-lista"></div>
           </div>
         </div>
 
@@ -852,6 +958,7 @@
             <button type="button" class="tab" data-cfg-tab="tributos">Conversão de Tributos</button>
             <button type="button" class="tab" data-cfg-tab="saida">Saída</button>
             <button type="button" class="tab" data-cfg-tab="clientes">Clientes</button>
+            <button type="button" class="tab" data-cfg-tab="etiquetas">Etiquetas</button>
           </div>
           <div id="cfg-tab-tema" class="cfg-tab">
             <div class="pref-card">
@@ -894,6 +1001,9 @@
           </div>
           <div id="cfg-tab-saida" class="cfg-tab" hidden>
             <div id="cfg-saida-host"></div>
+          </div>
+          <div id="cfg-tab-etiquetas" class="cfg-tab" hidden>
+            <div id="etiq-host"></div>
           </div>
           <div id="cfg-tab-clientes" class="cfg-tab" hidden>
             <div class="pref-card larga">
@@ -1184,6 +1294,7 @@
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=261"></script>
-  <script src="app.js?v=267"></script>
+  <script src="gondola.js?v=1"></script>
+  <script src="app.js?v=268"></script>
 </body>
 </html>

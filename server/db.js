@@ -163,7 +163,7 @@ async function withTransaction(db, fn, { waitTimeout = 15 } = {}) {
 }
 
 /** Tabelas criadas pelo Gestor: só nelas o MAX+1 é aceitável (o Clipp não insere nelas). */
-const TABELAS_GESTOR = new Set(['GESTOR_EST_ALTERACAO', 'GESTOR_COND_TOTAL', 'TB_MT_REGRA_TRIBUTO', 'TB_MT_CONVERSAO']);
+const TABELAS_GESTOR = new Set(['GESTOR_EST_ALTERACAO', 'GESTOR_COND_TOTAL', 'GESTOR_OFERTA', 'TB_MT_REGRA_TRIBUTO', 'TB_MT_CONVERSAO']);
 
 async function genValor(db, generatorName, passo) {
   const rows = await query(db, `SELECT GEN_ID(${generatorName}, ${Math.trunc(passo)}) AS ID FROM RDB$DATABASE`);
