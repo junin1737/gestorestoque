@@ -11,7 +11,7 @@ const { getAppDataDir } = require('./config');
 const importacaoParams = require('./importacao-params');
 const { parseNfeXml } = require('./importacao-xml');
 const { aplicarRateiosDoXml, syncSistemaComXmlItem, validarFinanceiroNf, completarParcelaVista } = require('./importacao-rateio');
-const { obterXmlCompleto, fiscalReady } = require('./importacao-sefaz');
+const { obterXmlCompleto, fiscalReady, xmlNfeCompleto } = require('./importacao-sefaz');
 const { getFiscalConfig } = require('./certificado');
 
 function todayYmd() {
@@ -578,19 +578,26 @@ function serieFromChave(chave) {
   return Number.isFinite(n) ? String(n) : raw;
 }
 
-function downloadsDirs() {
+function pastasXmlLocal() {
   const dirs = [];
   const push = (p) => {
     if (p && !dirs.includes(p)) dirs.push(p);
   };
-  push(path.join(os.homedir(), 'Downloads'));
-  push(path.join(os.homedir(), 'Download'));
-  if (process.env.USERPROFILE) {
-    push(path.join(process.env.USERPROFILE, 'Downloads'));
-    push(path.join(process.env.USERPROFILE, 'Download'));
+  const homes = [os.homedir(), process.env.USERPROFILE].filter(Boolean);
+  const oneDrives = [process.env.OneDrive, process.env.OneDriveConsumer, process.env.OneDriveCommercial].filter(Boolean);
+  for (const home of homes) {
+    push(path.join(home, 'Downloads'));
+    push(path.join(home, 'Download'));
+    push(path.join(home, 'Desktop'));
+    push(path.join(home, 'Área de Trabalho'));
+    push(path.join(home, 'OneDrive', 'Downloads'));
+    push(path.join(home, 'OneDrive', 'Desktop'));
+    push(path.join(home, 'OneDrive', 'Área de Trabalho'));
   }
-  if (process.env.OneDrive) {
-    push(path.join(process.env.OneDrive, 'Downloads'));
+  for (const oneDrive of oneDrives) {
+    push(path.join(oneDrive, 'Downloads'));
+    push(path.join(oneDrive, 'Desktop'));
+    push(path.join(oneDrive, 'Área de Trabalho'));
   }
   return dirs;
 }
@@ -602,7 +609,7 @@ function findXmlFileByChave(chave) {
   const exactNames = [`${ch}.xml`, `${ch}-nfe.xml`, `NFe${ch}.xml`, `${ch}.XML`];
   const candidates = [];
   for (const dir of [
-    ...downloadsDirs(),
+    ...pastasXmlLocal(),
     path.join(getAppDataDir(), 'xml'),
     path.join(process.cwd(), 'xml'),
   ]) {
@@ -618,8 +625,7 @@ function findXmlFileByChave(chave) {
     }
   }
 
-  // Varredura rápida nas pastas Downloads: arquivo cujo nome contém a chave
-  for (const dir of downloadsDirs()) {
+  for (const dir of pastasXmlLocal()) {
     try {
       if (!fs.existsSync(dir)) continue;
       const files = fs.readdirSync(dir);
@@ -659,7 +665,20 @@ async function resolveXmlPayload({ chave, xmlText, xmlPath, allowDemo, preferSef
   }
   const ch = String(chave || '').replace(/\D/g, '');
 
-  // 1) SEFAZ (quando certificado configurado)
+  // XML já salvo (Área de Trabalho, Downloads ou pasta do app) entra direto.
+  // O resumo da SEFAZ não impede a importação quando o arquivo completo existe.
+  if (!raw && ch.length === 44) {
+    const found = findXmlFileByChave(ch);
+    if (found) {
+      const texto = fs.readFileSync(found, 'utf8');
+      if (xmlNfeCompleto(texto)) {
+        raw = texto;
+        fonteOrigem = 'xml';
+      }
+    }
+  }
+
+  // SEFAZ só quando ainda não há XML completo. Não envia manifesto.
   let sefazErro = null;
   if (!raw && preferSefaz && ch.length === 44 && fiscalReady(getFiscalConfig())) {
     try {
@@ -671,16 +690,6 @@ async function resolveXmlPayload({ chave, xmlText, xmlPath, allowDemo, preferSef
     } catch (err) {
       sefazErro = err;
       console.warn('Consulta SEFAZ:', err.message);
-    }
-  }
-
-  // 2) Arquivo local / anexado
-  if (!raw && ch.length === 44) {
-    const found = findXmlFileByChave(ch);
-    if (found) {
-      raw = fs.readFileSync(found, 'utf8');
-      fonteOrigem = 'xml';
-      cacheXmlLocal(ch, raw);
     }
   }
 
@@ -720,7 +729,7 @@ async function resolveXmlPayload({ chave, xmlText, xmlPath, allowDemo, preferSef
     } else if (!fiscalReady(getFiscalConfig())) {
       partes.push('Certificado fiscal não configurado (Serviço → Certificado NF-e).');
     }
-    partes.push('Anexe o XML ou salve-o em Downloads com o nome da chave.');
+    partes.push('Anexe o XML ou salve-o na Área de Trabalho ou em Downloads com o nome da chave.');
     throw new Error(partes.join(' '));
   }
   throw new Error('Informe a chave (44 dígitos) ou envie o XML da NF-e.');
