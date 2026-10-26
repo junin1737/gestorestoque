@@ -176,6 +176,28 @@ try {
   return JSON.parse(out || '{"ok":false,"error":"Resposta vazia"}');
 }
 
+let cnpjCertCache = { chave: '', cnpj: '' };
+
+/** CNPJ do certificado configurado. A SEFAZ só devolve o XML para este CNPJ. */
+async function cnpjDoCertificado(fiscal) {
+  const f = fiscal || getFiscalConfig();
+  const chave = f.tipo === 'windows'
+    ? `w:${f.certStore || ''}:${f.thumbprint || ''}`
+    : `a:${f.arquivoPfx || ''}`;
+  if (cnpjCertCache.chave === chave && cnpjCertCache.cnpj) return cnpjCertCache.cnpj;
+  let cnpj = '';
+  if (f.tipo === 'windows' && f.thumbprint) {
+    const lista = await listWindowsCertificates();
+    const hit = lista.find((c) => String(c.thumbprint || '').toLowerCase() === String(f.thumbprint).toLowerCase());
+    cnpj = String(hit?.cnpj || '').replace(/\D/g, '');
+  } else if (f.arquivoPfx && f.senhaEnc) {
+    const res = await testA1Certificate(f.arquivoPfx, decryptSecret(f.senhaEnc));
+    cnpj = String(res?.cnpj || '').replace(/\D/g, '');
+  }
+  if (cnpj.length === 14) cnpjCertCache = { chave, cnpj };
+  return cnpj;
+}
+
 async function testWindowsCertificate(thumbprint, certStore) {
   if (!thumbprint) return { ok: false, error: 'Selecione um certificado instalado no Windows.' };
   const store = certStore || 'Cert:\\CurrentUser\\My';
@@ -255,5 +277,6 @@ module.exports = {
   publicFiscalConfig,
   listWindowsCertificates,
   testFiscalConfig,
+  cnpjDoCertificado,
   decryptSecret,
 };

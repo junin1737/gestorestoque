@@ -123,6 +123,11 @@ function saveStore(store) {
 
 async function cnpjEmitente() {
   try {
+    const { cnpjDoCertificado } = require('./certificado');
+    const doCert = String(await cnpjDoCertificado() || '').replace(/\D/g, '');
+    if (doCert.length === 14) return doCert;
+  } catch { /* usa o emitente da base */ }
+  try {
     let cnpj = '';
     await withDb(async (db) => {
       const rows = await query(db, 'SELECT FIRST 1 CNPJ FROM TB_EMITENTE');

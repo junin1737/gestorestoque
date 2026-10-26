@@ -282,9 +282,9 @@ async function consultarChaveSefaz(chave, opts = {}) {
     throw err;
   }
 
-  const cnpj = String(opts.cnpj || await getEmitenteCnpj() || '').replace(/\D/g, '');
+  const cnpj = String(opts.cnpj || await cnpjConsulta(fiscal) || '').replace(/\D/g, '');
   if (cnpj.length !== 14) {
-    throw new Error('CNPJ do emitente (destinatário da consulta) não encontrado em TB_EMITENTE.');
+    throw new Error('CNPJ do certificado não encontrado. Confira o certificado NF-e em Serviço.');
   }
 
   const ambiente = fiscal.ambiente === 'producao' ? 'producao' : 'homologacao';
@@ -334,9 +334,9 @@ async function contextoFiscal(opts = {}) {
     err.code = 'SEM_CERTIFICADO';
     throw err;
   }
-  const cnpj = String(opts.cnpj || await getEmitenteCnpj() || '').replace(/\D/g, '');
+  const cnpj = String(opts.cnpj || await cnpjConsulta(fiscal) || '').replace(/\D/g, '');
   if (cnpj.length !== 14) {
-    throw new Error('CNPJ do emitente (destinatário da consulta) não encontrado em TB_EMITENTE.');
+    throw new Error('CNPJ do certificado não encontrado. Confira o certificado NF-e em Serviço.');
   }
   let cUFAutor = String(opts.cUFAutor || '').replace(/\D/g, '');
   if (!cUFAutor) {
@@ -580,6 +580,17 @@ async function manifestarCiencia(chave, opts = {}) {
     throw e;
   }
   return { ok: true, cStat: stats[stats.length - 1] || '135', xMotivo: motivos.pop() || '' };
+}
+
+async function cnpjConsulta(fiscal) {
+  try {
+    const { cnpjDoCertificado } = require('./certificado');
+    const doCert = String(await cnpjDoCertificado(fiscal) || '').replace(/\D/g, '');
+    if (doCert.length === 14) return doCert;
+  } catch (err) {
+    console.warn('CNPJ do certificado:', err.message);
+  }
+  return String(await getEmitenteCnpj() || '').replace(/\D/g, '');
 }
 
 /** Busca o procNFe já liberado. Não envia ciência nem outro evento: o manifesto fica com o contador. */
