@@ -567,38 +567,14 @@ async function obterXmlParaImportar(chave) {
   if (sefaz.xmlNfeCompleto(arquivo)) {
     return { ok: true, chave: ch, xmlText: arquivo, via: 'arquivo' };
   }
-  try {
-    const direto = await sefaz.consultarChaveSefaz(ch);
-    if (direto?.xmlText && sefaz.xmlNfeCompleto(direto.xmlText)) {
-      if (nota) {
-        nota.temXml = true;
-        saveStore(store);
-      }
-      gravarXmlArquivo(ch, direto.xmlText);
-      return { ok: true, chave: ch, xmlText: direto.xmlText, via: 'sefaz' };
-    }
-  } catch (err) {
-    const segue = err.code === 'SEM_XML_COMPLETO' || err.code === 'SEM_XML';
-    if (!segue) throw err;
-  }
-  await sefaz.manifestarCiencia(ch);
-  if (nota) {
-    nota.cienciaEm = new Date().toISOString();
-    saveStore(store);
-  }
-  await sleep(4000);
-  const depois = await sefaz.consultarChaveSefaz(ch);
-  if (!depois?.xmlText || !sefaz.xmlNfeCompleto(depois.xmlText)) {
-    const e = new Error('A ciência foi registrada, mas a SEFAZ ainda não liberou o XML completo. Tente importar de novo em alguns minutos.');
-    e.code = 'SEM_XML_COMPLETO';
-    throw e;
-  }
+  const baixado = await sefaz.obterXmlCompleto(ch);
   if (nota) {
     nota.temXml = true;
+    if (!nota.cienciaEm) nota.cienciaEm = new Date().toISOString();
     saveStore(store);
   }
-  gravarXmlArquivo(ch, depois.xmlText);
-  return { ok: true, chave: ch, xmlText: depois.xmlText, via: 'ciencia' };
+  gravarXmlArquivo(ch, baixado.xmlText);
+  return { ok: true, chave: ch, xmlText: baixado.xmlText, via: 'sefaz' };
 }
 
 module.exports = {

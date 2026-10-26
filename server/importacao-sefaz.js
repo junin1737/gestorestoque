@@ -582,8 +582,53 @@ async function manifestarCiencia(chave, opts = {}) {
   return { ok: true, cStat: stats[stats.length - 1] || '135', xMotivo: motivos.pop() || '' };
 }
 
+function mensagemSemXml(cienciaErro, consultaErro) {
+  const ciencia = cienciaErro ? String(cienciaErro.message || cienciaErro) : '';
+  const consulta = consultaErro ? String(consultaErro.message || consultaErro) : '';
+  if (ciencia && consulta) {
+    return `A SEFAZ não liberou o XML completo. Ciência: ${ciencia}. Consulta: ${consulta}`;
+  }
+  return consulta || ciencia || 'A SEFAZ ainda não liberou o XML completo.';
+}
+
+/**
+ * Busca o procNFe. Se a distribuição só tiver o resumo, registra a ciência e consulta de novo.
+ * Uma recusa do evento não interrompe: a segunda consulta ainda vale quando o XML já está liberado.
+ */
+async function obterXmlCompleto(chave, opts = {}) {
+  const ch = String(chave || '').replace(/\D/g, '');
+  try {
+    const direto = await consultarChaveSefaz(ch, opts);
+    if (direto?.xmlText && xmlNfeCompleto(direto.xmlText)) return direto;
+  } catch (err) {
+    const segue = err.code === 'SEM_XML_COMPLETO' || err.code === 'SEM_XML';
+    if (!segue) throw err;
+  }
+  let cienciaErro = null;
+  try {
+    await manifestarCiencia(ch, opts);
+  } catch (err) {
+    cienciaErro = err;
+    console.warn('Ciência da operação:', err.message);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 4000));
+  try {
+    const depois = await consultarChaveSefaz(ch, opts);
+    if (depois?.xmlText && xmlNfeCompleto(depois.xmlText)) return depois;
+  } catch (err) {
+    const e = new Error(mensagemSemXml(cienciaErro, err));
+    e.code = err.code || 'SEM_XML_COMPLETO';
+    e.cStat = err.cStat;
+    throw e;
+  }
+  const e = new Error(mensagemSemXml(cienciaErro, null));
+  e.code = 'SEM_XML_COMPLETO';
+  throw e;
+}
+
 module.exports = {
   consultarChaveSefaz,
+  obterXmlCompleto,
   distribuirNsu,
   manifestarCiencia,
   fiscalReady,

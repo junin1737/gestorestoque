@@ -11,7 +11,7 @@ const { getAppDataDir } = require('./config');
 const importacaoParams = require('./importacao-params');
 const { parseNfeXml } = require('./importacao-xml');
 const { aplicarRateiosDoXml, syncSistemaComXmlItem, validarFinanceiroNf, completarParcelaVista } = require('./importacao-rateio');
-const { consultarChaveSefaz, fiscalReady } = require('./importacao-sefaz');
+const { obterXmlCompleto, fiscalReady } = require('./importacao-sefaz');
 const { getFiscalConfig } = require('./certificado');
 
 function todayYmd() {
@@ -663,7 +663,7 @@ async function resolveXmlPayload({ chave, xmlText, xmlPath, allowDemo, preferSef
   let sefazErro = null;
   if (!raw && preferSefaz && ch.length === 44 && fiscalReady(getFiscalConfig())) {
     try {
-      const sefaz = await consultarChaveSefaz(ch);
+      const sefaz = await obterXmlCompleto(ch);
       if (sefaz?.xmlText) {
         raw = sefaz.xmlText;
         fonteOrigem = 'sefaz';
