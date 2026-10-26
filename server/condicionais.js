@@ -845,6 +845,16 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
   });
 }
 
+async function condicionalFinalizado(db, idPedido) {
+  const rows = await query(db, `
+    SELECT FIRST 1 1 AS X
+    FROM TB_PEDIDO_VENDA P
+    JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
+    WHERE P.ID_PEDIDO = ?
+      AND UPPER(COALESCE(S.DESCRICAO, '')) CONTAINING 'FINAL'`, [num(idPedido)]);
+  return rows.length > 0;
+}
+
 async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, validade, idStatus, idParcela, frete, desconto, acrescimo }) {
   const codigo = num(idPedido);
   if (!codigo) throw new Error('Condicional inválido.');
@@ -864,6 +874,7 @@ async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, valid
   if (!num(idParcela)) throw new Error('Informe a forma de pagamento.');
   return withDb(async (db, appCfg) => {
     if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
+    if (await condicionalFinalizado(db, codigo)) throw new Error('Condicional finalizado não pode ser editado.');
     const temValidade = await columnExists(db, 'TB_PEDIDO_VENDA', 'DT_VALIDA');
     const t = writeTargets(appCfg)[0]?.tables;
     if (!t) throw new Error('Estoque não encontrado nesta base.');
@@ -1179,6 +1190,7 @@ async function alterarStatus(id, idStatus, idParcela) {
       LEFT JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
       WHERE P.ID_PEDIDO = ?`, [codigo]);
     if (!existe.length) throw new Error('Condicional não encontrado.');
+    if (await condicionalFinalizado(db, codigo)) throw new Error('Condicional finalizado não pode ser editado.');
     const pagamento = num(idParcela) ? await resolverPagamento(db, idParcela) : null;
     const trocaPagamento = pagamento && pagamento.id_parcela !== num(existe[0].ID_PARCELA);
     if (status !== num(existe[0].ID_STATUS) || trocaPagamento) {

@@ -2277,16 +2277,23 @@ html[data-theme="escuro"] .cond-pill.is-concluido { background: #14532d; color: 
 }
 #page-condicionais .cond-card {
   gap: 0;
+  min-width: 0;
+  max-width: 100%;
   padding: 0.32rem 0.5rem;
   border-radius: 8px;
 }
-#page-condicionais .cond-card-top { gap: 0.35rem; align-items: baseline; }
+#page-condicionais .cond-card-top {
+  min-width: 0;
+  gap: 0.35rem;
+  align-items: baseline;
+}
 #page-condicionais .cond-card-top strong {
+  flex: 0 0 auto;
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
 }
 #page-condicionais .cond-card-nome {
-  flex: 1;
+  flex: 1 1 auto;
   min-width: 0;
   font-size: 0.8rem;
   font-weight: 600;
@@ -2300,7 +2307,12 @@ html[data-theme="escuro"] .cond-pill.is-concluido { background: #14532d; color: 
   overflow: hidden;
   text-overflow: ellipsis;
 }
-#page-condicionais .cond-pill { font-size: 0.62rem; padding: 0.02rem 0.35rem; }
+#page-condicionais .cond-pill {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-size: 0.62rem;
+  padding: 0.02rem 0.35rem;
+}
 #page-condicionais .cond-form { padding: 0.6rem 0.75rem 0.85rem; }
 #page-condicionais .cond-form-head { margin-bottom: 0.45rem; }
 #page-condicionais .cond-form-head h3 { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; }

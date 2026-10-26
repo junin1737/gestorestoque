@@ -18,8 +18,16 @@ const Condicionais = (() => {
     return Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   }
 
+  function semAcento(valor) {
+    return String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  }
+
+  function ehFinalizado(doc) {
+    return semAcento(doc?.status_label).includes('final');
+  }
+
   function classeStatus(label) {
-    const s = String(label || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    const s = semAcento(label);
     if (s.includes('edit')) return 'is-editando';
     if (s.includes('reprov')) return 'is-reprovado';
     if (s.includes('reserv')) return 'is-reservado';
@@ -226,6 +234,7 @@ const Condicionais = (() => {
       return;
     }
     const doc = res.condicional || {};
+    const travado = ehFinalizado(doc);
     await carregarPagamentos();
     const itens = (doc.itens || []).map((it) => `
       <div class="cond-item">
@@ -240,6 +249,7 @@ const Condicionais = (() => {
       <div class="cond-ficha">
         <p class="cond-meta"><strong>${esc(doc.cliente || 'Sem cliente')}</strong> · ${esc(doc.data || '—')} ${esc(doc.horario || '')} · ${esc(doc.vendedor || 'sem vendedor')}</p>
         <p class="hint">Validade ${esc(doc.validade || '—')}${doc.obs ? ` · ${esc(doc.obs)}` : ''}</p>
+        ${travado ? '<p class="hint">Condicional finalizado. Não pode ser editado.</p>' : `
         <div class="cond-detalhe-campos">
           <label class="cond-filtro">Situação
             <select id="cond-detalhe-status">${opcoesStatus(doc.status)}</select>
@@ -247,12 +257,11 @@ const Condicionais = (() => {
           <label class="cond-filtro">Pagamento
             <select id="cond-detalhe-pagamento">${opcoesPagamento(doc.id_parcela)}</select>
           </label>
-        </div>
+        </div>`}
         <p class="hint" id="cond-detalhe-msg">${esc(aviso)}</p>
         <div class="cond-acoes">
-          <button type="button" class="btn" id="cond-editar">Editar</button>
-          <button type="button" class="btn primary" id="cond-salvar-status">Salvar</button>
-          ${doc.pode_reprovar ? '<button type="button" class="btn danger" id="cond-reprovar">Reprovar</button>' : ''}
+          ${travado ? '' : '<button type="button" class="btn" id="cond-editar">Editar</button><button type="button" class="btn primary" id="cond-salvar-status">Salvar</button>'}
+          ${doc.pode_reprovar && !travado ? '<button type="button" class="btn danger" id="cond-reprovar">Reprovar</button>' : ''}
           <button type="button" class="btn" data-pdf="${esc(doc.id)}">Gerar PDF</button>
           <button type="button" class="btn" data-wa="${esc(doc.id)}" data-fone="${esc(doc.telefone || '')}">WhatsApp</button>
         </div>
@@ -487,6 +496,11 @@ const Condicionais = (() => {
   }
 
   async function abrirEdicao(doc) {
+    if (ehFinalizado(doc)) {
+      const msg = $('#cond-detalhe-msg');
+      if (msg) msg.textContent = 'Condicional finalizado. Não pode ser editado.';
+      return;
+    }
     editandoId = Number(doc.id) || 0;
     painel('novo');
     await carregarVendedores();
