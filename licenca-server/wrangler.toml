@@ -27,6 +27,14 @@ service = "gestor-relay"
 binding = "ATUALIZACAO"
 bucket_name = "gestor-atualizacao"
 
+# Fotos e artes da Central de Ofertas. O endereço público (r2.dev ou domínio) entra em FOTOS_PUBLIC_BASE.
+[[r2_buckets]]
+binding = "FOTOS"
+bucket_name = "gestor-ofertas"
+
+[vars]
+FOTOS_PUBLIC_BASE = ""
+
 # Segredos (wrangler secret put ...):
 #   LICENCA_PRIVATE_KEY  chave Ed25519 PKCS8 em PEM (par da pública embutida em server/licenca.js)
 #   ADMIN_PASSWORD       senha do painel /admin

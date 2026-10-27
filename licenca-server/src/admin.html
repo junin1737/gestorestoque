@@ -393,6 +393,14 @@
       </select>
     </label>
     <p class="sub">Com Sim, o Gestor desta loja pode mostrar a aba Central de Ofertas para quem tiver a permissão.</p>
+    <h3>Instagram</h3>
+    <div class="grid2">
+      <label>Usuário<input id="d-ig-usuario" maxlength="80" placeholder="@da loja" /></label>
+      <label>ID da conta profissional<input id="d-ig-user-id" maxlength="40" inputmode="numeric" /></label>
+      <label>Validade do token<input id="d-ig-expira" type="date" /></label>
+      <label>Token de acesso<input id="d-ig-token" type="password" maxlength="500" autocomplete="new-password" placeholder="Em branco mantém o atual" /></label>
+    </div>
+    <p class="sub" id="d-ig-info">O token fica só neste painel. O Gestor da loja vê se a conta está informada, sem receber o token.</p>
     <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
     <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
 
@@ -1160,6 +1168,13 @@ function preencherCliente(r) {
   preencherSelectContador(c.contador_id);
   $('#d-pacote-entrada').value = Number(c.pacote_entrada) === 1 ? '1' : '0';
   $('#d-central-ofertas').value = Number(c.central_ofertas) === 1 ? '1' : '0';
+  $('#d-ig-usuario').value = c.ig_usuario || '';
+  $('#d-ig-user-id').value = c.ig_user_id || '';
+  $('#d-ig-expira').value = c.ig_token_expira || '';
+  $('#d-ig-token').value = '';
+  $('#d-ig-info').textContent = c.ig_token_informado
+    ? 'Token já informado. Deixe o campo em branco para mantê-lo.'
+    : 'O token fica só neste painel. O Gestor da loja vê se a conta está informada, sem receber o token.';
   $('#d-mensagem').value = c.mensagem || '';
   $('#d-obs').value = c.observacao || '';
   $('#d-sup-1').value = '';
@@ -1318,6 +1333,10 @@ $('#d-salvar').addEventListener('click', async () => {
       contador_id: $('#d-contador').value || null,
       pacote_entrada: $('#d-pacote-entrada').value === '1' ? 1 : 0,
       central_ofertas: $('#d-central-ofertas').value === '1' ? 1 : 0,
+      ig_usuario: $('#d-ig-usuario').value,
+      ig_user_id: $('#d-ig-user-id').value,
+      ig_token_expira: $('#d-ig-expira').value || null,
+      ig_token: $('#d-ig-token').value,
       mensagem: $('#d-mensagem').value,
       observacao: $('#d-obs').value,
     };

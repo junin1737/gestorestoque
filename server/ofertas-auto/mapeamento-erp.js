@@ -1,26 +1,42 @@
 'use strict';
 
 /**
- * Nomes das tabelas e dos campos do ERP.
- * Enquanto `pronto` for false, o conector real não consulta a base.
- * Preencha e mude `pronto` para true. Veja CONEXOES.md.
+ * Colunas lidas nas views do Clipp. O ManagePro repete o cadastro em V_ESTOQUE_2
+ * e é lá que existem PRC_PROMO, INPROMO (início) e FIMPROMO (fim).
+ * Itens vendidos não estão nessas views.
  */
 module.exports = {
-  pronto: false,
-  produto: {
-    tabela: 'TODO',
-    id: 'TODO',
-    codigo: 'TODO',
-    descricao: 'TODO',
-    ean: 'TODO',
-    preco: 'TODO',
-    preco_promocional: 'TODO',
-    promocao_inicio: 'TODO',
-    promocao_fim: 'TODO',
-    estoque: 'TODO',
-    custo: 'TODO',
-    categoria: 'TODO',
-    campos_texto: ['TODO'],
+  pronto: true,
+  clipp: {
+    view: 'V_ESTOQUE',
+    id: 'ID_IDENTIFICADOR',
+    codigo: 'ID_ESTOQUE',
+    descricao: 'PROD_SERV',
+    ean: 'COD_BARRA',
+    preco: 'PRC_VENDA',
+    estoque: 'QTD_ATUAL',
+    custo: 'PRC_CUSTO',
+    categoria: 'GRUPO',
+    referencia: 'REFERENCIA',
+    status: 'STATUS',
+    campos_texto: ['DESC_CMPL', 'INFCOMPLEMENTAR', 'ADICIONAL1', 'ADICIONAL2'],
+  },
+  manage: {
+    view: 'V_ESTOQUE_2',
+    id: 'ID_IDENTIFICADOR',
+    codigo: 'ID_ESTOQUE',
+    descricao: 'PROD_SERV',
+    ean: 'COD_BARRA',
+    preco: 'PRC_VENDA',
+    preco_promocional: 'PRC_PROMO',
+    promocao_inicio: 'INPROMO',
+    promocao_fim: 'FIMPROMO',
+    estoque: 'QTD_ATUAL',
+    custo: 'PRC_CUSTO',
+    categoria: 'GRUPO',
+    referencia: 'REFERENCIA',
+    status: 'STATUS',
+    campos_texto: ['DESC_CMPL', 'OBS'],
   },
   vendidos: {
     tabela: 'TODO',

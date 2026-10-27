@@ -62,7 +62,13 @@ function montar(router, deps) {
     try {
       const config = lerConfig();
       const campos = await conectores.erp.camposTexto();
-      const ig = await conectores.instagram.status();
+      const sit = require('../licenca').situacao();
+      const ig = {
+        conectada: sit.instagram_configurado === true,
+        usuario: '',
+        token_expira_em: sit.instagram_expira || null,
+        status: sit.instagram_configurado ? 'conectada' : 'desconectada',
+      };
       res.json({
         ok: true,
         loja_id: await lojaId(),

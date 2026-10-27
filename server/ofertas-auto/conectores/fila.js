@@ -44,13 +44,40 @@ function criarFilaSimulada() {
   };
 }
 
+async function chamarFila(path, options = {}) {
+  const { LICENCA_URL, cabecalhosInstalacao } = require('../../licenca');
+  const headers = {
+    ...(await cabecalhosInstalacao()),
+    'Content-Type': 'application/json',
+    ...(options.headers || {}),
+  };
+  const res = await fetch(`${LICENCA_URL}${path}`, { ...options, headers });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok || data.ok === false) {
+    throw new Error(data.error || `A fila na nuvem recusou a chamada (${res.status}).`);
+  }
+  return data;
+}
+
 function criarFilaReal() {
-  const erro = 'TODO: ligar FilaNuvem ao D1 da nuvem (gravar, buscar, confirmar e cópia incremental do catálogo).';
   return {
     modo: 'real',
-    async gravar() { throw new Error(erro); },
-    async buscar() { throw new Error(erro); },
-    async confirmar() { throw new Error(erro); },
+    async gravar(item) {
+      return chamarFila('/api/ofertas/fila', { method: 'POST', body: JSON.stringify(item) });
+    },
+    async buscar(lojaId, status) {
+      const q = new URLSearchParams();
+      if (lojaId) q.set('loja', lojaId);
+      if (status) q.set('status', status);
+      const data = await chamarFila(`/api/ofertas/fila?${q.toString()}`);
+      return data.itens || [];
+    },
+    async confirmar(id, resultado) {
+      return chamarFila(`/api/ofertas/fila/${encodeURIComponent(id)}/confirmar`, {
+        method: 'POST',
+        body: JSON.stringify(resultado || {}),
+      });
+    },
   };
 }
 

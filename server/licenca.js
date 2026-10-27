@@ -347,6 +347,8 @@ function situacao() {
     pacote_entrada: dados.pacote_entrada === true,
     contador_vinculado: dados.contador_vinculado === true,
     central_ofertas: dados.central_ofertas === true,
+    instagram_configurado: dados.instagram_configurado === true,
+    instagram_expira: dados.instagram_expira || null,
   };
   if (identidade?.cnpj && dados.cnpj !== identidade.cnpj) {
     return { ...out, liberado: false, status: 'outro_cnpj', mensagem: `A licença guardada é de outro CNPJ. Verificando a base atual… Se persistir, contate a ${CONTATO}.` };

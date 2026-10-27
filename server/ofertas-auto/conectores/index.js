@@ -5,13 +5,14 @@ const { criarFilaSimulada, criarFilaReal } = require('./fila');
 const { criarImagensSimuladas, criarImagensReais } = require('./imagens');
 const { criarInstagramSimulado, criarInstagramReal } = require('./instagram');
 
-function modo(nome) {
-  return String(process.env[nome] || 'simulado').trim().toLowerCase() === 'real' ? 'real' : 'simulado';
+function modo(nome, padrao = 'simulado') {
+  const v = String(process.env[nome] || padrao).trim().toLowerCase();
+  return v === 'simulado' ? 'simulado' : 'real';
 }
 
 function criarConectores(deps) {
-  const erpModo = modo('ERP_MODO');
-  const filaModo = modo('FILA_MODO');
+  const erpModo = modo('ERP_MODO', 'real');
+  const filaModo = modo('FILA_MODO', 'real');
   const imagensModo = modo('IMAGENS_MODO');
   const igModo = modo('INSTAGRAM_MODO');
   return {

@@ -86,43 +86,107 @@ function ident(nome) {
   return s;
 }
 
+function dia(v) {
+  if (!v) return '';
+  if (v instanceof Date && !Number.isNaN(v.getTime())) {
+    const bruto = new Date(v.getTime() + 3 * 3600000);
+    return bruto.toISOString().slice(0, 10);
+  }
+  const s = String(v);
+  const iso = s.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  return '';
+}
+
+function linhaProduto(r, texto) {
+  const promo = Number(r.PROMO);
+  const inicio = dia(r.PROMO_INI);
+  const fim = dia(r.PROMO_FIM);
+  const temPromo = promo > 0 && inicio && fim;
+  return {
+    id: String(r.ID),
+    codigo: String(r.CODIGO ?? r.ID),
+    descricao: String(r.DESCRICAO || '').trim(),
+    ean: String(r.EAN || '').replace(/\D/g, ''),
+    preco: Number(r.PRECO || 0),
+    preco_promocional: temPromo ? promo : null,
+    promocao_inicio: temPromo ? inicio : '',
+    promocao_fim: temPromo ? fim : '',
+    estoque: Number(r.ESTOQUE || 0),
+    custo: Number(r.CUSTO || 0),
+    categoria: String(r.CATEGORIA || '').trim(),
+    observacao: String(r[texto] || r.DESC_CMPL || '').trim(),
+    referencia: String(r.REFERENCIA || '').trim(),
+    foto: false,
+    ignorar_estoque: false,
+  };
+}
+
+function sqlLista(mapa, comPromo) {
+  const cols = [
+    `${ident(mapa.id)} AS ID`,
+    `${ident(mapa.codigo)} AS CODIGO`,
+    `${ident(mapa.descricao)} AS DESCRICAO`,
+    `${ident(mapa.ean)} AS EAN`,
+    `${ident(mapa.preco)} AS PRECO`,
+    `${ident(mapa.estoque)} AS ESTOQUE`,
+    `${ident(mapa.custo)} AS CUSTO`,
+    `${ident(mapa.categoria)} AS CATEGORIA`,
+    `${ident(mapa.referencia)} AS REFERENCIA`,
+    `${ident(mapa.campos_texto[0])} AS DESC_CMPL`,
+  ];
+  if (comPromo) {
+    cols.push(`${ident(mapa.preco_promocional)} AS PROMO`);
+    cols.push(`${ident(mapa.promocao_inicio)} AS PROMO_INI`);
+    cols.push(`${ident(mapa.promocao_fim)} AS PROMO_FIM`);
+  }
+  return `SELECT FIRST 400 ${cols.join(', ')} FROM ${ident(mapa.view)} WHERE COALESCE(${ident(mapa.status)}, 'A') = 'A' ORDER BY ${ident(mapa.codigo)} DESC`;
+}
+
 function criarErpReal(deps) {
   return {
     modo: 'real',
     async listarProdutos() {
-      if (!mapeamento.pronto) {
-        throw new Error('Mapeamento do ERP ainda não preenchido. Veja CONEXOES.md e server/ofertas-auto/mapeamento-erp.js.');
-      }
-      const { withDb, query } = deps;
-      const m = mapeamento.produto;
-      const sql = `SELECT FIRST 400 ${ident(m.id)} AS ID, ${ident(m.codigo)} AS CODIGO, ${ident(m.descricao)} AS DESCRICAO, ${ident(m.ean)} AS EAN, ${ident(m.preco)} AS PRECO, ${ident(m.preco_promocional)} AS PROMO, ${ident(m.promocao_inicio)} AS PROMO_INI, ${ident(m.promocao_fim)} AS PROMO_FIM, ${ident(m.estoque)} AS ESTOQUE, ${ident(m.custo)} AS CUSTO, ${ident(m.categoria)} AS CATEGORIA FROM ${ident(m.tabela)}`;
-      const rows = await withDb((db) => query(db, sql));
-      return rows.map((r) => ({
-        id: String(r.ID),
-        codigo: String(r.CODIGO ?? r.ID),
-        descricao: String(r.DESCRICAO || '').trim(),
-        ean: String(r.EAN || '').replace(/\D/g, ''),
-        preco: Number(r.PRECO || 0),
-        preco_promocional: r.PROMO == null ? null : Number(r.PROMO),
-        promocao_inicio: String(r.PROMO_INI || '').slice(0, 10),
-        promocao_fim: String(r.PROMO_FIM || '').slice(0, 10),
-        estoque: Number(r.ESTOQUE || 0),
-        custo: Number(r.CUSTO || 0),
-        categoria: String(r.CATEGORIA || '').trim(),
-        observacao: '',
-        foto: false,
-        ignorar_estoque: false,
-      }));
+      const { withDb, query, activeTargets } = deps;
+      return withDb(async (db, cfg) => {
+        const alvos = activeTargets(cfg);
+        const soManage = alvos.length === 1 && alvos[0].manage;
+        const mapa = soManage ? mapeamento.manage : mapeamento.clipp;
+        const rows = await query(db, sqlLista(mapa, soManage));
+        const produtos = rows.map((r) => linhaProduto(r, soManage ? 'DESC_CMPL' : 'DESC_CMPL'));
+        if (soManage || !alvos.some((a) => a.manage) || !produtos.length) return produtos;
+        const m = mapeamento.manage;
+        const ids = produtos.map((p) => Number(p.id)).filter((n) => Number.isInteger(n));
+        if (!ids.length) return produtos;
+        const promoSql = `SELECT ${ident(m.id)} AS ID, ${ident(m.preco_promocional)} AS PROMO, ${ident(m.promocao_inicio)} AS PROMO_INI, ${ident(m.promocao_fim)} AS PROMO_FIM FROM ${ident(m.view)} WHERE ${ident(m.id)} IN (${ids.map(() => '?').join(',')})`;
+        const promo = await query(db, promoSql, ids).catch(() => []);
+        const porId = new Map(promo.map((r) => [String(r.ID), linhaProduto(r, 'DESC_CMPL')]));
+        return produtos.map((p) => {
+          const extra = porId.get(p.id);
+          if (!extra?.preco_promocional) return p;
+          return {
+            ...p,
+            preco_promocional: extra.preco_promocional,
+            promocao_inicio: extra.promocao_inicio,
+            promocao_fim: extra.promocao_fim,
+          };
+        });
+      });
     },
     async lerProduto(id) {
       const lista = await this.listarProdutos();
       return lista.find((p) => p.id === String(id)) || null;
     },
     async camposTexto() {
-      return (mapeamento.produto.campos_texto || []).filter((c) => c && c !== 'TODO');
+      const { withDb, activeTargets } = deps;
+      return withDb(async (_db, cfg) => {
+        const alvos = activeTargets(cfg);
+        const mapa = alvos.length === 1 && alvos[0].manage ? mapeamento.manage : mapeamento.clipp;
+        return mapa.campos_texto;
+      });
     },
     async gravar() {
-      throw new Error('TODO: gravar pelo ErpConnector real usando a mesma camada do gestor (server/db.js), depois que o mapeamento estiver preenchido.');
+      throw new Error('A gravação no ERP passa pela fila na nuvem. O agente da loja ainda não aplica o item.');
     },
   };
 }

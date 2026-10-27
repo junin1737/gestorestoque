@@ -93,10 +93,10 @@
     }
     if (aba === 'instagram') {
       const ig = estado.instagram || {};
-      const modo = estado.modos?.instagram || 'simulado';
+      const fotos = estado.modos?.imagens || 'simulado';
       return `<p>Status: <strong>${esc(ig.status || 'desconectada')}</strong></p>
-        <p class="hint">${ig.usuario ? `Conta ${esc(ig.usuario)}.` : 'Nenhuma conta profissional conectada.'} ${ig.token_expira_em ? `Token até ${esc(ig.token_expira_em)}.` : ''}</p>
-        <p class="hint">Modo do conector: ${esc(modo)}. ${modo === 'simulado' ? 'A conexão real com a Meta fica para a fase de publicação.' : 'Aguardando o token da Meta no servidor.'}</p>`;
+        <p class="hint">${ig.token_expira_em ? `Token informado no painel, válido até ${esc(ig.token_expira_em)}.` : 'Nenhuma conta informada no cadastro do cliente.'}</p>
+        <p class="hint">Usuário, ID, token e validade ficam no cadastro do cliente, no painel. O token não vem para esta loja. Fotos: ${esc(fotos)}.</p>`;
     }
     if (aba === 'usuarios') {
       const linhas = (estado.equipe || []).map((u) => `<label class="co-user"><span>${esc(u.nome)}${u.supervisor ? ' (supervisor)' : ''}</span>

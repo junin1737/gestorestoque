@@ -1,4 +1,5 @@
 import ADMIN_HTML from './admin.html';
+import { rotaOfertas } from './ofertas-nuvem.js';
 
 const TOLERANCIA_OFFLINE_DIAS = 7;
 const SESSAO_HORAS = 12;
@@ -109,6 +110,30 @@ function pacoteEntradaAtivo(cli) {
 
 function centralOfertasAtiva(cli) {
   return Number(cli?.central_ofertas) === 1;
+}
+
+let colunasInstagramProntas = false;
+
+async function garantirInstagram(env) {
+  if (colunasInstagramProntas) return;
+  const colunas = ['ig_usuario TEXT', 'ig_user_id TEXT', 'ig_token TEXT', 'ig_token_expira TEXT'];
+  for (const coluna of colunas) {
+    try {
+      await env.DB.prepare(`ALTER TABLE clientes ADD COLUMN ${coluna}`).run();
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (!/duplicate column/i.test(msg)) throw e;
+    }
+  }
+  colunasInstagramProntas = true;
+}
+
+function instagramDoCliente(cli) {
+  const configurado = !!(String(cli?.ig_user_id || '').trim() && String(cli?.ig_token || '').trim());
+  return {
+    instagram_configurado: configurado,
+    instagram_expira: cli?.ig_token_expira || null,
+  };
 }
 
 function contadorVinculado(cli) {
@@ -280,6 +305,7 @@ async function instalacaoDaRequisicao(request, env, app) {
 async function check(request, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
+  await garantirInstagram(env);
   let body;
   try {
     body = await request.json();
@@ -398,6 +424,7 @@ async function check(request, env) {
     pacote_entrada: pacoteEntradaAtivo(cli),
     contador_vinculado: contadorVinculado(cli),
     central_ofertas: centralOfertasAtiva(cli),
+    ...instagramDoCliente(cli),
   });
   return json({
     ok: true,
@@ -580,11 +607,12 @@ async function listarClientes(url, env) {
 
 /** Nunca devolve o hash da senha do supervisor nem o do segredo da instalação ao painel. */
 function clientePublico(c, agora = new Date()) {
-  const { sup_hash: supHash, segredo_hash: segredoHash, ...resto } = c;
+  const { sup_hash: supHash, segredo_hash: segredoHash, ig_token: igToken, ...resto } = c;
   return {
     ...resto,
     sup_propria: !!supHash,
     instalacao_confirmada: !!segredoHash,
+    ig_token_informado: !!igToken,
     situacao: situacaoCliente(c, agora).status,
   };
 }
@@ -706,6 +734,14 @@ function camposEditaveis(body) {
   if (body.central_ofertas !== undefined) {
     out.central_ofertas = body.central_ofertas === true || body.central_ofertas === 1 || body.central_ofertas === '1' ? 1 : 0;
   }
+  if (body.ig_usuario !== undefined) out.ig_usuario = texto(body.ig_usuario, 80);
+  if (body.ig_user_id !== undefined) out.ig_user_id = texto(String(body.ig_user_id || '').replace(/\D/g, ''), 40);
+  if (body.ig_token_expira !== undefined) {
+    const d = dataValida(body.ig_token_expira);
+    if (body.ig_token_expira && !d) throw new Error('Validade do token do Instagram inválida (AAAA-MM-DD).');
+    out.ig_token_expira = d;
+  }
+  if (String(body.ig_token || '').trim()) out.ig_token = String(body.ig_token).trim().slice(0, 500);
   return out;
 }
 
@@ -810,6 +846,7 @@ async function criarCliente(request, env) {
 async function atualizarCliente(cnpj, app, request, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
+  await garantirInstagram(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
@@ -840,9 +877,14 @@ async function atualizarCliente(cnpj, app, request, env) {
       em_teste: 'teste grátis',
       pacote_entrada: 'pacote de entrada',
       central_ofertas: 'central de ofertas',
+      ig_usuario: 'instagram',
+      ig_user_id: 'id do instagram',
+      ig_token: 'token do instagram',
+      ig_token_expira: 'validade do token',
     };
     const valor = (k) => {
       if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
+      if (k === 'ig_token') return 'atualizado';
       if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas') return campos[k] ? 'sim' : 'não';
       if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
       return campos[k] ?? '—';
@@ -885,6 +927,7 @@ async function licencaOffline(cnpj, app, request, env) {
     pacote_entrada: pacoteEntradaAtivo(cli),
     contador_vinculado: contadorVinculado(cli),
     central_ofertas: centralOfertasAtiva(cli),
+    ...instagramDoCliente(cli),
   });
   await registrarEvento(env, cnpj, app, 'licenca_offline', `${dias} dia(s)${nse ? ` · NSE ${nse}` : ''}`);
   const codigo = `MTL1.${b64url(enc.encode(JSON.stringify(licenca)))}`;
@@ -1794,6 +1837,7 @@ export default {
         return await atualizacaoArquivo(request, env, decodeURIComponent(arquivo[1]));
       }
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
+      if (url.pathname.startsWith('/api/ofertas/')) return await rotaOfertas(request, env, url, instalacaoDaRequisicao);
       if (url.pathname.startsWith('/api/mt/')) return await rotaMt(request, env, url);
       if (url.pathname.startsWith('/api/admin/')) return await rotaAdmin(request, env, url);
       if (url.pathname === '/' || url.pathname === '/admin' || url.pathname === '/admin/') {
