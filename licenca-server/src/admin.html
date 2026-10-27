@@ -129,6 +129,7 @@
   .ig-acoes { display: flex; gap: .5rem; align-items: stretch; margin: .15rem 0 .35rem; }
   .ig-acoes .btn { flex: 1 1 0; height: 2.45rem; margin: 0; white-space: nowrap; }
   .ig-acoes .btn:disabled { opacity: .6; cursor: default; }
+  .ig-acoes .btn[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
   #d-ig-resultado { min-height: 1.1rem; margin: .15rem 0 .35rem; }
   #d-ig-resultado.ok { color: var(--ok); }
   #d-ig-resultado.erro { color: var(--danger); }
@@ -410,8 +411,13 @@
       <button class="btn ghost" id="d-ig-testar" type="button">Testar conexão</button>
       <button class="btn ghost" id="d-ig-renovar" type="button">Renovar agora</button>
     </div>
+    <div class="ig-acoes" role="group" aria-label="Forma de postagem">
+      <button class="btn ghost" type="button" data-ig-forma="post" aria-pressed="true">Postagem</button>
+      <button class="btn ghost" type="button" data-ig-forma="story" aria-pressed="false">Story</button>
+      <button class="btn ghost" type="button" data-ig-forma="ambos" aria-pressed="false">Ambos</button>
+    </div>
     <div class="ig-acoes">
-      <button class="btn ghost" id="d-ig-postar" type="button">Publicar post de teste</button>
+      <button class="btn ghost" id="d-ig-postar" type="button">Publicar teste</button>
     </div>
     <p class="sub" id="d-ig-resultado"></p>
     <p class="sub" id="d-ig-info">O token fica só neste painel. O Gestor da loja vê se a conta está informada, sem receber o token.</p>
@@ -1412,54 +1418,73 @@ function esperarPost(ms, ciclo) {
     igPostTimer = setTimeout(() => resolve(ciclo === igPostCiclo), ms);
   });
 }
+function formaInstagram() {
+  return document.querySelector('[data-ig-forma][aria-pressed="true"]')?.dataset.igForma || 'post';
+}
 function travarInstagram(travado) {
   ['d-ig-testar', 'd-ig-renovar', 'd-ig-postar'].forEach((id) => {
     const botao = document.getElementById(id);
     if (botao) botao.disabled = travado;
   });
+  document.querySelectorAll('[data-ig-forma]').forEach((botao) => { botao.disabled = travado; });
 }
+document.querySelectorAll('[data-ig-forma]').forEach((botao) => {
+  botao.addEventListener('click', () => {
+    document.querySelectorAll('[data-ig-forma]').forEach((outro) => {
+      outro.setAttribute('aria-pressed', outro === botao ? 'true' : 'false');
+    });
+  });
+});
 $('#dlg-cliente').addEventListener('close', cancelarPostTeste);
 
-$('#d-ig-postar').addEventListener('click', async () => {
-  const usuario = ($('#d-ig-usuario').value || '').trim() || 'esta conta';
-  if (!confirm(`Publicar um post de teste em ${usuario}? Ele aparece no Instagram e pode ser apagado depois.`)) return;
-  const ciclo = ++igPostCiclo;
-  travarInstagram(true);
-  mostrarResultadoIg('Criando o container da imagem…', false);
-  try {
-    const criado = await api(`${rotaCliente(st.atual)}/instagram/post-teste`, {
+async function publicarFormaTeste(forma, ciclo) {
+  const criado = await api(`${rotaCliente(st.atual)}/instagram/post-teste`, {
+    method: 'POST',
+    body: { etapa: 'criar', forma, token: $('#d-ig-token').value, ig_user_id: $('#d-ig-user-id').value },
+  });
+  if (ciclo !== igPostCiclo) return null;
+  if (!criado.ok) return { ok: false, error: criado.error || 'Falha ao criar o container.' };
+  mostrarResultadoIg(criado.mensagem, false);
+  let creationId = criado.creation_id;
+  for (let tentativa = 0; tentativa < 10; tentativa += 1) {
+    const consulta = await api(`${rotaCliente(st.atual)}/instagram/post-teste`, {
       method: 'POST',
-      body: { etapa: 'criar', token: $('#d-ig-token').value, ig_user_id: $('#d-ig-user-id').value },
+      body: { etapa: 'consultar', forma, creation_id: creationId, token: $('#d-ig-token').value, ig_user_id: $('#d-ig-user-id').value },
     });
-    if (ciclo !== igPostCiclo) return;
-    if (!criado.ok) {
-      mostrarResultadoIg(criado.error || 'Falha ao criar o container.', true);
-      toast(criado.error || 'Falha ao criar o container.', true);
-      return;
-    }
-    mostrarResultadoIg(criado.mensagem, false);
-    let creationId = criado.creation_id;
-    for (let tentativa = 0; tentativa < 10; tentativa += 1) {
-      const consulta = await api(`${rotaCliente(st.atual)}/instagram/post-teste`, {
-        method: 'POST',
-        body: { etapa: 'consultar', creation_id: creationId, token: $('#d-ig-token').value, ig_user_id: $('#d-ig-user-id').value },
-      });
-      if (ciclo !== igPostCiclo) return;
-      if (!consulta.ok) {
-        mostrarResultadoIg(consulta.error || 'Falha ao consultar o container.', true);
-        toast(consulta.error || 'Falha ao consultar o container.', true);
+    if (ciclo !== igPostCiclo) return null;
+    if (!consulta.ok) return { ok: false, error: consulta.error || 'Falha ao consultar o container.' };
+    creationId = consulta.creation_id || creationId;
+    mostrarResultadoIg(consulta.mensagem, false);
+    if (consulta.etapa === 'publicado') return { ok: true, mensagem: consulta.mensagem };
+    const seguiu = await esperarPost(Math.max(60000, Number(consulta.espera_ms) || 60000), ciclo);
+    if (!seguiu) return null;
+  }
+  return { ok: false, error: 'A imagem ainda não ficou pronta. Tente publicar de novo em alguns minutos.' };
+}
+
+$('#d-ig-postar').addEventListener('click', async () => {
+  const forma = formaInstagram();
+  const usuario = ($('#d-ig-usuario').value || '').trim() || 'esta conta';
+  const alvo = forma === 'ambos' ? 'uma postagem e um story' : (forma === 'story' ? 'um story' : 'uma postagem');
+  if (!confirm(`Publicar ${alvo} de teste em ${usuario}? Aparece no Instagram e pode ser apagado depois.`)) return;
+  const ciclo = ++igPostCiclo;
+  const alvos = forma === 'ambos' ? ['post', 'story'] : [forma];
+  travarInstagram(true);
+  const feitos = [];
+  try {
+    for (const alvoForma of alvos) {
+      const r = await publicarFormaTeste(alvoForma, ciclo);
+      if (!r) return;
+      if (!r.ok) {
+        mostrarResultadoIg(r.error, true);
+        toast(r.error, true);
         return;
       }
-      creationId = consulta.creation_id || creationId;
-      mostrarResultadoIg(consulta.mensagem, false);
-      if (consulta.etapa === 'publicado') {
-        toast(consulta.mensagem);
-        return;
-      }
-      const seguiu = await esperarPost(Math.max(60000, Number(consulta.espera_ms) || 60000), ciclo);
-      if (!seguiu) return;
+      feitos.push(r.mensagem);
     }
-    mostrarResultadoIg('A imagem ainda não ficou pronta. Tente publicar de novo em alguns minutos.', true);
+    const texto = feitos.join(' ');
+    mostrarResultadoIg(texto, false);
+    toast(forma === 'ambos' ? 'Postagem e story publicados.' : feitos[0]);
   } finally {
     if (ciclo === igPostCiclo) travarInstagram(false);
   }

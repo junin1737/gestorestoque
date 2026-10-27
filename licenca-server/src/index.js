@@ -794,9 +794,13 @@ function versaoInstagram(env) {
   return /^v\d+\.\d+$/.test(v) ? v : IG_VERSAO_PADRAO;
 }
 
-function imagemTeste(env) {
+function enderecoFoto(env, arquivo) {
   const base = String(env.FOTOS_PUBLIC_BASE || '').replace(/\/$/, '');
-  return base ? `${base}/teste/post-de-teste.jpg` : '';
+  return base ? `${base}/teste/${arquivo}` : '';
+}
+
+function formaTeste(v) {
+  return v === 'story' ? 'story' : 'post';
 }
 
 async function gravarTesteInstagram(env, cnpj, app, creationId, consultaEm) {
@@ -814,14 +818,17 @@ async function publicarPostTeste(cnpj, app, request, env) {
   const igId = soDigitos(body.ig_user_id != null && String(body.ig_user_id).trim() ? body.ig_user_id : cli.ig_user_id);
   if (!token) return json({ ok: false, error: 'Informe o token para publicar o teste.' }, 400);
   if (!(igId.length >= 5 && igId.length <= 40)) return json({ ok: false, error: 'Informe o ID da conta profissional.' }, 400);
-  const imagem = imagemTeste(env);
+  const forma = formaTeste(body.forma);
+  const nome = forma === 'story' ? 'story' : 'postagem';
+  const imagem = enderecoFoto(env, forma === 'story' ? 'story-de-teste.jpg' : 'post-de-teste.jpg');
   if (!imagem) return json({ ok: false, error: 'O endereço público das fotos não está configurado.' }, 500);
   const versao = versaoInstagram(env);
 
   if (body.etapa !== 'consultar') {
     const params = new URLSearchParams();
     params.set('image_url', imagem);
-    params.set('caption', LEGENDA_TESTE);
+    if (forma === 'story') params.set('media_type', 'STORIES');
+    else params.set('caption', LEGENDA_TESTE);
     params.set('access_token', token);
     let resp;
     try {
@@ -838,14 +845,14 @@ async function publicarPostTeste(cnpj, app, request, env) {
     }
     const creationId = String(resp.data.id);
     await gravarTesteInstagram(env, cnpj, app, creationId, null);
-    await registrarEvento(env, cnpj, app, 'instagram', 'container do post de teste criado');
-    return json({ ok: true, etapa: 'criado', creation_id: creationId, mensagem: 'Container criado. Conferindo se a imagem ficou pronta.' });
+    await registrarEvento(env, cnpj, app, 'instagram', `container do ${nome} de teste criado`);
+    return json({ ok: true, etapa: 'criado', forma, creation_id: creationId, mensagem: `Container do ${nome} criado. Conferindo se a imagem ficou pronta.` });
   }
 
   const creationId = String(body.creation_id || cli.ig_teste_creation_id || '').trim();
   if (!/^\d{5,40}$/.test(creationId)) return json({ ok: false, error: 'Não há container de teste para consultar.' }, 400);
   const ultima = Date.parse(String(cli.ig_teste_consulta_em || ''));
-  if (Number.isFinite(ultima)) {
+  if (Number.isFinite(ultima) && String(cli.ig_teste_creation_id || '') === creationId) {
     const falta = ESPERA_STATUS_MS - (Date.now() - ultima);
     if (falta > 0) {
       return json({
@@ -885,7 +892,7 @@ async function publicarPostTeste(cnpj, app, request, env) {
       creation_id: creationId,
       status_code: codigo || 'IN_PROGRESS',
       espera_ms: ESPERA_STATUS_MS,
-      mensagem: 'A imagem ainda está sendo preparada. Nova consulta em 1 minuto.',
+      mensagem: `A imagem do ${nome} ainda está sendo preparada. Nova consulta em 1 minuto.`,
     });
   }
   const publicar = new URLSearchParams();
@@ -906,8 +913,9 @@ async function publicarPostTeste(cnpj, app, request, env) {
   }
   await gravarTesteInstagram(env, cnpj, app, null, null);
   const postId = String(publicado.data.id);
-  await registrarEvento(env, cnpj, app, 'instagram', `post de teste publicado: ${postId}`);
-  return json({ ok: true, etapa: 'publicado', post_id: postId, mensagem: `Post publicado. ID ${postId}. Pode apagar no Instagram.` });
+  await registrarEvento(env, cnpj, app, 'instagram', `${nome} de teste publicado: ${postId}`);
+  const titulo = forma === 'story' ? 'Story publicado' : 'Postagem publicada';
+  return json({ ok: true, etapa: 'publicado', forma, post_id: postId, mensagem: `${titulo}. ID ${postId}. Pode apagar no Instagram.` });
 }
 
 async function testarInstagram(cnpj, app, request, env) {
