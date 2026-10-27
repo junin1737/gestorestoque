@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { validarPublicacao } = require('./regras-estoque');
+const { validarPublicacao, modoDaLinha } = require('./regras-estoque');
 const { capacidadeJanela } = require('./regras-publicacao');
 const { catalogoSimulado } = require('./conectores/erp');
 
@@ -66,4 +66,11 @@ test('o catálogo simulado cobre os casos de estoque, promoção, foto, EAN e pr
   assert.ok(lista.some((p) => p.foto === false));
   assert.ok(lista.some((p) => !p.ean));
   assert.ok(lista.some((p) => p.ignorar_estoque === true));
+});
+
+test('o modo da linha segue seleção, promoção e bloqueio de estoque', () => {
+  assert.equal(modoDaLinha({ exposicao: { ok: false }, selecionado: true, oferta: { ok: false } }), 'sem_estoque');
+  assert.equal(modoDaLinha({ exposicao: { ok: true }, selecionado: false, oferta: { ok: true } }), 'nenhum');
+  assert.equal(modoDaLinha({ exposicao: { ok: true }, selecionado: true, oferta: { ok: true } }), 'oferta');
+  assert.equal(modoDaLinha({ exposicao: { ok: true }, selecionado: true, oferta: { ok: false } }), 'exposicao');
 });

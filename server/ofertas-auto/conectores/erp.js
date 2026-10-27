@@ -75,6 +75,9 @@ function criarErpSimulado() {
     async gravar() {
       return { ok: false, error: 'No modo simulado a gravação no ERP fica na fila e não altera uma base real.' };
     },
+    async vendidos30() {
+      return {};
+    },
   };
 }
 
@@ -187,6 +190,31 @@ function criarErpReal(deps) {
     },
     async gravar() {
       throw new Error('A gravação no ERP passa pela fila na nuvem. O agente da loja ainda não aplica o item.');
+    },
+    async vendidos30() {
+      const inicio = new Date();
+      inicio.setDate(inicio.getDate() - 30);
+      const dia = `${inicio.getFullYear()}-${String(inicio.getMonth() + 1).padStart(2, '0')}-${String(inicio.getDate()).padStart(2, '0')}`;
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(dia)) return {};
+      const { withDb, query, activeTargets } = deps;
+      return withDb(async (db, cfg) => {
+        const fontes = [mapeamento.vendidos.clipp];
+        if (activeTargets(cfg).some((a) => a.manage)) fontes.push(mapeamento.vendidos.manage);
+        const totais = {};
+        for (const f of fontes) {
+          const sql = `SELECT I.${ident(f.produto_id)} AS ID, SUM(COALESCE(I.${ident(f.quantidade)}, 0)) AS QTD
+            FROM ${ident(f.item)} I
+            JOIN ${ident(f.nota)} N ON N.${ident(f.nota_id)} = I.${ident(f.nota_id)}
+            WHERE N.${ident(f.status)} = 'E' AND N.${ident(f.data)} >= '${dia}'
+            GROUP BY I.${ident(f.produto_id)}`;
+          const rows = await query(db, sql).catch(() => []);
+          for (const r of rows || []) {
+            const id = String(r.ID);
+            totais[id] = (totais[id] || 0) + Number(r.QTD || 0);
+          }
+        }
+        return totais;
+      });
     },
   };
 }

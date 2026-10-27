@@ -3179,5 +3179,209 @@ html[data-theme="escuro"] .compras-row:hover {
 }
 #page-central-ofertas .co-user { flex-direction: row; justify-content: space-between; align-items: center; gap: 0.8rem; }
 #page-central-ofertas .co-check { display: flex; align-items: center; gap: 0.45rem; margin: 0.45rem 0; }
-#page-central-ofertas .co-busca { margin-bottom: 0.6rem; }
+
+#page-central-ofertas .co-est { display: flex; flex-direction: column; gap: 0.7rem; min-width: 0; }
+#page-central-ofertas .co-filtros {
+  display: grid;
+  grid-template-columns: minmax(14rem, 1.5fr) minmax(10rem, 0.7fr) auto;
+  gap: 0.55rem;
+  align-items: end;
+}
+#page-central-ofertas .co-filtros > label { margin: 0; min-width: 0; }
+#page-central-ofertas .co-filtros input,
+#page-central-ofertas .co-filtros select {
+  width: 100%;
+  height: 2.45rem;
+  min-height: 2.45rem;
+  max-height: 2.45rem;
+  margin: 0;
+  padding: 0 0.65rem;
+  font-size: 0.9rem;
+  line-height: 2.45rem;
+  border-radius: 8px;
+}
+#page-central-ofertas .co-atalhos { display: flex; gap: 0.45rem; align-items: stretch; }
+#page-central-ofertas .co-atalho {
+  height: 2.45rem;
+  margin: 0;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+#page-central-ofertas .co-atalho[aria-pressed="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+#page-central-ofertas .co-tabela-wrap {
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+}
+#page-central-ofertas .co-tabela {
+  width: 100%;
+  min-width: 68rem;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.84rem;
+}
+#page-central-ofertas .co-tabela col.c-sel { width: 2.6rem; }
+#page-central-ofertas .co-tabela col.c-foto { width: 4.6rem; }
+#page-central-ofertas .co-tabela col.c-cod { width: 5.2rem; }
+#page-central-ofertas .co-tabela col.c-est { width: 5.8rem; }
+#page-central-ofertas .co-tabela col.c-preco { width: 6.6rem; }
+#page-central-ofertas .co-tabela col.c-data { width: 8.4rem; }
+#page-central-ofertas .co-tabela col.c-modo { width: 6.8rem; }
+#page-central-ofertas .co-tabela th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 700;
+  padding: 0.5rem 0.45rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+#page-central-ofertas .co-tabela td {
+  padding: 0.4rem 0.45rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  height: 3.35rem;
+}
+#page-central-ofertas .co-tabela .meio { text-align: center; }
+#page-central-ofertas .co-tabela .num { text-align: right; font-variant-numeric: tabular-nums; }
+#page-central-ofertas .co-tabela input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  accent-color: var(--accent);
+}
+#page-central-ofertas .co-tabela input.co-moeda,
+#page-central-ofertas .co-tabela input.co-data {
+  display: block;
+  width: 100%;
+  height: 2.15rem;
+  min-height: 2.15rem;
+  max-height: 2.15rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0 0.4rem;
+  font-size: 0.84rem;
+  line-height: 2.15rem;
+  border-radius: 8px;
+}
+#page-central-ofertas .co-tabela input.co-moeda { text-align: right; font-variant-numeric: tabular-nums; }
+#page-central-ofertas .co-tabela input:disabled {
+  opacity: 1;
+  color: var(--muted);
+  background: var(--bg);
+}
+#page-central-ofertas .co-nome,
+#page-central-ofertas .co-sub,
+#page-central-ofertas .co-cod {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-central-ofertas .co-nome { font-weight: 700; }
+#page-central-ofertas .co-sub { color: var(--muted); font-size: 0.72rem; margin-top: 0.1rem; }
+#page-central-ofertas .co-qtd.is-neg { color: var(--danger); font-weight: 700; }
+#page-central-ofertas .co-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  height: 1.5rem;
+  min-width: 5.6rem;
+  padding: 0 0.45rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+#page-central-ofertas .co-pill.foto-ok,
+#page-central-ofertas .co-pill.foto-falta { min-width: 3.4rem; }
+#page-central-ofertas .co-pill.oferta,
+#page-central-ofertas .co-pill.foto-ok { background: var(--ok-bg); color: var(--ok); }
+#page-central-ofertas .co-pill.exposicao { background: color-mix(in srgb, var(--accent) 16%, var(--bg-elev)); color: var(--text); }
+#page-central-ofertas .co-pill.sem_estoque,
+#page-central-ofertas .co-pill.foto-falta { background: var(--danger-bg); color: var(--danger); }
+#page-central-ofertas .co-pill.nenhum { background: transparent; color: var(--muted); min-width: 0; }
+#page-central-ofertas .co-vazio { text-align: center; color: var(--muted); padding: 1.4rem 0.6rem; }
+#page-central-ofertas .co-rodape {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.8rem;
+  min-height: 2.2rem;
+}
+#page-central-ofertas .co-rodape p { margin: 0; }
+#page-central-ofertas .co-cards { display: none; }
+
+@media (max-width: 860px) {
+  #page-central-ofertas .co-filtros { grid-template-columns: 1fr; }
+  #page-central-ofertas .co-filtros > label,
+  #page-central-ofertas .co-atalhos { grid-column: auto; }
+  #page-central-ofertas .co-rodape { flex-direction: column; align-items: flex-start; gap: 0.15rem; }
+  #page-central-ofertas .co-atalhos { display: grid; grid-template-columns: 1fr 1fr 1fr; }
+  #page-central-ofertas .co-atalho {
+    width: 100%;
+    height: auto;
+    min-height: 2.45rem;
+    padding: 0.35rem 0.4rem;
+    white-space: normal;
+    line-height: 1.15;
+  }
+  #page-central-ofertas .co-tabela-wrap { display: none; }
+  #page-central-ofertas .co-cards { display: grid; gap: 0.6rem; }
+  #page-central-ofertas .co-card {
+    display: grid;
+    grid-template-columns: 1.25rem minmax(0, 1fr) auto;
+    column-gap: 0.65rem;
+    row-gap: 0.55rem;
+    align-items: center;
+    padding: 0.75rem;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    background: var(--bg-elev);
+  }
+  #page-central-ofertas .co-card > input[type="checkbox"] {
+    width: 1.1rem;
+    height: 1.1rem;
+    min-height: 0;
+    margin: 0;
+    padding: 0;
+  }
+  #page-central-ofertas .co-card-campos {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem 0.55rem;
+  }
+  #page-central-ofertas .co-card-campos label { margin: 0; font-size: 0.72rem; }
+  #page-central-ofertas .co-card-campos input {
+    height: 2.75rem;
+    min-height: 2.75rem;
+    max-height: 2.75rem;
+    margin: 0;
+    padding: 0 0.6rem;
+    font-size: 16px;
+    border-radius: 8px;
+  }
+  #page-central-ofertas .co-card-campos input.co-moeda { text-align: right; font-variant-numeric: tabular-nums; }
+}
 
