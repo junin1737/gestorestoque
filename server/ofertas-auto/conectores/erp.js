@@ -57,7 +57,22 @@ function catalogoSimulado() {
 }
 
 function camposTextoSimulado() {
-  return ['observacao'];
+  return [
+    { coluna: 'OBSERVACAO', rotulo: 'Observação' },
+    { coluna: 'ID_IDENTIFICADOR', rotulo: 'Identificador' },
+    { coluna: 'COD_BARRA', rotulo: 'Código de barras' },
+  ];
+}
+
+function comTextos(p) {
+  return {
+    ...p,
+    textos: {
+      OBSERVACAO: String(p.observacao || ''),
+      ID_IDENTIFICADOR: String(p.id || ''),
+      COD_BARRA: String(p.ean || ''),
+    },
+  };
 }
 
 function criarErpSimulado() {
@@ -75,7 +90,7 @@ function criarErpSimulado() {
         lista = lista.filter((p) => Number(p.estoque) > 0 || ignora.has(String(p.id)));
       }
       if (filtros.promo) lista = lista.filter((p) => Number(p.preco_promocional) > 0 && p.promocao_inicio && p.promocao_fim);
-      return lista;
+      return lista.map(comTextos);
     },
     async grupos() {
       return [...new Set(catalogoSimulado().map((p) => p.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt'));
@@ -132,8 +147,17 @@ function linhaProduto(r, texto) {
     estoque: Number(r.ESTOQUE || 0),
     custo: Number(r.CUSTO || 0),
     categoria: String(r.CATEGORIA || '').trim(),
-    observacao: String(r[texto] || r.DESC_CMPL || '').trim(),
+    observacao: String(r.OBSERVACAO || r[texto] || '').trim(),
     referencia: String(r.REFERENCIA || '').trim(),
+    textos: {
+      OBSERVACAO: String(r.OBSERVACAO || '').trim(),
+      DESC_CMPL: String(r.DESC_CMPL || '').trim(),
+      INFCOMPLEMENTAR: String(r.INFCOMPLEMENTAR || '').trim(),
+      ADICIONAL1: String(r.ADICIONAL1 || '').trim(),
+      ADICIONAL2: String(r.ADICIONAL2 || '').trim(),
+      ID_IDENTIFICADOR: String(r.ID ?? ''),
+      COD_BARRA: String(r.EAN || '').replace(/\D/g, ''),
+    },
     foto: false,
     ignorar_estoque: false,
   };
@@ -150,8 +174,14 @@ function sqlLista(mapa, comPromo, filtros = {}, mapaPromo) {
     `${ident(mapa.custo)} AS CUSTO`,
     `${ident(mapa.categoria)} AS CATEGORIA`,
     `${ident(mapa.referencia)} AS REFERENCIA`,
-    `${ident(mapa.campos_texto[0])} AS DESC_CMPL`,
   ];
+  if (mapa.observacao === 'OBS') cols.push(`${ident('OBS')} AS OBSERVACAO`);
+  else cols.push(`(SELECT FIRST 1 OBSERVACAO FROM TB_ESTOQUE WHERE ID_ESTOQUE = V.ID_ESTOQUE) AS OBSERVACAO`);
+  for (const campo of mapa.campos_texto || []) {
+    const coluna = typeof campo === 'string' ? campo : campo.coluna;
+    if (!coluna || ['OBSERVACAO', 'ID_IDENTIFICADOR', 'COD_BARRA'].includes(coluna)) continue;
+    cols.push(`${ident(coluna)} AS ${ident(coluna)}`);
+  }
   if (comPromo) {
     cols.push(`${ident(mapa.preco_promocional)} AS PROMO`);
     cols.push(`${ident(mapa.promocao_inicio)} AS PROMO_INI`);
@@ -190,7 +220,7 @@ function sqlLista(mapa, comPromo, filtros = {}, mapaPromo) {
         AND ${ident(mapaPromo.promocao_fim)} IS NOT NULL
     )`);
   }
-  const sql = `SELECT FIRST 8000 ${cols.join(', ')} FROM ${ident(mapa.view)} WHERE ${where.join(' AND ')} ORDER BY ${ident(mapa.codigo)} DESC`;
+  const sql = `SELECT FIRST 8000 ${cols.join(', ')} FROM ${ident(mapa.view)} V WHERE ${where.join(' AND ')} ORDER BY ${ident(mapa.codigo)} DESC`;
   return { sql, params };
 }
 

@@ -105,12 +105,13 @@ export async function rotaOfertas(request, env, url, instalacaoDaRequisicao) {
     if (!env.FOTOS) return json({ ok: false, error: 'O bucket de fotos ainda não está ligado ao worker.' }, 500);
     const body = await request.json().catch(() => ({}));
     const produtoId = String(body.produto_id || '').replace(/[^\w.-]/g, '').slice(0, 40);
+    const ean = String(body.ean || '').replace(/\D/g, '').slice(0, 20) || 'sem-codigo';
     if (!produtoId) return json({ ok: false, error: 'Produto inválido.' }, 400);
     let bytes;
     try { bytes = Uint8Array.from(atob(String(body.base64 || '')), (c) => c.charCodeAt(0)); }
     catch { return json({ ok: false, error: 'Foto inválida.' }, 400); }
     if (!bytes.length || bytes.length > 1500000) return json({ ok: false, error: 'A foto precisa ter até 1,5 MB.' }, 400);
-    const chave = `${cnpj}/${produtoId}`;
+    const chave = `${cnpj}/${produtoId}/${ean}`;
     const tipo = /^image\/(jpeg|png|webp)$/.test(body.tipo) ? body.tipo : 'image/jpeg';
     await env.FOTOS.put(chave, bytes, { httpMetadata: { contentType: tipo } });
     const agora = new Date().toISOString();

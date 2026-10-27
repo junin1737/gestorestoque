@@ -2,7 +2,9 @@
 
 const { criarConectores } = require('./conectores');
 const { lerArquivo, gravarArquivo, lerConfig, sanitizar, padrao } = require('./config-loja');
+const { randomUUID } = require('crypto');
 const { validarPublicacao, promoValida, descontoPercentual, modoDaLinha } = require('./regras-estoque');
+const { montarRotina } = require('./regras-publicacao');
 
 function hoje() {
   const d = new Date();
@@ -35,8 +37,15 @@ function publicar(produto, config, modulo, data) {
   const base = preparar(produto, modulo);
   const linha = anotar(base, config, modulo, data);
   linha.selecionado = base.selecionado === true;
+  linha.modo_escolhido = modulo?.modo_escolhido === 'oferta' || modulo?.modo_escolhido === 'exposicao'
+    ? modulo.modo_escolhido
+    : '';
+  linha.foto_url = String(modulo?.foto_url || '');
+  linha.foto_chave = String(modulo?.foto_chave || '');
+  linha.foto = !!(linha.foto_url || produto.foto);
   linha.modo = modoDaLinha(linha);
   linha.vendido_30d = Number(produto.vendido_30d || 0);
+  linha.textos = produto.textos || {};
   return linha;
 }
 
@@ -233,6 +242,12 @@ function equipe() {
         prox.ignorar_estoque = req.body.ignorar_estoque === true || req.body.ignorar_estoque === 'true';
       }
       if ('selecionado' in (req.body || {})) prox.selecionado = req.body.selecionado === true;
+      if ('modo' in (req.body || {})) {
+        const modo = String(req.body.modo || '');
+        if (!['oferta', 'exposicao', 'nenhum'].includes(modo)) throw new Error('Modo inválido.');
+        prox.modo_escolhido = modo === 'nenhum' ? '' : modo;
+        if (modo === 'oferta' || modo === 'exposicao') prox.selecionado = true;
+      }
       if ('detalhes_sobrescritos' in (req.body || {})) {
         prox.detalhes_sobrescritos = String(req.body.detalhes_sobrescritos || '').slice(0, 200);
       }
@@ -269,6 +284,165 @@ function equipe() {
       res.status(400).json({ ok: false, error: err.message || 'Falha ao salvar o produto.' });
     }
   });
+
+  router.post('/central-ofertas/produtos/:id/foto', acesso, async (req, res) => {
+    try {
+      const id = String(req.params.id || '').replace(/[^\w.-]/g, '').slice(0, 40);
+      if (!id) return res.status(400).json({ ok: false, error: 'Produto inválido.' });
+      const ean = String(req.body?.ean || '').replace(/\D/g, '').slice(0, 20);
+      let bruto;
+      try { bruto = Buffer.from(String(req.body?.base64 || ''), 'base64'); }
+      catch { bruto = Buffer.alloc(0); }
+      if (!bruto.length || bruto.length > 8_000_000) {
+        return res.status(400).json({ ok: false, error: 'Escolha uma foto de até 8 MB.' });
+      }
+      const { Jimp } = require('jimp');
+      let img = await Jimp.read(bruto);
+      if (Math.max(img.width, img.height) > 1080) img = img.scaleToFit({ w: 1080, h: 1080 });
+      const jpeg = await img.getBuffer('image/jpeg');
+      if (jpeg.length > 1_500_000) {
+        return res.status(400).json({ ok: false, error: 'A foto ficou maior que 1,5 MB depois de reduzir. Use uma imagem menor.' });
+      }
+      const { LICENCA_URL, cabecalhosInstalacao } = require('../licenca');
+      const headers = { ...(await cabecalhosInstalacao()), 'Content-Type': 'application/json' };
+      const remoto = await fetch(`${LICENCA_URL}/api/ofertas/foto`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ produto_id: id, ean, tipo: 'image/jpeg', base64: jpeg.toString('base64') }),
+      });
+      const data = await remoto.json().catch(() => ({}));
+      if (!remoto.ok || data.ok === false) {
+        return res.status(400).json({ ok: false, error: data.error || 'O R2 não recebeu a foto.' });
+      }
+      const dados = lerArquivo();
+      dados.produtos = dados.produtos || {};
+      dados.produtos[id] = {
+        ...(dados.produtos[id] || {}),
+        foto_url: data.url || '',
+        foto_chave: data.chave || '',
+      };
+      gravarArquivo(dados);
+      res.json({ ok: true, foto_url: data.url || '', foto_chave: data.chave || '', aviso: data.aviso || '' });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao anexar a foto.' });
+    }
+  });
+
+  function lerOfertas() {
+    const lista = lerArquivo().ofertas;
+    return Array.isArray(lista) ? lista : [];
+  }
+
+  router.get('/central-ofertas/ofertas', acesso, (_req, res) => {
+    res.json({ ok: true, ofertas: lerOfertas() });
+  });
+
+  router.post('/central-ofertas/ofertas', acesso, (req, res) => {
+    try {
+      const nome = String(req.body?.nome || '').trim().slice(0, 80);
+      const inicio = dataCampo(req.body?.inicio);
+      const fim = dataCampo(req.body?.fim);
+      if (nome.length < 2) throw new Error('Dê um nome para a oferta.');
+      if (!inicio || !fim) throw new Error('Informe o início e o fim da oferta.');
+      if (fim < inicio) throw new Error('O fim da oferta é anterior ao início.');
+      const produtos = normalizarProdutosOferta(req.body?.produtos);
+      const dados = lerArquivo();
+      const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
+      if (lista.length >= 40) throw new Error('Há muitas ofertas salvas. Apague uma antes de criar outra.');
+      const oferta = {
+        id: randomUUID(),
+        nome,
+        inicio,
+        fim,
+        usar_detalhes: req.body?.usar_detalhes !== false,
+        produtos,
+        rotina: [],
+        aviso: '',
+        criada_em: new Date().toISOString(),
+      };
+      lista.unshift(oferta);
+      dados.ofertas = lista.slice(0, 40);
+      gravarArquivo(dados);
+      res.json({ ok: true, oferta });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao criar a oferta.' });
+    }
+  });
+
+  router.post('/central-ofertas/ofertas/:id/produtos', acesso, (req, res) => {
+    try {
+      const dados = lerArquivo();
+      const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
+      const oferta = lista.find((o) => o.id === req.params.id);
+      if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
+      const atuais = new Map((oferta.produtos || []).map((p) => [String(p.id), p]));
+      for (const p of normalizarProdutosOferta(req.body?.produtos)) atuais.set(p.id, p);
+      if (atuais.size > 300) throw new Error('A oferta aceita até 300 produtos.');
+      oferta.produtos = [...atuais.values()];
+      oferta.rotina = [];
+      oferta.aviso = '';
+      dados.ofertas = lista;
+      gravarArquivo(dados);
+      res.json({ ok: true, oferta });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao incluir os produtos.' });
+    }
+  });
+
+  router.post('/central-ofertas/ofertas/:id/rotina', acesso, (req, res) => {
+    try {
+      const dados = lerArquivo();
+      const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
+      const oferta = lista.find((o) => o.id === req.params.id);
+      if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
+      const config = lerConfig();
+      const usar = oferta.usar_detalhes === true && config.detalhes_item?.ativo === true;
+      const campo = config.detalhes_item?.campo_origem || 'OBSERVACAO';
+      const produtos = (oferta.produtos || []).map((p) => ({
+        ...p,
+        detalhe: usar ? String(p.detalhes?.[campo] || p.detalhe || '').slice(0, 200) : '',
+      }));
+      const gerada = montarRotina({
+        inicio: oferta.inicio,
+        fim: oferta.fim,
+        produtos,
+        publicacao: config.publicacao,
+      });
+      oferta.rotina = gerada.rotina;
+      oferta.aviso = gerada.aviso || '';
+      dados.ofertas = lista;
+      gravarArquivo(dados);
+      res.json({ ok: true, oferta, aviso: oferta.aviso });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao gerar a rotina.' });
+    }
+  });
+}
+
+function normalizarProdutosOferta(lista) {
+  if (!Array.isArray(lista)) return [];
+  const vistos = new Set();
+  const out = [];
+  for (const item of lista) {
+    const id = String(item?.id || '').replace(/[^\w.-]/g, '').slice(0, 40);
+    if (!id || vistos.has(id)) continue;
+    vistos.add(id);
+    const detalhes = {};
+    const bruto = item?.detalhes && typeof item.detalhes === 'object' ? item.detalhes : {};
+    for (const [chave, valor] of Object.entries(bruto)) {
+      if (!/^[A-Z0-9_]{2,40}$/.test(chave)) continue;
+      detalhes[chave] = String(valor || '').slice(0, 200);
+    }
+    out.push({
+      id,
+      descricao: String(item?.descricao || '').trim().slice(0, 120),
+      ean: String(item?.ean || '').replace(/\D/g, '').slice(0, 20),
+      detalhe: String(item?.detalhe || detalhes.OBSERVACAO || '').slice(0, 200),
+      detalhes,
+    });
+    if (out.length >= 300) break;
+  }
+  return out;
 }
 
 module.exports = { montar, anotar };

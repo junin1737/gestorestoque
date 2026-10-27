@@ -3,6 +3,7 @@
 (function () {
   const ABAS = [
     ['lista', 'Estoque'],
+    ['ofertas', 'Ofertas'],
     ['publicacao', 'Publicação'],
     ['fds', 'Fim de semana'],
     ['detalhes', 'Detalhes do item'],
@@ -23,15 +24,13 @@
   let aba = 'lista';
   let produtos = [];
   let grupos = [];
+  let ofertas = [];
+  let ofertaAberta = '';
   let podePreco = false;
   let buscaTimer = 0;
+  let fotoAlvo = '';
   const filtros = { q: '', grupo: '', com: false, menos: false, promo: false };
-  const MODO = {
-    oferta: 'Oferta',
-    exposicao: 'Exposição',
-    sem_estoque: 'Sem estoque',
-    nenhum: '—',
-  };
+  const MODO = { oferta: 'Oferta', exposicao: 'Exposição', sem_estoque: 'Sem estoque', nenhum: '—' };
 
   function raiz() {
     return document.getElementById('co-raiz');
@@ -39,12 +38,6 @@
 
   function campo(id) {
     return document.getElementById(id);
-  }
-
-  function moeda(v) {
-    const n = Number(v);
-    if (!Number.isFinite(n)) return '—';
-    return n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   }
 
   function htmlAbas() {
@@ -57,9 +50,21 @@
     return (lista || []).map(Number).includes(Number(valor)) ? 'checked' : '';
   }
 
+  function camposOrigem() {
+    return (estado?.campos_texto || []).map((c) => (
+      typeof c === 'string' ? { coluna: c, rotulo: c || 'Nenhum' } : { coluna: c.coluna || '', rotulo: c.rotulo || c.coluna || 'Nenhum' }
+    ));
+  }
+
+  function campoPadrao() {
+    const lista = camposOrigem();
+    return (lista.find((c) => c.coluna === 'OBSERVACAO') || lista[0] || { coluna: '' }).coluna;
+  }
+
   function painel() {
     const c = estado.config;
     const janela = estado.janela || {};
+    if (aba === 'ofertas') return htmlOfertas();
     if (aba === 'publicacao') {
       return `<div class="co-grade co-grade-2">
         <label>Posts por dia<input id="co-posts" type="number" min="1" max="50" value="${c.publicacao.posts_por_dia}" /></label>
@@ -82,16 +87,17 @@
     }
     if (aba === 'detalhes') {
       const d = c.detalhes_item;
-      const campos = estado.campos_texto || [];
-      return `<label class="co-check"><input id="co-det-on" type="checkbox" ${d.ativo ? 'checked' : ''} /> Mostrar um detalhe do produto</label>
-        <label>Campo de origem no ERP<select id="co-det-campo">${[''].concat(campos).map((nome) => `<option value="${esc(nome)}" ${nome === d.campo_origem ? 'selected' : ''}>${nome || 'Nenhum'}</option>`).join('')}</select></label>
+      const campos = camposOrigem();
+      const atual = d.campo_origem || campoPadrao();
+      return `<label class="co-check"><input id="co-det-on" type="checkbox" ${d.ativo ? 'checked' : ''} /> Usar os detalhes do item</label>
+        <label>Campo de origem no ERP<select id="co-det-campo">${campos.map((campo) => `<option value="${esc(campo.coluna)}" ${campo.coluna === atual ? 'selected' : ''}>${esc(campo.rotulo)}</option>`).join('')}</select></label>
         <label>Onde aparece<select id="co-det-onde">
           <option value="banner" ${d.onde === 'banner' ? 'selected' : ''}>Banner</option>
           <option value="legenda" ${d.onde === 'legenda' ? 'selected' : ''}>Legenda</option>
           <option value="ambos" ${d.onde === 'ambos' ? 'selected' : ''}>Banner e legenda</option>
         </select></label>
         <label>Limite no banner<input id="co-det-limite" type="number" min="10" max="120" value="${d.limite_banner}" /></label>
-        <p class="hint">Pode ser sobrescrito por produto na montagem, na fase seguinte.</p>
+        <p class="hint">Com a opção marcada, a rotina leva o texto da observação do produto. Identificador e código de barras também estão na lista porque formam o caminho da foto no R2.</p>
         <button type="button" class="btn primary" id="co-salvar">Salvar</button>`;
     }
     if (aba === 'regra') {
@@ -121,15 +127,16 @@
       `<option value="${esc(g)}" ${g === filtros.grupo ? 'selected' : ''}>${esc(g)}</option>`
     )).join('');
     return `<div class="co-est">
-      <div class="co-barra">
-        <label class="co-busca">Buscar<input id="co-q" type="search" placeholder="Nome, código ou EAN" value="${esc(filtros.q)}" /></label>
-        <label class="co-grupo">Grupo<select id="co-grupo">${opcoes}</select></label>
+      <div class="co-filtros">
+        <label>Buscar<input id="co-q" type="search" placeholder="Nome, código ou EAN" value="${esc(filtros.q)}" /></label>
+        <label>Grupo<select id="co-grupo">${opcoes}</select></label>
+        <div class="co-atalhos" role="group" aria-label="Filtros">
+          ${atalho('com', 'Com estoque')}
+          ${atalho('menos', 'Menos vendidos')}
+          ${atalho('promo', 'Promoção no ERP')}
+        </div>
       </div>
-      <div class="co-atalhos" role="group" aria-label="Filtros">
-        ${atalho('com', 'Com estoque')}
-        ${atalho('menos', 'Menos vendidos')}
-        ${atalho('promo', 'Promoção no ERP')}
-      </div>
+      <input id="co-arquivo" class="co-arquivo" type="file" accept="image/jpeg,image/png,image/webp" />
       <div id="co-miolo"></div>
       <div class="co-rodape">
         <p id="co-resumo"></p>
@@ -151,13 +158,17 @@
     return `${n.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} un`;
   }
 
+  function temPromo(p) {
+    return Number(p.preco_promocional) > 0 && p.promocao_inicio && p.promocao_fim;
+  }
+
   function visiveis() {
     const q = filtros.q.trim().toLowerCase();
     let lista = produtos.filter((p) => {
-      if (q && ![p.descricao, p.codigo, p.ean].some((v) => String(v || '').toLowerCase().includes(q))) return false;
+      if (q && ![p.descricao, p.codigo, p.ean, p.id].some((v) => String(v || '').toLowerCase().includes(q))) return false;
       if (filtros.grupo && p.categoria !== filtros.grupo) return false;
       if (filtros.com && !(Number(p.estoque) > 0 || p.ignorar_estoque)) return false;
-      if (filtros.promo && !p.promocao_valida) return false;
+      if (filtros.promo && !temPromo(p)) return false;
       return true;
     });
     if (filtros.menos) {
@@ -165,12 +176,6 @@
         || String(a.descricao).localeCompare(String(b.descricao), 'pt'));
     }
     return lista;
-  }
-
-  function modoLocal(p) {
-    if (p.exposicao?.ok === false) return 'sem_estoque';
-    if (!p.selecionado) return 'nenhum';
-    return p.oferta?.ok ? 'oferta' : 'exposicao';
   }
 
   function inputMoeda(p, nome, valor) {
@@ -183,43 +188,63 @@
     return `<input class="co-data" type="date" data-co-campo="${nome}" data-co-id="${esc(p.id)}" value="${esc(valor || '')}" ${dis} />`;
   }
 
-  function metaProduto(p) {
-    const partes = [p.codigo ? `Cód. ${p.codigo}` : '', p.ean ? `EAN ${p.ean}` : 'Sem EAN', p.categoria || ''];
+  function modoAtual(p) {
+    if (p.modo_escolhido === 'oferta' || p.modo_escolhido === 'exposicao') return p.modo_escolhido;
+    if (p.modo === 'oferta' || p.modo === 'exposicao') return p.modo;
+    return 'nenhum';
+  }
+
+  function htmlFoto(p) {
+    const caminho = `${p.id}/${p.ean || 'sem-codigo'}`;
+    const img = p.foto_url ? `<img class="co-foto-mini" src="${esc(p.foto_url)}" alt="" />` : '';
+    return `<button type="button" class="co-foto-btn" data-co-foto="${esc(p.id)}" data-co-ean="${esc(p.ean || '')}" title="Caminho no R2: ${esc(caminho)}">${img}<span>${p.foto_url ? 'Trocar' : 'Anexar'}</span></button>`;
+  }
+
+  function htmlModo(p) {
+    const modo = modoAtual(p);
+    const titulo = p.oferta?.motivo || p.exposicao?.motivo || '';
+    return `<select class="co-modo-sel" data-co-modo="${esc(p.id)}" title="${esc(titulo)}">
+      <option value="nenhum" ${modo === 'nenhum' ? 'selected' : ''}>—</option>
+      <option value="exposicao" ${modo === 'exposicao' ? 'selected' : ''}>Exposição</option>
+      <option value="oferta" ${modo === 'oferta' ? 'selected' : ''}>Oferta</option>
+    </select>`;
+  }
+
+  function subProduto(p) {
+    const partes = [p.ean ? `EAN ${p.ean}` : 'Sem EAN', p.categoria || ''];
+    if (filtros.menos) partes.push(`${Number(p.vendido_30d) || 0} vend. / 30d`);
     return partes.filter(Boolean).join(' · ');
   }
 
-  function htmlLinhas(lista) {
+  function htmlTabela(lista) {
     const todos = lista.length > 0 && lista.every((p) => p.selecionado);
-    const cabeca = `<div class="co-lista-topo">
-      <label class="co-marcar"><input type="checkbox" id="co-todos" ${todos ? 'checked' : ''} /><span>Marcar os visíveis</span></label>
-      <span>${lista.length} produto${lista.length === 1 ? '' : 's'}</span>
-    </div>`;
-    if (!lista.length) return `<div class="co-lista-caixa">${cabeca}<p class="co-vazio">Nenhum produto com esses filtros.</p></div>`;
     const linhas = lista.map((p) => {
-      const modo = p.modo || 'nenhum';
       const qtdCls = Number(p.estoque) < 0 ? ' is-neg' : '';
-      const titulo = p.oferta?.ok ? '' : (p.oferta?.motivo || p.exposicao?.motivo || '');
-      const selo = modo === 'nenhum' ? '' : `<span class="co-pill ${modo}" title="${esc(titulo)}">${MODO[modo]}</span>`;
-      return `<article class="co-linha${p.selecionado ? ' is-on' : ''}" data-co-id="${esc(p.id)}">
-        <div class="co-linha-topo">
-          <label class="co-check-linha">
-            <input type="checkbox" data-co-sel="${esc(p.id)}" ${p.selecionado ? 'checked' : ''} />
-            <span class="co-ident">
-              <span class="co-nome">${esc(p.descricao)}</span>
-              <span class="co-sub">${esc(metaProduto(p))}${metaProduto(p) ? ' · ' : ''}<span class="co-estoque${qtdCls}">${esc(qtdTxt(p.estoque))}</span></span>
-            </span>
-          </label>
-          ${selo}
-        </div>
-        <div class="co-campos">
-          <label>Preço${inputMoeda(p, 'preco', p.preco)}</label>
-          <label>Promoção${inputMoeda(p, 'promo', p.preco_promocional)}</label>
-          <label>Início${inputData(p, 'inicio', p.promocao_inicio)}</label>
-          <label>Fim${inputData(p, 'fim', p.promocao_fim)}</label>
-        </div>
-      </article>`;
+      return `<tr data-co-id="${esc(p.id)}">
+        <td class="meio"><input type="checkbox" data-co-sel="${esc(p.id)}" ${p.selecionado ? 'checked' : ''} /></td>
+        <td class="meio">${htmlFoto(p)}</td>
+        <td class="co-cod">${esc(p.codigo)}</td>
+        <td><div class="co-nome">${esc(p.descricao)}</div><div class="co-sub">${esc(subProduto(p))}</div></td>
+        <td class="num co-qtd${qtdCls}">${esc(qtdTxt(p.estoque))}</td>
+        <td>${inputMoeda(p, 'preco', p.preco)}</td>
+        <td>${inputMoeda(p, 'promo', p.preco_promocional)}</td>
+        <td>${inputData(p, 'inicio', p.promocao_inicio)}</td>
+        <td>${inputData(p, 'fim', p.promocao_fim)}</td>
+        <td class="meio">${htmlModo(p)}</td>
+      </tr>`;
     }).join('');
-    return `<div class="co-lista-caixa">${cabeca}<div class="co-linhas">${linhas}</div></div>`;
+    return `<div class="co-tabela-wrap"><table class="co-tabela">
+      <colgroup>
+        <col class="c-sel" /><col class="c-foto" /><col class="c-cod" /><col class="c-nome" />
+        <col class="c-est" /><col class="c-preco" /><col class="c-preco" /><col class="c-data" /><col class="c-data" /><col class="c-modo" />
+      </colgroup>
+      <thead><tr>
+        <th class="meio"><input type="checkbox" id="co-todos" ${todos ? 'checked' : ''} title="Marcar os visíveis" /></th>
+        <th class="meio">Foto</th><th>Cód.</th><th>Produto</th><th class="num">Estoque</th>
+        <th class="num">Preço</th><th class="num">Preço promo</th><th>Início</th><th>Fim</th><th class="meio">Modo</th>
+      </tr></thead>
+      <tbody>${linhas || '<tr><td colspan="10" class="co-vazio">Nenhum produto com esses filtros.</td></tr>'}</tbody>
+    </table></div>`;
   }
 
   function lerFormulario() {
@@ -260,13 +285,6 @@
     if (!r.ok) return showMsg(r.error || 'Falha ao salvar.');
     estado.config = r.config;
     estado.janela = r.janela;
-    if (Array.isArray(r.config.usuarios) && estado.equipe) {
-      const papeis = new Map(r.config.usuarios.map((u) => [Number(u.id), u.papel]));
-      estado.equipe = estado.equipe.map((u) => ({
-        ...u,
-        papel: u.supervisor ? 'preco' : (papeis.get(Number(u.id)) || 'agenda'),
-      }));
-    }
     desenhar();
     if (r.janela && r.janela.cabe === false) showMsg(r.janela.aviso);
   }
@@ -274,7 +292,7 @@
   function desenhar() {
     const el = raiz();
     if (!el || !estado) return;
-    el.innerHTML = htmlAbas() + '';
+    el.innerHTML = htmlAbas();
     const painelEl = document.getElementById('co-painel');
     if (painelEl) painelEl.innerHTML = painel();
     el.querySelectorAll('[data-co-aba]').forEach((btn) => {
@@ -283,6 +301,7 @@
         aba = btn.dataset.coAba;
         desenhar();
         if (aba === 'lista') carregarLista();
+        if (aba === 'ofertas') carregarOfertas();
       });
     });
     campo('co-salvar')?.addEventListener('click', salvar);
@@ -290,14 +309,14 @@
       const min = campo('co-minimo');
       if (min) min.disabled = !campo('co-exigir').checked;
     });
-    if (aba === 'lista') ligarLista(el);
+    if (aba === 'lista') ligarArquivo();
   }
 
   function pintar() {
     const miolo = document.getElementById('co-miolo');
     if (!miolo) return;
     const lista = visiveis();
-    miolo.innerHTML = htmlLinhas(lista);
+    miolo.innerHTML = htmlTabela(lista);
     const todos = campo('co-todos');
     if (todos) {
       const marcados = lista.filter((p) => p.selecionado).length;
@@ -306,16 +325,18 @@
     const resumo = document.getElementById('co-resumo');
     const extra = document.getElementById('co-extra');
     const sel = lista.filter((p) => p.selecionado);
-    const ofertas = sel.filter((p) => (p.modo || modoLocal(p)) === 'oferta').length;
-    const exposicoes = sel.filter((p) => (p.modo || modoLocal(p)) === 'exposicao').length;
+    const emOferta = sel.filter((p) => modoAtual(p) === 'oferta').length;
+    const exposicoes = sel.filter((p) => modoAtual(p) === 'exposicao').length;
     if (resumo) {
       const n = sel.length;
-      resumo.textContent = `${n} selecionado${n === 1 ? '' : 's'} · ${ofertas} em oferta · ${exposicoes} em exposição`;
+      resumo.textContent = `${n} selecionado${n === 1 ? '' : 's'} · ${emOferta} em oferta · ${exposicoes} em exposição`;
     }
     if (extra) {
-      const partes = [];
-      if (!podePreco) partes.push('Preço e promoção bloqueados para este usuário.');
-      if (produtos.length && lista.length !== produtos.length) partes.push(`${lista.length} de ${produtos.length}`);
+      const partes = [`${lista.length} produto${lista.length === 1 ? '' : 's'}`];
+      if (filtros.com) partes.push('com estoque');
+      if (filtros.promo) partes.push('com promoção no ERP');
+      if (filtros.menos) partes.push('menos vendidos primeiro');
+      if (!podePreco) partes.push('preço bloqueado para este usuário');
       extra.textContent = partes.join(' · ');
     }
   }
@@ -325,18 +346,20 @@
     const r = await api('/central-ofertas/selecao', { method: 'POST', body: { ids, selecionado } });
     if (!r.ok) return showMsg(r.error || 'Falha ao salvar a seleção.');
     const set = new Set(ids.map(String));
-    produtos = produtos.map((p) => {
-      if (!set.has(String(p.id))) return p;
-      const prox = { ...p, selecionado };
-      prox.modo = modoLocal(prox);
-      return prox;
-    });
+    produtos = produtos.map((p) => (set.has(String(p.id)) ? { ...p, selecionado } : p));
+    pintar();
+  }
+
+  async function salvarModo(id, modo) {
+    const r = await api(`/central-ofertas/produtos/${encodeURIComponent(id)}`, { method: 'PUT', body: { modo } });
+    if (!r.ok) return showMsg(r.error || 'Falha ao salvar o modo.');
+    produtos = produtos.map((p) => (String(p.id) === String(id) ? r.produto : p));
     pintar();
   }
 
   async function salvarCampos(id) {
     if (!podePreco) return;
-    const linha = raiz()?.querySelector(`.co-linha[data-co-id="${CSS.escape(String(id))}"]`);
+    const linha = raiz()?.querySelector(`tr[data-co-id="${CSS.escape(String(id))}"]`);
     if (!linha) return;
     const val = (nome) => linha.querySelector(`[data-co-campo="${nome}"]`)?.value ?? '';
     const preco = val('preco');
@@ -365,7 +388,109 @@
     pintar();
   }
 
-  function ligarLista(el) {
+  function reduzirFoto(file) {
+    return new Promise((resolve, reject) => {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        const lado = Math.max(img.width, img.height) || 1;
+        const escala = Math.min(1, 1080 / lado);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.max(1, Math.round(img.width * escala));
+        canvas.height = Math.max(1, Math.round(img.height * escala));
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        URL.revokeObjectURL(url);
+        resolve(canvas.toDataURL('image/jpeg', 0.82));
+      };
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        reject(new Error('Não abri a foto.'));
+      };
+      img.src = url;
+    });
+  }
+
+  async function enviarFoto(id, ean, file) {
+    let dataUrl = '';
+    try { dataUrl = await reduzirFoto(file); }
+    catch (err) { return showMsg(err.message || 'Não abri a foto.'); }
+    const base64 = dataUrl.split(',')[1] || '';
+    const r = await api(`/central-ofertas/produtos/${encodeURIComponent(id)}/foto`, {
+      method: 'POST',
+      body: { base64, tipo: 'image/jpeg', ean },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao anexar a foto.');
+    produtos = produtos.map((p) => (String(p.id) === String(id) ? { ...p, foto: true, foto_url: r.foto_url, foto_chave: r.foto_chave } : p));
+    pintar();
+    if (r.aviso) showMsg(r.aviso);
+  }
+
+  function noEvento(ev) {
+    if (!raiz()?.contains(ev.target)) return;
+    if (ev.type === 'click') clique(ev);
+    if (ev.type === 'change') mudou(ev);
+    if (ev.type === 'focusout') saiu(ev);
+  }
+
+  async function clique(ev) {
+    if (aba === 'ofertas') {
+      const item = ev.target.closest('[data-co-oferta]');
+      if (item) {
+        ofertaAberta = item.dataset.coOferta;
+        desenhar();
+        return;
+      }
+      if (ev.target.id === 'co-of-nova') {
+        ofertaAberta = '';
+        desenhar();
+        return;
+      }
+      if (ev.target.id === 'co-of-criar') await criarOferta();
+      if (ev.target.id === 'co-of-incluir') await incluirNaOferta();
+      if (ev.target.id === 'co-of-rotina') await gerarRotina();
+      return;
+    }
+    if (aba !== 'lista') return;
+    const foto = ev.target.closest('[data-co-foto]');
+    if (foto) {
+      fotoAlvo = foto.dataset.coFoto;
+      const arq = campo('co-arquivo');
+      if (arq) {
+        arq.dataset.ean = foto.dataset.coEan || '';
+        arq.click();
+      }
+      return;
+    }
+    const b = ev.target.closest('[data-co-filtro]');
+    if (!b) return;
+    const k = b.dataset.coFiltro;
+    filtros[k] = b.getAttribute('aria-pressed') !== 'true';
+    b.setAttribute('aria-pressed', filtros[k] ? 'true' : 'false');
+    pintar();
+    await carregarLista();
+  }
+
+  async function mudou(ev) {
+    const t = ev.target;
+    if (!raiz()?.contains(t) || aba !== 'lista') return;
+    if (t.id === 'co-todos') {
+      await salvarSelecao(visiveis().map((p) => p.id), t.checked);
+      return;
+    }
+    if (t.dataset.coSel) await salvarSelecao([t.dataset.coSel], t.checked);
+    if (t.dataset.coModo) await salvarModo(t.dataset.coModo, t.value);
+  }
+
+  function saiu(ev) {
+    if (aba !== 'lista') return;
+    const origem = ev.target.closest?.('tr');
+    if (!origem?.dataset.coId || !raiz()?.contains(origem)) return;
+    if (ev.target?.dataset?.coModo) return;
+    if (ev.relatedTarget && origem.contains(ev.relatedTarget)) return;
+    salvarCampos(origem.dataset.coId);
+  }
+
+  function ligarArquivo() {
     campo('co-q')?.addEventListener('input', () => {
       filtros.q = campo('co-q').value;
       clearTimeout(buscaTimer);
@@ -375,27 +500,13 @@
       filtros.grupo = campo('co-grupo').value;
       carregarLista();
     });
-    el.addEventListener('click', async (ev) => {
-      const b = ev.target.closest('[data-co-filtro]');
-      if (!b) return;
-      const k = b.dataset.coFiltro;
-      filtros[k] = b.getAttribute('aria-pressed') !== 'true';
-      b.setAttribute('aria-pressed', filtros[k] ? 'true' : 'false');
-      await carregarLista();
-    });
-    el.addEventListener('change', async (ev) => {
-      const t = ev.target;
-      if (t.id === 'co-todos') {
-        await salvarSelecao(visiveis().map((p) => p.id), t.checked);
-        return;
-      }
-      if (t.dataset.coSel) await salvarSelecao([t.dataset.coSel], t.checked);
-    });
-    el.addEventListener('focusout', (ev) => {
-      const origem = ev.target.closest?.('.co-linha');
-      if (!origem?.dataset.coId) return;
-      if (ev.relatedTarget && origem.contains(ev.relatedTarget)) return;
-      salvarCampos(origem.dataset.coId);
+    campo('co-arquivo')?.addEventListener('change', () => {
+      const file = campo('co-arquivo').files?.[0];
+      const id = fotoAlvo;
+      const ean = campo('co-arquivo').dataset.ean || '';
+      campo('co-arquivo').value = '';
+      fotoAlvo = '';
+      if (file && id) enviarFoto(id, ean, file);
     });
   }
 
@@ -412,7 +523,9 @@
 
   async function carregarLista() {
     const miolo = document.getElementById('co-miolo');
-    if (miolo && !produtos.length) miolo.innerHTML = '<p class="hint">Carregando produtos…</p>';
+    const extra = document.getElementById('co-extra');
+    if (extra) extra.textContent = 'Carregando produtos…';
+    else if (miolo && !produtos.length) miolo.innerHTML = '<p class="hint">Carregando produtos…</p>';
     const r = await api(`/central-ofertas/produtos${queryLista()}`);
     if (!r.ok) {
       if (miolo) miolo.innerHTML = `<p class="erro">${esc(r.error || 'Falha ao ler os produtos.')}</p>`;
@@ -431,6 +544,118 @@
     pintar();
   }
 
+  function isoHoje(offset) {
+    const d = new Date();
+    d.setDate(d.getDate() + offset);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  function ofertaAtual() {
+    return ofertas.find((o) => o.id === ofertaAberta) || null;
+  }
+
+  function itemOferta(p) {
+    return {
+      id: p.id,
+      descricao: p.descricao || '',
+      ean: p.ean || '',
+      detalhe: p.observacao || '',
+      detalhes: p.textos || {},
+    };
+  }
+
+  function htmlOfertas() {
+    const aberta = ofertaAtual();
+    const linhas = ofertas.map((o) => `<button type="button" class="co-oferta-item${o.id === ofertaAberta ? ' is-on' : ''}" data-co-oferta="${esc(o.id)}">
+      <strong>${esc(o.nome)}</strong>
+      <span>${esc(o.inicio)} a ${esc(o.fim)} · ${(o.produtos || []).length} produto${(o.produtos || []).length === 1 ? '' : 's'}</span>
+    </button>`).join('');
+    const detalhe = aberta ? htmlOfertaAberta(aberta) : `<section class="co-oferta-nova">
+      <h3>Nova oferta</h3>
+      <div class="co-grade co-grade-2">
+        <label class="co-oferta-nome">Nome<input id="co-of-nome" maxlength="80" placeholder="Semana do Yu-Gi-Oh" /></label>
+        <label>Início<input id="co-of-ini" type="date" value="${isoHoje(0)}" /></label>
+        <label>Fim<input id="co-of-fim" type="date" value="${isoHoje(6)}" /></label>
+      </div>
+      <p class="hint">Os produtos marcados na aba Estoque entram nesta oferta.</p>
+      <button type="button" class="btn primary" id="co-of-criar">Criar oferta</button>
+    </section>`;
+    return `<div class="co-ofertas">
+      <div class="co-oferta-lista">${linhas || '<p class="hint">Nenhuma oferta criada.</p>'}</div>
+      ${detalhe}
+    </div>`;
+  }
+
+  function htmlOfertaAberta(o) {
+    const produtosHtml = (o.produtos || []).map((p) => `<li><span>${esc(p.descricao || p.id)}</span>${o.usar_detalhes && p.detalhe ? `<small>${esc(p.detalhe)}</small>` : ''}</li>`).join('');
+    const rotina = (o.rotina || []).map((item) => `<li><span>${esc(item.data)} ${esc(item.hora)}</span><span>${esc(item.descricao || item.produto_id)}</span>${item.detalhe ? `<small>${esc(item.detalhe)}</small>` : ''}</li>`).join('');
+    return `<section class="co-oferta-nova">
+      <h3>${esc(o.nome)}</h3>
+      <p class="hint">${esc(o.inicio)} a ${esc(o.fim)}. ${o.usar_detalhes ? 'Os detalhes entram na rotina quando a opção da aba Detalhes do item está marcada.' : 'Esta oferta não usa detalhes.'}</p>
+      <h4>Produtos</h4>
+      <ul class="co-oferta-itens">${produtosHtml || '<li><span>Nenhum produto nesta oferta.</span></li>'}</ul>
+      <div class="co-oferta-acoes">
+        <button type="button" class="btn" id="co-of-incluir">Incluir marcados no estoque</button>
+        <button type="button" class="btn primary" id="co-of-rotina">Gerar rotina de postagem</button>
+        <button type="button" class="btn" id="co-of-nova">Nova oferta</button>
+      </div>
+      ${o.aviso ? `<p class="erro">${esc(o.aviso)}</p>` : ''}
+      <h4>Rotina</h4>
+      <ul class="co-oferta-rotina">${rotina || '<li><span>A rotina ainda não foi gerada.</span></li>'}</ul>
+    </section>`;
+  }
+
+  function marcados() {
+    return produtos.filter((p) => p.selecionado).map(itemOferta);
+  }
+
+  async function criarOferta() {
+    const usar = estado?.config?.detalhes_item?.ativo === true;
+    const r = await api('/central-ofertas/ofertas', {
+      method: 'POST',
+      body: {
+        nome: campo('co-of-nome')?.value || '',
+        inicio: campo('co-of-ini')?.value || '',
+        fim: campo('co-of-fim')?.value || '',
+        usar_detalhes: usar,
+        produtos: marcados(),
+      },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao criar a oferta.');
+    ofertaAberta = r.oferta.id;
+    await carregarOfertas();
+  }
+
+  async function incluirNaOferta() {
+    const o = ofertaAtual();
+    if (!o) return;
+    const lista = marcados();
+    if (!lista.length) return showMsg('Marque os produtos na aba Estoque.');
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/produtos`, {
+      method: 'POST',
+      body: { produtos: lista },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao incluir os produtos.');
+    await carregarOfertas();
+  }
+
+  async function gerarRotina() {
+    const o = ofertaAtual();
+    if (!o) return;
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/rotina`, { method: 'POST', body: {} });
+    if (!r.ok) return showMsg(r.error || 'Falha ao gerar a rotina.');
+    if (r.aviso) showMsg(r.aviso);
+    await carregarOfertas();
+  }
+
+  async function carregarOfertas() {
+    const r = await api('/central-ofertas/ofertas');
+    if (!r.ok) return showMsg(r.error || 'Falha ao ler as ofertas.');
+    ofertas = r.ofertas || [];
+    if (ofertaAberta && !ofertas.some((o) => o.id === ofertaAberta)) ofertaAberta = '';
+    if (aba === 'ofertas') desenhar();
+  }
+
   async function onPageEnter() {
     const el = raiz();
     if (!el) return;
@@ -443,12 +668,20 @@
     estado = r;
     desenhar();
     if (aba === 'lista') carregarLista();
+    if (aba === 'ofertas') carregarOfertas();
   }
 
   function init(deps) {
     api = deps.api || api;
     showMsg = deps.showMsg || showMsg;
     esc = deps.escapeHtml || esc;
+    const raizEl = document.getElementById('co-raiz');
+    if (raizEl && !raizEl.dataset.coLigado) {
+      raizEl.dataset.coLigado = '1';
+      raizEl.addEventListener('click', noEvento);
+      raizEl.addEventListener('change', noEvento);
+      raizEl.addEventListener('focusout', noEvento);
+    }
   }
 
   window.CentralOfertas = { init, onPageEnter };

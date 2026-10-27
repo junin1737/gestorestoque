@@ -45,6 +45,8 @@ function bloqueioEstoque(produto, config, modulo) {
 }
 
 function modoDaLinha(linha) {
+  const escolhido = linha?.modo_escolhido;
+  if (escolhido === 'oferta' || escolhido === 'exposicao') return escolhido;
   if (linha?.exposicao?.ok === false) return 'sem_estoque';
   if (linha?.selecionado !== true) return 'nenhum';
   return linha?.oferta?.ok === true ? 'oferta' : 'exposicao';

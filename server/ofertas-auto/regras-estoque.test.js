@@ -73,4 +73,30 @@ test('o modo da linha segue seleção, promoção e bloqueio de estoque', () => 
   assert.equal(modoDaLinha({ exposicao: { ok: true }, selecionado: false, oferta: { ok: true } }), 'nenhum');
   assert.equal(modoDaLinha({ exposicao: { ok: true }, selecionado: true, oferta: { ok: true } }), 'oferta');
   assert.equal(modoDaLinha({ exposicao: { ok: true }, selecionado: true, oferta: { ok: false } }), 'exposicao');
+  assert.equal(modoDaLinha({ exposicao: { ok: true }, selecionado: true, oferta: { ok: true }, modo_escolhido: 'exposicao' }), 'exposicao');
+});
+
+test('a rotina encaixa um horário por produto dentro da janela', () => {
+  const { montarRotina } = require('./regras-publicacao');
+  const gerada = montarRotina({
+    inicio: '2026-10-26',
+    fim: '2026-10-30',
+    produtos: [
+      { id: '1', descricao: 'A', detalhe: 'obs' },
+      { id: '2', descricao: 'B', detalhe: '' },
+    ],
+    publicacao: {
+      posts_por_dia: 4,
+      intervalo_minutos: 90,
+      hora_inicio: '08:00',
+      hora_fim: '20:00',
+      dias_semana: [1, 2, 3, 4, 5],
+    },
+  });
+  assert.equal(gerada.rotina.length, 2);
+  assert.equal(gerada.rotina[0].data, '2026-10-26');
+  assert.equal(gerada.rotina[0].hora, '08:00');
+  assert.equal(gerada.rotina[1].hora, '09:30');
+  assert.equal(gerada.rotina[0].detalhe, 'obs');
+  assert.equal(gerada.faltaram, 0);
 });

@@ -33,4 +33,76 @@ function capacidadeJanela({ horaInicio, horaFim, intervaloMinutos, postsPorDia }
   };
 }
 
-module.exports = { minutos, capacidadeJanela };
+function isoDia(data) {
+  const m = String(data.getMonth() + 1).padStart(2, '0');
+  const d = String(data.getDate()).padStart(2, '0');
+  return `${data.getFullYear()}-${m}-${d}`;
+}
+
+function horaDe(total) {
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+}
+
+/** Um horário por produto, dentro dos dias e da janela já configurados na publicação. */
+function montarRotina({ inicio, fim, produtos, publicacao }) {
+  const ids = [];
+  const porId = new Map();
+  for (const item of produtos || []) {
+    const id = String(item?.id || item || '').trim();
+    if (!id || porId.has(id)) continue;
+    porId.set(id, {
+      id,
+      descricao: String(item?.descricao || '').slice(0, 120),
+      detalhe: String(item?.detalhe || '').slice(0, 200),
+    });
+    ids.push(id);
+  }
+  if (!ids.length) throw new Error('Inclua produtos na oferta antes de gerar a rotina.');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(inicio || '')) || !/^\d{4}-\d{2}-\d{2}$/.test(String(fim || ''))) {
+    throw new Error('Informe o início e o fim da oferta.');
+  }
+  if (fim < inicio) throw new Error('O fim da oferta é anterior ao início.');
+  const pub = publicacao || {};
+  const janela = capacidadeJanela({
+    horaInicio: pub.hora_inicio,
+    horaFim: pub.hora_fim,
+    intervaloMinutos: pub.intervalo_minutos,
+    postsPorDia: pub.posts_por_dia,
+  });
+  if (!janela.cabe) throw new Error(janela.aviso || 'A janela de publicação não comporta a rotina.');
+  const dias = new Set((pub.dias_semana || []).map(Number));
+  const posts = Number(pub.posts_por_dia);
+  const intervalo = Number(pub.intervalo_minutos);
+  const ini = minutos(pub.hora_inicio);
+  const rotina = [];
+  const dia = new Date(`${inicio}T12:00:00`);
+  const limite = new Date(`${fim}T12:00:00`);
+  let idx = 0;
+  let voltas = 0;
+  while (dia <= limite && idx < ids.length && voltas < 120) {
+    voltas += 1;
+    if (dias.has(dia.getDay())) {
+      for (let n = 0; n < posts && idx < ids.length; n += 1) {
+        const produto = porId.get(ids[idx]);
+        rotina.push({
+          produto_id: produto.id,
+          descricao: produto.descricao,
+          detalhe: produto.detalhe,
+          data: isoDia(dia),
+          hora: horaDe(ini + n * intervalo),
+        });
+        idx += 1;
+      }
+    }
+    dia.setDate(dia.getDate() + 1);
+  }
+  return {
+    rotina,
+    faltaram: Math.max(0, ids.length - idx),
+    aviso: idx < ids.length ? 'A oferta termina antes de encaixar todos os produtos. Aumente o período ou os posts por dia.' : '',
+  };
+}
+
+module.exports = { minutos, capacidadeJanela, montarRotina };

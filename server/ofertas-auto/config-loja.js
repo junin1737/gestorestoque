@@ -72,7 +72,8 @@ function sanitizar(body, camposTexto) {
     ? [...new Set(fds.tipos.map(String).filter((t) => TIPOS_FDS.includes(t)))]
     : base.fim_de_semana.tipos;
   const campo = String(det.campo_origem || '').trim().slice(0, 40);
-  const campoOk = !campo || (Array.isArray(camposTexto) && camposTexto.includes(campo));
+  const nomes = (Array.isArray(camposTexto) ? camposTexto : []).map((c) => (typeof c === 'string' ? c : String(c?.coluna || '')));
+  const campoOk = !campo || nomes.includes(campo);
   const config = {
     publicacao: {
       posts_por_dia: inteiro(pub.posts_por_dia, base.publicacao.posts_por_dia, 1, 50),

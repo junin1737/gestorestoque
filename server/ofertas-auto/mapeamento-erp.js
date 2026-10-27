@@ -23,7 +23,16 @@ module.exports = {
     categoria: 'GRUPO',
     referencia: 'REFERENCIA',
     status: 'STATUS',
-    campos_texto: ['DESC_CMPL', 'INFCOMPLEMENTAR', 'ADICIONAL1', 'ADICIONAL2'],
+    observacao: 'TB_ESTOQUE',
+    campos_texto: [
+      { coluna: 'OBSERVACAO', rotulo: 'Observação' },
+      { coluna: 'DESC_CMPL', rotulo: 'Descrição complementar' },
+      { coluna: 'INFCOMPLEMENTAR', rotulo: 'Informação complementar' },
+      { coluna: 'ADICIONAL1', rotulo: 'Adicional 1' },
+      { coluna: 'ADICIONAL2', rotulo: 'Adicional 2' },
+      { coluna: 'ID_IDENTIFICADOR', rotulo: 'Identificador' },
+      { coluna: 'COD_BARRA', rotulo: 'Código de barras' },
+    ],
   },
   manage: {
     view: 'V_ESTOQUE_2',
@@ -40,7 +49,13 @@ module.exports = {
     categoria: 'GRUPO',
     referencia: 'REFERENCIA',
     status: 'STATUS',
-    campos_texto: ['DESC_CMPL', 'OBS'],
+    observacao: 'OBS',
+    campos_texto: [
+      { coluna: 'OBSERVACAO', rotulo: 'Observação' },
+      { coluna: 'DESC_CMPL', rotulo: 'Descrição complementar' },
+      { coluna: 'ID_IDENTIFICADOR', rotulo: 'Identificador' },
+      { coluna: 'COD_BARRA', rotulo: 'Código de barras' },
+    ],
   },
   vendidos: {
     clipp: {
