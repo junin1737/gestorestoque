@@ -126,6 +126,12 @@
   .aviso span { flex: 1; }
   .sup-box { border: 1px solid var(--line); border-radius: 9px; padding: .7rem .8rem; }
   .sup-box .linha { margin-top: .5rem; }
+  .ig-acoes { display: flex; gap: .5rem; align-items: stretch; margin: .15rem 0 .35rem; }
+  .ig-acoes .btn { flex: 1 1 0; height: 2.45rem; margin: 0; white-space: nowrap; }
+  .ig-acoes .btn:disabled { opacity: .6; cursor: default; }
+  #d-ig-resultado { min-height: 1.1rem; margin: .15rem 0 .35rem; }
+  #d-ig-resultado.ok { color: var(--ok); }
+  #d-ig-resultado.erro { color: var(--danger); }
   tr.solicitacao td { background: #fffaf0; }
 
   @media (max-width: 760px) {
@@ -400,7 +406,13 @@
       <label>Validade do token<input id="d-ig-expira" type="date" /></label>
       <label>Token de acesso<input id="d-ig-token" type="password" maxlength="500" autocomplete="new-password" placeholder="Em branco mantém o atual" /></label>
     </div>
+    <div class="ig-acoes">
+      <button class="btn ghost" id="d-ig-testar" type="button">Testar conexão</button>
+      <button class="btn ghost" id="d-ig-renovar" type="button">Renovar agora</button>
+    </div>
+    <p class="sub" id="d-ig-resultado"></p>
     <p class="sub" id="d-ig-info">O token fica só neste painel. O Gestor da loja vê se a conta está informada, sem receber o token.</p>
+    <p class="sub">A renovação só funciona com o token tendo mais de 24 horas.</p>
     <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
     <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
 
@@ -674,6 +686,7 @@ const EVENTO = {
   novo_cliente: 'Solicitou cadastro', nova_instalacao: 'Nova instalação', versao: 'Atualizou versão',
   status: 'Situação alterada', edicao: 'Dados alterados', licenca_offline: 'Licença offline gerada', cadastro_manual: 'Cadastro manual',
   senha_supervisor: 'Senha do supervisor', revenda: 'Revenda', config: 'Configuração', instalacao: 'Computador da empresa',
+  instagram: 'Instagram',
 };
 
 /** Data local de hoje (AAAA-MM-DD) no horário de Brasília. */
@@ -1172,6 +1185,9 @@ function preencherCliente(r) {
   $('#d-ig-user-id').value = c.ig_user_id || '';
   $('#d-ig-expira').value = c.ig_token_expira || '';
   $('#d-ig-token').value = '';
+  const resultadoIg = $('#d-ig-resultado');
+  resultadoIg.textContent = '';
+  resultadoIg.className = 'sub';
   $('#d-ig-info').textContent = c.ig_token_informado
     ? 'Token já informado. Deixe o campo em branco para mantê-lo.'
     : 'O token fica só neste painel. O Gestor da loja vê se a conta está informada, sem receber o token.';
@@ -1352,6 +1368,50 @@ $('#d-salvar').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+function mostrarResultadoIg(texto, erro) {
+  const el = $('#d-ig-resultado');
+  el.textContent = texto || '';
+  el.className = `sub${texto ? (erro ? ' erro' : ' ok') : ''}`;
+}
+
+async function acaoInstagram(btn, caminho, corpo) {
+  if (!st.atual) { toast('Salve o cliente antes.', true); return null; }
+  btn.disabled = true;
+  mostrarResultadoIg('Consultando o Instagram…', false);
+  try {
+    return await api(`${rotaCliente(st.atual)}/instagram/${caminho}`, { method: 'POST', body: corpo });
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$('#d-ig-testar').addEventListener('click', async () => {
+  const r = await acaoInstagram($('#d-ig-testar'), 'testar', {
+    token: $('#d-ig-token').value,
+    ig_usuario: $('#d-ig-usuario').value,
+    ig_user_id: $('#d-ig-user-id').value,
+  });
+  if (!r) return;
+  const texto = r.mensagem || r.error || 'Falha ao testar a conexão.';
+  mostrarResultadoIg(texto, !r.ok);
+  if (!r.ok) toast(texto, true);
+});
+
+$('#d-ig-renovar').addEventListener('click', async () => {
+  const r = await acaoInstagram($('#d-ig-renovar'), 'renovar', { token: $('#d-ig-token').value });
+  if (!r) return;
+  if (!r.ok) {
+    mostrarResultadoIg(r.error || 'Falha ao renovar o token.', true);
+    toast(r.error || 'Falha ao renovar o token.', true);
+    return;
+  }
+  $('#d-ig-expira').value = r.ig_token_expira || '';
+  $('#d-ig-token').value = '';
+  $('#d-ig-info').textContent = 'Token renovado. O novo token ficou só neste painel.';
+  mostrarResultadoIg(r.mensagem, false);
+  toast(r.mensagem);
+});
+
 $('#d-sup-salvar').addEventListener('click', async () => {
   const s1 = $('#d-sup-1').value;
   const fraca = senhaFraca(s1);

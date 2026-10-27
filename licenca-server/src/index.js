@@ -116,7 +116,7 @@ let colunasInstagramProntas = false;
 
 async function garantirInstagram(env) {
   if (colunasInstagramProntas) return;
-  const colunas = ['ig_usuario TEXT', 'ig_user_id TEXT', 'ig_token TEXT', 'ig_token_expira TEXT'];
+  const colunas = ['ig_usuario TEXT', 'ig_user_id TEXT', 'ig_token TEXT', 'ig_token_expira TEXT', 'ig_token_em TEXT'];
   for (const coluna of colunas) {
     try {
       await env.DB.prepare(`ALTER TABLE clientes ADD COLUMN ${coluna}`).run();
@@ -543,6 +543,7 @@ async function login(request, env) {
 async function listarClientes(url, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
+  await garantirInstagram(env);
   const q = String(url.searchParams.get('q') || '').trim();
   const status = String(url.searchParams.get('status') || '').trim();
   const app = nomeApp(url.searchParams.get('app'));
@@ -627,6 +628,7 @@ async function liberarTrocaInstalacao(cnpj, app, env) {
 }
 
 async function detalheCliente(cnpj, app, env) {
+  await garantirInstagram(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const inst = await env.DB.prepare('SELECT * FROM instalacoes WHERE cnpj = ? AND aplicacao = ? ORDER BY ultimo_contato DESC')
@@ -745,6 +747,133 @@ function camposEditaveis(body) {
   return out;
 }
 
+function usuarioInstagram(v) {
+  return String(v || '').trim().replace(/^@+/, '').toLowerCase();
+}
+
+function limparErroInstagram(msg) {
+  return String(msg || 'O Instagram não confirmou o token.')
+    .replace(/access_token[=:][^&\s"']+/gi, 'access_token')
+    .slice(0, 300);
+}
+
+function tokenDoPedido(body, cli) {
+  const digitado = String(body?.token || '').trim();
+  if (digitado) return digitado.slice(0, 500);
+  return String(cli?.ig_token || '').trim();
+}
+
+function tokenRecente(quando) {
+  const t = Date.parse(String(quando || ''));
+  if (!Number.isFinite(t)) return false;
+  return Date.now() - t < 24 * 60 * 60 * 1000;
+}
+
+function dataValidadeToken(expiresIn) {
+  const seg = Number(expiresIn);
+  const ms = Number.isFinite(seg) && seg > 0 ? seg * 1000 : 60 * 86400000;
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(Date.now() + ms));
+}
+
+async function chamarInstagram(url) {
+  const resp = await fetch(url, { method: 'GET' });
+  const data = await resp.json().catch(() => ({}));
+  return { ok: resp.ok, data };
+}
+
+async function testarInstagram(cnpj, app, request, env) {
+  await garantirInstagram(env);
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  const body = await request.json().catch(() => ({}));
+  const token = tokenDoPedido(body, cli);
+  if (!token) return json({ ok: false, error: 'Informe o token para testar a conexão.' }, 400);
+  const esperadoUsuario = usuarioInstagram(body.ig_usuario != null ? body.ig_usuario : cli.ig_usuario);
+  const esperadoId = soDigitos(body.ig_user_id != null ? body.ig_user_id : cli.ig_user_id);
+  const url = new URL('https://graph.instagram.com/me');
+  url.searchParams.set('fields', 'user_id,username');
+  url.searchParams.set('access_token', token);
+  let resp;
+  try {
+    resp = await chamarInstagram(url);
+  } catch {
+    return json({ ok: false, error: 'Não foi possível falar com o Instagram.' }, 502);
+  }
+  if (!resp.ok || resp.data?.error) {
+    return json({ ok: false, error: limparErroInstagram(resp.data?.error?.message) }, 400);
+  }
+  const username = String(resp.data.username || '').trim();
+  const userId = soDigitos(resp.data.user_id || resp.data.id || '');
+  const usuarioConfere = !!esperadoUsuario && usuarioInstagram(username) === esperadoUsuario;
+  const idConfere = !!esperadoId && userId === esperadoId;
+  let mensagem;
+  if (!esperadoUsuario || !esperadoId) {
+    mensagem = `O Instagram respondeu @${username || '—'}${userId ? ` (ID ${userId})` : ''}. Preencha o usuário e o ID para confirmar.`;
+  } else if (usuarioConfere && idConfere) {
+    mensagem = `Conectado como @${username}. O usuário e o ID conferem.`;
+  } else {
+    const partes = [];
+    if (!usuarioConfere) partes.push(`respondeu @${username || '—'}, e o cadastro está com @${esperadoUsuario}`);
+    if (!idConfere) partes.push(`respondeu o ID ${userId || '—'}, e o cadastro está com ${esperadoId}`);
+    mensagem = `O token funciona, mas o Instagram ${partes.join('; ')}.`;
+  }
+  if (usuarioConfere && idConfere) {
+    await registrarEvento(env, cnpj, app, 'instagram', `conexão testada como @${username}`);
+  }
+  return json({
+    ok: usuarioConfere && idConfere,
+    username,
+    user_id: userId,
+    mensagem,
+    error: usuarioConfere && idConfere ? undefined : mensagem,
+  });
+}
+
+async function renovarInstagram(cnpj, app, request, env) {
+  await garantirInstagram(env);
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  const body = await request.json().catch(() => ({}));
+  const digitado = String(body?.token || '').trim();
+  const token = digitado ? digitado.slice(0, 500) : String(cli.ig_token || '').trim();
+  if (!token) return json({ ok: false, error: 'Não há token para renovar.' }, 400);
+  const mesmoGuardado = !digitado || digitado === String(cli.ig_token || '').trim();
+  if (mesmoGuardado && tokenRecente(cli.ig_token_em)) {
+    return json({ ok: false, error: 'A renovação só funciona com o token tendo mais de 24 horas.' }, 400);
+  }
+  const url = new URL('https://graph.instagram.com/refresh_access_token');
+  url.searchParams.set('grant_type', 'ig_refresh_token');
+  url.searchParams.set('access_token', token);
+  let resp;
+  try {
+    resp = await chamarInstagram(url);
+  } catch {
+    return json({ ok: false, error: 'Não foi possível falar com o Instagram.' }, 502);
+  }
+  if (!resp.ok || resp.data?.error || !resp.data?.access_token) {
+    const bruto = limparErroInstagram(resp.data?.error?.message);
+    const jovem = /24\s*hour|24\s*hora|not old enough|too new|recently/i.test(bruto);
+    return json({
+      ok: false,
+      error: jovem ? 'A renovação só funciona com o token tendo mais de 24 horas.' : bruto,
+    }, 400);
+  }
+  const novo = String(resp.data.access_token).trim().slice(0, 500);
+  const expira = dataValidadeToken(resp.data.expires_in);
+  const agora = agoraIso();
+  await env.DB.prepare(
+    `UPDATE clientes SET ig_token = ?, ig_token_expira = ?, ig_token_em = ?, atualizado_em = ? WHERE cnpj = ? AND aplicacao = ?`
+  ).bind(novo, expira, agora, agora, cnpj, app).run();
+  const validade = expira.split('-').reverse().join('/');
+  await registrarEvento(env, cnpj, app, 'instagram', `token renovado, válido até ${validade}`);
+  return json({
+    ok: true,
+    ig_token_expira: expira,
+    ig_token_informado: true,
+    mensagem: `Token renovado. Válido até ${validade}.`,
+  });
+}
+
 async function conferirRevenda(env, campos) {
   if (campos.revenda_id == null) return null;
   const r = await env.DB.prepare('SELECT id, nome FROM revendas WHERE id = ?').bind(campos.revenda_id).first();
@@ -861,6 +990,7 @@ async function atualizarCliente(cnpj, app, request, env) {
   }
   if (campos.status === 'bloqueado' && cli.status === 'liberado') campos.bloqueado_em = agoraIso();
   else if (campos.status && campos.status !== 'bloqueado') campos.bloqueado_em = null;
+  if (campos.ig_token && campos.ig_token !== String(cli.ig_token || '')) campos.ig_token_em = agoraIso();
   const chaves = Object.keys(campos);
   if (!chaves.length) return detalheCliente(cnpj, app, env);
   await env.DB.prepare(
@@ -869,7 +999,7 @@ async function atualizarCliente(cnpj, app, request, env) {
   if (campos.status && campos.status !== cli.status) {
     await registrarEvento(env, cnpj, app, 'status', `${cli.status} → ${campos.status}`);
   }
-  const outros = chaves.filter((k) => k !== 'status' && k !== 'bloqueado_em' && (campos[k] ?? null) !== (cli[k] ?? null));
+  const outros = chaves.filter((k) => k !== 'status' && k !== 'bloqueado_em' && k !== 'ig_token_em' && (campos[k] ?? null) !== (cli[k] ?? null));
   if (outros.length) {
     const ROTULOS = {
       revenda_id: 'revenda',
@@ -881,6 +1011,7 @@ async function atualizarCliente(cnpj, app, request, env) {
       ig_user_id: 'id do instagram',
       ig_token: 'token do instagram',
       ig_token_expira: 'validade do token',
+      ig_token_em: 'momento do token',
     };
     const valor = (k) => {
       if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
@@ -1644,7 +1775,7 @@ async function vinculoDoContador(sess, url, env) {
 }
 
 const ROTA_CONTADOR = /^\/api\/admin\/contadores\/(\d+)$/;
-const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao)?$`);
+const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/instagram/testar|/instagram/renovar)?$`);
 const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
 async function rotaAdmin(request, env, url) {
@@ -1705,6 +1836,8 @@ async function rotaAdmin(request, env, url) {
     if (sub === '/licenca-offline' && request.method === 'POST') return licencaOffline(cnpj, app, request, env);
     if (sub === '/supervisor' && request.method === 'PUT') return definirSupCliente(cnpj, app, request, env);
     if (sub === '/instalacao' && request.method === 'DELETE') return liberarTrocaInstalacao(cnpj, app, env);
+    if (sub === '/instagram/testar' && request.method === 'POST') return testarInstagram(cnpj, app, request, env);
+    if (sub === '/instagram/renovar' && request.method === 'POST') return renovarInstagram(cnpj, app, request, env);
     if (!sub && request.method === 'GET') return detalheCliente(cnpj, app, env);
     if (!sub && request.method === 'PUT') return atualizarCliente(cnpj, app, request, env);
     if (!sub && request.method === 'DELETE') return excluirCliente(cnpj, app, env);
