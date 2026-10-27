@@ -361,9 +361,11 @@ router.get('/funcionarios', async (req, res) => {
     }
     if (changed) saveUsersConfig(appCfg, usersCfg);
 
+    const pacoteEntrada = require('./licenca').situacao().pacote_entrada === true;
     const list = listaLogin(
       loadUsersConfig(appCfg).usuarios
-        .filter((u) => u.supervisor || u.mtEntradas || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id))),
+        .filter((u) => (u.mtEntradas ? pacoteEntrada : true)
+          && (u.supervisor || u.mtEntradas || rows.some((r) => Number(r.ID_FUNCIONARIO) === Number(u.id)))),
       req
     );
 

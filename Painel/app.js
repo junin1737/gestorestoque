@@ -928,6 +928,7 @@ async function bootstrap() {
   if (msgAniv) msgAniv.value = state.config.mensagemAniversario || 'Olá {apelido}, feliz aniversário! A loja deseja um dia especial.';
 
   const lic = await api('/licenca');
+  guardarVinculos(lic.ok ? lic.licenca : null);
   if (lic.ok && lic.licenca && !lic.licenca.liberado) mostrarBloqueioLicenca(lic.licenca);
 
   const conn = await api('/emitente');
@@ -1176,7 +1177,18 @@ function iniciarConexao() {
   conexaoTimer = setInterval(pulsoConexao, 10000);
 }
 
-function enterApp() {
+function guardarVinculos(licenca) {
+  state.pacoteEntrada = licenca?.pacote_entrada === true;
+  state.contadorVinculado = licenca?.contador_vinculado === true;
+  const btn = $('#login-modo-contador');
+  if (btn) btn.hidden = !state.contadorVinculado && !loginModoContador;
+}
+
+async function enterApp() {
+  try {
+    const lic = await api('/licenca');
+    guardarVinculos(lic.ok ? lic.licenca : null);
+  } catch { /* mantém o último vínculo conhecido */ }
   const senhaEl = $('#login-senha');
   if (senhaEl) {
     senhaEl.value = '';
@@ -1216,7 +1228,8 @@ function enterApp() {
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
   if (cfgMais) cfgMais.hidden = !isNativeApk();
-  const showContador = !!state.usuario?.supervisor || !!state.usuario?.contador || can('massa', 'acesso');
+  const showContador = !!state.usuario?.contador
+    || (!!state.contadorVinculado && (!!state.usuario?.supervisor || can('massa', 'acesso')));
   if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
   if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
   if ($('#nav-empresas')) $('#nav-empresas').hidden = true;

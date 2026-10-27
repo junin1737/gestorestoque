@@ -379,6 +379,13 @@
       <button class="btn ghost" id="d-cont-novo" type="button">+</button>
     </div>
     <p class="sub">Opcional. Cada cliente tem no máximo um contador. O mesmo contador pode atender várias empresas.</p>
+    <label>Pacote de Entrada
+      <select id="d-pacote-entrada">
+        <option value="0">Não</option>
+        <option value="1">Sim</option>
+      </select>
+    </label>
+    <p class="sub">Com Sim, a loja aparece para o usuário MT Entradas e o Gestor dela mostra o acesso MT Entradas.</p>
     <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
     <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
 
@@ -1144,6 +1151,7 @@ function preencherCliente(r) {
   $('#d-fantasia').value = c.fantasia || '';
   $('#d-revenda').innerHTML = opcoesRevenda(c.revenda_id);
   preencherSelectContador(c.contador_id);
+  $('#d-pacote-entrada').value = Number(c.pacote_entrada) === 1 ? '1' : '0';
   $('#d-mensagem').value = c.mensagem || '';
   $('#d-obs').value = c.observacao || '';
   $('#d-sup-1').value = '';
@@ -1300,6 +1308,7 @@ $('#d-salvar').addEventListener('click', async () => {
       fantasia: $('#d-fantasia').value,
       revenda_id: $('#d-revenda').value || null,
       contador_id: $('#d-contador').value || null,
+      pacote_entrada: $('#d-pacote-entrada').value === '1' ? 1 : 0,
       mensagem: $('#d-mensagem').value,
       observacao: $('#d-obs').value,
     };

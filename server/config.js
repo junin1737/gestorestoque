@@ -189,8 +189,20 @@ function acessoRecusado(v) {
 }
 
 function perfisDashboard(u) {
+  let pacote = false;
+  let contador = false;
+  try {
+    const s = require('./licenca').situacao();
+    pacote = s.pacote_entrada === true;
+    contador = s.contador_vinculado === true;
+  } catch { /* licença ainda não carregada */ }
   return CHAVES_DASHBOARD
-    .filter((k) => acessoDashboard(u?.permissoes?.[k]?.acesso))
+    .filter((k) => {
+      if (!acessoDashboard(u?.permissoes?.[k]?.acesso)) return false;
+      if (k === 'dashboard_entradas' && !pacote) return false;
+      if (k === 'dashboard_contador' && !contador && !u?.contador) return false;
+      return true;
+    })
     .map((k) => PERFIL_DASHBOARD[k]);
 }
 

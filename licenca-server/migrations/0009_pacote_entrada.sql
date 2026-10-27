@@ -1,0 +1,1 @@
+ALTER TABLE clientes ADD COLUMN pacote_entrada INTEGER NOT NULL DEFAULT 0;

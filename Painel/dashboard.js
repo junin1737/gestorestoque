@@ -16,7 +16,12 @@ let dashAba = '';
 
 function dashPerfis() {
   const p = state.usuario?.permissoes || {};
-  return PERFIS_DASH.filter((item) => p[item.chave]?.acesso === true).map((item) => item.perfil);
+  return PERFIS_DASH.filter((item) => {
+    if (p[item.chave]?.acesso !== true) return false;
+    if (item.perfil === 'MT_ENTRADAS' && !state.pacoteEntrada) return false;
+    if (item.perfil === 'CONTADOR_ACESSA' && !state.contadorVinculado && !state.usuario?.contador) return false;
+    return true;
+  }).map((item) => item.perfil);
 }
 
 function dashTitulo(perfil) {

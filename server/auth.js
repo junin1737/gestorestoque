@@ -295,6 +295,9 @@ async function login(req, res) {
   if (!user) return res.json({ ok: false, error: 'Usuário não encontrado.' });
   const mt = isMtEntradas(user);
   let tokenMt = null;
+  if (mt && require('./licenca').situacao().pacote_entrada !== true) {
+    return res.json({ ok: false, error: 'Esta loja não tem o Pacote de Entrada.' });
+  }
   if (mt) {
     const senhaLocal = String(senha) === String(SENHA_MT_ENTRADAS || '');
     const r = await require('./mt-empresas').loginMt(senha);

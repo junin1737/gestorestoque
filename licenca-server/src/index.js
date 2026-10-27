@@ -76,6 +76,27 @@ function pemParaDer(pem) {
 }
 
 let chaveAssinatura = null;
+let colunaPacotePronta = false;
+
+/** Pacote de Entrada (Sim/Não) no cadastro do cliente. 0 até a coluna existir. */
+async function garantirPacoteEntrada(env) {
+  if (colunaPacotePronta) return;
+  try {
+    await env.DB.prepare('ALTER TABLE clientes ADD COLUMN pacote_entrada INTEGER NOT NULL DEFAULT 0').run();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (!/duplicate column/i.test(msg)) throw e;
+  }
+  colunaPacotePronta = true;
+}
+
+function pacoteEntradaAtivo(cli) {
+  return Number(cli?.pacote_entrada) === 1;
+}
+
+function contadorVinculado(cli) {
+  return Number(cli?.contador_id) > 0;
+}
 async function getChaveAssinatura(env) {
   if (!chaveAssinatura) {
     chaveAssinatura = await crypto.subtle.importKey(
@@ -240,6 +261,7 @@ async function instalacaoDaRequisicao(request, env, app) {
 }
 
 async function check(request, env) {
+  await garantirPacoteEntrada(env);
   let body;
   try {
     body = await request.json();
@@ -355,6 +377,8 @@ async function check(request, env) {
     emitido_em: emitido.toISOString(),
     valido_ate: validoAte.toISOString(),
     sup: sit.status === 'liberado' ? await supDoCliente(env, cli) : null,
+    pacote_entrada: pacoteEntradaAtivo(cli),
+    contador_vinculado: contadorVinculado(cli),
   });
   return json({
     ok: true,
@@ -471,6 +495,7 @@ async function login(request, env) {
 }
 
 async function listarClientes(url, env) {
+  await garantirPacoteEntrada(env);
   const q = String(url.searchParams.get('q') || '').trim();
   const status = String(url.searchParams.get('status') || '').trim();
   const app = nomeApp(url.searchParams.get('app'));
@@ -655,6 +680,9 @@ function camposEditaveis(body) {
     if (id !== null && !(Number.isInteger(id) && id > 0)) throw new Error('Contador inválido.');
     out.contador_id = id;
   }
+  if (body.pacote_entrada !== undefined) {
+    out.pacote_entrada = body.pacote_entrada === true || body.pacote_entrada === 1 || body.pacote_entrada === '1' ? 1 : 0;
+  }
   return out;
 }
 
@@ -757,6 +785,7 @@ async function criarCliente(request, env) {
 }
 
 async function atualizarCliente(cnpj, app, request, env) {
+  await garantirPacoteEntrada(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
@@ -781,10 +810,10 @@ async function atualizarCliente(cnpj, app, request, env) {
   }
   const outros = chaves.filter((k) => k !== 'status' && k !== 'bloqueado_em' && (campos[k] ?? null) !== (cli[k] ?? null));
   if (outros.length) {
-    const ROTULOS = { revenda_id: 'revenda', pago_ate: 'pago até', em_teste: 'teste grátis' };
+    const ROTULOS = { revenda_id: 'revenda', pago_ate: 'pago até', em_teste: 'teste grátis', pacote_entrada: 'pacote de entrada' };
     const valor = (k) => {
       if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
-      if (k === 'em_teste') return campos[k] ? 'sim' : 'não';
+      if (k === 'em_teste' || k === 'pacote_entrada') return campos[k] ? 'sim' : 'não';
       if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
       return campos[k] ?? '—';
     };
@@ -822,6 +851,8 @@ async function licencaOffline(cnpj, app, request, env) {
     emitido_em: emitido.toISOString(),
     valido_ate: validoAte.toISOString(),
     sup: await supDoCliente(env, cli),
+    pacote_entrada: pacoteEntradaAtivo(cli),
+    contador_vinculado: contadorVinculado(cli),
   });
   await registrarEvento(env, cnpj, app, 'licenca_offline', `${dias} dia(s)${nse ? ` · NSE ${nse}` : ''}`);
   const codigo = `MTL1.${b64url(enc.encode(JSON.stringify(licenca)))}`;
@@ -851,6 +882,7 @@ function urlTunelValida(v) {
 async function listarEmpresasMt(url, env) {
   const app = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
   await garantirTabelaMt(env);
+  await garantirPacoteEntrada(env);
   const desde = new Date(Date.now() - JANELA_ONLINE_MS).toISOString();
   const { results } = await env.DB.prepare(
     `SELECT c.cnpj,
@@ -860,6 +892,7 @@ async function listarEmpresasMt(url, env) {
      JOIN instalacoes i ON i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao
      LEFT JOIN mt_empresas m ON m.cnpj = c.cnpj AND m.aplicacao = c.aplicacao
      WHERE c.aplicacao = ?
+       AND COALESCE(c.pacote_entrada, 0) = 1
        AND i.ultimo_contato >= ?
      ORDER BY i.ultimo_contato DESC`
   ).bind(app, desde).all();
