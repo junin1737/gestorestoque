@@ -911,11 +911,12 @@ function urlTunelValida(v) {
   return /^https:\/\/acesso\.smsjrdeveloper\.com\.br\/t\/[a-z2-7]{20,32}$/.test(s) ? s : '';
 }
 
-async function listarEmpresasMt(url, env) {
+async function listarEmpresasMt(url, env, opcoes = {}) {
   const app = nomeApp(url.searchParams.get('aplicacao')) || APP_PADRAO;
   await garantirTabelaMt(env);
   await garantirPacoteEntrada(env);
   const desde = new Date(Date.now() - JANELA_ONLINE_MS).toISOString();
+  const filtroPacote = opcoes.soPacoteEntrada === true ? 'AND COALESCE(c.pacote_entrada, 0) = 1' : '';
   const { results } = await env.DB.prepare(
     `SELECT c.cnpj,
             COALESCE(NULLIF(m.nome, ''), NULLIF(c.fantasia, ''), NULLIF(c.razao, '')) AS nome,
@@ -924,7 +925,7 @@ async function listarEmpresasMt(url, env) {
      JOIN instalacoes i ON i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao
      LEFT JOIN mt_empresas m ON m.cnpj = c.cnpj AND m.aplicacao = c.aplicacao
      WHERE c.aplicacao = ?
-       AND COALESCE(c.pacote_entrada, 0) = 1
+       ${filtroPacote}
        AND i.ultimo_contato >= ?
      ORDER BY i.ultimo_contato DESC`
   ).bind(app, desde).all();
@@ -1355,7 +1356,7 @@ async function rotaMt(request, env, url) {
   }
 
   if (p === '/api/mt/empresas' && request.method === 'GET') {
-    return sess ? listarEmpresasMt(url, env) : json(SEM_SESSAO_MT, 401);
+    return sess ? listarEmpresasMt(url, env, { soPacoteEntrada: sess.papel === 'entradas' }) : json(SEM_SESSAO_MT, 401);
   }
   if (p === '/api/mt/empresas/cadastro' && request.method === 'GET') {
     return sess ? listarCadastroMt(url, env) : json(SEM_SESSAO_MT, 401);
@@ -1608,7 +1609,7 @@ async function rotaAdmin(request, env, url) {
   const sess = await sessaoToken(env, request);
   if (!sess) return json({ ok: false, error: 'Sessão expirada. Entre novamente.', code: 'AUTH' }, 401);
   if (url.pathname === '/api/admin/empresas-online' && request.method === 'GET') {
-    return listarEmpresasMt(url, env);
+    return listarEmpresasMt(url, env, { soPacoteEntrada: sess.papel === 'entradas' });
   }
   if (sess.papel === 'contador') {
     if (url.pathname === '/api/admin/contador/clientes' && request.method === 'GET') {
