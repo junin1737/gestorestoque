@@ -70,6 +70,7 @@ function syncSistemaComXmlItem(sistema, xmlItem) {
     v_icms_st_ret: Number(imp.vICMSSTRet || 0),
     v_icms_deson: Number(imp.vICMSDeson || 0),
     mot_des_icms: String(imp.motDesICMS || '').replace(/\D/g, '').slice(0, 2),
+    ind_deduz_deson: String(imp.indDeduzDeson ?? '').trim(),
     v_bc_fcp: Number(imp.vBCFCP || 0),
     p_fcp: Number(imp.pFCP || 0),
     v_fcp: Number(imp.vFCP || 0),
@@ -167,8 +168,25 @@ function totalMercadoriaItem(xmlItem = {}, sistema = {}) {
   return round2(vProd - vDesc + vFrete + vSeg + vOutro);
 }
 
-/** Parte do item no vNF: mercadoria + IPI + ST + FCP − ICMS desonerado. */
-function valorItemNaNf(it = {}) {
+/**
+ * ICMS desonerado só entra no vNF quando a nota manda deduzir (indDeduzDeson=1).
+ * Sem a tag, a NF-e antiga desconta e a atual (ex.: cesta básica) não: o chamador escolhe.
+ */
+function desoneracaoNoTotal(it = {}, ausenteDeduz = false) {
+  const xml = it.xml || it;
+  const sys = it.sistema || {};
+  const imp = xml.imposto || {};
+  const trib = sys.tributos || {};
+  const valor = Number(trib.v_icms_deson ?? imp.vICMSDeson ?? 0) || 0;
+  if (valor <= 0) return 0;
+  const ind = String(trib.ind_deduz_deson ?? imp.indDeduzDeson ?? '').trim();
+  if (ind === '1') return valor;
+  if (ind === '0') return 0;
+  return ausenteDeduz ? valor : 0;
+}
+
+/** Parte do item no vNF: mercadoria + IPI + ST + FCP − desoneração que a nota realmente deduz. */
+function valorItemNaNf(it = {}, ausenteDeduz = false) {
   const xml = it.xml || it;
   const sys = it.sistema || {};
   const imp = xml.imposto || {};
@@ -178,11 +196,11 @@ function valorItemNaNf(it = {}) {
     + Number(trib.v_icms_st ?? imp.vICMSST ?? 0)
     + Number(trib.v_fcp ?? imp.vFCP ?? 0)
     + Number(trib.v_fcp_st ?? imp.vFCPST ?? 0)
-    - Number(trib.v_icms_deson ?? imp.vICMSDeson ?? 0);
+    - desoneracaoNoTotal(it, ausenteDeduz);
 }
 
-function reconstruirVnfItens(itens = []) {
-  return round2(itens.reduce((acc, it) => acc + valorItemNaNf(it), 0));
+function reconstruirVnfItens(itens = [], ausenteDeduz = false) {
+  return round2(itens.reduce((acc, it) => acc + valorItemNaNf(it, ausenteDeduz), 0));
 }
 
 /** Itens que não geram financeiro (bonificação, brinde…): ficam fora do valor a pagar. */
@@ -196,8 +214,17 @@ function validarTotaisNf(xml, itensSessao) {
   const tot = xml?.total || {};
   const vNf = round2(tot.vNF || 0);
   if (vNf <= 0.009) return { ok: true, vNf: 0, recon: 0, delta: 0 };
-  const recon = reconstruirVnfItens(itensSessao || xml?.itens || []);
-  const delta = round2(Math.abs(vNf - recon));
+  const itens = itensSessao || xml?.itens || [];
+  let recon = reconstruirVnfItens(itens, false);
+  let delta = round2(Math.abs(vNf - recon));
+  if (delta > DIFERENCA_MAX_NF) {
+    const legado = reconstruirVnfItens(itens, true);
+    const deltaLegado = round2(Math.abs(vNf - legado));
+    if (deltaLegado <= DIFERENCA_MAX_NF) {
+      recon = legado;
+      delta = deltaLegado;
+    }
+  }
   if (delta > DIFERENCA_MAX_NF) {
     return {
       ok: false,

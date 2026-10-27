@@ -70,6 +70,7 @@ function parseImposto(det) {
     vICMSSTRet: tagNum(icmsInner, 'vICMSSTRet'),
     vICMSDeson: tagNum(icmsInner, 'vICMSDeson'),
     motDesICMS: tag(icmsInner, 'motDesICMS') || '',
+    indDeduzDeson: tag(icmsInner, 'indDeduzDeson') || '',
     vBCFCP: tagNum(icmsInner, 'vBCFCP'),
     pFCP: tagNum(icmsInner, 'pFCP'),
     vFCP: tagNum(icmsInner, 'vFCP'),

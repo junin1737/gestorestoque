@@ -2128,10 +2128,13 @@ const ImportacaoNfe = (() => {
         const xml = it.xml || {};
         const trib = sys.tributos || {};
         const imp = xml.imposto || {};
+        const deson = Number(trib.v_icms_deson ?? imp.vICMSDeson ?? 0) || 0;
+        const indDeson = String(trib.ind_deduz_deson ?? imp.indDeduzDeson ?? '').trim();
+        const desonDeduz = indDeson === '1' ? deson : 0;
         return acc + calcCustoNotaUnitario(sys, xml).totalItem
           + Number(trib.v_fcp ?? imp.vFCP ?? 0)
           + Number(trib.v_fcp_st ?? imp.vFCPST ?? 0)
-          - Number(trib.v_icms_deson ?? imp.vICMSDeson ?? 0);
+          - desonDeduz;
       }, 0);
     const sem = Number(semFin.toFixed(2));
     return { vNf, semFin: sem, alvo: sem > 0.009 ? Number((vNf - sem).toFixed(2)) : vNf };
@@ -3357,6 +3360,7 @@ const ImportacaoNfe = (() => {
           v_bc_st_ret: trib.v_bc_st_ret ?? 0,
           v_icms_st_ret: trib.v_icms_st_ret ?? 0,
           v_icms_deson: trib.v_icms_deson ?? 0,
+          ind_deduz_deson: trib.ind_deduz_deson ?? '',
           mot_des_icms: trib.mot_des_icms || '',
           v_bc_fcp: trib.v_bc_fcp ?? 0,
           p_fcp: trib.p_fcp ?? 0,
