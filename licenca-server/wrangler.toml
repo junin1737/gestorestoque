@@ -35,6 +35,9 @@ bucket_name = "gestor-ofertas"
 [vars]
 FOTOS_PUBLIC_BASE = "https://fotos.smsjrdeveloper.com.br"
 IG_GRAPH_VERSION = "v26.0"
+IG_REDIRECT_URI = "https://painel.smsjrdeveloper.com.br/api/instagram/retorno"
+# IG_APP_ID é o Instagram App ID (não o App ID do Facebook).
+# O segredo entra só com: npx wrangler secret put IG_APP_SECRET
 
 # Segredos (wrangler secret put ...):
 #   LICENCA_PRIVATE_KEY  chave Ed25519 PKCS8 em PEM (par da pública embutida em server/licenca.js)

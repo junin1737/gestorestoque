@@ -754,7 +754,8 @@ function usuarioInstagram(v) {
 function limparErroInstagram(msg) {
   return String(msg || 'O Instagram não confirmou o token.')
     .replace(/access_token[=:][^&\s"']+/gi, 'access_token')
-    .slice(0, 300);
+    .replace(/client_secret[=:][^&\s"']+/gi, 'client_secret')
+    .slice(0, 180);
 }
 
 function tokenDoPedido(body, cli) {
@@ -801,6 +802,182 @@ function enderecoFoto(env, arquivo) {
 
 function formaTeste(v) {
   return v === 'story' ? 'story' : 'post';
+}
+
+const IG_REDIRECT_PADRAO = 'https://painel.smsjrdeveloper.com.br/api/instagram/retorno';
+const IG_ESCOPO = 'instagram_business_basic,instagram_business_content_publish';
+
+function appInstagram(env) {
+  return {
+    id: String(env.IG_APP_ID || '').trim(),
+    segredo: String(env.IG_APP_SECRET || '').trim(),
+    retorno: String(env.IG_REDIRECT_URI || IG_REDIRECT_PADRAO).trim(),
+  };
+}
+
+async function assinarEstadoInstagram(env, cnpj, app) {
+  const corpo = b64url(enc.encode(JSON.stringify({ cnpj, app, exp: Date.now() + 10 * 60 * 1000 })));
+  const sig = b64url(await crypto.subtle.sign('HMAC', await chaveSessao(env), enc.encode(`ig1.${corpo}`)));
+  return `${corpo}.${sig}`;
+}
+
+async function lerEstadoInstagram(env, state) {
+  const [corpo, sig] = String(state || '').split('.');
+  if (!corpo || !sig || corpo.length > 400 || sig.length > 120) return null;
+  const esperado = b64url(await crypto.subtle.sign('HMAC', await chaveSessao(env), enc.encode(`ig1.${corpo}`)));
+  if (esperado.length !== sig.length) return null;
+  let diff = 0;
+  for (let i = 0; i < sig.length; i++) diff |= esperado.charCodeAt(i) ^ sig.charCodeAt(i);
+  if (diff !== 0) return null;
+  try {
+    const dados = JSON.parse(new TextDecoder().decode(b64urlDecode(corpo)));
+    const cnpj = soDigitos(dados.cnpj);
+    const app = nomeApp(dados.app);
+    if (!(Number(dados.exp) > Date.now())) return null;
+    if (!(cnpj.length === 11 || cnpj.length === 14) || !app) return null;
+    return { cnpj, app };
+  } catch {
+    return null;
+  }
+}
+
+function voltarPainel(request, campos) {
+  const destino = new URL('/', request.url);
+  for (const k of ['ig', 'usuario', 'cnpj', 'app', 'motivo']) {
+    const v = String(campos[k] || '').replace(/[\r\n<>]/g, '').slice(0, 180);
+    if (v) destino.searchParams.set(k, v);
+  }
+  return Response.redirect(destino.toString(), 302);
+}
+
+function tokenDaTroca(data) {
+  const item = Array.isArray(data?.data) ? data.data[0] : data;
+  const token = String(item?.access_token || '').trim();
+  const permissoes = String(item?.permissions || '');
+  return { token, permissoes };
+}
+
+async function iniciarConexaoInstagram(cnpj, app, env) {
+  await garantirInstagram(env);
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  const cfg = appInstagram(env);
+  if (!cfg.id || !cfg.segredo) {
+    return json({ ok: false, error: 'O aplicativo do Instagram ainda não está configurado neste painel.' }, 500);
+  }
+  const state = await assinarEstadoInstagram(env, cnpj, app);
+  const url = new URL('https://www.instagram.com/oauth/authorize');
+  url.searchParams.set('client_id', cfg.id);
+  url.searchParams.set('redirect_uri', cfg.retorno);
+  url.searchParams.set('response_type', 'code');
+  url.searchParams.set('scope', IG_ESCOPO);
+  url.searchParams.set('state', state);
+  url.searchParams.set('enable_fb_login', 'false');
+  url.searchParams.set('force_reauth', 'true');
+  return json({ ok: true, url: url.toString() });
+}
+
+async function retornoInstagram(request, env, url) {
+  if (url.searchParams.get('error')) {
+    return voltarPainel(request, { ig: 'erro', motivo: 'A autorização foi cancelada.' });
+  }
+  const alvo = await lerEstadoInstagram(env, url.searchParams.get('state'));
+  if (!alvo) return voltarPainel(request, { ig: 'erro', motivo: 'A autorização expirou. Abra o cliente e conecte de novo.' });
+  const code = String(url.searchParams.get('code') || '').trim().replace(/#_$/, '');
+  if (code.length < 8 || code.length > 512) {
+    return voltarPainel(request, { ig: 'erro', cnpj: alvo.cnpj, app: alvo.app, motivo: 'O Instagram não devolveu a autorização.' });
+  }
+  const cfg = appInstagram(env);
+  if (!cfg.id || !cfg.segredo) {
+    return voltarPainel(request, { ig: 'erro', cnpj: alvo.cnpj, app: alvo.app, motivo: 'O aplicativo do Instagram ainda não está configurado neste painel.' });
+  }
+  await garantirInstagram(env);
+  const cli = await buscarCliente(env, alvo.cnpj, alvo.app);
+  if (!cli) return voltarPainel(request, { ig: 'erro', motivo: 'Cliente não encontrado.' });
+
+  const troca = new URLSearchParams();
+  troca.set('client_id', cfg.id);
+  troca.set('client_secret', cfg.segredo);
+  troca.set('grant_type', 'authorization_code');
+  troca.set('redirect_uri', cfg.retorno);
+  troca.set('code', code);
+  let curto;
+  try {
+    curto = await chamarInstagram('https://api.instagram.com/oauth/access_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: troca.toString(),
+    });
+  } catch {
+    return voltarPainel(request, { ig: 'erro', cnpj: alvo.cnpj, app: alvo.app, motivo: 'Não foi possível falar com o Instagram.' });
+  }
+  const primeiro = tokenDaTroca(curto.data);
+  if (!curto.ok || curto.data?.error || !primeiro.token) {
+    return voltarPainel(request, {
+      ig: 'erro',
+      cnpj: alvo.cnpj,
+      app: alvo.app,
+      motivo: limparErroInstagram(curto.data?.error_message || curto.data?.error?.message),
+    });
+  }
+
+  const longoUrl = new URL('https://graph.instagram.com/access_token');
+  longoUrl.searchParams.set('grant_type', 'ig_exchange_token');
+  longoUrl.searchParams.set('client_secret', cfg.segredo);
+  longoUrl.searchParams.set('access_token', primeiro.token);
+  let longo;
+  try {
+    longo = await chamarInstagram(longoUrl);
+  } catch {
+    return voltarPainel(request, { ig: 'erro', cnpj: alvo.cnpj, app: alvo.app, motivo: 'Não foi possível guardar o token.' });
+  }
+  const definitivo = tokenDaTroca(longo.data);
+  if (!longo.ok || longo.data?.error || !definitivo.token) {
+    return voltarPainel(request, {
+      ig: 'erro',
+      cnpj: alvo.cnpj,
+      app: alvo.app,
+      motivo: limparErroInstagram(longo.data?.error?.message),
+    });
+  }
+
+  const perfilUrl = new URL('https://graph.instagram.com/me');
+  perfilUrl.searchParams.set('fields', 'user_id,username');
+  perfilUrl.searchParams.set('access_token', definitivo.token);
+  let perfil;
+  try {
+    perfil = await chamarInstagram(perfilUrl);
+  } catch {
+    return voltarPainel(request, { ig: 'erro', cnpj: alvo.cnpj, app: alvo.app, motivo: 'O token foi emitido, mas a conta não respondeu.' });
+  }
+  const usuario = String(perfil.data?.username || '').trim().replace(/^@+/, '').slice(0, 80);
+  const igId = String(perfil.data?.user_id || perfil.data?.id || '').replace(/\D/g, '').slice(0, 40);
+  if (!perfil.ok || perfil.data?.error || !usuario || !(igId.length >= 5)) {
+    return voltarPainel(request, {
+      ig: 'erro',
+      cnpj: alvo.cnpj,
+      app: alvo.app,
+      motivo: limparErroInstagram(perfil.data?.error?.message || 'A conta profissional não foi identificada.'),
+    });
+  }
+
+  const token = definitivo.token.slice(0, 2000);
+  const expira = dataValidadeToken(longo.data?.expires_in);
+  const agora = agoraIso();
+  await env.DB.prepare(
+    `UPDATE clientes SET ig_usuario = ?, ig_user_id = ?, ig_token = ?, ig_token_expira = ?, ig_token_em = ?, atualizado_em = ?
+     WHERE cnpj = ? AND aplicacao = ?`
+  ).bind(usuario, igId, token, expira, agora, agora, alvo.cnpj, alvo.app).run();
+  await registrarEvento(env, alvo.cnpj, alvo.app, 'instagram', `conta conectada como @${usuario}`);
+  const permissoes = `${primeiro.permissoes},${definitivo.permissoes}`;
+  const publica = !permissoes.replace(/,/g, '') || /content_publish/.test(permissoes);
+  return voltarPainel(request, {
+    ig: 'ok',
+    usuario,
+    cnpj: alvo.cnpj,
+    app: alvo.app,
+    motivo: publica ? '' : 'A conta conectou, mas não autorizou a publicação. Conecte de novo e aceite publicar.',
+  });
 }
 
 async function gravarTesteInstagram(env, cnpj, app, creationId, consultaEm) {
@@ -1912,7 +2089,7 @@ async function vinculoDoContador(sess, url, env) {
 }
 
 const ROTA_CONTADOR = /^\/api\/admin\/contadores\/(\d+)$/;
-const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/instagram/testar|/instagram/renovar|/instagram/post-teste)?$`);
+const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/instagram/conectar|/instagram/testar|/instagram/renovar|/instagram/post-teste)?$`);
 const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
 async function rotaAdmin(request, env, url) {
@@ -1973,6 +2150,7 @@ async function rotaAdmin(request, env, url) {
     if (sub === '/licenca-offline' && request.method === 'POST') return licencaOffline(cnpj, app, request, env);
     if (sub === '/supervisor' && request.method === 'PUT') return definirSupCliente(cnpj, app, request, env);
     if (sub === '/instalacao' && request.method === 'DELETE') return liberarTrocaInstalacao(cnpj, app, env);
+    if (sub === '/instagram/conectar' && request.method === 'POST') return iniciarConexaoInstagram(cnpj, app, env);
     if (sub === '/instagram/testar' && request.method === 'POST') return testarInstagram(cnpj, app, request, env);
     if (sub === '/instagram/renovar' && request.method === 'POST') return renovarInstagram(cnpj, app, request, env);
     if (sub === '/instagram/post-teste' && request.method === 'POST') return publicarPostTeste(cnpj, app, request, env);
@@ -2110,6 +2288,7 @@ export default {
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
       if (url.pathname.startsWith('/api/ofertas/')) return await rotaOfertas(request, env, url, instalacaoDaRequisicao);
       if (url.pathname.startsWith('/api/mt/')) return await rotaMt(request, env, url);
+      if (url.pathname === '/api/instagram/retorno' && request.method === 'GET') return await retornoInstagram(request, env, url);
       if (url.pathname.startsWith('/api/admin/')) return await rotaAdmin(request, env, url);
       if (url.pathname === '/' || url.pathname === '/admin' || url.pathname === '/admin/') {
         return new Response(ADMIN_HTML, {

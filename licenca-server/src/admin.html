@@ -401,6 +401,9 @@
     </label>
     <p class="sub">Com Sim, o Gestor desta loja pode mostrar a aba Central de Ofertas para quem tiver a permissão.</p>
     <h3>Instagram</h3>
+    <div class="ig-acoes">
+      <button class="btn ghost" id="d-ig-conectar" type="button">Conectar Instagram</button>
+    </div>
     <div class="grid2">
       <label>Usuário<input id="d-ig-usuario" maxlength="80" placeholder="@da loja" /></label>
       <label>ID da conta profissional<input id="d-ig-user-id" maxlength="40" inputmode="numeric" /></label>
@@ -420,7 +423,7 @@
       <button class="btn ghost" id="d-ig-postar" type="button">Publicar teste</button>
     </div>
     <p class="sub" id="d-ig-resultado"></p>
-    <p class="sub" id="d-ig-info">O token fica só neste painel. O Gestor da loja vê se a conta está informada, sem receber o token.</p>
+    <p class="sub" id="d-ig-info">Conectar Instagram pede a autorização da loja e preenche usuário, ID, token e validade. O token não aparece na tela.</p>
     <p class="sub">A renovação só funciona com o token tendo mais de 24 horas.</p>
     <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
     <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
@@ -689,6 +692,20 @@ function limparFiltrosVisiveis() {
 }
 const st = { token: localStorage.getItem('mt_licenca_token') || '', papel: localStorage.getItem('mt_licenca_papel') || 'admin', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null, contadorEditando: null, contadores: [] };
 st.papel = st.token ? papelDoToken(st.token) : 'admin';
+(function guardarRetornoInstagram() {
+  const q = new URLSearchParams(location.search);
+  const ig = q.get('ig');
+  if (ig !== 'ok' && ig !== 'erro') return;
+  const dados = {
+    ig,
+    usuario: String(q.get('usuario') || '').replace(/[^A-Za-z0-9._]/g, '').slice(0, 40),
+    cnpj: String(q.get('cnpj') || '').replace(/\D/g, '').slice(0, 14),
+    app: String(q.get('app') || '').replace(/[^A-Za-z0-9_.-]/g, '').slice(0, 40),
+    motivo: String(q.get('motivo') || '').replace(/[<>]/g, '').slice(0, 180),
+  };
+  try { sessionStorage.setItem('mt_ig_retorno', JSON.stringify(dados)); } catch { /* ignore */ }
+  history.replaceState(null, '', location.pathname);
+})();
 const rotaCliente = (c) => `/clientes/${encodeURIComponent(c.app)}/${c.cnpj}`;
 const ROTULO = { liberado: 'Liberado', pendente: 'Pendente', bloqueado: 'Bloqueado', vencido: 'Vencido', teste: 'Em teste' };
 const EVENTO = {
@@ -860,7 +877,7 @@ function mostrarApp(logado) {
   if (contador) { irPara('meus'); return; }
   if (entradas) { irPara('empresas'); return; }
   carregarConfig();
-  carregarRevendas().then(() => irPara('clientes'));
+  carregarRevendas().then(() => irPara('clientes')).then(() => mostrarRetornoInstagram());
 }
 async function carregarEmpresas() {
   const wrap = $('#empresas-wrap');
@@ -1421,8 +1438,45 @@ function esperarPost(ms, ciclo) {
 function formaInstagram() {
   return document.querySelector('[data-ig-forma][aria-pressed="true"]')?.dataset.igForma || 'post';
 }
+async function mostrarRetornoInstagram() {
+  let bruto = '';
+  try { bruto = sessionStorage.getItem('mt_ig_retorno') || ''; sessionStorage.removeItem('mt_ig_retorno'); } catch { return; }
+  if (!bruto || st.papel !== 'admin') return;
+  let r;
+  try { r = JSON.parse(bruto); } catch { return; }
+  if (r.ig === 'ok' && r.cnpj && r.app) {
+    await abrirCliente({ cnpj: r.cnpj, app: r.app });
+    const msg = r.motivo
+      ? `Conectado como @${r.usuario}. ${r.motivo}`
+      : `Conectado como @${r.usuario}. Usuário, ID e validade foram preenchidos.`;
+    mostrarResultadoIg(msg, !!r.motivo);
+    toast(msg, !!r.motivo);
+    return;
+  }
+  if (r.ig === 'erro') toast(r.motivo || 'O Instagram não autorizou a conexão.', true);
+}
+$('#d-ig-conectar').addEventListener('click', async () => {
+  if (!confirm('Abrir a autorização do Instagram desta loja? Quem aceitar precisa ser a conta profissional dela. Ao voltar, usuário, ID, token e validade são preenchidos.')) return;
+  const btn = $('#d-ig-conectar');
+  btn.disabled = true;
+  mostrarResultadoIg('Abrindo a autorização do Instagram…', false);
+  try {
+    const r = await api(`${rotaCliente(st.atual)}/instagram/conectar`, { method: 'POST', body: {} });
+    if (!r.ok || !r.url) {
+      mostrarResultadoIg(r.error || 'Não foi possível abrir a autorização.', true);
+      toast(r.error || 'Não foi possível abrir a autorização.', true);
+      btn.disabled = false;
+      return;
+    }
+    location.href = r.url;
+  } catch {
+    mostrarResultadoIg('Sem conexão com o servidor.', true);
+    btn.disabled = false;
+  }
+});
+
 function travarInstagram(travado) {
-  ['d-ig-testar', 'd-ig-renovar', 'd-ig-postar'].forEach((id) => {
+  ['d-ig-conectar', 'd-ig-testar', 'd-ig-renovar', 'd-ig-postar'].forEach((id) => {
     const botao = document.getElementById(id);
     if (botao) botao.disabled = travado;
   });
