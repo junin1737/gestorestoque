@@ -34,6 +34,7 @@ bucket_name = "gestor-ofertas"
 
 [vars]
 FOTOS_PUBLIC_BASE = "https://fotos.smsjrdeveloper.com.br"
+IG_GRAPH_VERSION = "v26.0"
 
 # Segredos (wrangler secret put ...):
 #   LICENCA_PRIVATE_KEY  chave Ed25519 PKCS8 em PEM (par da pública embutida em server/licenca.js)

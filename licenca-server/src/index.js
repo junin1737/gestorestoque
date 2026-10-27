@@ -116,7 +116,7 @@ let colunasInstagramProntas = false;
 
 async function garantirInstagram(env) {
   if (colunasInstagramProntas) return;
-  const colunas = ['ig_usuario TEXT', 'ig_user_id TEXT', 'ig_token TEXT', 'ig_token_expira TEXT', 'ig_token_em TEXT'];
+  const colunas = ['ig_usuario TEXT', 'ig_user_id TEXT', 'ig_token TEXT', 'ig_token_expira TEXT', 'ig_token_em TEXT', 'ig_teste_creation_id TEXT', 'ig_teste_consulta_em TEXT'];
   for (const coluna of colunas) {
     try {
       await env.DB.prepare(`ALTER TABLE clientes ADD COLUMN ${coluna}`).run();
@@ -775,10 +775,139 @@ function dataValidadeToken(expiresIn) {
   return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Sao_Paulo' }).format(new Date(Date.now() + ms));
 }
 
-async function chamarInstagram(url) {
-  const resp = await fetch(url, { method: 'GET' });
+async function chamarInstagram(url, opcoes = {}) {
+  const resp = await fetch(url, {
+    method: opcoes.method || 'GET',
+    headers: opcoes.headers,
+    body: opcoes.body,
+  });
   const data = await resp.json().catch(() => ({}));
   return { ok: resp.ok, data };
+}
+
+const IG_VERSAO_PADRAO = 'v26.0';
+const ESPERA_STATUS_MS = 60 * 1000;
+const LEGENDA_TESTE = 'Post de teste da Central de Ofertas. Pode apagar.';
+
+function versaoInstagram(env) {
+  const v = String(env.IG_GRAPH_VERSION || IG_VERSAO_PADRAO).trim();
+  return /^v\d+\.\d+$/.test(v) ? v : IG_VERSAO_PADRAO;
+}
+
+function imagemTeste(env) {
+  const base = String(env.FOTOS_PUBLIC_BASE || '').replace(/\/$/, '');
+  return base ? `${base}/teste/post-de-teste.jpg` : '';
+}
+
+async function gravarTesteInstagram(env, cnpj, app, creationId, consultaEm) {
+  await env.DB.prepare(
+    'UPDATE clientes SET ig_teste_creation_id = ?, ig_teste_consulta_em = ?, atualizado_em = ? WHERE cnpj = ? AND aplicacao = ?'
+  ).bind(creationId, consultaEm, agoraIso(), cnpj, app).run();
+}
+
+async function publicarPostTeste(cnpj, app, request, env) {
+  await garantirInstagram(env);
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  const body = await request.json().catch(() => ({}));
+  const token = tokenDoPedido(body, cli);
+  const igId = soDigitos(body.ig_user_id != null && String(body.ig_user_id).trim() ? body.ig_user_id : cli.ig_user_id);
+  if (!token) return json({ ok: false, error: 'Informe o token para publicar o teste.' }, 400);
+  if (!(igId.length >= 5 && igId.length <= 40)) return json({ ok: false, error: 'Informe o ID da conta profissional.' }, 400);
+  const imagem = imagemTeste(env);
+  if (!imagem) return json({ ok: false, error: 'O endereço público das fotos não está configurado.' }, 500);
+  const versao = versaoInstagram(env);
+
+  if (body.etapa !== 'consultar') {
+    const params = new URLSearchParams();
+    params.set('image_url', imagem);
+    params.set('caption', LEGENDA_TESTE);
+    params.set('access_token', token);
+    let resp;
+    try {
+      resp = await chamarInstagram(`https://graph.instagram.com/${versao}/${igId}/media`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+    } catch {
+      return json({ ok: false, error: 'Não foi possível falar com o Instagram.' }, 502);
+    }
+    if (!resp.ok || resp.data?.error || !resp.data?.id) {
+      return json({ ok: false, error: limparErroInstagram(resp.data?.error?.message) }, 400);
+    }
+    const creationId = String(resp.data.id);
+    await gravarTesteInstagram(env, cnpj, app, creationId, null);
+    await registrarEvento(env, cnpj, app, 'instagram', 'container do post de teste criado');
+    return json({ ok: true, etapa: 'criado', creation_id: creationId, mensagem: 'Container criado. Conferindo se a imagem ficou pronta.' });
+  }
+
+  const creationId = String(body.creation_id || cli.ig_teste_creation_id || '').trim();
+  if (!/^\d{5,40}$/.test(creationId)) return json({ ok: false, error: 'Não há container de teste para consultar.' }, 400);
+  const ultima = Date.parse(String(cli.ig_teste_consulta_em || ''));
+  if (Number.isFinite(ultima)) {
+    const falta = ESPERA_STATUS_MS - (Date.now() - ultima);
+    if (falta > 0) {
+      return json({
+        ok: true,
+        etapa: 'aguardando',
+        creation_id: creationId,
+        espera_ms: falta,
+        mensagem: `A imagem ainda está sendo preparada. Nova consulta em ${Math.ceil(falta / 1000)} s.`,
+      });
+    }
+  }
+  const statusUrl = new URL(`https://graph.instagram.com/${versao}/${creationId}`);
+  statusUrl.searchParams.set('fields', 'status_code');
+  statusUrl.searchParams.set('access_token', token);
+  let status;
+  try {
+    status = await chamarInstagram(statusUrl);
+  } catch {
+    return json({ ok: false, error: 'Não foi possível falar com o Instagram.' }, 502);
+  }
+  if (!status.ok || status.data?.error) {
+    return json({ ok: false, error: limparErroInstagram(status.data?.error?.message) }, 400);
+  }
+  const codigo = String(status.data.status_code || '');
+  if (codigo === 'ERROR' || codigo === 'EXPIRED') {
+    await gravarTesteInstagram(env, cnpj, app, null, null);
+    return json({
+      ok: false,
+      error: codigo === 'EXPIRED' ? 'O container expirou antes da publicação.' : 'O Instagram recusou a imagem do teste.',
+    }, 400);
+  }
+  if (codigo !== 'FINISHED') {
+    await gravarTesteInstagram(env, cnpj, app, creationId, agoraIso());
+    return json({
+      ok: true,
+      etapa: 'processando',
+      creation_id: creationId,
+      status_code: codigo || 'IN_PROGRESS',
+      espera_ms: ESPERA_STATUS_MS,
+      mensagem: 'A imagem ainda está sendo preparada. Nova consulta em 1 minuto.',
+    });
+  }
+  const publicar = new URLSearchParams();
+  publicar.set('creation_id', creationId);
+  publicar.set('access_token', token);
+  let publicado;
+  try {
+    publicado = await chamarInstagram(`https://graph.instagram.com/${versao}/${igId}/media_publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: publicar.toString(),
+    });
+  } catch {
+    return json({ ok: false, error: 'Não foi possível publicar o post.' }, 502);
+  }
+  if (!publicado.ok || publicado.data?.error || !publicado.data?.id) {
+    return json({ ok: false, error: limparErroInstagram(publicado.data?.error?.message) }, 400);
+  }
+  await gravarTesteInstagram(env, cnpj, app, null, null);
+  const postId = String(publicado.data.id);
+  await registrarEvento(env, cnpj, app, 'instagram', `post de teste publicado: ${postId}`);
+  return json({ ok: true, etapa: 'publicado', post_id: postId, mensagem: `Post publicado. ID ${postId}. Pode apagar no Instagram.` });
 }
 
 async function testarInstagram(cnpj, app, request, env) {
@@ -1775,7 +1904,7 @@ async function vinculoDoContador(sess, url, env) {
 }
 
 const ROTA_CONTADOR = /^\/api\/admin\/contadores\/(\d+)$/;
-const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/instagram/testar|/instagram/renovar)?$`);
+const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/instagram/testar|/instagram/renovar|/instagram/post-teste)?$`);
 const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
 async function rotaAdmin(request, env, url) {
@@ -1838,6 +1967,7 @@ async function rotaAdmin(request, env, url) {
     if (sub === '/instalacao' && request.method === 'DELETE') return liberarTrocaInstalacao(cnpj, app, env);
     if (sub === '/instagram/testar' && request.method === 'POST') return testarInstagram(cnpj, app, request, env);
     if (sub === '/instagram/renovar' && request.method === 'POST') return renovarInstagram(cnpj, app, request, env);
+    if (sub === '/instagram/post-teste' && request.method === 'POST') return publicarPostTeste(cnpj, app, request, env);
     if (!sub && request.method === 'GET') return detalheCliente(cnpj, app, env);
     if (!sub && request.method === 'PUT') return atualizarCliente(cnpj, app, request, env);
     if (!sub && request.method === 'DELETE') return excluirCliente(cnpj, app, env);

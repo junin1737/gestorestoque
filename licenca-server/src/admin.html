@@ -410,6 +410,9 @@
       <button class="btn ghost" id="d-ig-testar" type="button">Testar conexão</button>
       <button class="btn ghost" id="d-ig-renovar" type="button">Renovar agora</button>
     </div>
+    <div class="ig-acoes">
+      <button class="btn ghost" id="d-ig-postar" type="button">Publicar post de teste</button>
+    </div>
     <p class="sub" id="d-ig-resultado"></p>
     <p class="sub" id="d-ig-info">O token fica só neste painel. O Gestor da loja vê se a conta está informada, sem receber o token.</p>
     <p class="sub">A renovação só funciona com o token tendo mais de 24 horas.</p>
@@ -1395,6 +1398,71 @@ $('#d-ig-testar').addEventListener('click', async () => {
   const texto = r.mensagem || r.error || 'Falha ao testar a conexão.';
   mostrarResultadoIg(texto, !r.ok);
   if (!r.ok) toast(texto, true);
+});
+
+let igPostCiclo = 0;
+let igPostTimer = 0;
+function cancelarPostTeste() {
+  igPostCiclo += 1;
+  clearTimeout(igPostTimer);
+}
+function esperarPost(ms, ciclo) {
+  return new Promise((resolve) => {
+    clearTimeout(igPostTimer);
+    igPostTimer = setTimeout(() => resolve(ciclo === igPostCiclo), ms);
+  });
+}
+function travarInstagram(travado) {
+  ['d-ig-testar', 'd-ig-renovar', 'd-ig-postar'].forEach((id) => {
+    const botao = document.getElementById(id);
+    if (botao) botao.disabled = travado;
+  });
+}
+$('#dlg-cliente').addEventListener('close', cancelarPostTeste);
+
+$('#d-ig-postar').addEventListener('click', async () => {
+  const usuario = ($('#d-ig-usuario').value || '').trim() || 'esta conta';
+  if (!confirm(`Publicar um post de teste em ${usuario}? Ele aparece no Instagram e pode ser apagado depois.`)) return;
+  const ciclo = ++igPostCiclo;
+  travarInstagram(true);
+  mostrarResultadoIg('Criando o container da imagem…', false);
+  try {
+    const criado = await api(`${rotaCliente(st.atual)}/instagram/post-teste`, {
+      method: 'POST',
+      body: { etapa: 'criar', token: $('#d-ig-token').value, ig_user_id: $('#d-ig-user-id').value },
+    });
+    if (ciclo !== igPostCiclo) return;
+    if (!criado.ok) {
+      mostrarResultadoIg(criado.error || 'Falha ao criar o container.', true);
+      toast(criado.error || 'Falha ao criar o container.', true);
+      return;
+    }
+    mostrarResultadoIg(criado.mensagem, false);
+    let creationId = criado.creation_id;
+    for (let tentativa = 0; tentativa < 10; tentativa += 1) {
+      const consulta = await api(`${rotaCliente(st.atual)}/instagram/post-teste`, {
+        method: 'POST',
+        body: { etapa: 'consultar', creation_id: creationId, token: $('#d-ig-token').value, ig_user_id: $('#d-ig-user-id').value },
+      });
+      if (ciclo !== igPostCiclo) return;
+      if (!consulta.ok) {
+        mostrarResultadoIg(consulta.error || 'Falha ao consultar o container.', true);
+        toast(consulta.error || 'Falha ao consultar o container.', true);
+        return;
+      }
+      creationId = consulta.creation_id || creationId;
+      mostrarResultadoIg(consulta.mensagem, false);
+      if (consulta.etapa === 'publicado') {
+        toast(consulta.mensagem);
+        return;
+      }
+      const seguiu = await esperarPost(Math.max(60000, Number(consulta.espera_ms) || 60000), ciclo);
+      if (!seguiu) return;
+    }
+    mostrarResultadoIg('A imagem ainda não ficou pronta. Tente publicar de novo em alguns minutos.', true);
+  } finally {
+    if (ciclo === igPostCiclo) travarInstagram(false);
+  }
 });
 
 $('#d-ig-renovar').addEventListener('click', async () => {
