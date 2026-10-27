@@ -33,7 +33,7 @@ binding = "FOTOS"
 bucket_name = "gestor-ofertas"
 
 [vars]
-FOTOS_PUBLIC_BASE = "https://pub-b4ce55fc842145b9a0772045f8271a9c.r2.dev"
+FOTOS_PUBLIC_BASE = "https://fotos.smsjrdeveloper.com.br"
 
 # Segredos (wrangler secret put ...):
 #   LICENCA_PRIVATE_KEY  chave Ed25519 PKCS8 em PEM (par da pública embutida em server/licenca.js)
