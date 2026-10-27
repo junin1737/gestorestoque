@@ -65,7 +65,7 @@ const MODULOS = {
   },
   central_ofertas: {
     label: 'Central de Ofertas',
-    default: { acesso: false },
+    default: { acesso: false, preco: false },
   },
 };
 
@@ -359,6 +359,14 @@ function lerSomenteComEstoque(cfg) {
   return Number(cfg && cfg.somente_com_estoque) === 1 ? 1 : 0;
 }
 
+function lerProdutosSimilares(cfg) {
+  return Number(cfg && cfg.produtos_similares) === 1 ? 1 : 0;
+}
+
+function lerConsiderarQtdOfertas(cfg) {
+  return Number(cfg && cfg.considerar_qtd_ofertas) === 1 ? 1 : 0;
+}
+
 const MENSAGEM_ANIVERSARIO_PADRAO = 'Olá {apelido}, feliz aniversário! A loja deseja um dia especial.';
 
 function lerMensagemAniversario(cfg) {
@@ -392,6 +400,8 @@ module.exports = {
   lerUsaManage,
   lerIgnorarReceberCartao,
   lerSomenteComEstoque,
+  lerProdutosSimilares,
+  lerConsiderarQtdOfertas,
   lerMensagemAniversario,
   MENSAGEM_ANIVERSARIO_PADRAO,
   usaManageDoPedido,

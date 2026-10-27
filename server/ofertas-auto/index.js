@@ -97,12 +97,20 @@ function montar(router, deps) {
   }
 
   function podeAlterarPreco(req) {
-  const u = req.usuario;
-  if (!u) return false;
-  if (u.supervisor) return true;
-  const papel = (lerConfig().usuarios || []).find((x) => Number(x.id) === Number(u.id));
-  return papel?.papel === 'preco';
-}
+    const u = req.usuario;
+    if (!u) return false;
+    if (u.supervisor) return true;
+    if (u.permissoes?.central_ofertas?.preco === true) return true;
+    const papel = (lerConfig().usuarios || []).find((x) => Number(x.id) === Number(u.id));
+    return papel?.papel === 'preco';
+  }
+
+  function configEfetiva() {
+    const config = lerConfig();
+    const flag = Number(loadAppConfig()?.considerar_qtd_ofertas);
+    if (flag === 0 || flag === 1) config.estoque.exigir_estoque_positivo = flag === 1;
+    return config;
+  }
 
 function equipe() {
     const usuarios = loadUsersConfig(loadAppConfig()).usuarios || [];
@@ -119,7 +127,7 @@ function equipe() {
 
   router.get('/central-ofertas/config', acesso, async (_req, res) => {
     try {
-      const config = lerConfig();
+      const config = configEfetiva();
       const campos = await conectores.erp.camposTexto();
       const sit = require('../licenca').situacao();
       const ig = {
@@ -148,6 +156,11 @@ function equipe() {
     try {
       const campos = await conectores.erp.camposTexto();
       const { config, janela } = sanitizar(req.body || {}, campos);
+      const { saveAppConfig, loadAppConfig: lerApp } = require('../config');
+      saveAppConfig({
+        ...lerApp(),
+        considerar_qtd_ofertas: config.estoque?.exigir_estoque_positivo ? 1 : 0,
+      });
       const dados = lerArquivo();
       dados.loja_id = await lojaId();
       dados.configuracao = config;
@@ -161,15 +174,24 @@ function equipe() {
   router.get('/central-ofertas/produtos', acesso, async (req, res) => {
     try {
       const data = String(req.query.data || hoje());
-      const config = lerConfig();
+      const config = configEfetiva();
       const mods = lerArquivo().produtos || {};
-      let lista = await conectores.erp.listarProdutos();
+      const filtros = {
+        q: req.query.q,
+        grupo: req.query.grupo,
+        com: req.query.com === '1',
+        promo: req.query.promo === '1',
+        ignorar: Object.entries(mods).filter(([, m]) => m?.ignorar_estoque).map(([id]) => id),
+      };
+      let lista = await conectores.erp.listarProdutos(filtros);
       if (req.query.vendidos === '1') {
         const totais = await conectores.erp.vendidos30();
         lista = lista.map((p) => ({ ...p, vendido_30d: Number(totais[String(p.id)] || 0) }));
       }
-      const grupos = [...new Set(lista.map((p) => String(p.categoria || '').trim()).filter(Boolean))]
-        .sort((a, b) => a.localeCompare(b, 'pt'));
+      const grupos = await conectores.erp.grupos().catch(() => (
+        [...new Set(lista.map((p) => String(p.categoria || '').trim()).filter(Boolean))]
+          .sort((a, b) => a.localeCompare(b, 'pt'))
+      ));
       res.json({
         ok: true,
         data,

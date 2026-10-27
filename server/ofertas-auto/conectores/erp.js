@@ -63,8 +63,22 @@ function camposTextoSimulado() {
 function criarErpSimulado() {
   return {
     modo: 'simulado',
-    async listarProdutos() {
-      return catalogoSimulado();
+    async listarProdutos(filtros = {}) {
+      let lista = catalogoSimulado();
+      const q = String(filtros.q || '').trim().toLowerCase();
+      if (q) {
+        lista = lista.filter((p) => [p.descricao, p.codigo, p.ean, p.id].some((v) => String(v || '').toLowerCase().includes(q)));
+      }
+      if (filtros.grupo) lista = lista.filter((p) => p.categoria === filtros.grupo);
+      if (filtros.com) {
+        const ignora = new Set((filtros.ignorar || []).map(String));
+        lista = lista.filter((p) => Number(p.estoque) > 0 || ignora.has(String(p.id)));
+      }
+      if (filtros.promo) lista = lista.filter((p) => Number(p.preco_promocional) > 0 && p.promocao_inicio && p.promocao_fim);
+      return lista;
+    },
+    async grupos() {
+      return [...new Set(catalogoSimulado().map((p) => p.categoria).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'pt'));
     },
     async lerProduto(id) {
       return catalogoSimulado().find((p) => String(p.id) === String(id)) || null;
@@ -125,7 +139,7 @@ function linhaProduto(r, texto) {
   };
 }
 
-function sqlLista(mapa, comPromo) {
+function sqlLista(mapa, comPromo, filtros = {}, mapaPromo) {
   const cols = [
     `${ident(mapa.id)} AS ID`,
     `${ident(mapa.codigo)} AS CODIGO`,
@@ -143,26 +157,67 @@ function sqlLista(mapa, comPromo) {
     cols.push(`${ident(mapa.promocao_inicio)} AS PROMO_INI`);
     cols.push(`${ident(mapa.promocao_fim)} AS PROMO_FIM`);
   }
-  return `SELECT FIRST 400 ${cols.join(', ')} FROM ${ident(mapa.view)} WHERE COALESCE(${ident(mapa.status)}, 'A') = 'A' ORDER BY ${ident(mapa.codigo)} DESC`;
+  const where = [`COALESCE(${ident(mapa.status)}, 'A') = 'A'`];
+  const params = [];
+  const q = String(filtros.q || '').trim();
+  if (q) {
+    where.push(`(
+      UPPER(${ident(mapa.descricao)}) CONTAINING UPPER(?)
+      OR UPPER(COALESCE(${ident(mapa.ean)}, '')) CONTAINING UPPER(?)
+      OR CAST(${ident(mapa.codigo)} AS VARCHAR(20)) CONTAINING ?
+      OR CAST(${ident(mapa.id)} AS VARCHAR(20)) CONTAINING ?
+    )`);
+    params.push(q, q, q, q);
+  }
+  if (filtros.grupo) {
+    where.push(`${ident(mapa.categoria)} = ?`);
+    params.push(String(filtros.grupo));
+  }
+  if (filtros.com) {
+    const ids = (filtros.ignorar || []).map(Number).filter((n) => Number.isInteger(n)).slice(0, 300);
+    if (ids.length) where.push(`(COALESCE(${ident(mapa.estoque)}, 0) > 0 OR ${ident(mapa.id)} IN (${ids.join(',')}))`);
+    else where.push(`COALESCE(${ident(mapa.estoque)}, 0) > 0`);
+  }
+  if (filtros.promo && comPromo) {
+    where.push(`COALESCE(${ident(mapa.preco_promocional)}, 0) > 0`);
+    where.push(`${ident(mapa.promocao_inicio)} IS NOT NULL`);
+    where.push(`${ident(mapa.promocao_fim)} IS NOT NULL`);
+  } else if (filtros.promo && mapaPromo) {
+    where.push(`${ident(mapa.id)} IN (
+      SELECT ${ident(mapaPromo.id)} FROM ${ident(mapaPromo.view)}
+      WHERE COALESCE(${ident(mapaPromo.preco_promocional)}, 0) > 0
+        AND ${ident(mapaPromo.promocao_inicio)} IS NOT NULL
+        AND ${ident(mapaPromo.promocao_fim)} IS NOT NULL
+    )`);
+  }
+  const sql = `SELECT FIRST 8000 ${cols.join(', ')} FROM ${ident(mapa.view)} WHERE ${where.join(' AND ')} ORDER BY ${ident(mapa.codigo)} DESC`;
+  return { sql, params };
 }
 
 function criarErpReal(deps) {
   return {
     modo: 'real',
-    async listarProdutos() {
+    async listarProdutos(filtros = {}) {
       const { withDb, query, activeTargets } = deps;
       return withDb(async (db, cfg) => {
         const alvos = activeTargets(cfg);
         const soManage = alvos.length === 1 && alvos[0].manage;
         const mapa = soManage ? mapeamento.manage : mapeamento.clipp;
-        const rows = await query(db, sqlLista(mapa, soManage));
+        const temManage = alvos.some((a) => a.manage);
+        const consulta = sqlLista(mapa, soManage, filtros, temManage && !soManage ? mapeamento.manage : null);
+        const rows = await query(db, consulta.sql, consulta.params);
         const produtos = rows.map((r) => linhaProduto(r, soManage ? 'DESC_CMPL' : 'DESC_CMPL'));
         if (soManage || !alvos.some((a) => a.manage) || !produtos.length) return produtos;
         const m = mapeamento.manage;
         const ids = produtos.map((p) => Number(p.id)).filter((n) => Number.isInteger(n));
         if (!ids.length) return produtos;
-        const promoSql = `SELECT ${ident(m.id)} AS ID, ${ident(m.preco_promocional)} AS PROMO, ${ident(m.promocao_inicio)} AS PROMO_INI, ${ident(m.promocao_fim)} AS PROMO_FIM FROM ${ident(m.view)} WHERE ${ident(m.id)} IN (${ids.map(() => '?').join(',')})`;
-        const promo = await query(db, promoSql, ids).catch(() => []);
+        const promo = [];
+        for (let i = 0; i < ids.length; i += 300) {
+          const pedaco = ids.slice(i, i + 300);
+          const promoSql = `SELECT ${ident(m.id)} AS ID, ${ident(m.preco_promocional)} AS PROMO, ${ident(m.promocao_inicio)} AS PROMO_INI, ${ident(m.promocao_fim)} AS PROMO_FIM FROM ${ident(m.view)} WHERE ${ident(m.id)} IN (${pedaco.map(() => '?').join(',')})`;
+          const parte = await query(db, promoSql, pedaco).catch(() => []);
+          promo.push(...parte);
+        }
         const porId = new Map(promo.map((r) => [String(r.ID), linhaProduto(r, 'DESC_CMPL')]));
         return produtos.map((p) => {
           const extra = porId.get(p.id);
@@ -174,6 +229,19 @@ function criarErpReal(deps) {
             promocao_fim: extra.promocao_fim,
           };
         });
+      });
+    },
+    async grupos() {
+      const { withDb, query, activeTargets } = deps;
+      return withDb(async (db, cfg) => {
+        const alvos = activeTargets(cfg);
+        const mapa = alvos.length === 1 && alvos[0].manage ? mapeamento.manage : mapeamento.clipp;
+        const rows = await query(
+          db,
+          `SELECT DISTINCT ${ident(mapa.categoria)} AS G FROM ${ident(mapa.view)}
+           WHERE COALESCE(${ident(mapa.status)}, 'A') = 'A' AND ${ident(mapa.categoria)} IS NOT NULL`
+        );
+        return rows.map((r) => String(r.G || '').trim()).filter(Boolean).sort((a, b) => a.localeCompare(b, 'pt'));
       });
     },
     async lerProduto(id) {

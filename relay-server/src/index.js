@@ -239,18 +239,33 @@ function apelidoDoHost(hostname, dominio) {
 }
 
 const cacheApelidos = new Map();
+function urlPropriaSegura(v) {
+  try {
+    const u = new URL(String(v || ''));
+    if (u.protocol !== 'https:') return '';
+    if (u.pathname !== '/mtgestoronline') return '';
+    const host = u.hostname.toLowerCase();
+    if (!host || host === 'smsjrdeveloper.com.br' || host.endsWith('.smsjrdeveloper.com.br')) return '';
+    return `${u.origin}/mtgestoronline`;
+  } catch {
+    return '';
+  }
+}
+
 async function registroApelido(env, apelido) {
   let tunel = '';
   let anterior = '';
+  let urlLoja = '';
   try {
     const r = await env.APELIDO.get(env.APELIDO.idFromName(apelido)).fetch('https://apelido/');
     const j = await r.json();
     tunel = String(j.tunel || '');
     anterior = String(j.anterior || '');
+    urlLoja = String(j.url || '');
   } catch { /* trata como inexistente */ }
   if (!ID_RE.test(tunel)) tunel = '';
   if (!ID_RE.test(anterior)) anterior = '';
-  return { tunel, anterior };
+  return { tunel, anterior, url: urlPropriaSegura(urlLoja) };
 }
 
 function cookiesDaRequisicao(request) {
@@ -307,11 +322,11 @@ async function tunelDoApelido(env, apelido) {
   return tunel;
 }
 
-async function registrarApelido(env, apelido, tunel, cnpj) {
+async function registrarApelido(env, apelido, tunel, cnpj, url) {
   try {
     const r = await env.APELIDO.get(env.APELIDO.idFromName(apelido)).fetch('https://apelido/', {
       method: 'PUT',
-      body: JSON.stringify({ tunel, cnpj }),
+      body: JSON.stringify({ tunel, cnpj, url: urlPropriaSegura(url) }),
     });
     if (r.ok) cacheApelidos.set(apelido, { tunel, em: Date.now() });
   } catch { /* o Gestor continua usando o link /t/ */ }
@@ -369,7 +384,9 @@ export default {
       const resp = await stub.fetch(new Request(request, { headers }));
       // O NSE vem da licença assinada: só a instalação dona dele aponta o endereço para o seu túnel.
       const apelido = apelidoDaNse(lic.dados.nse);
-      if (resp.status === 101 && apelido) ctx.waitUntil(registrarApelido(env, apelido, id, String(lic.dados.cnpj)));
+      if (resp.status === 101 && apelido) {
+        ctx.waitUntil(registrarApelido(env, apelido, id, String(lic.dados.cnpj), urlPropriaSegura(lic.dados.url_propria)));
+      }
       return resp;
     }
 
@@ -407,15 +424,19 @@ export default {
       return comSeguranca(resp, request);
     }
 
-    const favorito = url.pathname.match(/^\/f\/([a-z0-9]{4,40})\/?$/);
+    const favorito = url.pathname.match(/^\/(?:f|i)\/([a-z0-9]{4,40})\/?$/);
     if (favorito && request.method === 'GET') {
       const apelido = favorito[1];
+      const interno = url.pathname.startsWith('/i/');
       if (!APELIDO_RE.test(apelido) || RESERVADOS.has(apelido)) {
         return comSeguranca(pagina('Endereço não encontrado', 'Nenhuma loja está usando este endereço. Confira o link fixo na tela do Gestor Estoque, no computador da loja.', 404), request);
       }
       const reg = await registroApelido(env, apelido);
       if (!reg.tunel) {
         return comSeguranca(pagina('Loja desconectada', 'O computador da loja ainda não conectou com este endereço. A página tenta de novo sozinha.', 503, true), request);
+      }
+      if (!interno && reg.url && request.headers.get('x-gestor-interno') !== '1') {
+        return comSeguranca(Response.redirect(reg.url, 302), request);
       }
       return comSeguranca(entradaFavorito(request, apelido, reg), request);
     }
@@ -447,8 +468,9 @@ export class Apelido {
       if (!ID_RE.test(tunel) || !cnpj) return new Response('Inválido.', { status: 400 });
       const atual = await this.ctx.storage.get('apelido');
       if (atual && atual.cnpj !== cnpj) return new Response('Endereço pertence a outra empresa.', { status: 409 });
-      if (!atual || atual.tunel !== tunel) {
-        const proximo = { tunel, cnpj, desde: new Date().toISOString() };
+      const url = urlPropriaSegura(dados.url);
+      if (!atual || atual.tunel !== tunel || String(atual.url || '') !== url) {
+        const proximo = { tunel, cnpj, url, desde: atual?.desde || new Date().toISOString() };
         if (atual?.tunel && atual.tunel !== tunel) proximo.anterior = atual.tunel;
         else if (atual?.anterior) proximo.anterior = atual.anterior;
         await this.ctx.storage.put('apelido', proximo);
@@ -456,7 +478,7 @@ export class Apelido {
       return new Response('ok');
     }
     const atual = await this.ctx.storage.get('apelido');
-    return Response.json({ tunel: atual?.tunel || '', anterior: atual?.anterior || '' });
+    return Response.json({ tunel: atual?.tunel || '', anterior: atual?.anterior || '', url: atual?.url || '' });
   }
 }
 

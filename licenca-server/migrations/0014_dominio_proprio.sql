@@ -1,0 +1,2 @@
+ALTER TABLE clientes ADD COLUMN dominio_proprio TEXT;
+ALTER TABLE clientes ADD COLUMN usa_dominio INTEGER NOT NULL DEFAULT 0;

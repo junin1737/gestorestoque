@@ -13,6 +13,8 @@ const {
   lerUsaManage,
   lerIgnorarReceberCartao,
   lerSomenteComEstoque,
+  lerProdutosSimilares,
+  lerConsiderarQtdOfertas,
   lerMensagemAniversario,
   usaManageDoPedido,
   CHAVES_DASHBOARD,
@@ -197,6 +199,8 @@ router.get('/config', (req, res) => {
       usa_manage: lerUsaManage(cfg),
       ignorarReceberCartao: lerIgnorarReceberCartao(cfg),
       somenteComEstoque: lerSomenteComEstoque(cfg),
+      produtosSimilares: lerProdutosSimilares(cfg),
+      considerarQtdOfertas: lerConsiderarQtdOfertas(cfg),
       mensagemAniversario: lerMensagemAniversario(cfg),
     },
     modulos: MODULOS,
@@ -216,6 +220,18 @@ router.post('/preferencias/somente-estoque', (req, res) => {
   const somenteComEstoque = req.body?.somenteComEstoque === true || Number(req.body?.somenteComEstoque) === 1 ? 1 : 0;
   saveAppConfig({ ...current, somente_com_estoque: somenteComEstoque });
   res.json({ ok: true, somenteComEstoque });
+});
+
+router.post('/preferencias/produtos', (req, res) => {
+  const current = loadAppConfig();
+  const produtosSimilares = req.body?.produtosSimilares === true || Number(req.body?.produtosSimilares) === 1 ? 1 : 0;
+  const considerarQtdOfertas = req.body?.considerarQtdOfertas === true || Number(req.body?.considerarQtdOfertas) === 1 ? 1 : 0;
+  saveAppConfig({
+    ...current,
+    produtos_similares: produtosSimilares,
+    considerar_qtd_ofertas: considerarQtdOfertas,
+  });
+  res.json({ ok: true, produtosSimilares, considerarQtdOfertas });
 });
 
 router.post('/dashboard/opcoes', (req, res) => {
@@ -572,6 +588,7 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
   try {
     const busca = String(req.query.q || '').trim();
     const statusFiltro = String(req.query.status || 'A').trim().toUpperCase();
+    const buscaPorBarras = /^\d+$/.test(busca) && (String(req.query.barras || '') === '1' || busca.length > 5);
     const data = await withDb(async (db, appCfg) => {
       const targets = activeTargets(appCfg);
       const t = targets[0].tables;
@@ -667,8 +684,43 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
         LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
         ORDER BY ${orderBy}`;
-      const rows = await query(db, sql, params);
-      return rows.map(mapProdutoRow);
+      let rows = await query(db, sql, params);
+      let focoId = null;
+      if (Number(appCfg?.produtos_similares) === 1 && buscaPorBarras && rows.length) {
+        const foco = rows.find((r) => String(r.COD_BARRAS || '').trim() === busca) || rows[0];
+        focoId = Number(foco.ID_IDENTIFICADOR);
+        let gradeWhere = 'E.ID_ESTOQUE = ?';
+        if (statusFiltro === 'I') gradeWhere += ` AND E.STATUS = 'I'`;
+        else if (statusFiltro !== 'ALL' && statusFiltro !== '*') gradeWhere += ` AND (E.STATUS = 'A' OR E.STATUS IS NULL)`;
+        const grade = await query(db, `
+          SELECT
+            E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
+            G.DESCRICAO AS GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO,
+            P.QTD_ATUAL, P.QTD_RESERV, P.COD_BARRA AS COD_BARRAS, P.REFERENCIA, P.DESC_CMPL,
+            E.GRADE_SERIE, P.CONTROLA_LOTE_VENDA, P.ID_NIVEL1, P.ID_NIVEL2,
+            N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO, E.STATUS
+          FROM ${t.estoque} E
+          JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
+          JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+          LEFT JOIN ${t.grupo} G ON G.ID_GRUPO = E.ID_GRUPO
+          LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
+          LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
+          WHERE ${gradeWhere}
+          ORDER BY I.ID_IDENTIFICADOR`, [foco.ID_ESTOQUE]);
+        if (grade.length > 1) {
+          rows = [
+            ...grade.filter((r) => Number(r.ID_IDENTIFICADOR) === focoId),
+            ...grade.filter((r) => Number(r.ID_IDENTIFICADOR) !== focoId),
+          ];
+        }
+      }
+      return rows.map((r) => {
+        const item = mapProdutoRow(r);
+        if (focoId == null || rows.length < 2) return item;
+        item.foco = Number(r.ID_IDENTIFICADOR) === focoId;
+        item.similar = !item.foco;
+        return item;
+      });
     });
     res.json({ ok: true, itens: data.map((it) => ocultarCusto(req, it)) });
   } catch (err) {

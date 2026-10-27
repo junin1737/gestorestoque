@@ -112,6 +112,37 @@ function centralOfertasAtiva(cli) {
   return Number(cli?.central_ofertas) === 1;
 }
 
+let colunasDominioProntas = false;
+
+async function garantirDominio(env) {
+  if (colunasDominioProntas) return;
+  const colunas = ['dominio_proprio TEXT', 'usa_dominio INTEGER NOT NULL DEFAULT 0'];
+  for (const coluna of colunas) {
+    try {
+      await env.DB.prepare(`ALTER TABLE clientes ADD COLUMN ${coluna}`).run();
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (!/duplicate column/i.test(msg)) throw e;
+    }
+  }
+  colunasDominioProntas = true;
+}
+
+function hostProprio(v) {
+  let s = String(v || '').trim().toLowerCase();
+  s = s.replace(/^[a-z]+:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '').replace(/\.$/, '');
+  if (s.startsWith('www.')) s = s.slice(4);
+  if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)+$/.test(s)) return '';
+  if (s === 'smsjrdeveloper.com.br' || s.endsWith('.smsjrdeveloper.com.br')) return '';
+  return s;
+}
+
+function urlPropriaCliente(cli) {
+  if (Number(cli?.usa_dominio) !== 1) return '';
+  const host = hostProprio(cli?.dominio_proprio);
+  return host ? `https://${host}/mtgestoronline` : '';
+}
+
 let colunasInstagramProntas = false;
 
 async function garantirInstagram(env) {
@@ -306,6 +337,7 @@ async function check(request, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
   await garantirInstagram(env);
+  await garantirDominio(env);
   let body;
   try {
     body = await request.json();
@@ -424,6 +456,7 @@ async function check(request, env) {
     pacote_entrada: pacoteEntradaAtivo(cli),
     contador_vinculado: contadorVinculado(cli),
     central_ofertas: centralOfertasAtiva(cli),
+    url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });
   return json({
@@ -544,6 +577,7 @@ async function listarClientes(url, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
   await garantirInstagram(env);
+  await garantirDominio(env);
   const q = String(url.searchParams.get('q') || '').trim();
   const status = String(url.searchParams.get('status') || '').trim();
   const app = nomeApp(url.searchParams.get('app'));
@@ -735,6 +769,14 @@ function camposEditaveis(body) {
   }
   if (body.central_ofertas !== undefined) {
     out.central_ofertas = body.central_ofertas === true || body.central_ofertas === 1 || body.central_ofertas === '1' ? 1 : 0;
+  }
+  if (body.usa_dominio !== undefined) {
+    out.usa_dominio = body.usa_dominio === true || body.usa_dominio === 1 || body.usa_dominio === '1' ? 1 : 0;
+  }
+  if (body.dominio_proprio !== undefined) {
+    const host = hostProprio(body.dominio_proprio);
+    if (String(body.dominio_proprio || '').trim() && !host) throw new Error('Domínio próprio inválido. Informe o endereço do site, como www.loja.com.br.');
+    out.dominio_proprio = host || null;
   }
   if (body.ig_usuario !== undefined) out.ig_usuario = texto(body.ig_usuario, 80);
   if (body.ig_user_id !== undefined) out.ig_user_id = texto(String(body.ig_user_id || '').replace(/\D/g, ''), 40);
@@ -1290,6 +1332,7 @@ async function atualizarCliente(cnpj, app, request, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
   await garantirInstagram(env);
+  await garantirDominio(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
@@ -1297,6 +1340,9 @@ async function atualizarCliente(cnpj, app, request, env) {
   let revendaNova = null;
   try {
     campos = camposEditaveis(body);
+    const usaDominio = campos.usa_dominio !== undefined ? campos.usa_dominio : Number(cli.usa_dominio);
+    const hostDominio = campos.dominio_proprio !== undefined ? campos.dominio_proprio : cli.dominio_proprio;
+    if (Number(usaDominio) === 1 && !hostProprio(hostDominio)) throw new Error('Informe o domínio do site para usar o link próprio.');
     revendaNova = await conferirRevenda(env, campos);
     await conferirContador(env, campos);
   } catch (e) {
@@ -1321,6 +1367,8 @@ async function atualizarCliente(cnpj, app, request, env) {
       em_teste: 'teste grátis',
       pacote_entrada: 'pacote de entrada',
       central_ofertas: 'central de ofertas',
+      usa_dominio: 'domínio próprio',
+      dominio_proprio: 'domínio',
       ig_usuario: 'instagram',
       ig_user_id: 'id do instagram',
       ig_token: 'token do instagram',
@@ -1330,7 +1378,7 @@ async function atualizarCliente(cnpj, app, request, env) {
     const valor = (k) => {
       if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
       if (k === 'ig_token') return 'atualizado';
-      if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas') return campos[k] ? 'sim' : 'não';
+      if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas' || k === 'usa_dominio') return campos[k] ? 'sim' : 'não';
       if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
       return campos[k] ?? '—';
     };
@@ -1372,6 +1420,7 @@ async function licencaOffline(cnpj, app, request, env) {
     pacote_entrada: pacoteEntradaAtivo(cli),
     contador_vinculado: contadorVinculado(cli),
     central_ofertas: centralOfertasAtiva(cli),
+    url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });
   await registrarEvento(env, cnpj, app, 'licenca_offline', `${dias} dia(s)${nse ? ` · NSE ${nse}` : ''}`);

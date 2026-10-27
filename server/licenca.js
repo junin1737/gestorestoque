@@ -349,6 +349,7 @@ function situacao() {
     central_ofertas: dados.central_ofertas === true,
     instagram_configurado: dados.instagram_configurado === true,
     instagram_expira: dados.instagram_expira || null,
+    url_propria: /^https:\/\/[a-z0-9.-]+\/mtgestoronline$/.test(String(dados.url_propria || '')) ? dados.url_propria : '',
   };
   if (identidade?.cnpj && dados.cnpj !== identidade.cnpj) {
     return { ...out, liberado: false, status: 'outro_cnpj', mensagem: `A licença guardada é de outro CNPJ. Verificando a base atual… Se persistir, contate a ${CONTATO}.` };

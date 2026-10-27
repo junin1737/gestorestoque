@@ -185,12 +185,16 @@ function setCfgTab(tab) {
   stateCfgTab = tab || 'tema';
   state.cfgTab = stateCfgTab;
   $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
-  ['tema', 'tributos', 'saida', 'clientes', 'etiquetas'].forEach((id) => {
+  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'etiquetas'].forEach((id) => {
     const pane = $(`#cfg-tab-${id}`);
     if (pane) pane.hidden = id !== stateCfgTab;
   });
   const salvar = $('#cfg-params-salvar');
-  if (salvar) salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas';
+  if (salvar) {
+    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas';
+    const barra = salvar.closest('.toolbar');
+    if (barra) barra.hidden = salvar.hidden;
+  }
   if (stateCfgTab === 'etiquetas') window.Gondola?.onEtiquetas();
   if (stateCfgTab !== 'tema' && stateCfgTab !== 'etiquetas' && !cfgMontada) {
     cfgMontada = true;
@@ -924,6 +928,10 @@ async function bootstrap() {
   if (chkCartao) chkCartao.checked = Number(state.config.ignorarReceberCartao) === 1;
   const chkEstoque = $('#cfg-somente-estoque');
   if (chkEstoque) chkEstoque.checked = Number(state.config.somenteComEstoque) === 1;
+  const chkSimilares = $('#cfg-produtos-similares');
+  if (chkSimilares) chkSimilares.checked = Number(state.config.produtosSimilares) === 1;
+  const chkQtdOfertas = $('#cfg-qtd-ofertas');
+  if (chkQtdOfertas) chkQtdOfertas.checked = Number(state.config.considerarQtdOfertas) === 1;
   const msgAniv = $('#cfg-aniv-msg');
   if (msgAniv) msgAniv.value = state.config.mensagemAniversario || 'Olá {apelido}, feliz aniversário! A loja deseja um dia especial.';
 
@@ -1419,6 +1427,20 @@ $('#cfg-somente-estoque')?.addEventListener('change', async (e) => {
   state.config.somenteComEstoque = somenteComEstoque;
 });
 
+async function salvarPreferenciaProdutos(origem) {
+  const produtosSimilares = $('#cfg-produtos-similares')?.checked ? 1 : 0;
+  const considerarQtdOfertas = $('#cfg-qtd-ofertas')?.checked ? 1 : 0;
+  const res = await api('/preferencias/produtos', { method: 'POST', body: { produtosSimilares, considerarQtdOfertas } });
+  if (!res.ok) {
+    if (origem) origem.checked = !origem.checked;
+    return;
+  }
+  state.config.produtosSimilares = produtosSimilares;
+  state.config.considerarQtdOfertas = considerarQtdOfertas;
+}
+$('#cfg-produtos-similares')?.addEventListener('change', (e) => salvarPreferenciaProdutos(e.target));
+$('#cfg-qtd-ofertas')?.addEventListener('change', (e) => salvarPreferenciaProdutos(e.target));
+
 $('#cfg-ignorar-cartao')?.addEventListener('change', async (e) => {
   const ignorarReceberCartao = e.target.checked ? 1 : 0;
   const res = await api('/dashboard/opcoes', { method: 'POST', body: { ignorarReceberCartao } });
@@ -1912,7 +1934,7 @@ function renderEstoqueLista() {
   const rows = list.map((it) => {
     const qtd = Number(it.qtd_atual || 0);
     const cls = qtdClass(qtd);
-    const active = Number(selectedId) === Number(it.id_identificador) ? 'is-active' : '';
+    const active = `${Number(selectedId) === Number(it.id_identificador) ? 'is-active' : ''}${it.foco ? ' is-foco' : ''}`;
     const inativo = String(it.status || 'A').toUpperCase() === 'I';
     const uni = escapeHtml(it.uni_medida || 'UN');
     const barras = it.cod_barras || it.referencia || '';
@@ -1933,8 +1955,12 @@ function renderEstoqueLista() {
           </tr>
         </thead>
         <tbody>
-          ${rows.map(({ it, qtd, cls, active, uni, barras }) => `
-            <tr class="${active}" data-id="${it.id_identificador}">
+          ${rows.map((row, i) => {
+            const { it, qtd, cls, active, uni, barras } = row;
+            const sep = it.similar && !rows[i - 1]?.it.similar
+              ? `<tr class="est-grade"><td colspan="${podeVerCusto() ? 6 : 5}">Produtos Similares / Mesma Grade</td></tr>`
+              : '';
+            return `${sep}<tr class="${active}" data-id="${it.id_identificador}">
               <td>${codigoEstoque(it)}</td>
               <td>
                 <div class="prod-name">${escapeHtml(it.descricao_exibicao || it.descricao)}</div>
@@ -1945,15 +1971,20 @@ function renderEstoqueLista() {
               <td class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</td>
               <td>${fmtMoney(it.prc_venda)}</td>
               ${podeVerCusto() ? `<td>${fmtMoney(it.prc_custo)}</td>` : ''}
-            </tr>`).join('')}
+            </tr>`;
+          }).join('')}
         </tbody>
       </table>
     </div>`;
 
   const cards = `
     <div class="est-cards">
-      ${rows.map(({ it, qtd, cls, active, uni, barras }) => `
-        <div class="est-card ${active}" data-id="${it.id_identificador}">
+      ${rows.map((row, i) => {
+        const { it, qtd, cls, active, uni, barras } = row;
+        const sep = it.similar && !rows[i - 1]?.it.similar
+          ? `<p class="est-grade">Produtos Similares / Mesma Grade</p>`
+          : '';
+        return `${sep}<div class="est-card ${active}" data-id="${it.id_identificador}">
           <div class="est-card-ico" aria-hidden="true">
             <svg viewBox="0 0 24 24"><path d="M3 8.5 12 4l9 4.5v11L12 20 3 15.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
           </div>
@@ -1963,7 +1994,8 @@ function renderEstoqueLista() {
             ${botaoCondicional(it)}
           </div>
           <span class="est-qtd ${cls}">${fmtNum(qtd)} ${uni}</span>
-        </div>`).join('')}
+        </div>`;
+      }).join('')}
     </div>`;
 
   box.innerHTML = table + cards;
@@ -1976,6 +2008,7 @@ function renderEstoqueLista() {
   box.querySelectorAll('[data-id]').forEach((row) => {
     row.addEventListener('click', () => openProduto(Number(row.dataset.id)));
   });
+  box.querySelector('.is-foco')?.scrollIntoView({ block: 'nearest' });
 }
 
 async function openProduto(idIdentificador) {
@@ -2947,6 +2980,12 @@ function htmlFormUsuario(u) {
             <option value="false" ${!u.supervisor && !u.permissoes?.central_ofertas?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        <label>Alterar preço nas ofertas
+          <select data-perm="central_ofertas.preco" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
+            <option value="true" ${u.supervisor || u.permissoes?.central_ofertas?.preco ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.supervisor && !u.permissoes?.central_ofertas?.preco ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
         <label>Alteração em massa
           <select data-perm="massa.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.massa?.acesso ? 'selected' : ''}>Sim</option>
@@ -3073,6 +3112,7 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         },
         central_ofertas: {
           acesso: $('[data-perm="central_ofertas.acesso"]', card)?.value === 'true',
+          preco: $('[data-perm="central_ofertas.preco"]', card)?.value === 'true',
         },
         massa: {
           acesso: $('[data-perm="massa.acesso"]', card)?.value === 'true',

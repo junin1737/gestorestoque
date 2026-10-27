@@ -88,12 +88,20 @@ function salvarConfig(cfg) {
  * Endereço que o cliente salva nos favoritos. Não leva o código de pareamento e não muda
  * quando o túnel reconecta: /f/<nse> aponta de novo para o computador da loja.
  */
-function linkFavoritos() {
+function linkGerado() {
   const apelido = apelidoDaLicenca();
-  if (apelido) return `${LINK_BASE}/f/${apelido}`;
+  if (apelido) return `${LINK_BASE}/i/${apelido}`;
   const cfg = carregarConfig();
   if (!ID_RE_TUNEL.test(String(cfg.tunelId || ''))) return '';
   return `${LINK_BASE}/t/${cfg.tunelId}`;
+}
+
+function linkFavoritos() {
+  const propria = String(licenca.situacao().url_propria || '');
+  if (/^https:\/\/[a-z0-9.-]+\/mtgestoronline$/.test(propria)) return propria;
+  const apelido = apelidoDaLicenca();
+  if (apelido) return `${LINK_BASE}/f/${apelido}`;
+  return linkGerado();
 }
 
 /** Link que funciona sem DNS do NSE: o computador do cliente é quem conhece o id do túnel. */
@@ -113,6 +121,8 @@ function status() {
     desde: estado.desde,
     ultimo_erro: cfg.ativo ? estado.ultimo_erro : null,
     link,
+    link_gerado: linkGerado(),
+    dominio_proprio: /^https:\/\/[a-z0-9.-]+\/mtgestoronline$/.test(String(licenca.situacao().url_propria || '')),
     servidor: LINK_BASE,
     aparelhos: aparelhos.listar(),
     validade: aparelhos.validade(),

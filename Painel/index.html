@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=273" />
+  <link rel="stylesheet" href="styles.css?v=274" />
   <link rel="stylesheet" href="importacao-nfe.css?v=248" />
 </head>
 <body>
@@ -974,6 +974,7 @@
         <div id="page-preferencias" class="page" hidden>
           <div class="tabs cfg-tabs" id="cfg-tabs">
             <button type="button" class="tab active" data-cfg-tab="tema">Tema</button>
+            <button type="button" class="tab" data-cfg-tab="produtos">Produtos</button>
             <button type="button" class="tab" data-cfg-tab="tributos">Conversão de Tributos</button>
             <button type="button" class="tab" data-cfg-tab="saida">Saída</button>
             <button type="button" class="tab" data-cfg-tab="clientes">Clientes</button>
@@ -1006,13 +1007,28 @@
               </label>
               <p class="hint">Marcado, essas contas saem da aba Financeiro e do recebido do gráfico.</p>
             </div>
+          </div>
+          <div id="cfg-tab-produtos" class="cfg-tab" hidden>
             <div class="pref-card">
-              <h3>Produtos</h3>
+              <h3>Busca</h3>
               <label class="pref-check">
                 <input type="checkbox" id="cfg-somente-estoque" />
                 <span>No condicional, pesquisar somente produtos com quantidade no estoque</span>
               </label>
               <p class="hint">Marcado, a busca do condicional só traz produto com quantidade maior que zero.</p>
+              <label class="pref-check">
+                <input type="checkbox" id="cfg-produtos-similares" />
+                <span>Produtos similares na busca</span>
+              </label>
+              <p class="hint">Marcado, ao bipar o código de barras a peça fica em destaque e, abaixo, aparecem as outras da mesma grade.</p>
+            </div>
+            <div class="pref-card">
+              <h3>Ofertas</h3>
+              <label class="pref-check">
+                <input type="checkbox" id="cfg-qtd-ofertas" />
+                <span>Considerar quantidade nas ofertas</span>
+              </label>
+              <p class="hint">Marcado, produto sem estoque não entra na oferta. Desmarcado, a quantidade não bloqueia o anúncio.</p>
             </div>
           </div>
           <div id="cfg-tab-tributos" class="cfg-tab" hidden>
@@ -1316,7 +1332,7 @@
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=262"></script>
   <script src="gondola.js?v=2"></script>
-  <script src="central-ofertas.js?v=4"></script>
-  <script src="app.js?v=271"></script>
+  <script src="central-ofertas.js?v=5"></script>
+  <script src="app.js?v=272"></script>
 </body>
 </html>

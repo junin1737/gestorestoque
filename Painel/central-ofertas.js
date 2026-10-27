@@ -8,7 +8,6 @@
     ['detalhes', 'Detalhes do item'],
     ['regra', 'Regra de estoque'],
     ['instagram', 'Conta Instagram'],
-    ['usuarios', 'Usuários'],
   ];
   const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
   const TIPOS = [
@@ -25,7 +24,6 @@
   let produtos = [];
   let grupos = [];
   let podePreco = false;
-  let vendidosProntos = false;
   let buscaTimer = 0;
   const filtros = { q: '', grupo: '', com: false, menos: false, promo: false };
   const MODO = {
@@ -109,16 +107,6 @@
       return `<p>Status: <strong>${esc(ig.status || 'desconectada')}</strong></p>
         <p class="hint">${ig.token_expira_em ? `Token informado no painel, válido até ${esc(ig.token_expira_em)}.` : 'Nenhuma conta informada no cadastro do cliente.'}</p>
         <p class="hint">Usuário, ID, token e validade ficam no cadastro do cliente, no painel. O token não vem para esta loja. Fotos: ${esc(fotos)}.</p>`;
-    }
-    if (aba === 'usuarios') {
-      const linhas = (estado.equipe || []).map((u) => `<label class="co-user"><span>${esc(u.nome)}${u.supervisor ? ' (supervisor)' : ''}</span>
-        <select data-co-user="${u.id}" ${u.supervisor ? 'disabled' : ''}>
-          <option value="agenda" ${u.papel !== 'preco' ? 'selected' : ''}>Só agenda</option>
-          <option value="preco" ${u.papel === 'preco' ? 'selected' : ''}>Pode alterar preço</option>
-        </select></label>`).join('');
-      return `<div class="co-lista">${linhas || '<p class="empty">Nenhum funcionário carregado.</p>'}</div>
-        <p class="hint">Quem só agenda não muda preço. A gravação do preço no ERP entra com a fila.</p>
-        <button type="button" class="btn primary" id="co-salvar">Salvar</button>`;
     }
     return htmlLista();
   }
@@ -263,11 +251,6 @@
         exigir_estoque_positivo: campo('co-exigir').checked,
         estoque_minimo_anuncio: Number(campo('co-minimo').value),
       };
-    } else if (aba === 'usuarios') {
-      c.usuarios = [...document.querySelectorAll('[data-co-user]')].map((el) => ({
-        id: Number(el.dataset.coUser),
-        papel: el.value,
-      }));
     }
   }
 
@@ -299,7 +282,7 @@
         if (campo('co-salvar')) lerFormulario();
         aba = btn.dataset.coAba;
         desenhar();
-        if (aba === 'lista') carregarLista(filtros.menos);
+        if (aba === 'lista') carregarLista();
       });
     });
     campo('co-salvar')?.addEventListener('click', salvar);
@@ -386,11 +369,11 @@
     campo('co-q')?.addEventListener('input', () => {
       filtros.q = campo('co-q').value;
       clearTimeout(buscaTimer);
-      buscaTimer = setTimeout(pintar, 160);
+      buscaTimer = setTimeout(() => carregarLista(), 280);
     });
     campo('co-grupo')?.addEventListener('change', () => {
       filtros.grupo = campo('co-grupo').value;
-      pintar();
+      carregarLista();
     });
     el.addEventListener('click', async (ev) => {
       const b = ev.target.closest('[data-co-filtro]');
@@ -398,8 +381,7 @@
       const k = b.dataset.coFiltro;
       filtros[k] = b.getAttribute('aria-pressed') !== 'true';
       b.setAttribute('aria-pressed', filtros[k] ? 'true' : 'false');
-      if (k === 'menos' && filtros.menos && !vendidosProntos) await carregarLista(true);
-      else pintar();
+      await carregarLista();
     });
     el.addEventListener('change', async (ev) => {
       const t = ev.target;
@@ -417,10 +399,21 @@
     });
   }
 
-  async function carregarLista(comVendidos) {
+  function queryLista() {
+    const qs = new URLSearchParams();
+    if (filtros.q) qs.set('q', filtros.q);
+    if (filtros.grupo) qs.set('grupo', filtros.grupo);
+    if (filtros.com) qs.set('com', '1');
+    if (filtros.promo) qs.set('promo', '1');
+    if (filtros.menos) qs.set('vendidos', '1');
+    const s = qs.toString();
+    return s ? `?${s}` : '';
+  }
+
+  async function carregarLista() {
     const miolo = document.getElementById('co-miolo');
     if (miolo && !produtos.length) miolo.innerHTML = '<p class="hint">Carregando produtos…</p>';
-    const r = await api(`/central-ofertas/produtos${comVendidos ? '?vendidos=1' : ''}`);
+    const r = await api(`/central-ofertas/produtos${queryLista()}`);
     if (!r.ok) {
       if (miolo) miolo.innerHTML = `<p class="erro">${esc(r.error || 'Falha ao ler os produtos.')}</p>`;
       return;
@@ -428,7 +421,6 @@
     produtos = r.produtos || [];
     grupos = r.grupos || [];
     podePreco = r.pode_preco === true;
-    if (comVendidos) vendidosProntos = true;
     const grupo = campo('co-grupo');
     if (grupo) {
       const atual = filtros.grupo;
@@ -450,7 +442,7 @@
     }
     estado = r;
     desenhar();
-    if (aba === 'lista') carregarLista(filtros.menos);
+    if (aba === 'lista') carregarLista();
   }
 
   function init(deps) {

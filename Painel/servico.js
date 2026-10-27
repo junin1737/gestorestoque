@@ -868,6 +868,14 @@ function renderOnline(o) {
   const link = $('#online-link');
   link.href = o.link;
   link.textContent = o.link;
+  const avisoDominio = $('#online-dominio-aviso');
+  if (avisoDominio) {
+    const proprio = !!o.dominio_proprio && o.link_gerado && o.link_gerado !== o.link;
+    avisoDominio.hidden = !proprio;
+    avisoDominio.textContent = proprio
+      ? `No site, encaminhe /mtgestoronline para ${o.link_gerado}.`
+      : '';
+  }
   const qrLink = o.pareamento?.link;
   if (o.ativo && qrLink && onlineQrDe !== qrLink) {
     onlineQrDe = qrLink;

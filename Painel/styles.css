@@ -1923,6 +1923,18 @@ html[data-theme="escuro"] .toolbar-select select {
 }
 .est-table tr { cursor: pointer; }
 .est-table tbody tr:hover { background: color-mix(in srgb, var(--text) 7%, var(--bg-elev)); }
+.est-grade {
+  padding: 0.55rem 0.75rem;
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
+  color: var(--text);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+.est-table tr.est-grade { cursor: default; }
+.est-table tr.est-grade td { color: var(--text); font-weight: 700; font-size: 0.75rem; }
+.est-table tr.is-foco td:first-child { box-shadow: inset 3px 0 0 var(--accent); }
+.est-card.is-foco { box-shadow: inset 3px 0 0 var(--accent); }
 .est-table tr.is-active {
   background: color-mix(in srgb, var(--accent) 22%, var(--bg-elev));
   box-shadow: inset 3px 0 0 var(--accent);
