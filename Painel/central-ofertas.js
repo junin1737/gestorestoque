@@ -27,7 +27,6 @@
   let podePreco = false;
   let vendidosProntos = false;
   let buscaTimer = 0;
-  let layoutEstreito = false;
   const filtros = { q: '', grupo: '', com: false, menos: false, promo: false };
   const MODO = {
     oferta: 'Oferta',
@@ -134,14 +133,14 @@
       `<option value="${esc(g)}" ${g === filtros.grupo ? 'selected' : ''}>${esc(g)}</option>`
     )).join('');
     return `<div class="co-est">
-      <div class="co-filtros">
-        <label>Buscar<input id="co-q" type="search" placeholder="Nome, código ou EAN" value="${esc(filtros.q)}" /></label>
-        <label>Grupo<select id="co-grupo">${opcoes}</select></label>
-        <div class="co-atalhos" role="group" aria-label="Filtros">
-          ${atalho('com', 'Com estoque')}
-          ${atalho('menos', 'Menos vendidos')}
-          ${atalho('promo', 'Promoção no ERP')}
-        </div>
+      <div class="co-barra">
+        <label class="co-busca">Buscar<input id="co-q" type="search" placeholder="Nome, código ou EAN" value="${esc(filtros.q)}" /></label>
+        <label class="co-grupo">Grupo<select id="co-grupo">${opcoes}</select></label>
+      </div>
+      <div class="co-atalhos" role="group" aria-label="Filtros">
+        ${atalho('com', 'Com estoque')}
+        ${atalho('menos', 'Menos vendidos')}
+        ${atalho('promo', 'Promoção no ERP')}
       </div>
       <div id="co-miolo"></div>
       <div class="co-rodape">
@@ -196,57 +195,43 @@
     return `<input class="co-data" type="date" data-co-campo="${nome}" data-co-id="${esc(p.id)}" value="${esc(valor || '')}" ${dis} />`;
   }
 
-  function htmlTabela(lista) {
+  function metaProduto(p) {
+    const partes = [p.codigo ? `Cód. ${p.codigo}` : '', p.ean ? `EAN ${p.ean}` : 'Sem EAN', p.categoria || ''];
+    return partes.filter(Boolean).join(' · ');
+  }
+
+  function htmlLinhas(lista) {
     const todos = lista.length > 0 && lista.every((p) => p.selecionado);
+    const cabeca = `<div class="co-lista-topo">
+      <label class="co-marcar"><input type="checkbox" id="co-todos" ${todos ? 'checked' : ''} /><span>Marcar os visíveis</span></label>
+      <span>${lista.length} produto${lista.length === 1 ? '' : 's'}</span>
+    </div>`;
+    if (!lista.length) return `<div class="co-lista-caixa">${cabeca}<p class="co-vazio">Nenhum produto com esses filtros.</p></div>`;
     const linhas = lista.map((p) => {
       const modo = p.modo || 'nenhum';
       const qtdCls = Number(p.estoque) < 0 ? ' is-neg' : '';
-      const foto = p.foto ? 'foto-ok' : 'foto-falta';
       const titulo = p.oferta?.ok ? '' : (p.oferta?.motivo || p.exposicao?.motivo || '');
-      return `<tr data-co-id="${esc(p.id)}">
-        <td class="meio"><input type="checkbox" data-co-sel="${esc(p.id)}" ${p.selecionado ? 'checked' : ''} /></td>
-        <td class="meio"><span class="co-pill ${foto}">${p.foto ? 'OK' : 'Falta'}</span></td>
-        <td class="co-cod">${esc(p.codigo)}</td>
-        <td><div class="co-nome">${esc(p.descricao)}</div><div class="co-sub">${p.ean ? `EAN ${esc(p.ean)}` : 'Sem EAN'}${p.categoria ? ` · ${esc(p.categoria)}` : ''}</div></td>
-        <td class="num co-qtd${qtdCls}">${esc(qtdTxt(p.estoque))}</td>
-        <td>${inputMoeda(p, 'preco', p.preco)}</td>
-        <td>${inputMoeda(p, 'promo', p.preco_promocional)}</td>
-        <td>${inputData(p, 'inicio', p.promocao_inicio)}</td>
-        <td>${inputData(p, 'fim', p.promocao_fim)}</td>
-        <td class="meio"><span class="co-pill ${modo}" title="${esc(titulo)}">${MODO[modo] || '—'}</span></td>
-      </tr>`;
-    }).join('');
-    return `<div class="co-tabela-wrap"><table class="co-tabela">
-      <colgroup>
-        <col class="c-sel" /><col class="c-foto" /><col class="c-cod" /><col class="c-nome" />
-        <col class="c-est" /><col class="c-preco" /><col class="c-preco" /><col class="c-data" /><col class="c-data" /><col class="c-modo" />
-      </colgroup>
-      <thead><tr>
-        <th class="meio"><input type="checkbox" id="co-todos" ${todos ? 'checked' : ''} /></th>
-        <th class="meio">Foto</th><th>Cód.</th><th>Produto</th><th class="num">Estoque</th>
-        <th class="num">Preço</th><th class="num">Preço promo</th><th>Início</th><th>Fim</th><th class="meio">Modo</th>
-      </tr></thead>
-      <tbody>${linhas || '<tr><td colspan="10" class="co-vazio">Nenhum produto com esses filtros.</td></tr>'}</tbody>
-    </table></div>`;
-  }
-
-  function htmlCards(lista) {
-    if (!lista.length) return '<p class="co-vazio">Nenhum produto com esses filtros.</p>';
-    return `<div class="co-cards">${lista.map((p) => {
-      const modo = p.modo || 'nenhum';
-      const foto = p.foto ? 'OK' : 'Falta';
-      return `<article class="co-card" data-co-id="${esc(p.id)}">
-        <input type="checkbox" data-co-sel="${esc(p.id)}" ${p.selecionado ? 'checked' : ''} />
-        <div class="co-card-nome"><div class="co-nome">${esc(p.descricao)}</div><div class="co-sub">${esc(p.codigo)} · ${p.ean ? `EAN ${esc(p.ean)}` : 'Sem EAN'} · ${foto} · ${esc(qtdTxt(p.estoque))}</div></div>
-        <span class="co-pill ${modo}">${MODO[modo] || '—'}</span>
-        <div class="co-card-campos">
+      const selo = modo === 'nenhum' ? '' : `<span class="co-pill ${modo}" title="${esc(titulo)}">${MODO[modo]}</span>`;
+      return `<article class="co-linha${p.selecionado ? ' is-on' : ''}" data-co-id="${esc(p.id)}">
+        <div class="co-linha-topo">
+          <label class="co-check-linha">
+            <input type="checkbox" data-co-sel="${esc(p.id)}" ${p.selecionado ? 'checked' : ''} />
+            <span class="co-ident">
+              <span class="co-nome">${esc(p.descricao)}</span>
+              <span class="co-sub">${esc(metaProduto(p))}${metaProduto(p) ? ' · ' : ''}<span class="co-estoque${qtdCls}">${esc(qtdTxt(p.estoque))}</span></span>
+            </span>
+          </label>
+          ${selo}
+        </div>
+        <div class="co-campos">
           <label>Preço${inputMoeda(p, 'preco', p.preco)}</label>
-          <label>Preço promo${inputMoeda(p, 'promo', p.preco_promocional)}</label>
+          <label>Promoção${inputMoeda(p, 'promo', p.preco_promocional)}</label>
           <label>Início${inputData(p, 'inicio', p.promocao_inicio)}</label>
           <label>Fim${inputData(p, 'fim', p.promocao_fim)}</label>
         </div>
       </article>`;
-    }).join('')}</div>`;
+    }).join('');
+    return `<div class="co-lista-caixa">${cabeca}<div class="co-linhas">${linhas}</div></div>`;
   }
 
   function lerFormulario() {
@@ -325,16 +310,11 @@
     if (aba === 'lista') ligarLista(el);
   }
 
-  function estreito() {
-    return window.matchMedia('(max-width: 860px)').matches;
-  }
-
   function pintar() {
     const miolo = document.getElementById('co-miolo');
     if (!miolo) return;
-    layoutEstreito = estreito();
     const lista = visiveis();
-    miolo.innerHTML = layoutEstreito ? htmlCards(lista) : htmlTabela(lista);
+    miolo.innerHTML = htmlLinhas(lista);
     const todos = campo('co-todos');
     if (todos) {
       const marcados = lista.filter((p) => p.selecionado).length;
@@ -373,7 +353,7 @@
 
   async function salvarCampos(id) {
     if (!podePreco) return;
-    const linha = raiz()?.querySelector(`tr[data-co-id="${CSS.escape(String(id))}"], .co-card[data-co-id="${CSS.escape(String(id))}"]`);
+    const linha = raiz()?.querySelector(`.co-linha[data-co-id="${CSS.escape(String(id))}"]`);
     if (!linha) return;
     const val = (nome) => linha.querySelector(`[data-co-campo="${nome}"]`)?.value ?? '';
     const preco = val('preco');
@@ -430,7 +410,7 @@
       if (t.dataset.coSel) await salvarSelecao([t.dataset.coSel], t.checked);
     });
     el.addEventListener('focusout', (ev) => {
-      const origem = ev.target.closest?.('tr, .co-card');
+      const origem = ev.target.closest?.('.co-linha');
       if (!origem?.dataset.coId) return;
       if (ev.relatedTarget && origem.contains(ev.relatedTarget)) return;
       salvarCampos(origem.dataset.coId);
@@ -477,10 +457,6 @@
     api = deps.api || api;
     showMsg = deps.showMsg || showMsg;
     esc = deps.escapeHtml || esc;
-    window.addEventListener('resize', () => {
-      if (aba !== 'lista' || !document.getElementById('co-miolo')) return;
-      if (estreito() !== layoutEstreito) pintar();
-    });
   }
 
   window.CentralOfertas = { init, onPageEnter };
