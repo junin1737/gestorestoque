@@ -164,6 +164,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M5 19c.8-3.2 3.2-5 7-5s6.2 1.8 7 5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Clientes
           </button>
+          <button class="nav-btn" data-page="central-ofertas" id="nav-central-ofertas" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 14.2 9H20l-4.6 3.5 1.8 5.5L12 14.8 6.8 18l1.8-5.5L4 9h5.8z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Central de Ofertas
+          </button>
           <button class="nav-btn" data-page="condicionais" id="nav-condicionais">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a1 1 0 0 1 1 1v14l-6-3-6 3V5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
             Condicionais
@@ -270,6 +274,13 @@
               </span>
               <strong>Consultar compras</strong>
               <span>NF-e emitidas contra o CNPJ</span>
+            </button>
+            <button type="button" id="dash-central-ofertas" class="dash-card" hidden>
+              <span class="dash-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M12 3.5 14.2 9H20l-4.6 3.5 1.8 5.5L12 14.8 6.8 18l1.8-5.5L4 9h5.8z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+              </span>
+              <strong>Central de Ofertas</strong>
+              <span>Ofertas liberadas para esta loja</span>
             </button>
             <button type="button" id="dash-alteracoes" class="dash-card" hidden>
               <span class="dash-ico" aria-hidden="true">
@@ -788,6 +799,10 @@
           </div>
         </div>
 
+        <div id="page-central-ofertas" class="page" hidden>
+          <p class="empty">A Central de Ofertas desta loja está liberada.</p>
+        </div>
+
         <div id="page-condicionais" class="page" hidden>
           <div class="cond-split" id="cond-split">
             <section class="cond-col cond-col-lista">
@@ -1081,6 +1096,7 @@
             <button type="button" data-page="dashboard" data-perfil="MT_ENTRADAS" data-secao="resumo" id="nav-dash-entradas-mobile" hidden>Dashboard de entradas</button>
             <button type="button" data-page="clientes" id="nav-clientes-mobile">Clientes</button>
             <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
+            <button type="button" data-page="central-ofertas" id="nav-central-ofertas-mobile" hidden>Central de Ofertas</button>
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
             <button type="button" data-page="contador" id="nav-contador-mobile" hidden>Alteração em massa</button>
@@ -1300,6 +1316,6 @@
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=262"></script>
   <script src="gondola.js?v=2"></script>
-  <script src="app.js?v=269"></script>
+  <script src="app.js?v=270"></script>
 </body>
 </html>

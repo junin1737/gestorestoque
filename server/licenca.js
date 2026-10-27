@@ -346,6 +346,7 @@ function situacao() {
     emitido_em: dados.emitido_em,
     pacote_entrada: dados.pacote_entrada === true,
     contador_vinculado: dados.contador_vinculado === true,
+    central_ofertas: dados.central_ofertas === true,
   };
   if (identidade?.cnpj && dados.cnpj !== identidade.cnpj) {
     return { ...out, liberado: false, status: 'outro_cnpj', mensagem: `A licença guardada é de outro CNPJ. Verificando a base atual… Se persistir, contate a ${CONTATO}.` };

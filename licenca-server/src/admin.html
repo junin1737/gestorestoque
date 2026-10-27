@@ -386,6 +386,13 @@
       </select>
     </label>
     <p class="sub">Com Sim, a loja aparece para o usuário MT Entradas e o Gestor dela mostra o acesso MT Entradas.</p>
+    <label>Central de Ofertas
+      <select id="d-central-ofertas">
+        <option value="0">Não</option>
+        <option value="1">Sim</option>
+      </select>
+    </label>
+    <p class="sub">Com Sim, o Gestor desta loja pode mostrar a aba Central de Ofertas para quem tiver a permissão.</p>
     <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
     <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
 
@@ -1152,6 +1159,7 @@ function preencherCliente(r) {
   $('#d-revenda').innerHTML = opcoesRevenda(c.revenda_id);
   preencherSelectContador(c.contador_id);
   $('#d-pacote-entrada').value = Number(c.pacote_entrada) === 1 ? '1' : '0';
+  $('#d-central-ofertas').value = Number(c.central_ofertas) === 1 ? '1' : '0';
   $('#d-mensagem').value = c.mensagem || '';
   $('#d-obs').value = c.observacao || '';
   $('#d-sup-1').value = '';
@@ -1309,6 +1317,7 @@ $('#d-salvar').addEventListener('click', async () => {
       revenda_id: $('#d-revenda').value || null,
       contador_id: $('#d-contador').value || null,
       pacote_entrada: $('#d-pacote-entrada').value === '1' ? 1 : 0,
+      central_ofertas: $('#d-central-ofertas').value === '1' ? 1 : 0,
       mensagem: $('#d-mensagem').value,
       observacao: $('#d-obs').value,
     };

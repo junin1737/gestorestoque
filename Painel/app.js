@@ -1180,6 +1180,7 @@ function iniciarConexao() {
 function guardarVinculos(licenca) {
   state.pacoteEntrada = licenca?.pacote_entrada === true;
   state.contadorVinculado = licenca?.contador_vinculado === true;
+  state.centralOfertas = licenca?.central_ofertas === true;
   const btn = $('#login-modo-contador');
   if (btn) btn.hidden = !state.contadorVinculado && !loginModoContador;
 }
@@ -1224,6 +1225,10 @@ async function enterApp() {
   const showCond = can('condicionais', 'acesso');
   if ($('#nav-condicionais')) $('#nav-condicionais').hidden = !showCond;
   if ($('#nav-condicionais-mobile')) $('#nav-condicionais-mobile').hidden = !showCond;
+  const showCentral = !!state.centralOfertas && can('central_ofertas', 'acesso');
+  if ($('#nav-central-ofertas')) $('#nav-central-ofertas').hidden = !showCentral;
+  if ($('#nav-central-ofertas-mobile')) $('#nav-central-ofertas-mobile').hidden = !showCentral;
+  if ($('#dash-central-ofertas')) $('#dash-central-ofertas').hidden = !showCentral;
   const cfgSrv = $('#btn-config-servidor');
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
@@ -1473,7 +1478,7 @@ function setNavActive(page) {
   $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === pagina && !atual));
   const mais = $('#btn-mais-mobile');
   if (mais) {
-    mais.classList.toggle('active', ['clientes', 'compras', 'condicionais', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
+    mais.classList.toggle('active', ['clientes', 'compras', 'condicionais', 'central-ofertas', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
   }
 }
 
@@ -1496,6 +1501,7 @@ $('#dash-importacao')?.addEventListener('click', () => showPage('importacao'));
 $('#dash-clientes')?.addEventListener('click', () => showPage('clientes'));
 $('#dash-compras')?.addEventListener('click', () => showPage('compras'));
 $('#dash-alteracoes')?.addEventListener('click', () => showPage('alteracoes'));
+$('#dash-central-ofertas')?.addEventListener('click', () => showPage('central-ofertas'));
 
 function scrollAppTop() {
   window.scrollTo(0, 0);
@@ -1551,6 +1557,10 @@ async function showPage(page) {
     showMsg('Sem permissão para condicionais.');
     page = 'dashboard';
   }
+  if (page === 'central-ofertas' && !(state.centralOfertas && can('central_ofertas', 'acesso'))) {
+    showMsg('Sem permissão para a Central de Ofertas.');
+    page = 'dashboard';
+  }
   if (page === 'empresas') page = 'dashboard';
   if (page === 'usuarios' && !state.usuario?.supervisor) {
     showMsg('Só o supervisor cadastra os usuários do painel.');
@@ -1590,6 +1600,7 @@ async function showPage(page) {
   if ($('#page-compras')) $('#page-compras').hidden = page !== 'compras';
   if ($('#page-clientes')) $('#page-clientes').hidden = page !== 'clientes';
   if ($('#page-condicionais')) $('#page-condicionais').hidden = page !== 'condicionais';
+  if ($('#page-central-ofertas')) $('#page-central-ofertas').hidden = page !== 'central-ofertas';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
   if ($('#page-contador')) $('#page-contador').hidden = page !== 'contador';
@@ -1647,6 +1658,9 @@ async function showPage(page) {
   } else if (page === 'condicionais') {
     $('#page-title').textContent = 'Condicionais';
     $('#page-sub').textContent = 'Peças reservadas para o cliente';
+  } else if (page === 'central-ofertas') {
+    $('#page-title').textContent = 'Central de Ofertas';
+    $('#page-sub').textContent = 'Ofertas liberadas para esta loja';
     window.Condicionais?.onPageEnter();
   } else if (page === 'gondola') {
     $('#page-title').textContent = 'Gôndola';
@@ -2926,6 +2940,12 @@ function htmlFormUsuario(u) {
             <option value="false" ${u.permissoes?.condicionais?.acesso === false ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        <label>Central de Ofertas
+          <select data-perm="central_ofertas.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
+            <option value="true" ${u.supervisor || u.permissoes?.central_ofertas?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.supervisor && !u.permissoes?.central_ofertas?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
         <label>Alteração em massa
           <select data-perm="massa.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.massa?.acesso ? 'selected' : ''}>Sim</option>
@@ -3050,6 +3070,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         condicionais: {
           acesso: $('[data-perm="condicionais.acesso"]', card)?.value === 'true',
         },
+        central_ofertas: {
+          acesso: $('[data-perm="central_ofertas.acesso"]', card)?.value === 'true',
+        },
         massa: {
           acesso: $('[data-perm="massa.acesso"]', card)?.value === 'true',
         },
@@ -3085,6 +3108,10 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     const showCond = can('condicionais', 'acesso');
     if ($('#nav-condicionais')) $('#nav-condicionais').hidden = !showCond;
     if ($('#nav-condicionais-mobile')) $('#nav-condicionais-mobile').hidden = !showCond;
+    const showCentral = !!state.centralOfertas && can('central_ofertas', 'acesso');
+    if ($('#nav-central-ofertas')) $('#nav-central-ofertas').hidden = !showCentral;
+    if ($('#nav-central-ofertas-mobile')) $('#nav-central-ofertas-mobile').hidden = !showCentral;
+    if ($('#dash-central-ofertas')) $('#dash-central-ofertas').hidden = !showCentral;
   }
   renderUsuarios();
   showToast('Usuários atualizados.');

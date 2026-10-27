@@ -1,0 +1,1 @@
+ALTER TABLE clientes ADD COLUMN central_ofertas INTEGER NOT NULL DEFAULT 0;

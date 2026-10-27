@@ -63,6 +63,10 @@ const MODULOS = {
     label: 'Dashboard de entradas',
     default: { acesso: false },
   },
+  central_ofertas: {
+    label: 'Central de Ofertas',
+    default: { acesso: false },
+  },
 };
 
 const CHAVES_DASHBOARD = ['dashboard_entradas', 'dashboard_contador', 'dashboard_padrao'];

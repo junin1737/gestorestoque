@@ -77,6 +77,7 @@ function pemParaDer(pem) {
 
 let chaveAssinatura = null;
 let colunaPacotePronta = false;
+let colunaCentralPronta = false;
 
 /** Pacote de Entrada (Sim/Não) no cadastro do cliente. 0 até a coluna existir. */
 async function garantirPacoteEntrada(env) {
@@ -90,8 +91,24 @@ async function garantirPacoteEntrada(env) {
   colunaPacotePronta = true;
 }
 
+/** Central de Ofertas (Sim/Não) no cadastro do cliente. 0 até a coluna existir. */
+async function garantirCentralOfertas(env) {
+  if (colunaCentralPronta) return;
+  try {
+    await env.DB.prepare('ALTER TABLE clientes ADD COLUMN central_ofertas INTEGER NOT NULL DEFAULT 0').run();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (!/duplicate column/i.test(msg)) throw e;
+  }
+  colunaCentralPronta = true;
+}
+
 function pacoteEntradaAtivo(cli) {
   return Number(cli?.pacote_entrada) === 1;
+}
+
+function centralOfertasAtiva(cli) {
+  return Number(cli?.central_ofertas) === 1;
 }
 
 function contadorVinculado(cli) {
@@ -262,6 +279,7 @@ async function instalacaoDaRequisicao(request, env, app) {
 
 async function check(request, env) {
   await garantirPacoteEntrada(env);
+  await garantirCentralOfertas(env);
   let body;
   try {
     body = await request.json();
@@ -379,6 +397,7 @@ async function check(request, env) {
     sup: sit.status === 'liberado' ? await supDoCliente(env, cli) : null,
     pacote_entrada: pacoteEntradaAtivo(cli),
     contador_vinculado: contadorVinculado(cli),
+    central_ofertas: centralOfertasAtiva(cli),
   });
   return json({
     ok: true,
@@ -496,6 +515,7 @@ async function login(request, env) {
 
 async function listarClientes(url, env) {
   await garantirPacoteEntrada(env);
+  await garantirCentralOfertas(env);
   const q = String(url.searchParams.get('q') || '').trim();
   const status = String(url.searchParams.get('status') || '').trim();
   const app = nomeApp(url.searchParams.get('app'));
@@ -683,6 +703,9 @@ function camposEditaveis(body) {
   if (body.pacote_entrada !== undefined) {
     out.pacote_entrada = body.pacote_entrada === true || body.pacote_entrada === 1 || body.pacote_entrada === '1' ? 1 : 0;
   }
+  if (body.central_ofertas !== undefined) {
+    out.central_ofertas = body.central_ofertas === true || body.central_ofertas === 1 || body.central_ofertas === '1' ? 1 : 0;
+  }
   return out;
 }
 
@@ -786,6 +809,7 @@ async function criarCliente(request, env) {
 
 async function atualizarCliente(cnpj, app, request, env) {
   await garantirPacoteEntrada(env);
+  await garantirCentralOfertas(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
@@ -810,10 +834,16 @@ async function atualizarCliente(cnpj, app, request, env) {
   }
   const outros = chaves.filter((k) => k !== 'status' && k !== 'bloqueado_em' && (campos[k] ?? null) !== (cli[k] ?? null));
   if (outros.length) {
-    const ROTULOS = { revenda_id: 'revenda', pago_ate: 'pago até', em_teste: 'teste grátis', pacote_entrada: 'pacote de entrada' };
+    const ROTULOS = {
+      revenda_id: 'revenda',
+      pago_ate: 'pago até',
+      em_teste: 'teste grátis',
+      pacote_entrada: 'pacote de entrada',
+      central_ofertas: 'central de ofertas',
+    };
     const valor = (k) => {
       if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
-      if (k === 'em_teste' || k === 'pacote_entrada') return campos[k] ? 'sim' : 'não';
+      if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas') return campos[k] ? 'sim' : 'não';
       if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
       return campos[k] ?? '—';
     };
@@ -833,6 +863,7 @@ async function excluirCliente(cnpj, app, env) {
 
 /** Código para colar na tela de serviço quando o cliente está sem internet. */
 async function licencaOffline(cnpj, app, request, env) {
+  await garantirCentralOfertas(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
@@ -853,6 +884,7 @@ async function licencaOffline(cnpj, app, request, env) {
     sup: await supDoCliente(env, cli),
     pacote_entrada: pacoteEntradaAtivo(cli),
     contador_vinculado: contadorVinculado(cli),
+    central_ofertas: centralOfertasAtiva(cli),
   });
   await registrarEvento(env, cnpj, app, 'licenca_offline', `${dias} dia(s)${nse ? ` · NSE ${nse}` : ''}`);
   const codigo = `MTL1.${b64url(enc.encode(JSON.stringify(licenca)))}`;
