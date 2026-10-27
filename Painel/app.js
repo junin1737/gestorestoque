@@ -1658,10 +1658,11 @@ async function showPage(page) {
   } else if (page === 'condicionais') {
     $('#page-title').textContent = 'Condicionais';
     $('#page-sub').textContent = 'Peças reservadas para o cliente';
+    window.Condicionais?.onPageEnter();
   } else if (page === 'central-ofertas') {
     $('#page-title').textContent = 'Central de Ofertas';
-    $('#page-sub').textContent = 'Ofertas liberadas para esta loja';
-    window.Condicionais?.onPageEnter();
+    $('#page-sub').textContent = 'Configurações e produtos da loja';
+    window.CentralOfertas?.onPageEnter();
   } else if (page === 'gondola') {
     $('#page-title').textContent = 'Gôndola';
     $('#page-sub').textContent = 'Etiquetas de preço';
@@ -4185,6 +4186,7 @@ window.Compras?.init({
 
 window.Condicionais?.init({ api });
 window.Clientes?.init({ api, showMsg, escapeHtml, getUsuario: () => state.usuario });
+window.CentralOfertas?.init({ api, showMsg, escapeHtml });
 window.Gondola?.init({
   api,
   showMsg,

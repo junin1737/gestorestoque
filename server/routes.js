@@ -3469,6 +3469,15 @@ router.post('/massa/aplicar', async (req, res) => {
   }
 });
 
+require('./ofertas-auto').montar(router, {
+  withDb,
+  query,
+  activeTargets,
+  loadAppConfig,
+  loadUsersConfig,
+  auth,
+});
+
 require('./etiquetas').montar(router, {
   withDb,
   query,

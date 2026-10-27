@@ -3165,3 +3165,19 @@ html[data-theme="escuro"] .compras-row:hover {
   .cli-aniv-grupo.is-mes { grid-column: auto; }
 }
 
+#page-central-ofertas .co-grade { display: grid; gap: 0.75rem; }
+@media (min-width: 720px) {
+  #page-central-ofertas .co-grade-2 { grid-template-columns: 1fr 1fr; }
+}
+#page-central-ofertas .co-dias,
+#page-central-ofertas .co-lista { display: flex; flex-wrap: wrap; gap: 0.45rem 0.8rem; margin: 0.7rem 0; }
+#page-central-ofertas .co-lista { flex-direction: column; }
+#page-central-ofertas .co-item,
+#page-central-ofertas .co-user {
+  display: flex; flex-direction: column; gap: 0.2rem;
+  padding: 0.65rem 0.75rem; border: 1px solid var(--border); border-radius: 8px;
+}
+#page-central-ofertas .co-user { flex-direction: row; justify-content: space-between; align-items: center; gap: 0.8rem; }
+#page-central-ofertas .co-check { display: flex; align-items: center; gap: 0.45rem; margin: 0.45rem 0; }
+#page-central-ofertas .co-busca { margin-bottom: 0.6rem; }
+
