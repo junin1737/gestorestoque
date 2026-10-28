@@ -181,21 +181,33 @@ function deviceId() {
 let stateCfgTab = 'tema';
 let cfgMontada = false;
 
+function pintarConexaoInstagram() {
+  const ig = state.config?.instagram || {};
+  const el = $('#cfg-ig-status');
+  if (!el) return;
+  if (!ig.conectada) {
+    el.textContent = 'Nenhuma conta informada no cadastro do cliente, no painel.';
+    return;
+  }
+  el.textContent = ig.expira ? `Conectada. Token válido até ${ig.expira}.` : 'Conectada.';
+}
+
 function setCfgTab(tab) {
   stateCfgTab = tab || 'tema';
   state.cfgTab = stateCfgTab;
   $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
-  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'etiquetas'].forEach((id) => {
+  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'etiquetas', 'conexoes'].forEach((id) => {
     const pane = $(`#cfg-tab-${id}`);
     if (pane) pane.hidden = id !== stateCfgTab;
   });
   const salvar = $('#cfg-params-salvar');
   if (salvar) {
-    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas';
+    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas' || stateCfgTab === 'conexoes';
     const barra = salvar.closest('.toolbar');
     if (barra) barra.hidden = salvar.hidden;
   }
   if (stateCfgTab === 'etiquetas') window.Gondola?.onEtiquetas();
+  if (stateCfgTab === 'conexoes') pintarConexaoInstagram();
   if (stateCfgTab !== 'tema' && stateCfgTab !== 'etiquetas' && !cfgMontada) {
     cfgMontada = true;
     window.ImportacaoNfe?.mountConfig?.();
@@ -932,6 +944,7 @@ async function bootstrap() {
   if (chkSimilares) chkSimilares.checked = Number(state.config.produtosSimilares) === 1;
   const chkQtdOfertas = $('#cfg-qtd-ofertas');
   if (chkQtdOfertas) chkQtdOfertas.checked = Number(state.config.considerarQtdOfertas) === 1;
+  pintarConexaoInstagram();
   const msgAniv = $('#cfg-aniv-msg');
   if (msgAniv) msgAniv.value = state.config.mensagemAniversario || 'Olá {apelido}, feliz aniversário! A loja deseja um dia especial.';
 

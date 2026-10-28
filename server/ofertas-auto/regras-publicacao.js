@@ -1,7 +1,7 @@
 'use strict';
 
 function minutos(hora) {
-  const m = String(hora || '').match(/^(\d{2}):(\d{2})$/);
+  const m = String(hora || '').trim().match(/^(\d{1,2}):(\d{2})/);
   if (!m) return null;
   const h = Number(m[1]);
   const min = Number(m[2]);
@@ -10,7 +10,11 @@ function minutos(hora) {
 }
 
 /** Quantos posts cabem entre o início e o fim, com o primeiro no início e os demais a cada intervalo. */
-function capacidadeJanela({ horaInicio, horaFim, intervaloMinutos, postsPorDia }) {
+function capacidadeJanela(entrada) {
+  const horaInicio = entrada?.horaInicio ?? entrada?.hora_inicio;
+  const horaFim = entrada?.horaFim ?? entrada?.hora_fim;
+  const intervaloMinutos = entrada?.intervaloMinutos ?? entrada?.intervalo_minutos;
+  const postsPorDia = entrada?.postsPorDia ?? entrada?.posts_por_dia;
   const ini = minutos(horaInicio);
   const fim = minutos(horaFim);
   const intervalo = Number(intervaloMinutos);
@@ -46,7 +50,7 @@ function horaDe(total) {
 }
 
 /** Um horário por produto, dentro dos dias e da janela já configurados na publicação. */
-function montarRotina({ inicio, fim, produtos, publicacao }) {
+function montarRotina({ inicio, fim, produtos, publicacao, fds }) {
   const ids = [];
   const porId = new Map();
   for (const item of produtos || []) {
@@ -97,6 +101,27 @@ function montarRotina({ inicio, fim, produtos, publicacao }) {
       }
     }
     dia.setDate(dia.getDate() + 1);
+  }
+  if (fds?.ativo) {
+    const extra = new Date(`${inicio}T12:00:00`);
+    const qtd = Math.min(10, Math.max(0, Number(fds.qtd) || 0));
+    let guard = 0;
+    while (extra <= limite && guard < 60) {
+      guard += 1;
+      const semana = extra.getDay();
+      if ((semana === 0 || semana === 6) && qtd > 0) {
+        for (let n = 0; n < qtd; n += 1) {
+          rotina.push({
+            produto_id: '',
+            descricao: 'Engajamento',
+            detalhe: fds.encarte && semana === 6 && n === 0 ? 'Encarte' : '',
+            data: isoDia(extra),
+            hora: pub.hora_inicio,
+          });
+        }
+      }
+      extra.setDate(extra.getDate() + 1);
+    }
   }
   return {
     rotina,

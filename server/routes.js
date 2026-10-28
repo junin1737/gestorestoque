@@ -185,6 +185,18 @@ router.post('/online', somenteServidorLocal, (req, res) => {
   res.json({ ok: true, online: tunel.status() });
 });
 
+function instagramDaLicenca() {
+  try {
+    const sit = require('./licenca').situacao();
+    return {
+      conectada: sit.instagram_configurado === true,
+      expira: sit.instagram_expira || null,
+    };
+  } catch {
+    return { conectada: false, expira: null };
+  }
+}
+
 router.get('/config', (req, res) => {
   const cfg = loadAppConfig();
   const conexao = isServidorLocal(req)
@@ -202,6 +214,7 @@ router.get('/config', (req, res) => {
       produtosSimilares: lerProdutosSimilares(cfg),
       considerarQtdOfertas: lerConsiderarQtdOfertas(cfg),
       mensagemAniversario: lerMensagemAniversario(cfg),
+      instagram: instagramDaLicenca(),
     },
     modulos: MODULOS,
     demo: DEMO_ATIVO,

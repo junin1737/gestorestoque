@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=275" />
+  <link rel="stylesheet" href="styles.css?v=277" />
   <link rel="stylesheet" href="importacao-nfe.css?v=248" />
 </head>
 <body>
@@ -979,6 +979,7 @@
             <button type="button" class="tab" data-cfg-tab="saida">Saída</button>
             <button type="button" class="tab" data-cfg-tab="clientes">Clientes</button>
             <button type="button" class="tab" data-cfg-tab="etiquetas">Etiquetas</button>
+            <button type="button" class="tab" data-cfg-tab="conexoes">Conexões</button>
           </div>
           <div id="cfg-tab-tema" class="cfg-tab">
             <div class="pref-card">
@@ -1039,6 +1040,13 @@
           </div>
           <div id="cfg-tab-etiquetas" class="cfg-tab" hidden>
             <div id="etiq-host"></div>
+          </div>
+          <div id="cfg-tab-conexoes" class="cfg-tab" hidden>
+            <div class="pref-card">
+              <h3>Instagram</h3>
+              <p id="cfg-ig-status">Nenhuma conta informada no cadastro do cliente, no painel.</p>
+              <p class="hint">Usuário, ID e token ficam no cadastro do cliente, no painel. Aqui só aparece se a conta está conectada e até quando o token vale.</p>
+            </div>
           </div>
           <div id="cfg-tab-clientes" class="cfg-tab" hidden>
             <div class="pref-card larga">
@@ -1332,7 +1340,7 @@
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=262"></script>
   <script src="gondola.js?v=2"></script>
-  <script src="central-ofertas.js?v=6"></script>
-  <script src="app.js?v=272"></script>
+  <script src="central-ofertas.js?v=7"></script>
+  <script src="app.js?v=273"></script>
 </body>
 </html>

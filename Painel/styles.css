@@ -3406,6 +3406,60 @@ html[data-theme="escuro"] .compras-row:hover {
 }
 #page-central-ofertas h3,
 #page-central-ofertas h4 { margin: 0.2rem 0 0.55rem; }
+#page-central-ofertas .co-oferta-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.4rem;
+}
+#page-central-ofertas .co-oferta-head h3 { margin: 0; }
+#page-central-ofertas .co-rotina {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.55rem;
+  margin: 0.35rem 0 0.7rem;
+}
+#page-central-ofertas .co-rotina label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+#page-central-ofertas .co-hora,
+#page-central-ofertas .co-curto {
+  height: 2rem;
+  min-height: 2rem;
+  max-height: 2rem;
+  margin: 0;
+  padding: 0 0.3rem;
+  font-size: 0.85rem;
+}
+#page-central-ofertas .co-hora {
+  width: 7.6rem;
+  flex: 0 0 7.6rem;
+}
+#page-central-ofertas .co-curto {
+  width: 3.4rem;
+  flex: 0 0 3.4rem;
+}
+#page-central-ofertas .co-dias-curtos { display: flex; gap: 0.25rem; }
+#page-central-ofertas .co-dia {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  margin: 0;
+  font-size: 0.75rem;
+}
+#page-central-ofertas .co-dia input {
+  width: 0.95rem;
+  height: 0.95rem;
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+}
 
 @media (max-width: 860px) {
   #page-central-ofertas .co-filtros,

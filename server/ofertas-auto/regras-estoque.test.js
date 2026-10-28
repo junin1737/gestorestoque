@@ -47,6 +47,12 @@ test('oferta usa o preço do ERP e recusa promoção fora da data', () => {
   assert.equal(dentro.preco_por, 15);
 });
 
+test('a janela lê hora_inicio mesmo quando o relógio manda os segundos', () => {
+  const ok = capacidadeJanela({ hora_inicio: '08:00:00', hora_fim: '09:00', intervalo_minutos: 30, posts_por_dia: 3 });
+  assert.equal(ok.cabe, true);
+  assert.equal(ok.vagas, 3);
+});
+
 test('a janela avisa quando a quantidade de posts não cabe', () => {
   const ok = capacidadeJanela({ horaInicio: '08:00', horaFim: '20:00', intervaloMinutos: 60, postsPorDia: 13 });
   assert.equal(ok.cabe, true);

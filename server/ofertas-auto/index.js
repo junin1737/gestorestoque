@@ -356,6 +356,7 @@ function equipe() {
         fim,
         usar_detalhes: req.body?.usar_detalhes !== false,
         produtos,
+        rotina_cfg: rotinaPadrao(),
         rotina: [],
         aviso: '',
         criada_em: new Date().toISOString(),
@@ -389,6 +390,24 @@ function equipe() {
     }
   });
 
+  router.post('/central-ofertas/ofertas/:id/produtos/remover', acesso, (req, res) => {
+    try {
+      const dados = lerArquivo();
+      const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
+      const oferta = lista.find((o) => o.id === req.params.id);
+      if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
+      const tirar = new Set((Array.isArray(req.body?.ids) ? req.body.ids : []).map(String));
+      oferta.produtos = (oferta.produtos || []).filter((p) => !tirar.has(String(p.id)));
+      oferta.rotina = [];
+      oferta.aviso = '';
+      dados.ofertas = lista;
+      gravarArquivo(dados);
+      res.json({ ok: true, oferta });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao tirar o produto.' });
+    }
+  });
+
   router.post('/central-ofertas/ofertas/:id/rotina', acesso, (req, res) => {
     try {
       const dados = lerArquivo();
@@ -398,6 +417,8 @@ function equipe() {
       const config = lerConfig();
       const usar = oferta.usar_detalhes === true && config.detalhes_item?.ativo === true;
       const campo = config.detalhes_item?.campo_origem || 'OBSERVACAO';
+      const cfg = normalizarRotina(req.body?.rotina || oferta.rotina_cfg);
+      oferta.rotina_cfg = cfg;
       const produtos = (oferta.produtos || []).map((p) => ({
         ...p,
         detalhe: usar ? String(p.detalhes?.[campo] || p.detalhe || '').slice(0, 200) : '',
@@ -406,7 +427,8 @@ function equipe() {
         inicio: oferta.inicio,
         fim: oferta.fim,
         produtos,
-        publicacao: config.publicacao,
+        publicacao: cfg,
+        fds: { ativo: cfg.fds_ativo, qtd: cfg.fds_qtd, encarte: cfg.encarte },
       });
       oferta.rotina = gerada.rotina;
       oferta.aviso = gerada.aviso || '';
@@ -417,6 +439,50 @@ function equipe() {
       res.status(400).json({ ok: false, error: err.message || 'Falha ao gerar a rotina.' });
     }
   });
+}
+
+function rotinaPadrao() {
+  const pub = require('./config-loja').padrao();
+  return {
+    posts_por_dia: pub.publicacao.posts_por_dia,
+    intervalo_minutos: pub.publicacao.intervalo_minutos,
+    hora_inicio: pub.publicacao.hora_inicio,
+    hora_fim: pub.publicacao.hora_fim,
+    dias_semana: pub.publicacao.dias_semana.slice(),
+    fds_ativo: false,
+    fds_qtd: 1,
+    encarte: false,
+  };
+}
+
+function horaRotina(v, nome) {
+  const m = String(v || '').trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!m) throw new Error(`Informe ${nome} no formato HH:MM.`);
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) throw new Error(`Informe ${nome} no formato HH:MM.`);
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
+}
+
+function normalizarRotina(body) {
+  const base = rotinaPadrao();
+  const src = body && typeof body === 'object' ? body : {};
+  const dias = Array.isArray(src.dias_semana)
+    ? [...new Set(src.dias_semana.map(Number).filter((n) => n >= 0 && n <= 6))]
+    : base.dias_semana;
+  const posts = Number(src.posts_por_dia);
+  const intervalo = Number(src.intervalo_minutos);
+  const qtd = Number(src.fds_qtd);
+  return {
+    posts_por_dia: Number.isInteger(posts) ? Math.min(50, Math.max(1, posts)) : base.posts_por_dia,
+    intervalo_minutos: Number.isInteger(intervalo) ? Math.min(1440, Math.max(1, intervalo)) : base.intervalo_minutos,
+    hora_inicio: horaRotina(src.hora_inicio || base.hora_inicio, 'o início'),
+    hora_fim: horaRotina(src.hora_fim || base.hora_fim, 'o fim'),
+    dias_semana: dias.length ? dias : base.dias_semana,
+    fds_ativo: src.fds_ativo === true || src.fds_ativo === 1 || src.fds_ativo === '1',
+    fds_qtd: Number.isInteger(qtd) ? Math.min(10, Math.max(0, qtd)) : base.fds_qtd,
+    encarte: src.encarte === true || src.encarte === 1 || src.encarte === '1',
+  };
 }
 
 function normalizarProdutosOferta(lista) {

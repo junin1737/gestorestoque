@@ -45,7 +45,12 @@ function padrao() {
 }
 
 function hora(v, fallback) {
-  return /^([01]\d|2[0-3]):[0-5]\d$/.test(String(v || '')) ? String(v) : fallback;
+  const m = String(v || '').trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?$/);
+  if (!m) return fallback;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (h > 23 || min > 59) return fallback;
+  return `${String(h).padStart(2, '0')}:${m[2]}`;
 }
 
 function inteiro(v, fallback, min, max) {
