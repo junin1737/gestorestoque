@@ -1,6 +1,6 @@
 'use strict';
 
-const { lerArquivo, gravarArquivo } = require('./config-loja');
+const { lerArquivo, gravarArquivo, lerConfig } = require('./config-loja');
 const { caixaInstagram, escalaMinima, escolherSlot } = require('./regras-postagem');
 
 const ESPERA_FALHA_MS = 10 * 60 * 1000;
@@ -91,11 +91,42 @@ async function prepararFoto(dados, oferta, slot) {
   if (!resposta.ok) return { url, chave: '' };
   const bruto = Buffer.from(await resposta.arrayBuffer());
   if (!bruto.length || bruto.length > 8_000_000) return { url, chave: '' };
-  const quadro = await enquadrarJpeg(bruto);
-  if (!quadro.mudou) return { url, chave: '' };
+  const banner = lerConfig().banner;
+  const composto = await montarComBanner(bruto, banner);
+  const quadro = await enquadrarJpeg(composto || bruto);
+  if (!quadro.mudou && !composto) return { url, chave: '' };
   const produto = (oferta.produtos || []).find((p) => String(p.id) === String(slot.produto_id));
   const ean = String(produto?.ean || dados.produtos?.[String(slot.produto_id)]?.ean || '').replace(/\D/g, '').slice(0, 20);
   return enviarJpeg(String(slot.produto_id), ean, quadro.jpeg);
+}
+
+async function montarComBanner(fotoBuf, banner) {
+  if (!banner || !/^https:\/\//.test(String(banner.url || ''))) return null;
+  let resposta;
+  try { resposta = await fetch(banner.url, { signal: AbortSignal.timeout(20000) }); }
+  catch { return null; }
+  if (!resposta.ok) return null;
+  const { Jimp } = require('jimp');
+  const base = await Jimp.read(Buffer.from(await resposta.arrayBuffer()));
+  let foto = await Jimp.read(fotoBuf);
+  const x = Math.round(base.width * Number(banner.x) / 100);
+  const y = Math.round(base.height * Number(banner.y) / 100);
+  const w = Math.max(1, Math.round(base.width * Number(banner.w) / 100));
+  const h = Math.max(1, Math.round(base.height * Number(banner.h) / 100));
+  const escala = Math.max(w / foto.width, h / foto.height);
+  if (escala !== 1) foto = foto.scale(escala);
+  const corteW = Math.min(w, foto.width);
+  const corteH = Math.min(h, foto.height);
+  foto.crop({
+    x: Math.max(0, Math.round((foto.width - corteW) / 2)),
+    y: Math.max(0, Math.round((foto.height - corteH) / 2)),
+    w: corteW,
+    h: corteH,
+  });
+  base.composite(foto, x, y);
+  const jpeg = await base.getBuffer('image/jpeg');
+  if (!jpeg.length || jpeg.length > 1_500_000) return null;
+  return jpeg;
 }
 
 async function cicloInstagram(url, legenda) {

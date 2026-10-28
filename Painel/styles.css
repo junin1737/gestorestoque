@@ -3452,6 +3452,101 @@ html[data-theme="escuro"] .compras-row:hover {
   line-height: 1.2;
 }
 #page-central-ofertas .co-cal-post.is-feito { color: var(--muted); text-decoration: line-through; }
+#page-central-ofertas .co-proximas { list-style: none; margin: 0; padding: 0; }
+#page-central-ofertas .co-proximas button {
+  display: grid;
+  grid-template-columns: 3.4rem 3.2rem minmax(0, 1fr);
+  gap: 0.15rem 0.55rem;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 0.45rem 0.1rem;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  border-radius: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+#page-central-ofertas .co-prox-hora {
+  font-weight: 750;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.92rem;
+}
+#page-central-ofertas .co-prox-dia { color: var(--muted); font-size: 0.75rem; }
+#page-central-ofertas .co-prox-txt { min-width: 0; }
+#page-central-ofertas .co-prox-txt strong,
+#page-central-ofertas .co-prox-txt small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#page-central-ofertas .co-prox-txt strong { font-size: 0.86rem; font-weight: 650; }
+#page-central-ofertas .co-prox-txt small { color: var(--muted); font-size: 0.72rem; }
+#page-central-ofertas .co-cal,
+#page-central-ofertas .co-cal-semana { width: 100%; }
+#page-central-ofertas .co-cal-baixo {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 18rem;
+  gap: 0.8rem;
+  align-items: start;
+  margin: 0.8rem 0 0.2rem;
+}
+#page-central-ofertas .co-banner .hint { margin: -0.35rem 0 0.65rem; }
+#page-central-ofertas .co-banner .btn {
+  height: 2rem;
+  min-height: 2rem;
+  padding: 0 0.8rem;
+}
+#page-central-ofertas .co-banner-vago,
+#page-central-ofertas .co-banner-palco {
+  width: min(100%, 16rem);
+  margin-bottom: 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+}
+#page-central-ofertas .co-banner-vago {
+  display: grid;
+  place-items: center;
+  height: 8.5rem;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+#page-central-ofertas .co-banner-palco { position: relative; width: 100%; }
+#page-central-ofertas .co-banner-palco img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+}
+#page-central-ofertas .co-banner-vazio {
+  position: absolute;
+  box-sizing: border-box;
+  display: grid;
+  place-items: center;
+  border: 2px dashed #2563eb;
+  background: rgba(255, 255, 255, 0.78);
+  color: #5a6577;
+  font-size: 0.72rem;
+  font-weight: 650;
+  text-align: center;
+  cursor: move;
+  touch-action: none;
+}
+#page-central-ofertas .co-banner-alca {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
+  background: #2563eb;
+  cursor: nwse-resize;
+}
 #page-central-ofertas .co-dia-painel { margin: 0.7rem 0; }
 #page-central-ofertas .co-detalhes {
   display: flex;
@@ -3738,7 +3833,8 @@ html[data-theme="escuro"] .compras-row:hover {
 @media (max-width: 860px) {
   #page-central-ofertas .co-filtros,
   #page-central-ofertas .co-ofertas,
-  #page-central-ofertas .co-par { grid-template-columns: 1fr; }
+  #page-central-ofertas .co-par,
+  #page-central-ofertas .co-cal-baixo { grid-template-columns: 1fr; }
   #page-central-ofertas .co-rotina-fim { flex-direction: column; align-items: flex-start; }
   #page-central-ofertas .co-atalhos { display: grid; grid-template-columns: 1fr; }
   #page-central-ofertas .co-atalho { width: 100%; }

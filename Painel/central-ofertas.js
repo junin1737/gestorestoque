@@ -121,7 +121,7 @@
       if (!dia) return '<div class="co-cal-vazio"></div>';
       const posts = postsNoDia(dia);
       const ofertasDia = ofertas.filter((o) => ativaNoDia(o, dia));
-      const itens = posts.slice(0, 3).map((p) => `<span class="co-cal-post${p.publicado ? ' is-feito' : ''}">${esc(p.hora)} ${esc(p.descricao || p.oferta)}</span>`).join('');
+      const itens = posts.slice(0, 3).map((p) => `<span class="co-cal-post${p.publicado ? ' is-feito' : ''}">${esc(String(p.hora || '').slice(0, 5))}</span>`).join('');
       const extra = posts.length > 3 ? `<span class="co-cal-mais">+${posts.length - 3}</span>` : '';
       const sem = !posts.length && ofertasDia.length ? `<span class="co-cal-post">${ofertasDia.length} oferta${ofertasDia.length === 1 ? '' : 's'}</span>` : '';
       return `<button type="button" class="co-cal-dia${dia === hoje ? ' is-hoje' : ''}${dia === diaAberto ? ' is-on' : ''}" data-co-dia-cal="${dia}">
@@ -149,10 +149,75 @@
       <div class="co-cal-semana">${DIAS.map((d) => `<span>${d}</span>`).join('')}</div>
       <div class="co-cal">${grade}</div>
       ${painelDia}
+      <div class="co-cal-baixo">
+        ${htmlProximas()}
+        ${htmlBanner()}
+      </div>
       <h4>Ofertas ativas</h4>
       <div class="co-oferta-lista">${ativas || '<p class="hint">Nenhuma oferta em andamento.</p>'}</div>
       <h4>Ofertas inativas</h4>
       <div class="co-oferta-lista">${inativas || '<p class="hint">Nenhuma oferta inativa neste período.</p>'}</div>`;
+  }
+
+  function proximasPostagens() {
+    const hoje = isoHoje(0);
+    const limite = isoHoje(-7);
+    const lista = [];
+    for (const o of ofertas) {
+      if (!ofertaLigada(o)) continue;
+      for (const slot of o.rotina || []) {
+        if (slot.publicado || !slot.data || !slot.hora) continue;
+        if (slot.data < limite) continue;
+        lista.push({
+          oferta_id: o.id,
+          oferta: o.nome,
+          descricao: slot.descricao || '',
+          hora: String(slot.hora).slice(0, 5),
+          data: slot.data,
+          diaCurto: slot.data.split('-').reverse().slice(0, 2).join('/'),
+          atrasada: slot.data < hoje,
+        });
+      }
+    }
+    lista.sort((a, b) => a.data.localeCompare(b.data) || a.hora.localeCompare(b.hora) || String(a.oferta).localeCompare(String(b.oferta), 'pt'));
+    return lista.slice(0, 8);
+  }
+
+  function htmlProximas() {
+    const itens = proximasPostagens();
+    const linhas = itens.map((p) => `<li><button type="button" data-co-oferta="${esc(p.oferta_id)}">
+        <span class="co-prox-hora">${esc(p.hora)}</span>
+        <span class="co-prox-dia">${esc(p.diaCurto)}</span>
+        <span class="co-prox-txt"><strong>${esc(p.descricao || p.oferta)}</strong><small>${esc(p.oferta)}${p.atrasada ? ' · atrasada' : ''}</small></span>
+      </button></li>`).join('');
+    return `<section class="co-card"><h3>Próximas postagens</h3>${linhas
+      ? `<ul class="co-proximas">${linhas}</ul>`
+      : '<p class="hint">Gere a rotina na campanha para ver os horários.</p>'}</section>`;
+  }
+
+  function bannerAtual() {
+    const b = estado?.config?.banner || {};
+    const n = (v, fb) => (Number.isFinite(Number(v)) ? Number(v) : fb);
+    return {
+      url: /^https:\/\//.test(String(b.url || '')) ? String(b.url) : '',
+      x: n(b.x, 28),
+      y: n(b.y, 16),
+      w: n(b.w, 44),
+      h: n(b.h, 52),
+    };
+  }
+
+  function htmlBanner() {
+    const b = bannerAtual();
+    const palco = b.url
+      ? `<div class="co-banner-palco"><img src="${esc(b.url)}" alt="Banner padrão" /><div class="co-banner-vazio" style="left:${b.x}%;top:${b.y}%;width:${b.w}%;height:${b.h}%"><span>Foto do produto</span><i class="co-banner-alca"></i></div></div>`
+      : '<div class="co-banner-vago">Nenhum banner</div>';
+    return `<section class="co-card co-banner"><h3>Banner padrão</h3>
+      <p class="hint">O espaço em branco recebe a foto do produto.</p>
+      ${palco}
+      <button type="button" class="btn" id="co-banner">Escolher banner</button>
+      <input id="co-banner-arquivo" class="co-arquivo" type="file" accept="image/jpeg,image/png,image/webp" />
+    </section>`;
   }
 
   function htmlDia(dia) {
@@ -643,6 +708,10 @@
       return;
     }
     if (ev.target.closest('#co-nova')) return criarOferta();
+    if (ev.target.closest('#co-banner')) {
+      campo('co-banner-arquivo')?.click();
+      return;
+    }
     const dia = ev.target.closest('[data-co-dia-cal]');
     if (dia) {
       diaAberto = diaAberto === dia.dataset.coDiaCal ? '' : dia.dataset.coDiaCal;
@@ -704,9 +773,66 @@
     if (filtros.q.trim().length >= 2) buscarSugestoes();
   }
 
+  async function enviarBanner(file) {
+    if (!file) return;
+    let dataUrl = '';
+    try { dataUrl = await reduzirFoto(file); }
+    catch (err) {
+      if (campo('co-banner-arquivo')) campo('co-banner-arquivo').value = '';
+      return showMsg(err.message || 'Não abri o banner.');
+    }
+    const b = bannerAtual();
+    const r = await api('/central-ofertas/banner', {
+      method: 'POST',
+      body: { base64: dataUrl.split(',')[1] || '', tipo: 'image/jpeg', x: b.x, y: b.y, w: b.w, h: b.h },
+    });
+    if (campo('co-banner-arquivo')) campo('co-banner-arquivo').value = '';
+    if (!r.ok) return showMsg(r.error || 'Falha ao guardar o banner.');
+    if (estado) estado.config = { ...(estado.config || {}), banner: r.banner };
+    desenhar();
+  }
+
+  async function salvarFuro(furo) {
+    const r = await api('/central-ofertas/banner', { method: 'POST', body: furo });
+    if (!r.ok) return showMsg(r.error || 'Falha ao guardar o espaço da foto.');
+    if (estado) estado.config = { ...(estado.config || {}), banner: r.banner };
+  }
+
+  let furoArraste = null;
+
+  function moverFuro(ev) {
+    if (!furoArraste) return;
+    const dx = ((ev.clientX - furoArraste.px) / furoArraste.largura) * 100;
+    const dy = ((ev.clientY - furoArraste.py) / furoArraste.altura) * 100;
+    let { x, y, w, h } = furoArraste;
+    if (furoArraste.alca) {
+      w = Math.min(100 - x, Math.max(18, furoArraste.w + dx));
+      h = Math.min(100 - y, Math.max(18, furoArraste.h + dy));
+    } else {
+      x = Math.min(100 - w, Math.max(0, furoArraste.x + dx));
+      y = Math.min(100 - h, Math.max(0, furoArraste.y + dy));
+    }
+    const el = raiz()?.querySelector('.co-banner-vazio');
+    if (el) {
+      el.style.left = `${x}%`;
+      el.style.top = `${y}%`;
+      el.style.width = `${w}%`;
+      el.style.height = `${h}%`;
+    }
+    furoArraste.atual = { x: Math.round(x), y: Math.round(y), w: Math.round(w), h: Math.round(h) };
+  }
+
+  function soltarFuro() {
+    const atual = furoArraste?.atual;
+    furoArraste = null;
+    if (atual) salvarFuro(atual);
+  }
+
   async function mudou(ev) {
     const t = ev.target;
-    if (!raiz()?.contains(t) || !ofertaAtual()) return;
+    if (!raiz()?.contains(t)) return;
+    if (t.id === 'co-banner-arquivo') return enviarBanner(t.files?.[0]);
+    if (!ofertaAtual()) return;
     const extraId = t.dataset.coLimite || t.dataset.coOrigem || t.dataset.coOnde;
     if (extraId) return salvarExtra(extraId);
     if (t.dataset.coModo) await salvarModo(t.dataset.coModo, t.value);
@@ -1017,13 +1143,34 @@
         dedoRemocao = '';
       };
       raizEl.addEventListener('pointerdown', (ev) => {
+        const vazio = ev.target.closest?.('.co-banner-vazio');
+        if (vazio) {
+          const palco = vazio.parentElement?.getBoundingClientRect();
+          const b = bannerAtual();
+          furoArraste = {
+            alca: ev.target.classList?.contains('co-banner-alca'),
+            px: ev.clientX,
+            py: ev.clientY,
+            x: b.x,
+            y: b.y,
+            w: b.w,
+            h: b.h,
+            largura: palco?.width || 1,
+            altura: palco?.height || 1,
+            atual: null,
+          };
+          vazio.setPointerCapture?.(ev.pointerId);
+          ev.preventDefault();
+          return;
+        }
         const tirar = ev.target.closest?.('[data-co-tirar]');
         if (!tirar) return;
         dedoRemocao = String(tirar.dataset.coTirar);
         emRemocao.add(dedoRemocao);
       });
-      raizEl.addEventListener('pointerup', soltarRemocao);
-      raizEl.addEventListener('pointercancel', soltarRemocao);
+      raizEl.addEventListener('pointermove', moverFuro);
+      raizEl.addEventListener('pointerup', () => { soltarFuro(); soltarRemocao(); });
+      raizEl.addEventListener('pointercancel', () => { furoArraste = null; soltarRemocao(); });
       raizEl.addEventListener('click', noEvento);
       raizEl.addEventListener('change', noEvento);
       raizEl.addEventListener('focusout', noEvento);

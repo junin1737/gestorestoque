@@ -334,6 +334,49 @@ function equipe() {
     }
   });
 
+  router.post('/central-ofertas/banner', acesso, async (req, res) => {
+    try {
+      const dados = lerArquivo();
+      dados.configuracao = dados.configuracao && typeof dados.configuracao === 'object' ? dados.configuracao : {};
+      const atual = { ...padrao().banner, ...(dados.configuracao.banner || {}) };
+      const furo = require('./regras-postagem').furoBanner(req.body || {}, atual);
+      let url = /^https:\/\//.test(String(atual.url || '')) ? String(atual.url) : '';
+      let chave = String(atual.chave || '');
+      if (req.body?.base64) {
+        let bruto;
+        try { bruto = Buffer.from(String(req.body.base64 || ''), 'base64'); }
+        catch { bruto = Buffer.alloc(0); }
+        if (!bruto.length || bruto.length > 8_000_000) {
+          return res.status(400).json({ ok: false, error: 'Escolha um banner de até 8 MB.' });
+        }
+        const { Jimp } = require('jimp');
+        let img = await Jimp.read(bruto);
+        if (Math.max(img.width, img.height) > 1080) img = img.scaleToFit({ w: 1080, h: 1080 });
+        const jpeg = await img.getBuffer('image/jpeg');
+        if (jpeg.length > 1_500_000) {
+          return res.status(400).json({ ok: false, error: 'O banner ficou maior que 1,5 MB. Use uma imagem menor.' });
+        }
+        const { LICENCA_URL, cabecalhosInstalacao } = require('../licenca');
+        const remoto = await fetch(`${LICENCA_URL}/api/ofertas/foto`, {
+          method: 'POST',
+          headers: { ...(await cabecalhosInstalacao()), 'Content-Type': 'application/json' },
+          body: JSON.stringify({ produto_id: 'banner-padrao', ean: 'loja', tipo: 'image/jpeg', base64: jpeg.toString('base64') }),
+        });
+        const data = await remoto.json().catch(() => ({}));
+        if (!remoto.ok || data.ok === false || !data.url) {
+          return res.status(400).json({ ok: false, error: data.error || 'O R2 não recebeu o banner.' });
+        }
+        url = String(data.url);
+        chave = String(data.chave || '');
+      }
+      dados.configuracao.banner = { url, chave, ...furo };
+      gravarArquivo(dados);
+      res.json({ ok: true, banner: dados.configuracao.banner });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao guardar o banner.' });
+    }
+  });
+
   function lerOfertas() {
     const lista = lerArquivo().ofertas;
     return Array.isArray(lista) ? lista : [];

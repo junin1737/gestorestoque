@@ -107,6 +107,14 @@ test('a rotina encaixa um horário por produto dentro da janela', () => {
   assert.equal(gerada.faltaram, 0);
 });
 
+test('o espaço em branco do banner fica dentro da imagem', () => {
+  const { furoBanner } = require('./regras-postagem');
+  const f = furoBanner({ x: 90, y: 80, w: 40, h: 50 }, null);
+  assert.ok(f.x + f.w <= 100);
+  assert.ok(f.y + f.h <= 100);
+  assert.ok(f.w >= 18 && f.h >= 18);
+});
+
 test('o horário vencido de uma campanha ativa é o que publica', () => {
   const { escolherSlot } = require('./regras-postagem');
   const agora = new Date(2026, 9, 28, 15, 21, 0, 0);

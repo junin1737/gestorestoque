@@ -55,4 +55,22 @@ function escolherSlot(ofertas, agora, esperaMs = 10 * 60 * 1000) {
   return melhor;
 }
 
-module.exports = { caixaInstagram, escalaMinima, quandoSlot, escolherSlot };
+function faixa(v, min, max, fallback) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.min(max, Math.max(min, Math.round(n)));
+}
+
+/** O retângulo em branco do banner, em porcentagem da imagem. */
+function furoBanner(body, atual) {
+  const base = { x: 28, y: 16, w: 44, h: 52, ...(atual || {}) };
+  const x = faixa(body?.x, 0, 82, base.x);
+  const y = faixa(body?.y, 0, 82, base.y);
+  let w = faixa(body?.w, 18, 100, base.w);
+  let h = faixa(body?.h, 18, 100, base.h);
+  if (x + w > 100) w = 100 - x;
+  if (y + h > 100) h = 100 - y;
+  return { x, y, w, h };
+}
+
+module.exports = { caixaInstagram, escalaMinima, quandoSlot, escolherSlot, furoBanner };

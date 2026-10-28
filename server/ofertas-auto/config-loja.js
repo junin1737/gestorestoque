@@ -34,6 +34,14 @@ function padrao() {
       exigir_estoque_positivo: false,
       estoque_minimo_anuncio: 1,
     },
+    banner: {
+      url: '',
+      chave: '',
+      x: 28,
+      y: 16,
+      w: 44,
+      h: 52,
+    },
     instagram: {
       conectada: false,
       usuario: '',
