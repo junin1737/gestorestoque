@@ -1626,6 +1626,8 @@ async function showPage(page) {
 
   const saiaCompras = $('#page-compras') && !$('#page-compras').hidden && page !== 'compras';
   if (saiaCompras) window.Compras?.onPageLeave?.();
+  const saiaOfertas = $('#page-central-ofertas') && !$('#page-central-ofertas').hidden && page !== 'central-ofertas';
+  if (saiaOfertas) window.CentralOfertas?.onPageLeave?.();
 
   lembrarTela(page);
   setNavActive(page);

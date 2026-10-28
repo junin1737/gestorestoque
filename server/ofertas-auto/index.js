@@ -307,13 +307,8 @@ function equipe() {
       if (!bruto.length || bruto.length > 8_000_000) {
         return res.status(400).json({ ok: false, error: 'Escolha uma foto de até 8 MB.' });
       }
-      const { Jimp } = require('jimp');
-      let img = await Jimp.read(bruto);
-      if (Math.max(img.width, img.height) > 1080) img = img.scaleToFit({ w: 1080, h: 1080 });
-      const jpeg = await img.getBuffer('image/jpeg');
-      if (jpeg.length > 1_500_000) {
-        return res.status(400).json({ ok: false, error: 'A foto ficou maior que 1,5 MB depois de reduzir. Use uma imagem menor.' });
-      }
+      const quadro = await require('./publicador').enquadrarJpeg(bruto);
+      const jpeg = quadro.jpeg;
       const { LICENCA_URL, cabecalhosInstalacao } = require('../licenca');
       const headers = { ...(await cabecalhosInstalacao()), 'Content-Type': 'application/json' };
       const remoto = await fetch(`${LICENCA_URL}/api/ofertas/foto`, {
@@ -525,51 +520,16 @@ function equipe() {
 
   router.post('/central-ofertas/ofertas/:id/postar', acesso, async (req, res) => {
     try {
-      const dados = lerArquivo();
-      const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
-      const oferta = lista.find((o) => o.id === req.params.id);
-      if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
-      const slot = (oferta.rotina || []).find((s) => !s.publicado && s.produto_id);
-      if (!slot) return res.status(400).json({ ok: false, error: 'Não há postagem pendente nesta oferta.' });
-      const foto = String(slot.foto_url || dados.produtos?.[String(slot.produto_id)]?.foto_url || '');
-      if (!foto) return res.status(400).json({ ok: false, error: 'Anexe a foto deste produto antes de postar.' });
-      const pedido = String(req.body?.etapa || '');
-      const etapa = pedido === 'consultar' || slot.creation_id ? 'consultar' : 'criar';
-      const creationId = String(req.body?.creation_id || slot.creation_id || '');
-      const legenda = [slot.descricao, slot.detalhe].map((v) => String(v || '').trim()).filter(Boolean).join('\n').slice(0, 2000);
-      const { LICENCA_URL, cabecalhosInstalacao } = require('../licenca');
-      const remoto = await fetch(`${LICENCA_URL}/api/ofertas/publicar`, {
-        method: 'POST',
-        headers: { ...(await cabecalhosInstalacao()), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image_url: foto, caption: legenda, etapa, creation_id: creationId }),
-        signal: AbortSignal.timeout(20000),
-      });
-      const data = await remoto.json().catch(() => ({}));
-      if (!remoto.ok || data.ok === false) {
-        if (data.error && /expirou|recusou/i.test(data.error)) slot.creation_id = '';
-        dados.ofertas = lista;
-        gravarArquivo(dados);
-        return res.status(400).json({ ok: false, error: data.error || 'O Instagram não publicou.' });
-      }
-      if (data.creation_id) slot.creation_id = String(data.creation_id);
-      if (data.etapa === 'publicado') {
-        slot.publicado = true;
-        slot.publicado_em = new Date().toISOString();
-        slot.post_id = String(data.post_id || '');
-        slot.creation_id = '';
-      }
-      dados.ofertas = lista;
-      gravarArquivo(dados);
+      const r = await require('./publicador').publicarOferta(req.params.id);
       res.json({
         ok: true,
-        etapa: data.etapa,
-        creation_id: slot.creation_id || '',
-        espera_ms: data.espera_ms || 0,
-        mensagem: data.mensagem || '',
-        oferta,
+        etapa: r.etapa || 'publicado',
+        mensagem: r.mensagem || '',
+        post_id: r.post_id || '',
+        oferta: r.oferta,
       });
     } catch (err) {
-      res.status(400).json({ ok: false, error: err.message || 'Falha ao postar.' });
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao postar.', oferta: err.oferta });
     }
   });
 }

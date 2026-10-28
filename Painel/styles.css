@@ -3706,6 +3706,11 @@ html[data-theme="escuro"] .compras-row:hover {
   font-size: 0.75rem;
   font-weight: 700;
 }
+#page-central-ofertas .co-erro-slot {
+  color: #b42318;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
 #page-central-ofertas .co-mais {
   display: flex;
   flex-wrap: wrap;

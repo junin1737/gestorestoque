@@ -16,6 +16,8 @@
   let criando = false;
   let diaAberto = '';
   let postando = false;
+  let assinatura = '';
+  let relogio = null;
   const hojeData = new Date();
   let calAno = hojeData.getFullYear();
   let calMes = hojeData.getMonth();
@@ -285,9 +287,13 @@
     };
   }
 
-  function horaDoItem(o, id) {
+  function slotDoItem(o, id) {
     const slots = (o.rotina || []).filter((s) => String(s.produto_id) === String(id));
-    const prox = slots.find((s) => !s.publicado) || slots[0];
+    return slots.find((s) => !s.publicado) || slots[0] || null;
+  }
+
+  function horaDoItem(o, id) {
+    const prox = slotDoItem(o, id);
     return prox?.hora ? String(prox.hora).slice(0, 5) : '';
   }
 
@@ -369,7 +375,9 @@
       const aberto = !fechados.has(String(p.id));
       const qtdCls = Number(p.estoque) < 0 ? ' is-neg' : '';
       const hora = horaDoItem(o, p.id);
-      const extra = aberto ? `<div class="co-mais-linha">${hora ? `<span class="co-hora-slot">${esc(hora)}</span>` : ''}${htmlMais(p, o)}</div>` : '';
+      const falha = slotDoItem(o, p.id);
+      const erro = falha && !falha.publicado && falha.erro ? `<span class="co-erro-slot">${esc(falha.erro)}</span>` : '';
+      const extra = aberto ? `<div class="co-mais-linha">${hora ? `<span class="co-hora-slot">${esc(hora)}</span>` : ''}${erro}${htmlMais(p, o)}</div>` : '';
       return `<tr data-co-id="${esc(p.id)}">
         <td class="meio"><button type="button" class="co-abre" data-co-abre="${esc(p.id)}" aria-expanded="${aberto ? 'true' : 'false'}">${aberto ? '▾' : '▸'}</button></td>
         <td class="meio">${htmlFoto(p)}</td>
@@ -905,37 +913,23 @@
     const o = ofertaAtual();
     if (!o || postando) return;
     postando = true;
+    desenhar();
+    const andamento = campo('co-rotina-status');
+    if (andamento) andamento.textContent = 'Publicando no Instagram…';
     let texto = '';
     let falhou = false;
     try {
-      desenhar();
-      let etapa = 'criar';
-      let creationId = '';
-      for (let i = 0; i < 12; i += 1) {
-        const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/postar`, {
-          method: 'POST',
-          body: { etapa, creation_id: creationId },
-        });
-        if (!r.ok) {
-          texto = r.error || 'Falha ao postar.';
-          falhou = true;
-          break;
-        }
-        if (r.oferta) trocarOferta(r.oferta);
-        creationId = r.creation_id || creationId;
-        if (r.etapa === 'publicado') {
-          const prox = (r.oferta.rotina || []).find((s) => !s.publicado);
-          texto = prox
-            ? `Publicado. A próxima é ${prox.data} ${prox.hora}${prox.descricao ? ` — ${prox.descricao}` : ''}.`
-            : 'Publicado. Não há próxima postagem nesta oferta.';
-          break;
-        }
-        etapa = 'consultar';
-        const st = campo('co-rotina-status');
-        if (st) st.textContent = r.mensagem || 'Aguardando o Instagram…';
-        await new Promise((resolver) => setTimeout(resolver, Math.min(15000, Number(r.espera_ms) || 4000)));
+      const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/postar`, {
+        method: 'POST',
+        body: {},
+      });
+      if (r.oferta) trocarOferta(r.oferta);
+      if (!r.ok || r.etapa !== 'publicado') {
+        texto = r.error || r.mensagem || 'Falha ao postar.';
+        falhou = true;
+      } else {
+        texto = r.mensagem || 'Publicado no Instagram.';
       }
-      if (!texto) texto = 'O Instagram ainda está preparando a imagem. Clique em Postar agora de novo.';
     } finally {
       postando = false;
     }
@@ -943,8 +937,44 @@
       desenhar();
       const st = campo('co-rotina-status');
       if (st) st.textContent = texto;
+      assinatura = assinar(ofertas);
     }
     if (falhou) showMsg(texto);
+  }
+
+  function assinar(lista) {
+    return JSON.stringify((lista || []).map((o) => ({
+      id: o.id,
+      aviso: o.aviso || '',
+      rotina: (o.rotina || []).map((s) => [s.produto_id, s.data, s.hora, !!s.publicado, s.erro || '']),
+    })));
+  }
+
+  function campoFocado() {
+    const el = document.activeElement;
+    return !!(el && raiz()?.contains(el) && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName));
+  }
+
+  async function acompanhar() {
+    if (postando || campoFocado()) return;
+    const r = await api('/central-ofertas/ofertas');
+    if (!r.ok) return;
+    const nova = assinar(r.ofertas);
+    if (nova === assinatura) return;
+    ofertas = r.ofertas || [];
+    if (ofertaAberta && !ofertas.some((o) => o.id === ofertaAberta)) ofertaAberta = '';
+    assinatura = nova;
+    desenhar();
+  }
+
+  function ligarRelogio() {
+    clearInterval(relogio);
+    relogio = setInterval(acompanhar, 20000);
+  }
+
+  function onPageLeave() {
+    clearInterval(relogio);
+    relogio = null;
   }
 
   async function carregarOfertas() {
@@ -952,6 +982,7 @@
     if (!r.ok) return showMsg(r.error || 'Falha ao ler as ofertas.');
     ofertas = r.ofertas || [];
     if (ofertaAberta && !ofertas.some((o) => o.id === ofertaAberta)) ofertaAberta = '';
+    assinatura = assinar(ofertas);
     desenhar();
   }
 
@@ -970,6 +1001,7 @@
     estado = r;
     podePreco = r.pode_preco === true;
     await carregarOfertas();
+    ligarRelogio();
   }
 
   function init(deps) {
@@ -998,5 +1030,5 @@
     }
   }
 
-  window.CentralOfertas = { init, onPageEnter };
+  window.CentralOfertas = { init, onPageEnter, onPageLeave };
 })();

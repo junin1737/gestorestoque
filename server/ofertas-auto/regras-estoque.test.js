@@ -106,3 +106,44 @@ test('a rotina encaixa um horário por produto dentro da janela', () => {
   assert.equal(gerada.rotina[0].detalhe, 'obs');
   assert.equal(gerada.faltaram, 0);
 });
+
+test('o horário vencido de uma campanha ativa é o que publica', () => {
+  const { escolherSlot } = require('./regras-postagem');
+  const agora = new Date(2026, 9, 28, 15, 21, 0, 0);
+  const alvo = escolherSlot([
+    {
+      id: '1',
+      ativa: true,
+      rotina: [
+        { produto_id: '9', data: '2026-10-27', hora: '15:20', publicado: false },
+        { produto_id: '8', data: '2026-10-28', hora: '22:00', publicado: false },
+      ],
+    },
+    {
+      id: '2',
+      ativa: false,
+      rotina: [{ produto_id: '7', data: '2026-10-27', hora: '08:00', publicado: false }],
+    },
+  ], agora);
+  assert.equal(alvo.slot.produto_id, '9');
+  assert.equal(escolherSlot([{
+    id: '3',
+    ativa: true,
+    rotina: [{ produto_id: '1', data: '2026-10-28', hora: '15:20', publicado: false, erro: 'falhou', tentativa_em: agora.toISOString() }],
+  }], agora), null);
+});
+
+test('a foto alta entra na proporção que o Instagram aceita', async () => {
+  const { Jimp } = require('jimp');
+  const { enquadrarJpeg } = require('./publicador');
+  const { caixaInstagram } = require('./regras-postagem');
+  const alta = new Jimp({ width: 400, height: 800, color: 0xff3366ff });
+  const quadro = await enquadrarJpeg(await alta.getBuffer('image/png'));
+  assert.equal(quadro.mudou, true);
+  assert.equal(caixaInstagram(400, 800).fw, 640);
+  const razao = quadro.largura / quadro.altura;
+  assert.ok(razao >= 0.8 && razao <= 1.91);
+  const quadrada = new Jimp({ width: 500, height: 500, color: 0xffffffff });
+  const igual = await enquadrarJpeg(await quadrada.getBuffer('image/png'));
+  assert.equal(igual.mudou, false);
+});

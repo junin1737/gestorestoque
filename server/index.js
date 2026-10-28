@@ -235,6 +235,11 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   } catch (err) {
     console.warn('Consultar compras:', err.message);
   }
+  try {
+    require('./ofertas-auto/agendador').iniciar();
+  } catch (err) {
+    console.warn('Publicação das ofertas:', err.message);
+  }
   setTimeout(() => {
     const condicionais = require('./condicionais');
     condicionais.alinharGeradorPedido()
