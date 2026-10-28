@@ -128,5 +128,107 @@ export async function rotaOfertas(request, env, url, instalacaoDaRequisicao) {
     });
   }
 
+  if (url.pathname === '/api/ofertas/publicar' && request.method === 'POST') {
+    return publicarNoInstagram(request, env, cnpj);
+  }
+
   return json({ ok: false, error: 'Rota não encontrada.' }, 404);
+}
+
+function erroInstagram(msg) {
+  return String(msg || 'O Instagram não confirmou a publicação.')
+    .replace(/access_token[=:][^&\s"']+/gi, 'access_token')
+    .replace(/client_secret[=:][^&\s"']+/gi, 'client_secret')
+    .slice(0, 180);
+}
+
+async function publicarNoInstagram(request, env, cnpj) {
+  const body = await request.json().catch(() => ({}));
+  const cli = await env.DB.prepare(
+    'SELECT ig_token, ig_user_id FROM clientes WHERE cnpj = ? AND aplicacao = ?'
+  ).bind(cnpj, APP_PADRAO).first();
+  const token = String(cli?.ig_token || '').trim();
+  const igId = String(cli?.ig_user_id || '').replace(/\D/g, '');
+  if (!token || igId.length < 5) {
+    return json({ ok: false, error: 'Nenhuma conta do Instagram conectada no cadastro do cliente.' }, 400);
+  }
+  const base = String(env.FOTOS_PUBLIC_BASE || '').replace(/\/$/, '');
+  const imagem = String(body.image_url || '').trim();
+  if (!base || !imagem.startsWith(`${base}/`)) {
+    return json({ ok: false, error: 'Anexe a foto do produto antes de postar.' }, 400);
+  }
+  const versao = /^v\d+\.\d+$/.test(String(env.IG_GRAPH_VERSION || '').trim())
+    ? String(env.IG_GRAPH_VERSION).trim()
+    : 'v26.0';
+  const etapa = body.etapa === 'consultar' ? 'consultar' : 'criar';
+  if (etapa === 'criar') {
+    const params = new URLSearchParams();
+    params.set('image_url', imagem);
+    const legenda = String(body.caption || '').trim().slice(0, 2000);
+    if (legenda) params.set('caption', legenda);
+    params.set('access_token', token);
+    let resp;
+    try {
+      resp = await fetch(`https://graph.instagram.com/${versao}/${igId}/media`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: params.toString(),
+      });
+    } catch {
+      return json({ ok: false, error: 'Não foi possível falar com o Instagram.' }, 502);
+    }
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.error || !data.id) return json({ ok: false, error: erroInstagram(data.error?.message) }, 400);
+    return json({
+      ok: true,
+      etapa: 'criado',
+      creation_id: String(data.id),
+      espera_ms: 4000,
+      mensagem: 'Imagem enviada. Aguardando o Instagram.',
+    });
+  }
+  const creationId = String(body.creation_id || '').trim();
+  if (!/^\d{5,40}$/.test(creationId)) return json({ ok: false, error: 'Publicação sem identificador.' }, 400);
+  const statusUrl = new URL(`https://graph.instagram.com/${versao}/${creationId}`);
+  statusUrl.searchParams.set('fields', 'status_code');
+  statusUrl.searchParams.set('access_token', token);
+  let statusResp;
+  try { statusResp = await fetch(statusUrl); }
+  catch { return json({ ok: false, error: 'Não foi possível falar com o Instagram.' }, 502); }
+  const status = await statusResp.json().catch(() => ({}));
+  if (!statusResp.ok || status.error) return json({ ok: false, error: erroInstagram(status.error?.message) }, 400);
+  const codigo = String(status.status_code || '');
+  if (codigo === 'ERROR' || codigo === 'EXPIRED') {
+    return json({
+      ok: false,
+      error: codigo === 'EXPIRED' ? 'A imagem expirou antes da publicação.' : 'O Instagram recusou a imagem.',
+    }, 400);
+  }
+  if (codigo !== 'FINISHED') {
+    return json({
+      ok: true,
+      etapa: 'processando',
+      creation_id: creationId,
+      espera_ms: 8000,
+      mensagem: 'A imagem ainda está sendo preparada.',
+    });
+  }
+  const publicar = new URLSearchParams();
+  publicar.set('creation_id', creationId);
+  publicar.set('access_token', token);
+  let pubResp;
+  try {
+    pubResp = await fetch(`https://graph.instagram.com/${versao}/${igId}/media_publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: publicar.toString(),
+    });
+  } catch {
+    return json({ ok: false, error: 'Não foi possível publicar.' }, 502);
+  }
+  const publicado = await pubResp.json().catch(() => ({}));
+  if (!pubResp.ok || publicado.error || !publicado.id) {
+    return json({ ok: false, error: erroInstagram(publicado.error?.message) }, 400);
+  }
+  return json({ ok: true, etapa: 'publicado', post_id: String(publicado.id), creation_id: creationId, mensagem: 'Publicado.' });
 }

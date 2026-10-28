@@ -145,6 +145,7 @@ function linhaProduto(r, texto) {
     promocao_inicio: temPromo ? inicio : '',
     promocao_fim: temPromo ? fim : '',
     estoque: Number(r.ESTOQUE || 0),
+    vendido_30d: r.VENDIDO == null ? undefined : Number(r.VENDIDO || 0),
     custo: Number(r.CUSTO || 0),
     categoria: String(r.CATEGORIA || '').trim(),
     observacao: String(r.OBSERVACAO || r[texto] || '').trim(),
@@ -163,7 +164,24 @@ function linhaProduto(r, texto) {
   };
 }
 
-function sqlLista(mapa, comPromo, filtros = {}, mapaPromo) {
+function diaAtras(dias) {
+  const d = new Date();
+  d.setDate(d.getDate() - dias);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function sqlVendas(fontes) {
+  const partes = (fontes || []).map((f) => `
+    SELECT I.${ident(f.produto_id)} AS VID, COALESCE(I.${ident(f.quantidade)}, 0) AS QTD
+    FROM ${ident(f.item)} I
+    JOIN ${ident(f.nota)} N ON N.${ident(f.nota_id)} = I.${ident(f.nota_id)}
+    WHERE N.${ident(f.status)} = 'E' AND N.${ident(f.data)} >= ?`);
+  return `LEFT JOIN (
+    SELECT VID, SUM(QTD) AS VENDIDO FROM (${partes.join(' UNION ALL ')}) U GROUP BY VID
+  ) S ON S.VID = V.ID_IDENTIFICADOR`;
+}
+
+function sqlLista(mapa, comPromo, filtros = {}, mapaPromo, fontesVenda = null) {
   const cols = [
     `${ident(mapa.id)} AS ID`,
     `${ident(mapa.codigo)} AS CODIGO`,
@@ -187,6 +205,7 @@ function sqlLista(mapa, comPromo, filtros = {}, mapaPromo) {
     cols.push(`${ident(mapa.promocao_inicio)} AS PROMO_INI`);
     cols.push(`${ident(mapa.promocao_fim)} AS PROMO_FIM`);
   }
+  if (fontesVenda?.length) cols.push('COALESCE(S.VENDIDO, 0) AS VENDIDO');
   const where = [`COALESCE(${ident(mapa.status)}, 'A') = 'A'`];
   const params = [];
   const q = String(filtros.q || '').trim();
@@ -220,7 +239,13 @@ function sqlLista(mapa, comPromo, filtros = {}, mapaPromo) {
         AND ${ident(mapaPromo.promocao_fim)} IS NOT NULL
     )`);
   }
-  const sql = `SELECT FIRST 8000 ${cols.join(', ')} FROM ${ident(mapa.view)} V WHERE ${where.join(' AND ')} ORDER BY ${ident(mapa.codigo)} DESC`;
+  const join = fontesVenda?.length ? sqlVendas(fontesVenda) : '';
+  if (fontesVenda?.length) params.unshift(...fontesVenda.map(() => diaAtras(30)));
+  const limite = fontesVenda?.length ? 300 : 8000;
+  const ordem = fontesVenda?.length
+    ? 'COALESCE(S.VENDIDO, 0), V.PROD_SERV'
+    : `${ident(mapa.codigo)} DESC`;
+  const sql = `SELECT FIRST ${limite} ${cols.join(', ')} FROM ${ident(mapa.view)} V ${join} WHERE ${where.join(' AND ')} ORDER BY ${ordem}`;
   return { sql, params };
 }
 
@@ -234,7 +259,10 @@ function criarErpReal(deps) {
         const soManage = alvos.length === 1 && alvos[0].manage;
         const mapa = soManage ? mapeamento.manage : mapeamento.clipp;
         const temManage = alvos.some((a) => a.manage);
-        const consulta = sqlLista(mapa, soManage, filtros, temManage && !soManage ? mapeamento.manage : null);
+        const fontes = filtros.menos
+          ? (soManage ? [mapeamento.vendidos.manage] : (temManage ? [mapeamento.vendidos.clipp, mapeamento.vendidos.manage] : [mapeamento.vendidos.clipp]))
+          : null;
+        const consulta = sqlLista(mapa, soManage, filtros, temManage && !soManage ? mapeamento.manage : null, fontes);
         const rows = await query(db, consulta.sql, consulta.params);
         const produtos = rows.map((r) => linhaProduto(r, soManage ? 'DESC_CMPL' : 'DESC_CMPL'));
         if (soManage || !alvos.some((a) => a.manage) || !produtos.length) return produtos;

@@ -1,34 +1,30 @@
 'use strict';
 
 (function () {
-  const ABAS = [
-    ['ofertas', 'Ofertas'],
-    ['detalhes', 'Detalhes do item'],
-  ];
   const DIAS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+  const MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
 
   let api = async () => ({ ok: false });
   let showMsg = (t) => window.alert(t);
   let esc = (v) => String(v ?? '');
   let estado = null;
-  let aba = 'ofertas';
   let produtos = [];
   let grupos = [];
   let ofertas = [];
   let ofertaAberta = '';
   let podePreco = false;
+  let criando = false;
+  let diaAberto = '';
+  let postando = false;
+  const hojeData = new Date();
+  let calAno = hojeData.getFullYear();
+  let calMes = hojeData.getMonth();
   let buscaTimer = 0;
   let fotoAlvo = '';
   const filtros = { q: '', grupo: '', com: false, menos: false, promo: false };
 
   function raiz() { return document.getElementById('co-raiz'); }
   function campo(id) { return document.getElementById(id); }
-
-  function htmlAbas() {
-    return `<div class="tabs" id="co-abas">${ABAS.map(([id, nome]) =>
-      `<button type="button" class="tab${id === aba ? ' active' : ''}" data-co-aba="${id}">${nome}</button>`
-    ).join('')}</div><div id="co-painel"></div>`;
-  }
 
   function camposOrigem() {
     return (estado?.campos_texto || []).map((c) => (
@@ -42,24 +38,34 @@
   }
 
   function painel() {
-    if (aba === 'detalhes') return htmlDetalhes();
-    return htmlOfertas();
+    if (ofertaAtual()) return htmlOfertaAberta(ofertaAtual());
+    return htmlCalendario();
   }
 
-  function htmlDetalhes() {
-    const d = estado.config.detalhes_item;
+  function detalhesOferta(o) {
+    const base = estado?.config?.detalhes_item || {};
+    const d = o?.detalhes || {};
+    return {
+      ativo: o?.usar_detalhes !== false,
+      campo_origem: d.campo_origem || base.campo_origem || campoPadrao(),
+      onde: d.onde || base.onde || 'legenda',
+      limite_banner: d.limite_banner || base.limite_banner || 40,
+    };
+  }
+
+  function htmlDetalhesOferta(o) {
+    const d = detalhesOferta(o);
     const campos = camposOrigem();
-    const atual = d.campo_origem || campoPadrao();
-    return `<label class="co-check"><input id="co-det-on" type="checkbox" ${d.ativo ? 'checked' : ''} /> Usar os detalhes do item</label>
-      <label>Campo de origem no ERP<select id="co-det-campo">${campos.map((item) => `<option value="${esc(item.coluna)}" ${item.coluna === atual ? 'selected' : ''}>${esc(item.rotulo)}</option>`).join('')}</select></label>
-      <label>Onde aparece<select id="co-det-onde">
+    return `<div class="co-detalhes">
+      <label class="co-check"><input id="co-det-on" type="checkbox" ${d.ativo ? 'checked' : ''} /> Usar os detalhes do item</label>
+      <label>Origem<select id="co-det-campo">${campos.map((item) => `<option value="${esc(item.coluna)}" ${item.coluna === d.campo_origem ? 'selected' : ''}>${esc(item.rotulo)}</option>`).join('')}</select></label>
+      <label>Onde<select id="co-det-onde">
         <option value="banner" ${d.onde === 'banner' ? 'selected' : ''}>Banner</option>
         <option value="legenda" ${d.onde === 'legenda' ? 'selected' : ''}>Legenda</option>
-        <option value="ambos" ${d.onde === 'ambos' ? 'selected' : ''}>Banner e legenda</option>
+        <option value="ambos" ${d.onde === 'ambos' ? 'selected' : ''}>Os dois</option>
       </select></label>
-      <label>Limite no banner<input id="co-det-limite" type="number" min="10" max="120" value="${d.limite_banner}" /></label>
-      <p class="hint">Com a opção marcada, a rotina leva o texto da observação. A quantidade segue o parâmetro em Configurações, Produtos. A conta do Instagram fica em Configurações, Conexões.</p>
-      <button type="button" class="btn primary" id="co-salvar">Salvar</button>`;
+      <label>Limite<input id="co-det-limite" class="co-curto" type="number" min="10" max="120" value="${esc(d.limite_banner)}" /></label>
+    </div>`;
   }
 
   function ofertaAtual() {
@@ -70,16 +76,46 @@
     return new Set((ofertaAtual()?.produtos || []).map((p) => String(p.id)));
   }
 
-  function htmlOfertas() {
-    const aberta = ofertaAtual();
-    if (aberta) return htmlOfertaAberta(aberta);
-    const linhas = ofertas.map((o) => `<button type="button" class="co-oferta-item" data-co-oferta="${esc(o.id)}">
-      <strong>${esc(o.nome)}</strong>
-      <span>${esc(o.inicio)} a ${esc(o.fim)} · ${(o.produtos || []).length} produto${(o.produtos || []).length === 1 ? '' : 's'}</span>
-    </button>`).join('');
-    return `<div class="co-ofertas">
-      <div class="co-oferta-lista">${linhas || '<p class="hint">Nenhuma oferta criada.</p>'}</div>
-      <section class="co-oferta-nova">
+  function isoDia(data) {
+    return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
+  }
+
+  function ativaNoDia(o, dia) {
+    return o.inicio && o.fim && o.inicio <= dia && o.fim >= dia;
+  }
+
+  function postsNoDia(dia) {
+    const lista = [];
+    for (const o of ofertas) {
+      for (const slot of o.rotina || []) {
+        if (slot.data === dia) lista.push({ ...slot, oferta_id: o.id, oferta: o.nome });
+      }
+    }
+    return lista.sort((a, b) => String(a.hora).localeCompare(String(b.hora)) || String(a.oferta).localeCompare(String(b.oferta), 'pt'));
+  }
+
+  function htmlCalendario() {
+    const primeiro = new Date(calAno, calMes, 1);
+    const ultimoDia = new Date(calAno, calMes + 1, 0).getDate();
+    const hoje = isoHoje(0);
+    const casas = [];
+    for (let i = 0; i < primeiro.getDay(); i += 1) casas.push('');
+    for (let dia = 1; dia <= ultimoDia; dia += 1) casas.push(isoDia(new Date(calAno, calMes, dia)));
+    while (casas.length % 7) casas.push('');
+    const grade = casas.map((dia) => {
+      if (!dia) return '<div class="co-cal-vazio"></div>';
+      const posts = postsNoDia(dia);
+      const ofertasDia = ofertas.filter((o) => ativaNoDia(o, dia));
+      const itens = posts.slice(0, 3).map((p) => `<span class="co-cal-post${p.publicado ? ' is-feito' : ''}">${esc(p.hora)} ${esc(p.descricao || p.oferta)}</span>`).join('');
+      const extra = posts.length > 3 ? `<span class="co-cal-mais">+${posts.length - 3}</span>` : '';
+      const sem = !posts.length && ofertasDia.length ? `<span class="co-cal-post">${ofertasDia.length} oferta${ofertasDia.length === 1 ? '' : 's'}</span>` : '';
+      return `<button type="button" class="co-cal-dia${dia === hoje ? ' is-hoje' : ''}${dia === diaAberto ? ' is-on' : ''}" data-co-dia-cal="${dia}">
+        <strong>${Number(dia.slice(8))}</strong>
+        ${itens}${extra}${sem}
+      </button>`;
+    }).join('');
+    const painelDia = htmlDia(diaAberto);
+    const form = criando ? `<section class="co-oferta-nova">
         <h3>Nova oferta</h3>
         <div class="co-grade co-grade-2">
           <label class="co-oferta-nome">Nome<input id="co-of-nome" maxlength="80" placeholder="Semana do Yu-Gi-Oh" /></label>
@@ -87,8 +123,41 @@
           <label>Fim<input id="co-of-fim" type="date" value="${isoHoje(6)}" /></label>
         </div>
         <button type="button" class="btn primary" id="co-of-criar">Criar oferta</button>
-      </section>
-    </div>`;
+      </section>` : '';
+    const ativas = ofertas.filter((o) => o.fim >= hoje).map((o) => {
+      const prox = (o.rotina || []).find((s) => !s.publicado);
+      return `<button type="button" class="co-oferta-item" data-co-oferta="${esc(o.id)}">
+        <strong>${esc(o.nome)}</strong>
+        <span>${esc(o.inicio)} a ${esc(o.fim)}${prox ? ` · próxima ${esc(prox.data)} ${esc(prox.hora)}` : ''}</span>
+      </button>`;
+    }).join('');
+    return `<div class="co-cal-head">
+        <button type="button" class="btn small" data-co-mes="-1" aria-label="Mês anterior">‹</button>
+        <h3>${esc(MESES[calMes])} ${calAno}</h3>
+        <button type="button" class="btn small" data-co-mes="1" aria-label="Próximo mês">›</button>
+        <button type="button" class="btn primary" id="co-nova">${criando ? 'Fechar' : 'Nova oferta'}</button>
+      </div>
+      <div class="co-cal-semana">${DIAS.map((d) => `<span>${d}</span>`).join('')}</div>
+      <div class="co-cal">${grade}</div>
+      ${painelDia}
+      ${form}
+      <h4>Ofertas ativas</h4>
+      <div class="co-oferta-lista">${ativas || '<p class="hint">Nenhuma oferta em andamento.</p>'}</div>`;
+  }
+
+  function htmlDia(dia) {
+    if (!dia) return '';
+    const posts = postsNoDia(dia);
+    const linhas = posts.map((p) => `<li class="${p.publicado ? 'is-feito' : ''}">
+      <button type="button" data-co-oferta="${esc(p.oferta_id)}">${esc(p.hora)} · ${esc(p.oferta)}</button>
+      <span>${esc(p.descricao || 'Engajamento')}${p.publicado ? ' · publicado' : ''}</span>
+    </li>`).join('');
+    const semRotina = ofertas.filter((o) => ativaNoDia(o, dia) && !(o.rotina || []).some((s) => s.data === dia));
+    const extras = semRotina.map((o) => `<li><button type="button" data-co-oferta="${esc(o.id)}">${esc(o.nome)}</button><span>Sem horário neste dia</span></li>`).join('');
+    return `<section class="co-dia-painel">
+      <h4>${esc(dia.split('-').reverse().join('/'))}</h4>
+      <ul class="co-oferta-rotina">${linhas || extras || '<li><span>Nenhuma oferta neste dia.</span></li>'}${linhas ? extras : ''}</ul>
+    </section>`;
   }
 
   function cfgRotina(o) {
@@ -102,14 +171,26 @@
   function htmlOfertaAberta(o) {
     const r = cfgRotina(o);
     const dias = (r.dias_semana || []).map(Number);
-    const rotina = (o.rotina || []).map((item) => `<li><span>${esc(item.data)} ${esc(item.hora)}</span><span>${esc(item.descricao || item.produto_id)}</span>${item.detalhe ? `<small>${esc(item.detalhe)}</small>` : ''}</li>`).join('');
+    let proxima = true;
+    const rotina = (o.rotina || []).map((item) => {
+      const feita = !!item.publicado;
+      const eProxima = !feita && proxima;
+      if (eProxima) proxima = false;
+      return `<li class="${feita ? 'is-feito' : ''}${eProxima ? ' is-proxima' : ''}">
+        <span>${esc(item.data)} ${esc(item.hora)}</span>
+        <span>${esc(item.descricao || item.produto_id || 'Engajamento')}</span>
+        ${item.detalhe ? `<small>${esc(item.detalhe)}</small>` : ''}
+        <small>${feita ? 'Publicado' : (eProxima ? 'Próxima' : '')}</small>
+      </li>`;
+    }).join('');
+    const pendente = (o.rotina || []).some((item) => !item.publicado && item.produto_id);
     return `<div class="co-oferta-head">
-        <button type="button" class="btn small" id="co-of-voltar">Ofertas</button>
+        <button type="button" class="btn small" id="co-of-voltar">Calendário</button>
         <h3>${esc(o.nome)}</h3>
         <span class="hint">${esc(o.inicio)} a ${esc(o.fim)}</span>
       </div>
-      <h4>Produtos</h4>
-      ${htmlBusca()}
+      <h4>Detalhes do item</h4>
+      ${htmlDetalhesOferta(o)}
       <h4>Rotina</h4>
       <div class="co-rotina">
         <label>Posts<input id="co-r-posts" class="co-curto" type="number" min="1" max="50" value="${Number(r.posts_por_dia) || 4}" /></label>
@@ -121,9 +202,12 @@
         <label>Qtd<input id="co-r-fds-qtd" class="co-curto" type="number" min="0" max="10" value="${Number(r.fds_qtd) || 0}" /></label>
         <label class="co-check"><input id="co-r-encarte" type="checkbox" ${r.encarte ? 'checked' : ''} /> Encarte</label>
         <button type="button" class="btn primary" id="co-of-rotina">Gerar</button>
+        <button type="button" class="btn" id="co-of-agora" ${pendente && !postando ? '' : 'disabled'}>${postando ? 'Publicando…' : 'Postar agora'}</button>
       </div>
-      ${o.aviso ? `<p class="erro">${esc(o.aviso)}</p>` : ''}
-      <ul class="co-oferta-rotina">${rotina || '<li><span>A rotina ainda não foi gerada.</span></li>'}</ul>`;
+      <p class="hint" id="co-rotina-status">${esc(o.aviso || '')}</p>
+      <ul class="co-oferta-rotina" id="co-rotina-lista">${rotina || '<li><span>A rotina ainda não foi gerada.</span></li>'}</ul>
+      <h4>Produtos</h4>
+      ${htmlBusca()}`;
   }
 
   function atalho(id, nome) {
@@ -251,42 +335,15 @@
     </table></div>`;
   }
 
-  function lerFormulario() {
-    if (aba !== 'detalhes' || !campo('co-det-on')) return;
-    estado.config.detalhes_item = {
-      ativo: campo('co-det-on').checked,
-      campo_origem: campo('co-det-campo').value,
-      onde: campo('co-det-onde').value,
-      limite_banner: Number(campo('co-det-limite').value),
-    };
-  }
-
-  async function salvar() {
-    lerFormulario();
-    const r = await api('/central-ofertas/config', { method: 'PUT', body: estado.config });
-    if (!r.ok) return showMsg(r.error || 'Falha ao salvar.');
-    estado.config = r.config;
-    estado.janela = r.janela;
-    desenhar();
-  }
-
   function desenhar() {
     const el = raiz();
     if (!el || !estado) return;
-    el.innerHTML = htmlAbas();
-    const painelEl = document.getElementById('co-painel');
-    if (painelEl) painelEl.innerHTML = painel();
-    el.querySelectorAll('[data-co-aba]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        if (campo('co-salvar')) lerFormulario();
-        aba = btn.dataset.coAba;
-        desenhar();
-        if (aba === 'ofertas' && ofertaAtual()) carregarLista();
-      });
-    });
-    campo('co-salvar')?.addEventListener('click', salvar);
-    if (aba === 'ofertas' && ofertaAtual()) ligarArquivo();
+    const rolagem = document.querySelector('.main')?.scrollTop || 0;
+    el.innerHTML = painel();
+    if (ofertaAtual()) ligarArquivo();
     pintar();
+    const main = document.querySelector('.main');
+    if (main) main.scrollTop = rolagem;
   }
 
   function buscaAtiva() {
@@ -454,10 +511,29 @@
   }
 
   async function clique(ev) {
-    const abaBtn = ev.target.closest('[data-co-aba]');
-    if (abaBtn) return;
-    if (ev.target.id === 'co-of-criar') return criarOferta();
-    if (ev.target.id === 'co-of-voltar') {
+    const mes = ev.target.closest('[data-co-mes]');
+    if (mes) {
+      const passo = Number(mes.dataset.coMes) || 0;
+      const d = new Date(calAno, calMes + passo, 1);
+      calAno = d.getFullYear();
+      calMes = d.getMonth();
+      diaAberto = '';
+      desenhar();
+      return;
+    }
+    if (ev.target.closest('#co-nova')) {
+      criando = !criando;
+      desenhar();
+      return;
+    }
+    const dia = ev.target.closest('[data-co-dia-cal]');
+    if (dia) {
+      diaAberto = diaAberto === dia.dataset.coDiaCal ? '' : dia.dataset.coDiaCal;
+      desenhar();
+      return;
+    }
+    if (ev.target.closest('#co-of-criar')) return criarOferta();
+    if (ev.target.closest('#co-of-voltar')) {
       ofertaAberta = '';
       produtos = [];
       desenhar();
@@ -466,10 +542,12 @@
     const item = ev.target.closest('[data-co-oferta]');
     if (item) {
       ofertaAberta = item.dataset.coOferta;
+      criando = false;
       desenhar();
       return;
     }
-    if (ev.target.id === 'co-of-rotina') return gerarRotina();
+    if (ev.target.closest('#co-of-rotina')) return gerarRotina();
+    if (ev.target.closest('#co-of-agora')) return postarAgora();
     if (!ofertaAtual()) return;
     const foto = ev.target.closest('[data-co-foto]');
     if (foto) {
@@ -530,7 +608,7 @@
     }
     const extra = document.getElementById('co-extra');
     if (extra) extra.textContent = 'Carregando produtos…';
-    const r = await api(`/central-ofertas/produtos${queryLista()}`);
+    const r = await api(`/central-ofertas/produtos${queryLista()}`, { cache: 'no-store' });
     if (!r.ok) {
       const miolo = document.getElementById('co-miolo');
       if (miolo) miolo.innerHTML = `<p class="erro">${esc(r.error || 'Falha ao ler os produtos.')}</p>`;
@@ -561,11 +639,26 @@
       intervalo_minutos: Number(campo('co-r-int')?.value),
       hora_inicio: String(campo('co-r-ini')?.value || '').slice(0, 5),
       hora_fim: String(campo('co-r-fim')?.value || '').slice(0, 5),
-      dias_semana: [...document.querySelectorAll('[data-co-dia]:checked')].map((el) => Number(el.dataset.coDia)),
+      dias_semana: [...document.querySelectorAll('#co-raiz [data-co-dia]:checked')].map((el) => Number(el.dataset.coDia)),
       fds_ativo: !!campo('co-r-fds')?.checked,
       fds_qtd: Number(campo('co-r-fds-qtd')?.value),
       encarte: !!campo('co-r-encarte')?.checked,
     };
+  }
+
+  function lerDetalhesForm() {
+    return {
+      ativo: !!campo('co-det-on')?.checked,
+      campo_origem: campo('co-det-campo')?.value || 'OBSERVACAO',
+      onde: campo('co-det-onde')?.value || 'legenda',
+      limite_banner: Number(campo('co-det-limite')?.value),
+    };
+  }
+
+  function avisoRotina(texto) {
+    const el = campo('co-rotina-status');
+    if (el) el.textContent = texto || '';
+    if (texto) showMsg(texto);
   }
 
   async function criarOferta() {
@@ -582,21 +675,79 @@
     });
     if (!r.ok) return showMsg(r.error || 'Falha ao criar a oferta.');
     ofertaAberta = r.oferta.id;
+    criando = false;
     await carregarOfertas();
   }
 
   async function gerarRotina() {
     const o = ofertaAtual();
     if (!o) return;
+    if (!(o.produtos || []).length) return avisoRotina('Inclua um produto na oferta antes de gerar.');
+    const status = campo('co-rotina-status');
+    if (status) status.textContent = 'Gerando a rotina…';
     const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/rotina`, {
       method: 'POST',
-      body: { rotina: lerRotinaForm() },
+      body: { rotina: lerRotinaForm(), detalhes: lerDetalhesForm() },
     });
-    if (!r.ok) return showMsg(r.error || 'Falha ao gerar a rotina.');
-    if (r.aviso) showMsg(r.aviso);
+    if (!r.ok) return avisoRotina(r.error || 'Falha ao gerar a rotina.');
     trocarOferta(r.oferta);
     desenhar();
     carregarLista();
+    const n = (r.oferta.rotina || []).length;
+    const prox = (r.oferta.rotina || []).find((s) => !s.publicado);
+    const texto = prox
+      ? `${n} horário${n === 1 ? '' : 's'}. A próxima é ${prox.data} ${prox.hora}.`
+      : `${n} horário${n === 1 ? '' : 's'}.`;
+    const st = campo('co-rotina-status');
+    if (st) st.textContent = r.aviso ? `${texto} ${r.aviso}` : texto;
+    document.getElementById('co-rotina-lista')?.scrollIntoView({ block: 'nearest' });
+  }
+
+  async function postarAgora() {
+    const o = ofertaAtual();
+    if (!o || postando) return;
+    postando = true;
+    let texto = '';
+    let falhou = false;
+    try {
+      desenhar();
+      let etapa = 'criar';
+      let creationId = '';
+      for (let i = 0; i < 12; i += 1) {
+        const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/postar`, {
+          method: 'POST',
+          body: { etapa, creation_id: creationId },
+        });
+        if (!r.ok) {
+          texto = r.error || 'Falha ao postar.';
+          falhou = true;
+          break;
+        }
+        if (r.oferta) trocarOferta(r.oferta);
+        creationId = r.creation_id || creationId;
+        if (r.etapa === 'publicado') {
+          const prox = (r.oferta.rotina || []).find((s) => !s.publicado);
+          texto = prox
+            ? `Publicado. A próxima é ${prox.data} ${prox.hora}${prox.descricao ? ` — ${prox.descricao}` : ''}.`
+            : 'Publicado. Não há próxima postagem nesta oferta.';
+          break;
+        }
+        etapa = 'consultar';
+        const st = campo('co-rotina-status');
+        if (st) st.textContent = r.mensagem || 'Aguardando o Instagram…';
+        await new Promise((resolver) => setTimeout(resolver, Math.min(15000, Number(r.espera_ms) || 4000)));
+      }
+      if (!texto) texto = 'O Instagram ainda está preparando a imagem. Clique em Postar agora de novo.';
+    } finally {
+      postando = false;
+    }
+    if (ofertaAtual()) {
+      desenhar();
+      carregarLista();
+      const st = campo('co-rotina-status');
+      if (st) st.textContent = texto;
+    }
+    if (falhou) showMsg(texto);
   }
 
   async function carregarOfertas() {
@@ -604,15 +755,16 @@
     if (!r.ok) return showMsg(r.error || 'Falha ao ler as ofertas.');
     ofertas = r.ofertas || [];
     if (ofertaAberta && !ofertas.some((o) => o.id === ofertaAberta)) ofertaAberta = '';
-    if (aba === 'ofertas') {
-      desenhar();
-      if (ofertaAtual()) carregarLista();
-    }
+    desenhar();
+    if (ofertaAtual()) carregarLista();
   }
 
   async function onPageEnter() {
     const el = raiz();
     if (!el) return;
+    ofertaAberta = '';
+    diaAberto = '';
+    criando = false;
     el.innerHTML = '<p class="hint">Carregando…</p>';
     const r = await api('/central-ofertas/config');
     if (!r.ok) {

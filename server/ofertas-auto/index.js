@@ -190,12 +190,16 @@ function equipe() {
         grupo: req.query.grupo,
         com: req.query.com === '1',
         promo: req.query.promo === '1',
+        menos: req.query.vendidos === '1',
         ignorar: Object.entries(mods).filter(([, m]) => m?.ignorar_estoque).map(([id]) => id),
       };
       let lista = await conectores.erp.listarProdutos(filtros);
-      if (req.query.vendidos === '1') {
+      if (req.query.vendidos === '1' && !lista.some((p) => p.vendido_30d != null)) {
         const totais = await conectores.erp.vendidos30();
-        lista = lista.map((p) => ({ ...p, vendido_30d: Number(totais[String(p.id)] || 0) }));
+        lista = lista
+          .map((p) => ({ ...p, vendido_30d: Number(totais[String(p.id)] || 0) }))
+          .sort((a, b) => a.vendido_30d - b.vendido_30d || String(a.descricao).localeCompare(String(b.descricao), 'pt'))
+          .slice(0, 300);
       }
       const grupos = await conectores.erp.grupos().catch(() => (
         [...new Set(lista.map((p) => String(p.categoria || '').trim()).filter(Boolean))]
@@ -414,15 +418,20 @@ function equipe() {
       const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
       const oferta = lista.find((o) => o.id === req.params.id);
       if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
-      const config = lerConfig();
-      const usar = oferta.usar_detalhes === true && config.detalhes_item?.ativo === true;
-      const campo = config.detalhes_item?.campo_origem || 'OBSERVACAO';
       const cfg = normalizarRotina(req.body?.rotina || oferta.rotina_cfg);
       oferta.rotina_cfg = cfg;
-      const produtos = (oferta.produtos || []).map((p) => ({
+      aplicarDetalhes(oferta, req.body?.detalhes);
+      const usar = oferta.usar_detalhes !== false;
+      const campo = oferta.detalhes?.campo_origem || 'OBSERVACAO';
+      const publicados = (oferta.rotina || []).filter((s) => s.publicado);
+      const ja = new Set(publicados.map((s) => String(s.produto_id || '')).filter(Boolean));
+      const produtos = (oferta.produtos || []).filter((p) => !ja.has(String(p.id))).map((p) => ({
         ...p,
         detalhe: usar ? String(p.detalhes?.[campo] || p.detalhe || '').slice(0, 200) : '',
       }));
+      if (!produtos.length) {
+        throw new Error(ja.size ? 'Todos os produtos desta oferta já foram publicados.' : 'Inclua produtos na oferta antes de gerar a rotina.');
+      }
       const gerada = montarRotina({
         inicio: oferta.inicio,
         fim: oferta.fim,
@@ -430,7 +439,12 @@ function equipe() {
         publicacao: cfg,
         fds: { ativo: cfg.fds_ativo, qtd: cfg.fds_qtd, encarte: cfg.encarte },
       });
-      oferta.rotina = gerada.rotina;
+      const fotos = dados.produtos || {};
+      oferta.rotina = publicados.concat(gerada.rotina.map((slot) => ({
+        ...slot,
+        publicado: false,
+        foto_url: String(fotos[String(slot.produto_id)]?.foto_url || ''),
+      })));
       oferta.aviso = gerada.aviso || '';
       dados.ofertas = lista;
       gravarArquivo(dados);
@@ -439,6 +453,69 @@ function equipe() {
       res.status(400).json({ ok: false, error: err.message || 'Falha ao gerar a rotina.' });
     }
   });
+
+  router.post('/central-ofertas/ofertas/:id/postar', acesso, async (req, res) => {
+    try {
+      const dados = lerArquivo();
+      const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
+      const oferta = lista.find((o) => o.id === req.params.id);
+      if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
+      const slot = (oferta.rotina || []).find((s) => !s.publicado && s.produto_id);
+      if (!slot) return res.status(400).json({ ok: false, error: 'Não há postagem pendente nesta oferta.' });
+      const foto = String(slot.foto_url || dados.produtos?.[String(slot.produto_id)]?.foto_url || '');
+      if (!foto) return res.status(400).json({ ok: false, error: 'Anexe a foto deste produto antes de postar.' });
+      const pedido = String(req.body?.etapa || '');
+      const etapa = pedido === 'consultar' || slot.creation_id ? 'consultar' : 'criar';
+      const creationId = String(req.body?.creation_id || slot.creation_id || '');
+      const legenda = [slot.descricao, slot.detalhe].map((v) => String(v || '').trim()).filter(Boolean).join('\n').slice(0, 2000);
+      const { LICENCA_URL, cabecalhosInstalacao } = require('../licenca');
+      const remoto = await fetch(`${LICENCA_URL}/api/ofertas/publicar`, {
+        method: 'POST',
+        headers: { ...(await cabecalhosInstalacao()), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image_url: foto, caption: legenda, etapa, creation_id: creationId }),
+        signal: AbortSignal.timeout(20000),
+      });
+      const data = await remoto.json().catch(() => ({}));
+      if (!remoto.ok || data.ok === false) {
+        if (data.error && /expirou|recusou/i.test(data.error)) slot.creation_id = '';
+        dados.ofertas = lista;
+        gravarArquivo(dados);
+        return res.status(400).json({ ok: false, error: data.error || 'O Instagram não publicou.' });
+      }
+      if (data.creation_id) slot.creation_id = String(data.creation_id);
+      if (data.etapa === 'publicado') {
+        slot.publicado = true;
+        slot.publicado_em = new Date().toISOString();
+        slot.post_id = String(data.post_id || '');
+        slot.creation_id = '';
+      }
+      dados.ofertas = lista;
+      gravarArquivo(dados);
+      res.json({
+        ok: true,
+        etapa: data.etapa,
+        creation_id: slot.creation_id || '',
+        espera_ms: data.espera_ms || 0,
+        mensagem: data.mensagem || '',
+        oferta,
+      });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao postar.' });
+    }
+  });
+}
+
+function aplicarDetalhes(oferta, body) {
+  const src = body && typeof body === 'object' ? body : {};
+  if ('ativo' in src) oferta.usar_detalhes = src.ativo !== false && src.ativo !== 0 && src.ativo !== '0';
+  const campo = String(src.campo_origem || oferta.detalhes?.campo_origem || 'OBSERVACAO').replace(/[^\w]/g, '').slice(0, 40);
+  const onde = ['banner', 'legenda', 'ambos'].includes(src.onde) ? src.onde : (oferta.detalhes?.onde || 'legenda');
+  const limite = Number(src.limite_banner);
+  oferta.detalhes = {
+    campo_origem: campo || 'OBSERVACAO',
+    onde,
+    limite_banner: Number.isInteger(limite) ? Math.min(120, Math.max(10, limite)) : (oferta.detalhes?.limite_banner || 40),
+  };
 }
 
 function rotinaPadrao() {
