@@ -20,7 +20,12 @@
   let calAno = hojeData.getFullYear();
   let calMes = hojeData.getMonth();
   let buscaTimer = 0;
+  let buscaSeq = 0;
   let fotoAlvo = '';
+  let sugestoes = [];
+  let escolhaId = '';
+  let gruposProntos = false;
+  const fechados = new Set();
   const filtros = { q: '', grupo: '', com: false, menos: false, promo: false };
 
   function raiz() { return document.getElementById('co-raiz'); }
@@ -171,43 +176,54 @@
   function htmlOfertaAberta(o) {
     const r = cfgRotina(o);
     const dias = (r.dias_semana || []).map(Number);
-    let proxima = true;
-    const rotina = (o.rotina || []).map((item) => {
-      const feita = !!item.publicado;
-      const eProxima = !feita && proxima;
-      if (eProxima) proxima = false;
-      return `<li class="${feita ? 'is-feito' : ''}${eProxima ? ' is-proxima' : ''}">
-        <span>${esc(item.data)} ${esc(item.hora)}</span>
-        <span>${esc(item.descricao || item.produto_id || 'Engajamento')}</span>
-        ${item.detalhe ? `<small>${esc(item.detalhe)}</small>` : ''}
-        <small>${feita ? 'Publicado' : (eProxima ? 'Próxima' : '')}</small>
-      </li>`;
-    }).join('');
+    const d = detalhesOferta(o);
+    const n = (o.produtos || []).length;
     const pendente = (o.rotina || []).some((item) => !item.publicado && item.produto_id);
     return `<div class="co-oferta-head">
-        <button type="button" class="btn small" id="co-of-voltar">Calendário</button>
-        <h3>${esc(o.nome)}</h3>
-        <span class="hint">${esc(o.inicio)} a ${esc(o.fim)}</span>
+        <button type="button" class="btn" id="co-of-voltar"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M8 3.5v3M16 3.5v3M4 10h16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg> Calendário</button>
+        <strong class="co-oferta-titulo">${esc(o.nome)}</strong>
+        <span class="co-oferta-datas">${esc(o.inicio)} a ${esc(o.fim)}</span>
       </div>
-      <h4>Detalhes do item</h4>
-      ${htmlDetalhesOferta(o)}
-      <h4>Rotina</h4>
-      <div class="co-rotina">
-        <label>Posts<input id="co-r-posts" class="co-curto" type="number" min="1" max="50" value="${Number(r.posts_por_dia) || 4}" /></label>
-        <label>Min<input id="co-r-int" class="co-curto" type="number" min="1" max="1440" value="${Number(r.intervalo_minutos) || 90}" /></label>
-        <label>Início<input id="co-r-ini" class="co-hora" type="time" value="${esc(String(r.hora_inicio || '08:00').slice(0, 5))}" /></label>
-        <label>Fim<input id="co-r-fim" class="co-hora" type="time" value="${esc(String(r.hora_fim || '20:00').slice(0, 5))}" /></label>
-        <div class="co-dias-curtos">${DIAS.map((nome, i) => `<label class="co-dia" title="${nome}"><input type="checkbox" data-co-dia="${i}" ${dias.includes(i) ? 'checked' : ''} /><span>${esc(nome)}</span></label>`).join('')}</div>
-        <label class="co-check"><input id="co-r-fds" type="checkbox" ${r.fds_ativo ? 'checked' : ''} /> Fds</label>
-        <label>Qtd<input id="co-r-fds-qtd" class="co-curto" type="number" min="0" max="10" value="${Number(r.fds_qtd) || 0}" /></label>
-        <label class="co-check"><input id="co-r-encarte" type="checkbox" ${r.encarte ? 'checked' : ''} /> Encarte</label>
-        <button type="button" class="btn primary" id="co-of-rotina">Gerar</button>
-        <button type="button" class="btn" id="co-of-agora" ${pendente && !postando ? '' : 'disabled'}>${postando ? 'Publicando…' : 'Postar agora'}</button>
+      <div class="co-par">
+        <section class="co-card">
+          <h3>Adicionar Item</h3>
+          ${htmlBusca()}
+        </section>
+        <section class="co-card">
+          <h3>Configurações de Rotina</h3>
+          <div class="co-rotina">
+            <label>Posts<input id="co-r-posts" class="co-curto" type="number" min="1" max="50" value="${Number(r.posts_por_dia) || 4}" /></label>
+            <label>Min<input id="co-r-int" class="co-curto" type="number" min="1" max="1440" value="${Number(r.intervalo_minutos) || 90}" /></label>
+            <label>Início<input id="co-r-ini" class="co-hora" type="time" value="${esc(String(r.hora_inicio || '08:00').slice(0, 5))}" /></label>
+            <label>Fim<input id="co-r-fim" class="co-hora" type="time" value="${esc(String(r.hora_fim || '20:00').slice(0, 5))}" /></label>
+          </div>
+          <div class="co-rotina">
+            <span class="co-rotulo">Dias da Semana</span>
+            <div class="co-dias-curtos">${DIAS.map((nome, i) => `<label class="co-dia" title="${nome}"><input type="checkbox" data-co-dia="${i}" ${dias.includes(i) ? 'checked' : ''} /><span>${esc(nome)}</span></label>`).join('')}</div>
+            <label class="co-check"><input id="co-r-fds" type="checkbox" ${r.fds_ativo ? 'checked' : ''} /> Fds</label>
+          </div>
+          <div class="co-rotina-fim">
+            <div class="co-rotina">
+              <label>Qtd<input id="co-r-fds-qtd" class="co-curto" type="number" min="0" max="10" value="${Number(r.fds_qtd) || 0}" /></label>
+              <label class="co-check"><input id="co-r-encarte" type="checkbox" ${r.encarte ? 'checked' : ''} /> Encarte</label>
+            </div>
+            <div class="co-rotina-botoes">
+              <button type="button" class="btn primary" id="co-of-rotina">Gerar</button>
+              <button type="button" class="btn" id="co-of-agora" ${pendente && !postando ? '' : 'disabled'}>${postando ? 'Publicando…' : 'Postar agora'}</button>
+            </div>
+          </div>
+          <p class="hint" id="co-rotina-status">${esc(o.aviso || '')}</p>
+        </section>
       </div>
-      <p class="hint" id="co-rotina-status">${esc(o.aviso || '')}</p>
-      <ul class="co-oferta-rotina" id="co-rotina-lista">${rotina || '<li><span>A rotina ainda não foi gerada.</span></li>'}</ul>
-      <h4>Produtos</h4>
-      ${htmlBusca()}`;
+      <section class="co-card">
+        <div class="co-itens-head">
+          <h3>Itens Adicionados na Campanha</h3>
+          <label class="co-check"><input id="co-det-on" type="checkbox" ${d.ativo ? 'checked' : ''} /> Usar os detalhes do item</label>
+        </div>
+        ${htmlCampanha(o)}
+        <p class="hint co-contagem">${n} na oferta</p>
+      </section>
+      <input id="co-arquivo" class="co-arquivo" type="file" accept="image/jpeg,image/png,image/webp" />`;
   }
 
   function atalho(id, nome) {
@@ -218,20 +234,22 @@
     const opcoes = ['<option value="">Todos</option>'].concat(grupos.map((g) =>
       `<option value="${esc(g)}" ${g === filtros.grupo ? 'selected' : ''}>${esc(g)}</option>`
     )).join('');
-    return `<div class="co-est">
-      <div class="co-filtros">
-        <label>Buscar<input id="co-q" type="search" placeholder="Nome, código ou EAN" value="${esc(filtros.q)}" /></label>
-        <label>Grupo<select id="co-grupo">${opcoes}</select></label>
+    return `<p class="co-lbl">Buscar</p>
+      <div class="co-busca">
+        <span class="co-lupa" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16"><circle cx="11" cy="11" r="6" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M16 16l4 4" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg></span>
+        <input id="co-q" type="search" placeholder="Nome, código ou EAN" value="${esc(filtros.q)}" autocomplete="off" />
+        <ul id="co-sugestoes" class="co-sugestoes" hidden></ul>
+      </div>
+      <p class="co-lbl">Grupo</p>
+      <select id="co-grupo">${opcoes}</select>
+      <div class="co-filtros-linha">
         <div class="co-atalhos" role="group" aria-label="Filtros">
           ${atalho('com', 'Com estoque')}
           ${atalho('menos', 'Menos vendidos')}
           ${atalho('promo', 'Promoção no ERP')}
         </div>
-      </div>
-      <input id="co-arquivo" class="co-arquivo" type="file" accept="image/jpeg,image/png,image/webp" />
-      <div id="co-miolo"></div>
-      <p class="hint" id="co-extra"></p>
-    </div>`;
+        <button type="button" class="btn primary" id="co-add">+ Adicionar à Campanha</button>
+      </div>`;
   }
 
   function moedaInput(v) {
@@ -244,7 +262,30 @@
   function qtdTxt(v) {
     const n = Number(v);
     if (!Number.isFinite(n)) return '—';
-    return `${n.toLocaleString('pt-BR', { maximumFractionDigits: 3 })} un`;
+    return n.toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+  }
+
+  function detalheItem(p, o) {
+    const base = detalhesOferta(o);
+    return {
+      limite: Number(p.limite_banner) || base.limite_banner,
+      campo: p.campo_origem || base.campo_origem,
+      onde: p.onde || base.onde,
+    };
+  }
+
+  function horaDoItem(o, id) {
+    const slots = (o.rotina || []).filter((s) => String(s.produto_id) === String(id));
+    const prox = slots.find((s) => !s.publicado) || slots[0];
+    return prox?.hora ? String(prox.hora).slice(0, 5) : '';
+  }
+
+  function rotuloCurto(coluna) {
+    if (coluna === 'DESC_CMPL') return 'Descrição';
+    if (coluna === 'COD_BARRA') return 'Código de barras';
+    if (coluna === 'ID_IDENTIFICADOR') return 'Identificador';
+    const item = camposOrigem().find((c) => c.coluna === coluna);
+    return item?.rotulo || coluna || 'Nenhum';
   }
 
   function temPromo(p) {
@@ -285,8 +326,8 @@
 
   function htmlFoto(p) {
     const caminho = `${p.id}/${p.ean || 'sem-codigo'}`;
-    const img = p.foto_url ? `<img class="co-foto-mini" src="${esc(p.foto_url)}" alt="" />` : '';
-    return `<button type="button" class="co-foto-btn" data-co-foto="${esc(p.id)}" data-co-ean="${esc(p.ean || '')}" title="Caminho no R2: ${esc(caminho)}">${img}<span>${p.foto_url ? 'Trocar' : 'Anexar'}</span></button>`;
+    const img = p.foto_url ? `<img class="co-foto-mini" src="${esc(p.foto_url)}" alt="" />` : '<span>Anexar</span>';
+    return `<button type="button" class="co-foto-btn" data-co-foto="${esc(p.id)}" data-co-ean="${esc(p.ean || '')}" title="Caminho no R2: ${esc(caminho)}">${img}</button>`;
   }
 
   function htmlModo(p) {
@@ -299,39 +340,47 @@
     </select>`;
   }
 
-  function htmlTabela(lista) {
-    const naOferta = idsNaOferta();
-    const linhas = lista.map((p) => {
+  function htmlMais(p, o) {
+    const det = detalheItem(p, o);
+    const campos = camposOrigem();
+    const origem = campos.map((item) => `<option value="${esc(item.coluna)}" ${item.coluna === det.campo ? 'selected' : ''}>${esc(rotuloCurto(item.coluna))}</option>`).join('');
+    const onde = (valor, nome) => `<option value="${valor}" ${det.onde === valor ? 'selected' : ''}>${nome}</option>`;
+    return `<div class="co-mais">
+      <label>Limite <input class="co-curto" type="number" min="10" max="120" data-co-limite="${esc(p.id)}" value="${esc(det.limite)}" /></label>
+      <label>Origem <select data-co-origem="${esc(p.id)}">${origem}</select></label>
+      <label>Onde <select data-co-onde="${esc(p.id)}">${onde('banner', 'Banner')}${onde('legenda', 'Legenda')}${onde('ambos', 'Os dois')}</select></label>
+      <button type="button" class="btn small" data-co-tirar="${esc(p.id)}">Tirar</button>
+    </div>`;
+  }
+
+  function htmlCampanha(o) {
+    const linhas = (o.produtos || []).map((p) => {
+      const aberto = !fechados.has(String(p.id));
       const qtdCls = Number(p.estoque) < 0 ? ' is-neg' : '';
-      const dentro = naOferta.has(String(p.id));
-      const vendido = filtros.menos ? ` · ${Number(p.vendido_30d) || 0} vend.` : '';
+      const hora = horaDoItem(o, p.id);
+      const extra = aberto ? `<div class="co-mais-linha">${hora ? `<span class="co-hora-slot">${esc(hora)}</span>` : ''}${htmlMais(p, o)}</div>` : '';
       return `<tr data-co-id="${esc(p.id)}">
-        <td class="meio"><input type="checkbox" data-co-na="${esc(p.id)}" ${dentro ? 'checked' : ''} title="${dentro ? 'Tirar da oferta' : 'Incluir na oferta'}" /></td>
+        <td class="meio"><button type="button" class="co-abre" data-co-abre="${esc(p.id)}" aria-expanded="${aberto ? 'true' : 'false'}">${aberto ? '▾' : '▸'}</button></td>
         <td class="meio">${htmlFoto(p)}</td>
-        <td class="co-cod">${esc(p.codigo)}</td>
-        <td><div class="co-nome">${esc(p.descricao)}</div><div class="co-sub">${esc(p.ean ? `EAN ${p.ean}` : 'Sem EAN')}${p.categoria ? ` · ${esc(p.categoria)}` : ''}${esc(vendido)}</div></td>
+        <td class="co-cod">${esc(p.codigo || p.id)}</td>
+        <td><div class="co-nome">${esc(p.descricao)}</div>${extra}</td>
         <td class="num co-qtd${qtdCls}">${esc(qtdTxt(p.estoque))}</td>
-        <td>${inputMoeda(p, 'preco', p.preco)}</td>
-        <td>${inputMoeda(p, 'promo', p.preco_promocional)}</td>
-        <td>${inputData(p, 'inicio', p.promocao_inicio)}</td>
-        <td>${inputData(p, 'fim', p.promocao_fim)}</td>
+        <td><div class="co-preco"><span>R$</span>${inputMoeda(p, 'preco', p.preco)}</div></td>
+        <td><div class="co-preco"><span>R$</span>${inputMoeda(p, 'promo', p.preco_promocional)}</div></td>
         <td class="meio">${htmlModo(p)}</td>
       </tr>`;
     }).join('');
-    const vazio = filtros.q || filtros.grupo || filtros.com || filtros.menos || filtros.promo
-      ? 'Nenhum produto com esses filtros.'
-      : 'Busque o produto para incluir na oferta.';
-    return `<div class="co-tabela-wrap"><table class="co-tabela">
+    return `<div class="co-tabela-wrap co-campanha"><table class="co-tabela">
       <colgroup>
-        <col class="c-sel" /><col class="c-foto" /><col class="c-cod" /><col class="c-nome" />
-        <col class="c-est" /><col class="c-preco" /><col class="c-preco" /><col class="c-data" /><col class="c-data" /><col class="c-modo" />
+        <col class="c-abre" /><col class="c-foto" /><col class="c-cod" /><col class="c-nome" />
+        <col class="c-est" /><col class="c-preco" /><col class="c-preco" /><col class="c-modo" />
       </colgroup>
       <thead><tr>
-        <th class="meio" title="Incluir na oferta"></th>
+        <th></th>
         <th class="meio">Foto</th><th>Cód.</th><th>Produto</th><th class="num">Estoque</th>
-        <th class="num">Preço</th><th class="num">Preço promo</th><th>Início</th><th>Fim</th><th class="meio">Modo</th>
+        <th class="num">Preço</th><th class="num">Preço promo</th><th class="meio">Modo</th>
       </tr></thead>
-      <tbody>${linhas || `<tr><td colspan="10" class="co-vazio">${vazio}</td></tr>`}</tbody>
+      <tbody>${linhas || '<tr><td colspan="8" class="co-vazio">Nenhum item na campanha.</td></tr>'}</tbody>
     </table></div>`;
   }
 
@@ -340,40 +389,47 @@
     if (!el || !estado) return;
     const rolagem = document.querySelector('.main')?.scrollTop || 0;
     el.innerHTML = painel();
-    if (ofertaAtual()) ligarArquivo();
-    pintar();
+    if (ofertaAtual()) {
+      ligarArquivo();
+      carregarGrupos();
+    }
     const main = document.querySelector('.main');
     if (main) main.scrollTop = rolagem;
   }
 
-  function buscaAtiva() {
-    return !!(filtros.q.trim() || filtros.grupo || filtros.com || filtros.menos || filtros.promo);
-  }
-
-  function pintar() {
-    const miolo = document.getElementById('co-miolo');
-    if (!miolo) return;
-    miolo.innerHTML = htmlTabela(buscaAtiva() ? visiveis() : []);
-    const extra = document.getElementById('co-extra');
-    if (!extra) return;
-    if (!buscaAtiva()) {
-      extra.textContent = `${(ofertaAtual()?.produtos || []).length} na oferta`;
+  function pintarSugestoes() {
+    const lista = document.getElementById('co-sugestoes');
+    if (!lista) return;
+    if (!sugestoes.length) {
+      lista.hidden = true;
+      lista.innerHTML = '';
       return;
     }
-    const partes = [`${visiveis().length} produto${visiveis().length === 1 ? '' : 's'}`];
-    if (filtros.com) partes.push('com estoque');
-    if (filtros.promo) partes.push('com promoção no ERP');
-    if (filtros.menos) partes.push('menos vendidos primeiro');
-    extra.textContent = partes.join(' · ');
+    lista.hidden = false;
+    lista.innerHTML = sugestoes.map((p) => `<li><button type="button" class="co-sug${String(p.id) === String(escolhaId) ? ' is-on' : ''}" data-co-sug="${esc(p.id)}"><strong>${esc(p.codigo || p.id)}</strong><span>${esc(p.descricao)}</span></button></li>`).join('');
   }
 
   function itemOferta(p) {
+    const base = detalhesOferta(ofertaAtual());
+    const modo = modoAtual(p);
     return {
       id: p.id,
+      codigo: p.codigo || p.id,
       descricao: p.descricao || '',
       ean: p.ean || '',
-      detalhe: p.observacao || '',
-      detalhes: p.textos || {},
+      detalhe: p.observacao || p.detalhe || '',
+      detalhes: (p.textos && Object.values(p.textos).some((v) => String(v || '').trim())) ? p.textos : (p.detalhes || {}),
+      preco: p.preco,
+      preco_promocional: p.preco_promocional,
+      promocao_inicio: p.promocao_inicio || '',
+      promocao_fim: p.promocao_fim || '',
+      estoque: p.estoque,
+      foto_url: p.foto_url || '',
+      modo: modo === 'nenhum' ? '' : modo,
+      categoria: p.categoria || '',
+      limite_banner: Number(p.limite_banner) || base.limite_banner,
+      campo_origem: p.campo_origem || base.campo_origem,
+      onde: p.onde || base.onde,
     };
   }
 
@@ -382,17 +438,43 @@
     if (!ofertas.some((o) => o.id === oferta.id)) ofertas.unshift(oferta);
   }
 
-  async function incluirProduto(p) {
+  async function persistirItem(p) {
     const o = ofertaAtual();
-    if (!o || !p) return;
+    if (!o || !p) return null;
     const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/produtos`, {
       method: 'POST',
       body: { produtos: [itemOferta(p)] },
     });
-    if (!r.ok) return showMsg(r.error || 'Falha ao incluir o produto.');
+    if (!r.ok) {
+      showMsg(r.error || 'Falha ao salvar o item.');
+      return null;
+    }
     trocarOferta(r.oferta);
+    return r.oferta;
+  }
+
+  async function incluirProduto(p) {
+    const o = ofertaAtual();
+    if (!o || !p) return;
+    if (idsNaOferta().has(String(p.id))) return showMsg('Este produto já está na campanha.');
+    const salvo = await persistirItem(p);
+    if (!salvo) return;
+    filtros.q = '';
+    sugestoes = [];
+    escolhaId = '';
     desenhar();
-    carregarLista();
+  }
+
+  async function adicionarEscolha() {
+    clearTimeout(buscaTimer);
+    if (filtros.q.trim().length >= 2) await buscarSugestoes();
+    const id = escolhaId || sugestoes[0]?.id;
+    if (!id) return showMsg('Busque o nome, código ou EAN e escolha um produto.');
+    if (idsNaOferta().has(String(id))) return showMsg('Este produto já está na campanha.');
+    const r = await api(`/central-ofertas/produtos?id=${encodeURIComponent(id)}`, { cache: 'no-store' });
+    const p = (r.ok && r.produtos && r.produtos[0]) || sugestoes.find((item) => String(item.id) === String(id));
+    if (!p) return showMsg(r.error || 'Produto não encontrado.');
+    await incluirProduto(p);
   }
 
   async function tirarProduto(id) {
@@ -405,14 +487,17 @@
     if (!r.ok) return showMsg(r.error || 'Falha ao tirar o produto.');
     trocarOferta(r.oferta);
     desenhar();
-    carregarLista();
+  }
+
+  function itemCampanha(id) {
+    return (ofertaAtual()?.produtos || []).find((p) => String(p.id) === String(id)) || null;
   }
 
   async function salvarModo(id, modo) {
     const r = await api(`/central-ofertas/produtos/${encodeURIComponent(id)}`, { method: 'PUT', body: { modo } });
     if (!r.ok) return showMsg(r.error || 'Falha ao salvar o modo.');
-    produtos = produtos.map((p) => (String(p.id) === String(id) ? r.produto : p));
-    pintar();
+    const atual = itemCampanha(id) || {};
+    await persistirItem({ ...atual, ...r.produto, modo: modo === 'nenhum' ? '' : modo, modo_escolhido: modo === 'nenhum' ? '' : modo });
   }
 
   async function salvarCampos(id) {
@@ -422,14 +507,11 @@
     const val = (nome) => linha.querySelector(`[data-co-campo="${nome}"]`)?.value ?? '';
     const preco = val('preco');
     const promo = val('promo');
-    const inicio = val('inicio');
-    const fim = val('fim');
-    const atual = produtos.find((p) => String(p.id) === String(id));
-    if (atual
-      && moedaInput(atual.preco) === preco
-      && moedaInput(atual.preco_promocional) === promo
-      && String(atual.promocao_inicio || '') === inicio
-      && String(atual.promocao_fim || '') === fim) return;
+    const atual = itemCampanha(id) || {};
+    const o = ofertaAtual();
+    const inicio = val('inicio') || atual.promocao_inicio || o?.inicio || '';
+    const fim = val('fim') || atual.promocao_fim || o?.fim || '';
+    if (moedaInput(atual.preco) === preco && moedaInput(atual.preco_promocional) === promo) return;
     if (!String(preco).trim()) return showMsg('Informe o preço.');
     if (String(promo).trim() && (!inicio || !fim)) return showMsg('Informe o início e o fim da promoção.');
     const r = await api(`/central-ofertas/produtos/${encodeURIComponent(id)}`, {
@@ -442,8 +524,7 @@
       },
     });
     if (!r.ok) return showMsg(r.error || 'Falha ao salvar o preço.');
-    produtos = produtos.map((p) => (String(p.id) === String(id) ? r.produto : p));
-    pintar();
+    await persistirItem({ ...atual, ...r.produto });
   }
 
   function reduzirFoto(file) {
@@ -478,8 +559,9 @@
       body: { base64, tipo: 'image/jpeg', ean },
     });
     if (!r.ok) return showMsg(r.error || 'Falha ao anexar a foto.');
-    produtos = produtos.map((p) => (String(p.id) === String(id) ? { ...p, foto: true, foto_url: r.foto_url, foto_chave: r.foto_chave } : p));
-    pintar();
+    const atual = itemCampanha(id) || { id, ean };
+    await persistirItem({ ...atual, foto: true, foto_url: r.foto_url, foto_chave: r.foto_chave });
+    desenhar();
     if (r.aviso) showMsg(r.aviso);
   }
 
@@ -487,11 +569,16 @@
     campo('co-q')?.addEventListener('input', () => {
       filtros.q = campo('co-q').value;
       clearTimeout(buscaTimer);
-      buscaTimer = setTimeout(() => carregarLista(), 280);
+      buscaTimer = setTimeout(() => buscarSugestoes(), 320);
+    });
+    campo('co-q')?.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      adicionarEscolha();
     });
     campo('co-grupo')?.addEventListener('change', () => {
       filtros.grupo = campo('co-grupo').value;
-      carregarLista();
+      if (filtros.q.trim().length >= 2) buscarSugestoes();
     });
     campo('co-arquivo')?.addEventListener('change', () => {
       const file = campo('co-arquivo').files?.[0];
@@ -535,7 +622,9 @@
     if (ev.target.closest('#co-of-criar')) return criarOferta();
     if (ev.target.closest('#co-of-voltar')) {
       ofertaAberta = '';
-      produtos = [];
+      sugestoes = [];
+      escolhaId = '';
+      filtros.q = '';
       desenhar();
       return;
     }
@@ -559,24 +648,52 @@
       }
       return;
     }
+    if (ev.target.closest('#co-add')) return adicionarEscolha();
+    const sug = ev.target.closest('[data-co-sug]');
+    if (sug) {
+      escolhaId = sug.dataset.coSug;
+      return adicionarEscolha();
+    }
+    const abre = ev.target.closest('[data-co-abre]');
+    if (abre) {
+      const id = String(abre.dataset.coAbre);
+      if (fechados.has(id)) fechados.delete(id);
+      else fechados.add(id);
+      desenhar();
+      return;
+    }
+    const tirar = ev.target.closest('[data-co-tirar]');
+    if (tirar) return tirarProduto(tirar.dataset.coTirar);
     const b = ev.target.closest('[data-co-filtro]');
     if (!b) return;
     const k = b.dataset.coFiltro;
     filtros[k] = b.getAttribute('aria-pressed') !== 'true';
     b.setAttribute('aria-pressed', filtros[k] ? 'true' : 'false');
-    await carregarLista();
+    if (filtros.q.trim().length >= 2) buscarSugestoes();
   }
 
   async function mudou(ev) {
     const t = ev.target;
     if (!raiz()?.contains(t) || !ofertaAtual()) return;
-    if (t.dataset.coNa) {
-      const p = produtos.find((item) => String(item.id) === String(t.dataset.coNa));
-      if (t.checked) await incluirProduto(p);
-      else await tirarProduto(t.dataset.coNa);
-      return;
-    }
+    const extraId = t.dataset.coLimite || t.dataset.coOrigem || t.dataset.coOnde;
+    if (extraId) return salvarExtra(extraId);
     if (t.dataset.coModo) await salvarModo(t.dataset.coModo, t.value);
+  }
+
+  async function salvarExtra(id) {
+    const atual = itemCampanha(id);
+    if (!atual) return;
+    const raizEl = raiz();
+    const limite = Number(raizEl?.querySelector(`[data-co-limite="${CSS.escape(String(id))}"]`)?.value);
+    const campoOrigem = raizEl?.querySelector(`[data-co-origem="${CSS.escape(String(id))}"]`)?.value || '';
+    const onde = raizEl?.querySelector(`[data-co-onde="${CSS.escape(String(id))}"]`)?.value || '';
+    await persistirItem({
+      ...atual,
+      limite_banner: limite,
+      campo_origem: campoOrigem,
+      onde,
+      textos: atual.detalhes,
+    });
   }
 
   function saiu(ev) {
@@ -595,36 +712,47 @@
     if (filtros.com) qs.set('com', '1');
     if (filtros.promo) qs.set('promo', '1');
     if (filtros.menos) qs.set('vendidos', '1');
-    const s = qs.toString();
-    return s ? `?${s}` : '';
+    qs.set('rapido', '1');
+    return `?${qs.toString()}`;
   }
 
-  async function carregarLista() {
+  async function buscarSugestoes() {
     if (!ofertaAtual()) return;
-    if (!buscaAtiva()) {
-      produtos = [];
-      pintar();
+    const seq = ++buscaSeq;
+    if (filtros.q.trim().length < 2) {
+      sugestoes = [];
+      escolhaId = '';
+      pintarSugestoes();
       return;
     }
-    const extra = document.getElementById('co-extra');
-    if (extra) extra.textContent = 'Carregando produtos…';
     const r = await api(`/central-ofertas/produtos${queryLista()}`, { cache: 'no-store' });
+    if (seq !== buscaSeq) return;
     if (!r.ok) {
-      const miolo = document.getElementById('co-miolo');
-      if (miolo) miolo.innerHTML = `<p class="erro">${esc(r.error || 'Falha ao ler os produtos.')}</p>`;
+      sugestoes = [];
+      pintarSugestoes();
+      return showMsg(r.error || 'Falha ao buscar os produtos.');
+    }
+    podePreco = r.pode_preco === true;
+    sugestoes = r.produtos || [];
+    if (!sugestoes.some((p) => String(p.id) === String(escolhaId))) escolhaId = sugestoes[0]?.id || '';
+    pintarSugestoes();
+  }
+
+  async function carregarGrupos() {
+    if (gruposProntos) return;
+    gruposProntos = true;
+    const r = await api('/central-ofertas/produtos?grupos=1', { cache: 'no-store' });
+    if (!r.ok) {
+      gruposProntos = false;
       return;
     }
-    produtos = r.produtos || [];
     grupos = r.grupos || [];
-    podePreco = r.pode_preco === true;
     const grupo = campo('co-grupo');
-    if (grupo) {
-      const atual = filtros.grupo;
-      grupo.innerHTML = ['<option value="">Todos</option>'].concat(grupos.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`)).join('');
-      grupo.value = grupos.includes(atual) ? atual : '';
-      filtros.grupo = grupo.value;
-    }
-    pintar();
+    if (!grupo) return;
+    const atual = filtros.grupo;
+    grupo.innerHTML = ['<option value="">Todos</option>'].concat(grupos.map((g) => `<option value="${esc(g)}">${esc(g)}</option>`)).join('');
+    grupo.value = grupos.includes(atual) ? atual : '';
+    filtros.grupo = grupo.value;
   }
 
   function isoHoje(offset) {
@@ -647,11 +775,12 @@
   }
 
   function lerDetalhesForm() {
+    const d = detalhesOferta(ofertaAtual());
     return {
-      ativo: !!campo('co-det-on')?.checked,
-      campo_origem: campo('co-det-campo')?.value || 'OBSERVACAO',
-      onde: campo('co-det-onde')?.value || 'legenda',
-      limite_banner: Number(campo('co-det-limite')?.value),
+      ativo: campo('co-det-on') ? !!campo('co-det-on').checked : d.ativo,
+      campo_origem: d.campo_origem,
+      onde: d.onde,
+      limite_banner: d.limite_banner,
     };
   }
 
@@ -692,7 +821,6 @@
     if (!r.ok) return avisoRotina(r.error || 'Falha ao gerar a rotina.');
     trocarOferta(r.oferta);
     desenhar();
-    carregarLista();
     const n = (r.oferta.rotina || []).length;
     const prox = (r.oferta.rotina || []).find((s) => !s.publicado);
     const texto = prox
@@ -700,7 +828,6 @@
       : `${n} horário${n === 1 ? '' : 's'}.`;
     const st = campo('co-rotina-status');
     if (st) st.textContent = r.aviso ? `${texto} ${r.aviso}` : texto;
-    document.getElementById('co-rotina-lista')?.scrollIntoView({ block: 'nearest' });
   }
 
   async function postarAgora() {
@@ -743,7 +870,6 @@
     }
     if (ofertaAtual()) {
       desenhar();
-      carregarLista();
       const st = campo('co-rotina-status');
       if (st) st.textContent = texto;
     }
@@ -756,7 +882,6 @@
     ofertas = r.ofertas || [];
     if (ofertaAberta && !ofertas.some((o) => o.id === ofertaAberta)) ofertaAberta = '';
     desenhar();
-    if (ofertaAtual()) carregarLista();
   }
 
   async function onPageEnter() {
@@ -772,6 +897,7 @@
       return;
     }
     estado = r;
+    podePreco = r.pode_preco === true;
     await carregarOfertas();
   }
 

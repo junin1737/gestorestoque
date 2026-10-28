@@ -134,7 +134,7 @@ function equipe() {
       }));
   }
 
-  router.get('/central-ofertas/config', acesso, async (_req, res) => {
+  router.get('/central-ofertas/config', acesso, async (req, res) => {
     try {
       const config = configEfetiva();
       const campos = await conectores.erp.camposTexto();
@@ -154,6 +154,7 @@ function equipe() {
         modos: conectores.modos,
         campos_texto: campos,
         equipe: equipe(),
+        pode_preco: podeAlterarPreco(req),
         instagram: ig,
       });
     } catch (err) {
@@ -191,17 +192,23 @@ function equipe() {
         com: req.query.com === '1',
         promo: req.query.promo === '1',
         menos: req.query.vendidos === '1',
+        rapido: req.query.rapido === '1',
+        id: req.query.id || '',
         ignorar: Object.entries(mods).filter(([, m]) => m?.ignorar_estoque).map(([id]) => id),
       };
+      if (req.query.grupos === '1') {
+        const soGrupos = await conectores.erp.grupos().catch(() => []);
+        return res.json({ ok: true, grupos: soGrupos, produtos: [], pode_preco: podeAlterarPreco(req) });
+      }
       let lista = await conectores.erp.listarProdutos(filtros);
-      if (req.query.vendidos === '1' && !lista.some((p) => p.vendido_30d != null)) {
+      if (req.query.vendidos === '1' && !filtros.rapido && !filtros.id && !lista.some((p) => p.vendido_30d != null)) {
         const totais = await conectores.erp.vendidos30();
         lista = lista
           .map((p) => ({ ...p, vendido_30d: Number(totais[String(p.id)] || 0) }))
           .sort((a, b) => a.vendido_30d - b.vendido_30d || String(a.descricao).localeCompare(String(b.descricao), 'pt'))
           .slice(0, 300);
       }
-      const grupos = await conectores.erp.grupos().catch(() => (
+      const grupos = filtros.rapido || filtros.id ? [] : await conectores.erp.grupos().catch(() => (
         [...new Set(lista.map((p) => String(p.categoria || '').trim()).filter(Boolean))]
           .sort((a, b) => a.localeCompare(b, 'pt'))
       ));
@@ -381,11 +388,22 @@ function equipe() {
       const oferta = lista.find((o) => o.id === req.params.id);
       if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
       const atuais = new Map((oferta.produtos || []).map((p) => [String(p.id), p]));
-      for (const p of normalizarProdutosOferta(req.body?.produtos)) atuais.set(p.id, p);
+      let entrou = false;
+      for (const p of normalizarProdutosOferta(req.body?.produtos)) {
+        if (!atuais.has(p.id)) entrou = true;
+        const anterior = atuais.get(p.id) || {};
+        atuais.set(p.id, {
+          ...anterior,
+          ...p,
+          detalhes: { ...(anterior.detalhes || {}), ...(p.detalhes || {}) },
+        });
+      }
       if (atuais.size > 300) throw new Error('A oferta aceita até 300 produtos.');
       oferta.produtos = [...atuais.values()];
-      oferta.rotina = [];
-      oferta.aviso = '';
+      if (entrou) {
+        oferta.rotina = [];
+        oferta.aviso = '';
+      }
       dados.ofertas = lista;
       gravarArquivo(dados);
       res.json({ ok: true, oferta });
@@ -425,10 +443,13 @@ function equipe() {
       const campo = oferta.detalhes?.campo_origem || 'OBSERVACAO';
       const publicados = (oferta.rotina || []).filter((s) => s.publicado);
       const ja = new Set(publicados.map((s) => String(s.produto_id || '')).filter(Boolean));
-      const produtos = (oferta.produtos || []).filter((p) => !ja.has(String(p.id))).map((p) => ({
-        ...p,
-        detalhe: usar ? String(p.detalhes?.[campo] || p.detalhe || '').slice(0, 200) : '',
-      }));
+      const produtos = (oferta.produtos || []).filter((p) => !ja.has(String(p.id))).map((p) => {
+        const campoItem = String(p.campo_origem || campo || 'OBSERVACAO');
+        return {
+          ...p,
+          detalhe: usar ? String(p.detalhes?.[campoItem] || p.detalhe || '').slice(0, 200) : '',
+        };
+      });
       if (!produtos.length) {
         throw new Error(ja.size ? 'Todos os produtos desta oferta já foram publicados.' : 'Inclua produtos na oferta antes de gerar a rotina.');
       }
@@ -443,7 +464,9 @@ function equipe() {
       oferta.rotina = publicados.concat(gerada.rotina.map((slot) => ({
         ...slot,
         publicado: false,
-        foto_url: String(fotos[String(slot.produto_id)]?.foto_url || ''),
+        foto_url: String(fotos[String(slot.produto_id)]?.foto_url
+          || (oferta.produtos || []).find((p) => String(p.id) === String(slot.produto_id))?.foto_url
+          || ''),
       })));
       oferta.aviso = gerada.aviso || '';
       dados.ofertas = lista;
@@ -576,12 +599,31 @@ function normalizarProdutosOferta(lista) {
       if (!/^[A-Z0-9_]{2,40}$/.test(chave)) continue;
       detalhes[chave] = String(valor || '').slice(0, 200);
     }
+    const preco = Number(item?.preco);
+    const promo = item?.preco_promocional == null || item?.preco_promocional === '' ? null : Number(item.preco_promocional);
+    const estoque = Number(item?.estoque);
+    const limite = Number(item?.limite_banner);
+    const onde = ['banner', 'legenda', 'ambos'].includes(item?.onde) ? item.onde : '';
+    const campo = String(item?.campo_origem || '').replace(/[^\w]/g, '').slice(0, 40);
+    const foto = String(item?.foto_url || '');
     out.push({
       id,
+      codigo: String(item?.codigo || id).trim().slice(0, 20),
       descricao: String(item?.descricao || '').trim().slice(0, 120),
       ean: String(item?.ean || '').replace(/\D/g, '').slice(0, 20),
       detalhe: String(item?.detalhe || detalhes.OBSERVACAO || '').slice(0, 200),
       detalhes,
+      preco: Number.isFinite(preco) ? Math.round(preco * 100) / 100 : null,
+      preco_promocional: Number.isFinite(promo) ? Math.round(promo * 100) / 100 : null,
+      promocao_inicio: String(item?.promocao_inicio || '').slice(0, 10),
+      promocao_fim: String(item?.promocao_fim || '').slice(0, 10),
+      estoque: Number.isFinite(estoque) ? estoque : null,
+      foto_url: /^https:\/\//.test(foto) ? foto.slice(0, 300) : '',
+      modo: item?.modo === 'oferta' || item?.modo === 'exposicao' ? item.modo : '',
+      categoria: String(item?.categoria || '').trim().slice(0, 60),
+      limite_banner: Number.isInteger(limite) ? Math.min(120, Math.max(10, limite)) : 0,
+      campo_origem: campo,
+      onde,
     });
     if (out.length >= 300) break;
   }

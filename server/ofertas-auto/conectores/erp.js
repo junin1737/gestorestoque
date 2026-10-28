@@ -193,12 +193,15 @@ function sqlLista(mapa, comPromo, filtros = {}, mapaPromo, fontesVenda = null) {
     `${ident(mapa.categoria)} AS CATEGORIA`,
     `${ident(mapa.referencia)} AS REFERENCIA`,
   ];
-  if (mapa.observacao === 'OBS') cols.push(`${ident('OBS')} AS OBSERVACAO`);
-  else cols.push(`(SELECT FIRST 1 OBSERVACAO FROM TB_ESTOQUE WHERE ID_ESTOQUE = V.ID_ESTOQUE) AS OBSERVACAO`);
-  for (const campo of mapa.campos_texto || []) {
-    const coluna = typeof campo === 'string' ? campo : campo.coluna;
-    if (!coluna || ['OBSERVACAO', 'ID_IDENTIFICADOR', 'COD_BARRA'].includes(coluna)) continue;
-    cols.push(`${ident(coluna)} AS ${ident(coluna)}`);
+  const rapido = filtros.rapido === true;
+  if (!rapido) {
+    if (mapa.observacao === 'OBS') cols.push(`${ident('OBS')} AS OBSERVACAO`);
+    else cols.push(`(SELECT FIRST 1 OBSERVACAO FROM TB_ESTOQUE WHERE ID_ESTOQUE = V.ID_ESTOQUE) AS OBSERVACAO`);
+    for (const campo of mapa.campos_texto || []) {
+      const coluna = typeof campo === 'string' ? campo : campo.coluna;
+      if (!coluna || ['OBSERVACAO', 'ID_IDENTIFICADOR', 'COD_BARRA'].includes(coluna)) continue;
+      cols.push(`${ident(coluna)} AS ${ident(coluna)}`);
+    }
   }
   if (comPromo) {
     cols.push(`${ident(mapa.preco_promocional)} AS PROMO`);
@@ -241,30 +244,55 @@ function sqlLista(mapa, comPromo, filtros = {}, mapaPromo, fontesVenda = null) {
   }
   const join = fontesVenda?.length ? sqlVendas(fontesVenda) : '';
   if (fontesVenda?.length) params.unshift(...fontesVenda.map(() => diaAtras(30)));
-  const limite = fontesVenda?.length ? 300 : 8000;
-  const ordem = fontesVenda?.length
-    ? 'COALESCE(S.VENDIDO, 0), V.PROD_SERV'
-    : `${ident(mapa.codigo)} DESC`;
-  const sql = `SELECT FIRST ${limite} ${cols.join(', ')} FROM ${ident(mapa.view)} V ${join} WHERE ${where.join(' AND ')} ORDER BY ${ordem}`;
+  if (filtros.id) {
+    where.push(`${ident(mapa.id)} = ?`);
+    params.push(Number(filtros.id));
+  }
+  const limite = filtros.id ? 1 : (rapido ? 40 : (fontesVenda?.length ? 300 : 8000));
+  let ordem = '';
+  if (!rapido && !filtros.id) {
+    ordem = fontesVenda?.length
+      ? ' ORDER BY COALESCE(S.VENDIDO, 0), V.PROD_SERV'
+      : ` ORDER BY ${ident(mapa.codigo)} DESC`;
+  }
+  const sql = `SELECT FIRST ${limite} ${cols.join(', ')} FROM ${ident(mapa.view)} V ${join} WHERE ${where.join(' AND ')}${ordem}`;
   return { sql, params };
 }
 
 function criarErpReal(deps) {
+  let cacheVendas = null;
+  let cacheVendasEm = 0;
   return {
     modo: 'real',
     async listarProdutos(filtros = {}) {
       const { withDb, query, activeTargets } = deps;
+      let totaisMenor = null;
+      if (filtros.rapido && filtros.menos) {
+        if (!cacheVendas || Date.now() - cacheVendasEm > 10 * 60 * 1000) {
+          cacheVendas = await this.vendidos30();
+          cacheVendasEm = Date.now();
+        }
+        totaisMenor = cacheVendas;
+      }
       return withDb(async (db, cfg) => {
         const alvos = activeTargets(cfg);
         const soManage = alvos.length === 1 && alvos[0].manage;
         const mapa = soManage ? mapeamento.manage : mapeamento.clipp;
         const temManage = alvos.some((a) => a.manage);
-        const fontes = filtros.menos
+        const fontes = filtros.menos && !filtros.rapido
           ? (soManage ? [mapeamento.vendidos.manage] : (temManage ? [mapeamento.vendidos.clipp, mapeamento.vendidos.manage] : [mapeamento.vendidos.clipp]))
           : null;
         const consulta = sqlLista(mapa, soManage, filtros, temManage && !soManage ? mapeamento.manage : null, fontes);
         const rows = await query(db, consulta.sql, consulta.params);
-        const produtos = rows.map((r) => linhaProduto(r, soManage ? 'DESC_CMPL' : 'DESC_CMPL'));
+        let produtos = rows.map((r) => linhaProduto(r, soManage ? 'DESC_CMPL' : 'DESC_CMPL'));
+        if (filtros.rapido && filtros.menos) {
+          const totais = totaisMenor || {};
+          produtos.sort((a, b) => Number(totais[a.id] || 0) - Number(totais[b.id] || 0)
+            || a.descricao.localeCompare(b.descricao, 'pt'));
+          produtos = produtos.slice(0, 12);
+          if (!filtros.promo) return produtos;
+        } else if (filtros.rapido && !filtros.promo) return produtos.slice(0, 12);
+        produtos = produtos.slice(0, filtros.rapido ? 12 : produtos.length);
         if (soManage || !alvos.some((a) => a.manage) || !produtos.length) return produtos;
         const m = mapeamento.manage;
         const ids = produtos.map((p) => Number(p.id)).filter((n) => Number.isInteger(n));
