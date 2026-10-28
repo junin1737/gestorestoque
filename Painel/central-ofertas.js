@@ -25,7 +25,10 @@
   let sugestoes = [];
   let escolhaId = '';
   let gruposProntos = false;
+  let gravacao = 0;
+  let dedoRemocao = '';
   const fechados = new Set();
+  const emRemocao = new Set();
   const filtros = { q: '', grupo: '', com: false, menos: false, promo: false };
 
   function raiz() { return document.getElementById('co-raiz'); }
@@ -85,13 +88,18 @@
     return `${data.getFullYear()}-${String(data.getMonth() + 1).padStart(2, '0')}-${String(data.getDate()).padStart(2, '0')}`;
   }
 
+  function ofertaLigada(o) {
+    return o?.ativa !== false;
+  }
+
   function ativaNoDia(o, dia) {
-    return o.inicio && o.fim && o.inicio <= dia && o.fim >= dia;
+    return ofertaLigada(o) && o.inicio && o.fim && o.inicio <= dia && o.fim >= dia;
   }
 
   function postsNoDia(dia) {
     const lista = [];
     for (const o of ofertas) {
+      if (!ofertaLigada(o)) continue;
       for (const slot of o.rotina || []) {
         if (slot.data === dia) lista.push({ ...slot, oferta_id: o.id, oferta: o.nome });
       }
@@ -120,34 +128,29 @@
       </button>`;
     }).join('');
     const painelDia = htmlDia(diaAberto);
-    const form = criando ? `<section class="co-oferta-nova">
-        <h3>Nova oferta</h3>
-        <div class="co-grade co-grade-2">
-          <label class="co-oferta-nome">Nome<input id="co-of-nome" maxlength="80" placeholder="Semana do Yu-Gi-Oh" /></label>
-          <label>Início<input id="co-of-ini" type="date" value="${isoHoje(0)}" /></label>
-          <label>Fim<input id="co-of-fim" type="date" value="${isoHoje(6)}" /></label>
-        </div>
-        <button type="button" class="btn primary" id="co-of-criar">Criar oferta</button>
-      </section>` : '';
-    const ativas = ofertas.filter((o) => o.fim >= hoje).map((o) => {
-      const prox = (o.rotina || []).find((s) => !s.publicado);
-      return `<button type="button" class="co-oferta-item" data-co-oferta="${esc(o.id)}">
+    const itemOfertaLista = (o) => {
+      const prox = ofertaLigada(o) ? (o.rotina || []).find((s) => !s.publicado) : null;
+      return `<button type="button" class="co-oferta-item${ofertaLigada(o) ? '' : ' is-inativa'}" data-co-oferta="${esc(o.id)}">
         <strong>${esc(o.nome)}</strong>
-        <span>${esc(o.inicio)} a ${esc(o.fim)}${prox ? ` · próxima ${esc(prox.data)} ${esc(prox.hora)}` : ''}</span>
+        <span>${ofertaLigada(o) ? 'Ativa' : 'Inativa'} · ${esc(o.inicio)} a ${esc(o.fim)}${prox ? ` · próxima ${esc(prox.data)} ${esc(prox.hora)}` : ''}</span>
       </button>`;
-    }).join('');
+    };
+    const noPeriodo = ofertas.filter((o) => o.fim >= hoje);
+    const ativas = noPeriodo.filter(ofertaLigada).map(itemOfertaLista).join('');
+    const inativas = noPeriodo.filter((o) => !ofertaLigada(o)).map(itemOfertaLista).join('');
     return `<div class="co-cal-head">
         <button type="button" class="btn small" data-co-mes="-1" aria-label="Mês anterior">‹</button>
         <h3>${esc(MESES[calMes])} ${calAno}</h3>
         <button type="button" class="btn small" data-co-mes="1" aria-label="Próximo mês">›</button>
-        <button type="button" class="btn primary" id="co-nova">${criando ? 'Fechar' : 'Nova oferta'}</button>
+        <button type="button" class="btn primary" id="co-nova">Nova oferta</button>
       </div>
       <div class="co-cal-semana">${DIAS.map((d) => `<span>${d}</span>`).join('')}</div>
       <div class="co-cal">${grade}</div>
       ${painelDia}
-      ${form}
       <h4>Ofertas ativas</h4>
-      <div class="co-oferta-lista">${ativas || '<p class="hint">Nenhuma oferta em andamento.</p>'}</div>`;
+      <div class="co-oferta-lista">${ativas || '<p class="hint">Nenhuma oferta em andamento.</p>'}</div>
+      <h4>Ofertas inativas</h4>
+      <div class="co-oferta-lista">${inativas || '<p class="hint">Nenhuma oferta inativa neste período.</p>'}</div>`;
   }
 
   function htmlDia(dia) {
@@ -179,10 +182,17 @@
     const d = detalhesOferta(o);
     const n = (o.produtos || []).length;
     const pendente = (o.rotina || []).some((item) => !item.publicado && item.produto_id);
+    const ligada = ofertaLigada(o);
     return `<div class="co-oferta-head">
         <button type="button" class="btn" id="co-of-voltar"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M8 3.5v3M16 3.5v3M4 10h16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg> Calendário</button>
-        <strong class="co-oferta-titulo">${esc(o.nome)}</strong>
-        <span class="co-oferta-datas">${esc(o.inicio)} a ${esc(o.fim)}</span>
+        <input id="co-of-nome" class="co-oferta-nome-input" maxlength="80" value="${esc(o.nome)}" aria-label="Nome da campanha" />
+        <input id="co-of-ini" class="co-oferta-data" type="date" value="${esc(o.inicio)}" aria-label="Início da campanha" />
+        <span class="co-oferta-datas">a</span>
+        <input id="co-of-fim" class="co-oferta-data" type="date" value="${esc(o.fim)}" aria-label="Fim da campanha" />
+        <div class="co-status" role="group" aria-label="Status da campanha">
+          <button type="button" data-co-status="1" aria-pressed="${ligada ? 'true' : 'false'}">Ativa</button>
+          <button type="button" data-co-status="0" aria-pressed="${ligada ? 'false' : 'true'}">Inativa</button>
+        </div>
       </div>
       <div class="co-par">
         <section class="co-card">
@@ -208,6 +218,7 @@
               <label class="co-check"><input id="co-r-encarte" type="checkbox" ${r.encarte ? 'checked' : ''} /> Encarte</label>
             </div>
             <div class="co-rotina-botoes">
+              <button type="button" class="btn" id="co-of-cancelar">Cancelar</button>
               <button type="button" class="btn primary" id="co-of-rotina">Gerar</button>
               <button type="button" class="btn" id="co-of-agora" ${pendente && !postando ? '' : 'disabled'}>${postando ? 'Publicando…' : 'Postar agora'}</button>
             </div>
@@ -440,11 +451,13 @@
 
   async function persistirItem(p) {
     const o = ofertaAtual();
-    if (!o || !p) return null;
+    if (!o || !p || emRemocao.has(String(p.id))) return null;
+    const marca = gravacao;
     const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/produtos`, {
       method: 'POST',
       body: { produtos: [itemOferta(p)] },
     });
+    if (marca !== gravacao || emRemocao.has(String(p.id))) return null;
     if (!r.ok) {
       showMsg(r.error || 'Falha ao salvar o item.');
       return null;
@@ -480,11 +493,21 @@
   async function tirarProduto(id) {
     const o = ofertaAtual();
     if (!o) return;
+    const chave = String(id);
+    emRemocao.add(chave);
+    gravacao += 1;
+    trocarOferta({ ...o, produtos: (o.produtos || []).filter((p) => String(p.id) !== chave) });
+    desenhar();
     const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/produtos/remover`, {
       method: 'POST',
-      body: { ids: [id] },
+      body: { ids: [chave] },
     });
-    if (!r.ok) return showMsg(r.error || 'Falha ao tirar o produto.');
+    emRemocao.delete(chave);
+    if (!r.ok) {
+      showMsg(r.error || 'Falha ao tirar o produto.');
+      await carregarOfertas();
+      return;
+    }
     trocarOferta(r.oferta);
     desenhar();
   }
@@ -501,7 +524,7 @@
   }
 
   async function salvarCampos(id) {
-    if (!podePreco) return;
+    if (!podePreco || emRemocao.has(String(id))) return;
     const linha = raiz()?.querySelector(`tr[data-co-id="${CSS.escape(String(id))}"]`);
     if (!linha) return;
     const val = (nome) => linha.querySelector(`[data-co-campo="${nome}"]`)?.value ?? '';
@@ -580,6 +603,9 @@
       filtros.grupo = campo('co-grupo').value;
       if (filtros.q.trim().length >= 2) buscarSugestoes();
     });
+    campo('co-of-nome')?.addEventListener('change', () => salvarCapa());
+    campo('co-of-ini')?.addEventListener('change', () => salvarCapa());
+    campo('co-of-fim')?.addEventListener('change', () => salvarCapa());
     campo('co-arquivo')?.addEventListener('change', () => {
       const file = campo('co-arquivo').files?.[0];
       const id = fotoAlvo;
@@ -608,18 +634,14 @@
       desenhar();
       return;
     }
-    if (ev.target.closest('#co-nova')) {
-      criando = !criando;
-      desenhar();
-      return;
-    }
+    if (ev.target.closest('#co-nova')) return criarOferta();
     const dia = ev.target.closest('[data-co-dia-cal]');
     if (dia) {
       diaAberto = diaAberto === dia.dataset.coDiaCal ? '' : dia.dataset.coDiaCal;
       desenhar();
       return;
     }
-    if (ev.target.closest('#co-of-criar')) return criarOferta();
+    if (ev.target.closest('#co-of-cancelar')) return cancelarOferta();
     if (ev.target.closest('#co-of-voltar')) {
       ofertaAberta = '';
       sugestoes = [];
@@ -635,6 +657,8 @@
       desenhar();
       return;
     }
+    const statusBtn = ev.target.closest('[data-co-status]');
+    if (statusBtn && ofertaAtual()) return definirStatus(statusBtn.dataset.coStatus === '1');
     if (ev.target.closest('#co-of-rotina')) return gerarRotina();
     if (ev.target.closest('#co-of-agora')) return postarAgora();
     if (!ofertaAtual()) return;
@@ -700,6 +724,7 @@
     if (!ofertaAtual()) return;
     const origem = ev.target.closest?.('tr');
     if (!origem?.dataset.coId || !raiz()?.contains(origem)) return;
+    if (emRemocao.has(String(origem.dataset.coId))) return;
     if (ev.target?.dataset?.coModo || ev.target?.dataset?.coNa) return;
     if (ev.relatedTarget && origem.contains(ev.relatedTarget)) return;
     salvarCampos(origem.dataset.coId);
@@ -795,17 +820,63 @@
     const r = await api('/central-ofertas/ofertas', {
       method: 'POST',
       body: {
-        nome: campo('co-of-nome')?.value || '',
-        inicio: campo('co-of-ini')?.value || '',
-        fim: campo('co-of-fim')?.value || '',
+        nome: 'Nova oferta',
+        inicio: isoHoje(0),
+        fim: isoHoje(6),
         usar_detalhes: usar,
+        ativa: true,
         produtos: [],
       },
     });
     if (!r.ok) return showMsg(r.error || 'Falha ao criar a oferta.');
     ofertaAberta = r.oferta.id;
     criando = false;
+    filtros.q = '';
+    sugestoes = [];
     await carregarOfertas();
+  }
+
+  async function salvarCapa() {
+    const o = ofertaAtual();
+    if (!o) return;
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
+      method: 'PUT',
+      body: {
+        nome: campo('co-of-nome')?.value || o.nome,
+        inicio: campo('co-of-ini')?.value || o.inicio,
+        fim: campo('co-of-fim')?.value || o.fim,
+      },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao salvar a campanha.');
+    trocarOferta(r.oferta);
+  }
+
+  async function definirStatus(ativa) {
+    const o = ofertaAtual();
+    if (!o || ofertaLigada(o) === ativa) return;
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
+      method: 'PUT',
+      body: { ativa },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao mudar o status.');
+    trocarOferta(r.oferta);
+    desenhar();
+  }
+
+  async function cancelarOferta() {
+    const o = ofertaAtual();
+    const vazia = o && !(o.produtos || []).length && !(o.rotina || []).some((s) => s.publicado);
+    ofertaAberta = '';
+    sugestoes = [];
+    escolhaId = '';
+    filtros.q = '';
+    if (vazia) {
+      const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/apagar`, { method: 'POST', body: {} });
+      if (!r.ok) showMsg(r.error || 'Falha ao cancelar a campanha.');
+      await carregarOfertas();
+      return;
+    }
+    desenhar();
   }
 
   async function gerarRotina() {
@@ -908,6 +979,19 @@
     const raizEl = document.getElementById('co-raiz');
     if (raizEl && !raizEl.dataset.coLigado) {
       raizEl.dataset.coLigado = '1';
+      const soltarRemocao = () => {
+        if (!dedoRemocao) return;
+        emRemocao.delete(dedoRemocao);
+        dedoRemocao = '';
+      };
+      raizEl.addEventListener('pointerdown', (ev) => {
+        const tirar = ev.target.closest?.('[data-co-tirar]');
+        if (!tirar) return;
+        dedoRemocao = String(tirar.dataset.coTirar);
+        emRemocao.add(dedoRemocao);
+      });
+      raizEl.addEventListener('pointerup', soltarRemocao);
+      raizEl.addEventListener('pointercancel', soltarRemocao);
       raizEl.addEventListener('click', noEvento);
       raizEl.addEventListener('change', noEvento);
       raizEl.addEventListener('focusout', noEvento);

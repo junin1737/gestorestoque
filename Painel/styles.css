@@ -3466,6 +3466,7 @@ html[data-theme="escuro"] .compras-row:hover {
 #page-central-ofertas .co-oferta-rotina li.is-feito { color: var(--muted); }
 #page-central-ofertas .co-oferta-head {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.7rem;
   margin-bottom: 0.4rem;
@@ -3525,6 +3526,40 @@ html[data-theme="escuro"] .compras-row:hover {
 }
 #page-central-ofertas .co-oferta-titulo { font-size: 1.05rem; }
 #page-central-ofertas .co-oferta-datas { color: var(--muted); }
+#page-central-ofertas .co-oferta-head input {
+  width: auto;
+  height: 2.2rem;
+  min-height: 2.2rem;
+  margin: 0;
+  font-size: 0.9rem;
+}
+#page-central-ofertas .co-oferta-nome-input { width: 14rem; font-weight: 700; }
+#page-central-ofertas .co-oferta-data { width: 9.4rem; }
+#page-central-ofertas .co-status { display: flex; gap: 0.3rem; margin-left: auto; }
+#page-central-ofertas .co-status button {
+  height: 2.2rem;
+  margin: 0;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+#page-central-ofertas .co-status button[data-co-status="1"][aria-pressed="true"] {
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+}
+#page-central-ofertas .co-status button[data-co-status="0"][aria-pressed="true"] {
+  background: #64748b;
+  border-color: #64748b;
+  color: #fff;
+}
+#page-central-ofertas .co-oferta-item.is-inativa { opacity: 0.72; }
 #page-central-ofertas .co-par {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr);

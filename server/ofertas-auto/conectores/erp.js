@@ -134,16 +134,15 @@ function linhaProduto(r, texto) {
   const promo = Number(r.PROMO);
   const inicio = dia(r.PROMO_INI);
   const fim = dia(r.PROMO_FIM);
-  const temPromo = promo > 0 && inicio && fim;
   return {
     id: String(r.ID),
     codigo: String(r.CODIGO ?? r.ID),
     descricao: String(r.DESCRICAO || '').trim(),
     ean: String(r.EAN || '').replace(/\D/g, ''),
     preco: Number(r.PRECO || 0),
-    preco_promocional: temPromo ? promo : null,
-    promocao_inicio: temPromo ? inicio : '',
-    promocao_fim: temPromo ? fim : '',
+    preco_promocional: promo > 0 ? promo : null,
+    promocao_inicio: inicio,
+    promocao_fim: fim,
     estoque: Number(r.ESTOQUE || 0),
     vendido_30d: r.VENDIDO == null ? undefined : Number(r.VENDIDO || 0),
     custo: Number(r.CUSTO || 0),

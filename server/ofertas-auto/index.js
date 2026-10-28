@@ -366,6 +366,7 @@ function equipe() {
         inicio,
         fim,
         usar_detalhes: req.body?.usar_detalhes !== false,
+        ativa: req.body?.ativa !== false,
         produtos,
         rotina_cfg: rotinaPadrao(),
         rotina: [],
@@ -378,6 +379,51 @@ function equipe() {
       res.json({ ok: true, oferta });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message || 'Falha ao criar a oferta.' });
+    }
+  });
+
+  router.put('/central-ofertas/ofertas/:id', acesso, (req, res) => {
+    try {
+      const dados = lerArquivo();
+      const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
+      const oferta = lista.find((o) => o.id === req.params.id);
+      if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
+      if (req.body?.nome != null) {
+        const nome = String(req.body.nome || '').trim().slice(0, 80);
+        if (nome.length < 2) throw new Error('Dê um nome para a oferta.');
+        oferta.nome = nome;
+      }
+      if (req.body?.inicio != null || req.body?.fim != null) {
+        const inicio = dataCampo(req.body?.inicio || oferta.inicio);
+        const fim = dataCampo(req.body?.fim || oferta.fim);
+        if (!inicio || !fim) throw new Error('Informe o início e o fim da oferta.');
+        if (fim < inicio) throw new Error('O fim da oferta é anterior ao início.');
+        oferta.inicio = inicio;
+        oferta.fim = fim;
+      }
+      if (req.body?.ativa != null) oferta.ativa = req.body.ativa !== false && req.body.ativa !== 0 && req.body.ativa !== '0';
+      dados.ofertas = lista;
+      gravarArquivo(dados);
+      res.json({ ok: true, oferta });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao salvar a oferta.' });
+    }
+  });
+
+  router.post('/central-ofertas/ofertas/:id/apagar', acesso, (req, res) => {
+    try {
+      const dados = lerArquivo();
+      const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
+      const oferta = lista.find((o) => o.id === req.params.id);
+      if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
+      if ((oferta.rotina || []).some((s) => s.publicado)) {
+        throw new Error('Esta campanha já tem post publicado.');
+      }
+      dados.ofertas = lista.filter((o) => o.id !== oferta.id);
+      gravarArquivo(dados);
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err.message || 'Falha ao cancelar a campanha.' });
     }
   });
 
