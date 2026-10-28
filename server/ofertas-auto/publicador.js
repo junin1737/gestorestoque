@@ -18,27 +18,98 @@ function fotoDoSlot(dados, oferta, slot) {
   return String(slot?.foto_url || produto?.foto_url || dados?.produtos?.[id]?.foto_url || '').trim();
 }
 
-function legendaDoSlot(slot) {
-  return [slot?.descricao, slot?.detalhe].map((v) => String(v || '').trim()).filter(Boolean).join('\n').slice(0, 2000);
+function textoPublicacao(oferta, slot) {
+  return [oferta?.legenda, slot?.descricao, slot?.detalhe]
+    .map((v) => String(v || '').trim())
+    .filter(Boolean)
+    .join('\n')
+    .slice(0, 2000);
+}
+
+function branco() {
+  const { rgbaToInt } = require('jimp');
+  return rgbaToInt(255, 255, 255, 255);
+}
+
+async function fundoBranco(img) {
+  const { Jimp } = require('jimp');
+  const fundo = new Jimp({ width: img.width, height: img.height, color: branco() });
+  fundo.composite(img, 0, 0);
+  return fundo;
+}
+
+function centralizar(img, largura, altura) {
+  const { Jimp } = require('jimp');
+  if (img.width === largura && img.height === altura) return img;
+  const fundo = new Jimp({ width: largura, height: altura, color: branco() });
+  fundo.composite(
+    img,
+    Math.max(0, Math.round((largura - img.width) / 2)),
+    Math.max(0, Math.round((altura - img.height) / 2)),
+  );
+  return fundo;
+}
+
+function encaixarFeed(img) {
+  let atual = img;
+  const caixa = caixaInstagram(atual.width, atual.height);
+  if (caixa) {
+    const { Jimp } = require('jimp');
+    const fundo = new Jimp({ width: caixa.fw, height: caixa.fh, color: branco() });
+    fundo.composite(atual, caixa.x, caixa.y);
+    atual = fundo;
+  }
+  let alvo = atual.width;
+  if (alvo < 1080) alvo = 1080;
+  if (alvo > 1440) alvo = 1440;
+  if (Math.abs(atual.width - alvo) > 2) atual = atual.scale(alvo / atual.width);
+  return atual;
+}
+
+function encaixarStory(img) {
+  const alvoW = 1080;
+  const alvoH = 1920;
+  const cabe = img.width > alvoW || img.height > alvoH
+    ? img.scaleToFit({ w: alvoW, h: alvoH })
+    : img;
+  const sobe = Math.min(alvoW / cabe.width, alvoH / cabe.height);
+  const cheio = sobe > 1.01 ? cabe.scale(sobe) : cabe;
+  return centralizar(cheio, alvoW, alvoH);
+}
+
+async function jpegAte(img) {
+  let atual = img;
+  for (let volta = 0; volta < 4; volta += 1) {
+    for (const quality of [92, 84, 76]) {
+      const jpeg = await atual.getBuffer('image/jpeg', { quality });
+      if (jpeg.length <= 1_450_000) return jpeg;
+    }
+    atual = atual.scale(0.85);
+  }
+  throw new Error('A foto ficou maior que 1,5 MB depois de ajustar para o Instagram.');
+}
+
+async function arquivoParaGuardar(bruto, maxLado = 1920) {
+  const { Jimp } = require('jimp');
+  let img = await fundoBranco(await Jimp.read(bruto));
+  if (Math.max(img.width, img.height) > maxLado) img = img.scaleToFit({ w: maxLado, h: maxLado });
+  return jpegAte(img);
 }
 
 async function enquadrarJpeg(bruto) {
   const { Jimp } = require('jimp');
-  let img = await Jimp.read(bruto);
+  let img = await fundoBranco(await Jimp.read(bruto));
   const escala = escalaMinima(img.width, img.height);
   if (escala > 1) img = img.scale(escala);
-  if (Math.max(img.width, img.height) > 1080) img = img.scaleToFit({ w: 1080, h: 1080 });
+  if (Math.max(img.width, img.height) > 1440) img = img.scaleToFit({ w: 1440, h: 1440 });
   const caixa = caixaInstagram(img.width, img.height);
   let saida = img;
   if (caixa) {
-    const fundo = new Jimp({ width: caixa.fw, height: caixa.fh, color: 0xffffffff });
+    const fundo = new Jimp({ width: caixa.fw, height: caixa.fh, color: branco() });
     fundo.composite(img, caixa.x, caixa.y);
     saida = fundo;
   }
-  const jpeg = await saida.getBuffer('image/jpeg');
-  if (jpeg.length > 1_500_000) {
-    throw new Error('A foto ficou maior que 1,5 MB depois de ajustar para o Instagram.');
-  }
+  const jpeg = await jpegAte(saida);
   return { jpeg, mudou: escala > 1 || !!caixa, largura: saida.width, altura: saida.height };
 }
 
@@ -79,62 +150,85 @@ async function enviarJpeg(produtoId, ean, jpeg) {
   return { url: String(data.url), chave: String(data.chave || '') };
 }
 
-async function prepararFoto(dados, oferta, slot) {
+async function prepararFoto(dados, oferta, slot, forma) {
   const url = fotoDoSlot(dados, oferta, slot);
   if (!/^https:\/\//.test(url)) throw new Error('Anexe a foto deste produto antes de postar.');
   let resposta;
   try {
     resposta = await fetch(url, { signal: AbortSignal.timeout(20000) });
   } catch {
-    return { url, chave: '' };
+    throw new Error('Não foi possível ler a foto do produto.');
   }
-  if (!resposta.ok) return { url, chave: '' };
+  if (!resposta.ok) throw new Error('Não foi possível ler a foto do produto.');
   const bruto = Buffer.from(await resposta.arrayBuffer());
-  if (!bruto.length || bruto.length > 8_000_000) return { url, chave: '' };
-  const banner = lerConfig().banner;
-  const composto = await montarComBanner(bruto, banner);
-  const quadro = await enquadrarJpeg(composto || bruto);
-  if (!quadro.mudou && !composto) return { url, chave: '' };
+  if (!bruto.length || bruto.length > 8_000_000) throw new Error('A foto do produto não pôde ser lida.');
+  const montada = await montarPublicacao(bruto, lerConfig().banner, forma);
+  const jpeg = await jpegAte(montada);
   const produto = (oferta.produtos || []).find((p) => String(p.id) === String(slot.produto_id));
   const ean = String(produto?.ean || dados.produtos?.[String(slot.produto_id)]?.ean || '').replace(/\D/g, '').slice(0, 20);
-  return enviarJpeg(String(slot.produto_id), ean, quadro.jpeg);
+  return enviarJpeg(`m${Date.now().toString(36)}`, ean, jpeg);
 }
 
-async function montarComBanner(fotoBuf, banner) {
+async function lerBanner(banner) {
   if (!banner || !/^https:\/\//.test(String(banner.url || ''))) return null;
   let resposta;
   try { resposta = await fetch(banner.url, { signal: AbortSignal.timeout(20000) }); }
   catch { return null; }
   if (!resposta.ok) return null;
   const { Jimp } = require('jimp');
-  const base = await Jimp.read(Buffer.from(await resposta.arrayBuffer()));
-  let foto = await Jimp.read(fotoBuf);
-  const x = Math.round(base.width * Number(banner.x) / 100);
-  const y = Math.round(base.height * Number(banner.y) / 100);
-  const w = Math.max(1, Math.round(base.width * Number(banner.w) / 100));
-  const h = Math.max(1, Math.round(base.height * Number(banner.h) / 100));
-  const escala = Math.max(w / foto.width, h / foto.height);
-  if (escala !== 1) foto = foto.scale(escala);
-  const corteW = Math.min(w, foto.width);
-  const corteH = Math.min(h, foto.height);
-  foto.crop({
-    x: Math.max(0, Math.round((foto.width - corteW) / 2)),
-    y: Math.max(0, Math.round((foto.height - corteH) / 2)),
-    w: corteW,
-    h: corteH,
-  });
-  base.composite(foto, x, y);
-  const jpeg = await base.getBuffer('image/jpeg');
-  if (!jpeg.length || jpeg.length > 1_500_000) return null;
-  return jpeg;
+  return fundoBranco(await Jimp.read(Buffer.from(await resposta.arrayBuffer())));
 }
 
-async function cicloInstagram(url, legenda) {
+async function montarPublicacao(fotoBuf, banner, forma) {
+  const { Jimp } = require('jimp');
+  let foto = await fundoBranco(await Jimp.read(fotoBuf));
+  let base = await lerBanner(banner);
+  if (base) {
+    const x = Math.round(base.width * Number(banner.x) / 100);
+    const y = Math.round(base.height * Number(banner.y) / 100);
+    const w = Math.max(1, Math.round(base.width * Number(banner.w) / 100));
+    const h = Math.max(1, Math.round(base.height * Number(banner.h) / 100));
+    const escala = Math.max(w / foto.width, h / foto.height);
+    if (Math.abs(escala - 1) > 0.01) foto = foto.scale(escala);
+    const corteW = Math.min(w, foto.width);
+    const corteH = Math.min(h, foto.height);
+    foto.crop({
+      x: Math.max(0, Math.round((foto.width - corteW) / 2)),
+      y: Math.max(0, Math.round((foto.height - corteH) / 2)),
+      w: corteW,
+      h: corteH,
+    });
+    base.composite(foto, x, y);
+  } else {
+    base = foto;
+  }
+  return forma === 'story' ? encaixarStory(base) : encaixarFeed(base);
+}
+
+async function cicloInstagram(url, legenda, forma, link) {
   let etapa = 'criar';
   let creationId = '';
   let ultimo = null;
+  let linkEnvio = forma === 'story' ? String(link || '').trim() : '';
+  let legendaEnvio = legenda;
   for (let i = 0; i < 12; i += 1) {
-    ultimo = await chamarWorker({ image_url: url, caption: legenda, etapa, creation_id: creationId });
+    try {
+      ultimo = await chamarWorker({
+        image_url: url,
+        caption: legendaEnvio,
+        etapa,
+        creation_id: creationId,
+        forma: forma === 'story' ? 'story' : 'post',
+        link: linkEnvio,
+      });
+    } catch (err) {
+      if (etapa === 'criar' && linkEnvio && /link|sticker|param/i.test(err.message || '')) {
+        linkEnvio = '';
+        if (link && !String(legendaEnvio).includes(link)) legendaEnvio = `${legendaEnvio}\n${link}`.trim().slice(0, 2000);
+        continue;
+      }
+      throw err;
+    }
     if (ultimo.creation_id) creationId = String(ultimo.creation_id);
     if (ultimo.etapa === 'publicado') return ultimo;
     etapa = 'consultar';
@@ -146,26 +240,15 @@ async function cicloInstagram(url, legenda) {
   throw erro;
 }
 
-function gravarResultado(ofertaId, chave, patch, foto) {
+function gravarResultado(ofertaId, chave, patch) {
   const dados = lerArquivo();
   const oferta = (dados.ofertas || []).find((o) => o.id === ofertaId);
   if (!oferta) return null;
   const slot = (oferta.rotina || []).find((s) => String(s.produto_id) === String(chave.produto_id)
     && s.data === chave.data && s.hora === chave.hora && !s.publicado);
   if (!slot) return oferta;
-  if (foto?.url) {
-    slot.foto_url = foto.url;
-    dados.produtos = dados.produtos || {};
-    dados.produtos[String(chave.produto_id)] = {
-      ...(dados.produtos[String(chave.produto_id)] || {}),
-      foto_url: foto.url,
-      foto_chave: foto.chave || dados.produtos[String(chave.produto_id)]?.foto_chave || '',
-    };
-    const produto = (oferta.produtos || []).find((p) => String(p.id) === String(chave.produto_id));
-    if (produto) produto.foto_url = foto.url;
-  }
   Object.assign(slot, patch);
-  oferta.aviso = patch.aviso || '';
+  if ('aviso' in patch) oferta.aviso = patch.aviso || '';
   dados.ofertas = dados.ofertas;
   gravarArquivo(dados);
   return oferta;
@@ -183,29 +266,41 @@ async function executar(oferta, slot) {
   const viva = (dados.ofertas || []).find((o) => o.id === oferta.id) || oferta;
   const alvo = (viva.rotina || []).find((s) => String(s.produto_id) === String(slot.produto_id) && s.data === slot.data && s.hora === slot.hora) || slot;
   if (alvo.publicado) return { ok: true, etapa: 'publicado', mensagem: 'Este horário já foi publicado.', oferta: viva };
-  let foto = null;
+  const forma = viva.forma === 'story' || viva.forma === 'ambos' ? viva.forma : 'post';
+  const tipos = forma === 'ambos' ? ['post', 'story'] : [forma];
+  const ids = { post_id: String(alvo.post_id || ''), story_id: String(alvo.story_id || '') };
   try {
-    foto = await prepararFoto(dados, viva, alvo);
-    const publicado = await cicloInstagram(foto.url, legendaDoSlot(alvo));
+    for (const tipo of tipos) {
+      if (tipo === 'post' && ids.post_id) continue;
+      if (tipo === 'story' && ids.story_id) continue;
+      const foto = await prepararFoto(dados, viva, alvo, tipo);
+      const publicado = await cicloInstagram(foto.url, textoPublicacao(viva, alvo), tipo, tipo === 'story' ? viva.link : '');
+      if (tipo === 'story') ids.story_id = String(publicado.post_id || '');
+      else ids.post_id = String(publicado.post_id || '');
+      gravarResultado(viva.id, alvo, { post_id: ids.post_id, story_id: ids.story_id, creation_id: '', erro: '', tentativa_em: '' });
+    }
     const aviso = textoProxima(viva, alvo);
     const salva = gravarResultado(viva.id, alvo, {
       publicado: true,
       publicado_em: new Date().toISOString(),
-      post_id: String(publicado.post_id || ''),
+      post_id: ids.post_id,
+      story_id: ids.story_id,
       creation_id: '',
       erro: '',
       tentativa_em: '',
       aviso,
-    }, foto);
-    return { ok: true, etapa: 'publicado', mensagem: aviso, oferta: salva, post_id: String(publicado.post_id || '') };
+    });
+    return { ok: true, etapa: 'publicado', mensagem: aviso, oferta: salva, post_id: ids.post_id || ids.story_id };
   } catch (err) {
     const aviso = err.message || 'Falha ao postar.';
     const salva = gravarResultado(viva.id, alvo, {
+      post_id: ids.post_id,
+      story_id: ids.story_id,
       creation_id: err.recusou ? '' : (err.creationId || alvo.creation_id || ''),
       erro: aviso.slice(0, 180),
       tentativa_em: new Date().toISOString(),
       aviso,
-    }, foto && foto.url !== alvo.foto_url ? foto : null);
+    });
     err.oferta = salva;
     throw err;
   }
@@ -242,4 +337,4 @@ function pulso() {
   });
 }
 
-module.exports = { enquadrarJpeg, publicarOferta, pulso };
+module.exports = { enquadrarJpeg, arquivoParaGuardar, fundoBranco, publicarOferta, pulso };

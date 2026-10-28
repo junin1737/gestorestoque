@@ -4,7 +4,7 @@ const { criarConectores } = require('./conectores');
 const { lerArquivo, gravarArquivo, lerConfig, sanitizar, padrao } = require('./config-loja');
 const { randomUUID } = require('crypto');
 const { validarPublicacao, promoValida, descontoPercentual, modoDaLinha } = require('./regras-estoque');
-const { montarRotina } = require('./regras-publicacao');
+const { montarRotina, diaDaOferta } = require('./regras-publicacao');
 
 function hoje() {
   const d = new Date();
@@ -307,8 +307,7 @@ function equipe() {
       if (!bruto.length || bruto.length > 8_000_000) {
         return res.status(400).json({ ok: false, error: 'Escolha uma foto de até 8 MB.' });
       }
-      const quadro = await require('./publicador').enquadrarJpeg(bruto);
-      const jpeg = quadro.jpeg;
+      const jpeg = await require('./publicador').arquivoParaGuardar(bruto, 1920);
       const { LICENCA_URL, cabecalhosInstalacao } = require('../licenca');
       const headers = { ...(await cabecalhosInstalacao()), 'Content-Type': 'application/json' };
       const remoto = await fetch(`${LICENCA_URL}/api/ofertas/foto`, {
@@ -349,13 +348,7 @@ function equipe() {
         if (!bruto.length || bruto.length > 8_000_000) {
           return res.status(400).json({ ok: false, error: 'Escolha um banner de até 8 MB.' });
         }
-        const { Jimp } = require('jimp');
-        let img = await Jimp.read(bruto);
-        if (Math.max(img.width, img.height) > 1080) img = img.scaleToFit({ w: 1080, h: 1080 });
-        const jpeg = await img.getBuffer('image/jpeg');
-        if (jpeg.length > 1_500_000) {
-          return res.status(400).json({ ok: false, error: 'O banner ficou maior que 1,5 MB. Use uma imagem menor.' });
-        }
+        const jpeg = await require('./publicador').arquivoParaGuardar(bruto, 1920);
         const { LICENCA_URL, cabecalhosInstalacao } = require('../licenca');
         const remoto = await fetch(`${LICENCA_URL}/api/ofertas/foto`, {
           method: 'POST',
@@ -406,7 +399,10 @@ function equipe() {
         usar_detalhes: req.body?.usar_detalhes !== false,
         ativa: req.body?.ativa !== false,
         produtos,
-        rotina_cfg: rotinaPadrao(),
+        rotina_cfg: { ...rotinaPadrao(), dias_semana: diaDaOferta(inicio) },
+        forma: 'post',
+        legenda: '',
+        link: '',
         rotina: [],
         aviso: '',
         criada_em: new Date().toISOString(),
@@ -440,6 +436,10 @@ function equipe() {
         oferta.fim = fim;
       }
       if (req.body?.ativa != null) oferta.ativa = req.body.ativa !== false && req.body.ativa !== 0 && req.body.ativa !== '0';
+      if (req.body?.rotina_cfg) oferta.rotina_cfg = normalizarRotina(req.body.rotina_cfg);
+      if (req.body?.forma != null) oferta.forma = formaOferta(req.body.forma);
+      if (req.body?.legenda != null) oferta.legenda = String(req.body.legenda || '').slice(0, 1000);
+      if (req.body?.link != null) oferta.link = linkOferta(req.body.link);
       dados.ofertas = lista;
       gravarArquivo(dados);
       res.json({ ok: true, oferta });
@@ -588,6 +588,17 @@ function aplicarDetalhes(oferta, body) {
     onde,
     limite_banner: Number.isInteger(limite) ? Math.min(120, Math.max(10, limite)) : (oferta.detalhes?.limite_banner || 40),
   };
+}
+
+function formaOferta(v) {
+  return v === 'story' || v === 'ambos' ? v : 'post';
+}
+
+function linkOferta(v) {
+  const s = String(v || '').trim().slice(0, 300);
+  if (!s) return '';
+  if (!/^https?:\/\/\S+$/i.test(s)) throw new Error('O link precisa começar com http:// ou https://');
+  return s;
 }
 
 function rotinaPadrao() {

@@ -245,7 +245,7 @@
 
   function htmlOfertaAberta(o) {
     const r = cfgRotina(o);
-    const dias = (r.dias_semana || []).map(Number);
+    const dias = diasMarcados(o, r);
     const d = detalhesOferta(o);
     const n = (o.produtos || []).length;
     const pendente = (o.rotina || []).some((item) => !item.publicado && item.produto_id);
@@ -278,6 +278,22 @@
             <span class="co-rotulo">Dias da Semana</span>
             <div class="co-dias-curtos">${DIAS.map((nome, i) => `<label class="co-dia" title="${nome}"><input type="checkbox" data-co-dia="${i}" ${dias.includes(i) ? 'checked' : ''} /><span>${esc(nome)}</span></label>`).join('')}</div>
             <label class="co-check"><input id="co-r-fds" type="checkbox" ${r.fds_ativo ? 'checked' : ''} /> Fds</label>
+          </div>
+          <div class="co-mensagem">
+            <span class="co-rotulo">Modo</span>
+            <div class="co-forma" id="co-forma" role="group" aria-label="Modo de postagem">
+              <button type="button" data-co-forma="post" aria-pressed="${formaOferta(o) === 'post' ? 'true' : 'false'}">Postagem</button>
+              <button type="button" data-co-forma="story" aria-pressed="${formaOferta(o) === 'story' ? 'true' : 'false'}">Story</button>
+              <button type="button" data-co-forma="ambos" aria-pressed="${formaOferta(o) === 'ambos' ? 'true' : 'false'}">Ambos</button>
+            </div>
+            <label class="co-campo">Legenda
+              <textarea id="co-legenda" maxlength="1000" rows="3">${esc(o.legenda || '')}</textarea>
+            </label>
+            <label class="co-campo">Link
+              <input id="co-link" type="url" inputmode="url" placeholder="https://" maxlength="300" value="${esc(o.link || '')}" />
+            </label>
+            <p class="co-lbl">Prévia da mensagem</p>
+            <pre class="co-previa" id="co-previa">${esc(previaMensagem(o))}</pre>
           </div>
           <div class="co-rotina-fim">
             <div class="co-rotina">
@@ -629,13 +645,16 @@
       const img = new Image();
       img.onload = () => {
         const lado = Math.max(img.width, img.height) || 1;
-        const escala = Math.min(1, 1080 / lado);
+        const escala = Math.min(1, 1920 / lado);
         const canvas = document.createElement('canvas');
         canvas.width = Math.max(1, Math.round(img.width * escala));
         canvas.height = Math.max(1, Math.round(img.height * escala));
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         URL.revokeObjectURL(url);
-        resolve(canvas.toDataURL('image/jpeg', 0.82));
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
       };
       img.onerror = () => {
         URL.revokeObjectURL(url);
@@ -676,9 +695,13 @@
       filtros.grupo = campo('co-grupo').value;
       if (filtros.q.trim().length >= 2) buscarSugestoes();
     });
-    campo('co-of-nome')?.addEventListener('change', () => salvarCapa());
-    campo('co-of-ini')?.addEventListener('change', () => salvarCapa());
-    campo('co-of-fim')?.addEventListener('change', () => salvarCapa());
+    campo('co-of-nome')?.addEventListener('change', () => salvarCapa(false));
+    campo('co-of-ini')?.addEventListener('change', () => salvarCapa(true));
+    campo('co-of-fim')?.addEventListener('change', () => salvarCapa(true));
+    campo('co-legenda')?.addEventListener('input', atualizarPrevia);
+    campo('co-link')?.addEventListener('input', atualizarPrevia);
+    campo('co-legenda')?.addEventListener('change', () => salvarTexto());
+    campo('co-link')?.addEventListener('change', () => salvarTexto());
     campo('co-arquivo')?.addEventListener('change', () => {
       const file = campo('co-arquivo').files?.[0];
       const id = fotoAlvo;
@@ -736,6 +759,8 @@
     }
     const statusBtn = ev.target.closest('[data-co-status]');
     if (statusBtn && ofertaAtual()) return definirStatus(statusBtn.dataset.coStatus === '1');
+    const formaBtn = ev.target.closest('[data-co-forma]');
+    if (formaBtn && ofertaAtual()) return definirForma(formaBtn.dataset.coForma);
     if (ev.target.closest('#co-of-rotina')) return gerarRotina();
     if (ev.target.closest('#co-of-agora')) return postarAgora();
     if (!ofertaAtual()) return;
@@ -914,6 +939,44 @@
     filtros.grupo = grupo.value;
   }
 
+  function diasMarcados(o, r) {
+    const salvos = (r.dias_semana || []).map(Number).filter((n) => n >= 0 && n <= 6).sort((a, b) => a - b);
+    const padraoAntigo = salvos.length === 5 && salvos.every((n, i) => n === i + 1);
+    if (padraoAntigo) return diaDaOferta(o.inicio);
+    return salvos.length ? salvos : diaDaOferta(o.inicio);
+  }
+
+  function diaDaOferta(inicio) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(inicio || ''))) return [];
+    const dia = new Date(`${inicio}T12:00:00`);
+    if (Number.isNaN(dia.getTime())) return [];
+    return [dia.getDay()];
+  }
+
+  function formaOferta(o) {
+    return o?.forma === 'story' || o?.forma === 'ambos' ? o.forma : 'post';
+  }
+
+  function previaMensagem(o) {
+    const produto = (o?.produtos || [])[0];
+    const legenda = String(campo('co-legenda')?.value ?? o?.legenda ?? '').trim();
+    const forma = campo('co-forma')?.querySelector('[aria-pressed="true"]')?.dataset.coForma || formaOferta(o);
+    const link = String(campo('co-link')?.value ?? o?.link ?? '').trim();
+    const linhas = [];
+    if (legenda) linhas.push(legenda);
+    linhas.push(String(produto?.descricao || 'Nome do produto'));
+    const detalhe = String(produto?.detalhe || '').trim();
+    if (detalhe) linhas.push(detalhe);
+    if ((forma === 'story' || forma === 'ambos') && link) linhas.push('', link);
+    return linhas.join('\n');
+  }
+
+  function atualizarPrevia() {
+    const el = campo('co-previa');
+    const o = ofertaAtual();
+    if (el && o) el.textContent = previaMensagem(o);
+  }
+
   function isoHoje(offset) {
     const d = new Date();
     d.setDate(d.getDate() + offset);
@@ -956,7 +1019,7 @@
       body: {
         nome: 'Nova oferta',
         inicio: isoHoje(0),
-        fim: isoHoje(6),
+        fim: isoHoje(0),
         usar_detalhes: usar,
         ativa: true,
         produtos: [],
@@ -970,18 +1033,52 @@
     await carregarOfertas();
   }
 
-  async function salvarCapa() {
+  async function salvarCapa(ajustarDias) {
     const o = ofertaAtual();
     if (!o) return;
+    const inicio = campo('co-of-ini')?.value || o.inicio;
+    const fim = campo('co-of-fim')?.value || o.fim;
+    const body = {
+      nome: campo('co-of-nome')?.value || o.nome,
+      inicio,
+      fim,
+    };
+    if (ajustarDias) body.rotina_cfg = { ...lerRotinaForm(), dias_semana: diaDaOferta(inicio) };
     const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
       method: 'PUT',
-      body: {
-        nome: campo('co-of-nome')?.value || o.nome,
-        inicio: campo('co-of-ini')?.value || o.inicio,
-        fim: campo('co-of-fim')?.value || o.fim,
-      },
+      body,
     });
     if (!r.ok) return showMsg(r.error || 'Falha ao salvar a campanha.');
+    trocarOferta(r.oferta);
+  }
+
+  async function definirForma(forma) {
+    const o = ofertaAtual();
+    if (!o || !['post', 'story', 'ambos'].includes(forma)) return;
+    document.querySelectorAll('#co-forma [data-co-forma]').forEach((b) => {
+      b.setAttribute('aria-pressed', b.dataset.coForma === forma ? 'true' : 'false');
+    });
+    atualizarPrevia();
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
+      method: 'PUT',
+      body: { forma },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao salvar o modo.');
+    trocarOferta(r.oferta);
+  }
+
+  async function salvarTexto() {
+    const o = ofertaAtual();
+    if (!o) return;
+    const legenda = String(campo('co-legenda')?.value || '');
+    const link = String(campo('co-link')?.value || '').trim();
+    if (link && !/^https?:\/\/\S+$/i.test(link)) return showMsg('O link precisa começar com http:// ou https://');
+    atualizarPrevia();
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
+      method: 'PUT',
+      body: { legenda, link },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao salvar a mensagem.');
     trocarOferta(r.oferta);
   }
 

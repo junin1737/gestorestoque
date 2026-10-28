@@ -3654,6 +3654,66 @@ html[data-theme="escuro"] .compras-row:hover {
   border-color: #64748b;
   color: #fff;
 }
+#page-central-ofertas .co-mensagem { margin: 0.15rem 0 0.75rem; }
+#page-central-ofertas .co-forma { display: flex; flex-wrap: wrap; gap: 0.3rem; margin: 0.25rem 0 0.55rem; }
+#page-central-ofertas .co-forma button {
+  height: 2rem;
+  min-height: 2rem;
+  margin: 0;
+  padding: 0 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+#page-central-ofertas .co-forma button[aria-pressed="true"] {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+#page-central-ofertas .co-campo {
+  display: grid;
+  gap: 0.2rem;
+  margin: 0 0 0.45rem;
+  font-size: 0.78rem;
+  font-weight: 650;
+}
+#page-central-ofertas .co-campo textarea,
+#page-central-ofertas .co-campo input {
+  width: 100%;
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+  font-size: 0.85rem;
+  font-weight: 450;
+}
+#page-central-ofertas .co-campo input {
+  height: 2rem;
+  min-height: 2rem;
+  max-height: 2rem;
+}
+#page-central-ofertas .co-campo textarea {
+  height: 4.4rem;
+  min-height: 4.4rem;
+  max-height: 8rem;
+  resize: vertical;
+}
+#page-central-ofertas .co-previa {
+  margin: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  white-space: pre-wrap;
+  font: inherit;
+  font-size: 0.8rem;
+  line-height: 1.35;
+  min-height: 3.4rem;
+}
 #page-central-ofertas .co-oferta-item.is-inativa { opacity: 0.72; }
 #page-central-ofertas .co-par {
   display: grid;

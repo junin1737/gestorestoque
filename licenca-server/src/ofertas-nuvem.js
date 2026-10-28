@@ -164,8 +164,12 @@ async function publicarNoInstagram(request, env, cnpj) {
   if (etapa === 'criar') {
     const params = new URLSearchParams();
     params.set('image_url', imagem);
+    const forma = body.forma === 'story' ? 'story' : 'post';
+    if (forma === 'story') params.set('media_type', 'STORIES');
     const legenda = String(body.caption || '').trim().slice(0, 2000);
     if (legenda) params.set('caption', legenda);
+    const link = String(body.link || '').trim();
+    if (forma === 'story' && /^https?:\/\/\S+$/i.test(link)) params.set('link', link.slice(0, 300));
     params.set('access_token', token);
     let resp;
     try {

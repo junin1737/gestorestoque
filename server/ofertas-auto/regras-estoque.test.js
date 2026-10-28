@@ -155,3 +155,21 @@ test('a foto alta entra na proporção que o Instagram aceita', async () => {
   const igual = await enquadrarJpeg(await quadrada.getBuffer('image/png'));
   assert.equal(igual.mudou, false);
 });
+
+test('fundo transparente da foto sai branco', async () => {
+  const { Jimp } = require('jimp');
+  const { fundoBranco } = require('./publicador');
+  const png = new Jimp({ width: 6, height: 6, color: 0x00000000 });
+  const base = await fundoBranco(png);
+  const jpeg = await base.getBuffer('image/jpeg', { quality: 90 });
+  const lido = await Jimp.read(jpeg);
+  assert.equal(lido.bitmap.data[0], 255);
+  assert.equal(lido.bitmap.data[1], 255);
+  assert.equal(lido.bitmap.data[2], 255);
+});
+
+test('campanha nova marca so o dia de inicio', () => {
+  const { diaDaOferta } = require('./regras-publicacao');
+  assert.deepEqual(diaDaOferta('2026-10-28'), [3]);
+  assert.deepEqual(diaDaOferta(''), []);
+});

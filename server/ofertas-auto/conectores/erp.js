@@ -210,15 +210,17 @@ function sqlLista(mapa, comPromo, filtros = {}, mapaPromo, fontesVenda = null) {
   if (fontesVenda?.length) cols.push('COALESCE(S.VENDIDO, 0) AS VENDIDO');
   const where = [`COALESCE(${ident(mapa.status)}, 'A') = 'A'`];
   const params = [];
-  const q = String(filtros.q || '').trim();
+  const q = String(filtros.q || '').trim().slice(0, 250);
   if (q) {
-    where.push(`(
-      UPPER(${ident(mapa.descricao)}) CONTAINING UPPER(?)
-      OR UPPER(COALESCE(${ident(mapa.ean)}, '')) CONTAINING UPPER(?)
-      OR CAST(${ident(mapa.codigo)} AS VARCHAR(20)) CONTAINING ?
-      OR CAST(${ident(mapa.id)} AS VARCHAR(20)) CONTAINING ?
-    )`);
-    params.push(q, q, q, q);
+    const partes = [`CAST(UPPER(${ident(mapa.descricao)}) AS VARCHAR(250)) CONTAINING UPPER(?)`];
+    params.push(q);
+    if (q.length <= 40) {
+      partes.push(`CAST(UPPER(COALESCE(${ident(mapa.ean)}, '')) AS VARCHAR(40)) CONTAINING UPPER(?)`);
+      partes.push(`CAST(${ident(mapa.codigo)} AS VARCHAR(40)) CONTAINING ?`);
+      partes.push(`CAST(${ident(mapa.id)} AS VARCHAR(40)) CONTAINING ?`);
+      params.push(q, q, q);
+    }
+    where.push(`(${partes.join(' OR ')})`);
   }
   if (filtros.grupo) {
     where.push(`${ident(mapa.categoria)} = ?`);

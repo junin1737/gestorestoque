@@ -37,6 +37,14 @@ function capacidadeJanela(entrada) {
   };
 }
 
+/** O dia da semana em que a campanha começa. A postagem manual nasce só nesse dia. */
+function diaDaOferta(inicio) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(inicio || ''))) return [];
+  const dia = new Date(`${inicio}T12:00:00`);
+  if (Number.isNaN(dia.getTime())) return [];
+  return [dia.getDay()];
+}
+
 function isoDia(data) {
   const m = String(data.getMonth() + 1).padStart(2, '0');
   const d = String(data.getDate()).padStart(2, '0');
@@ -130,4 +138,4 @@ function montarRotina({ inicio, fim, produtos, publicacao, fds }) {
   };
 }
 
-module.exports = { minutos, capacidadeJanela, montarRotina };
+module.exports = { minutos, capacidadeJanela, montarRotina, diaDaOferta };
