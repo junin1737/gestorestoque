@@ -12,7 +12,7 @@ const ONDE = ['banner', 'legenda', 'ambos'];
 function padrao() {
   return {
     publicacao: {
-      posts_por_dia: 4,
+      posts_por_dia: 1,
       intervalo_minutos: 90,
       hora_inicio: '08:00',
       hora_fim: '20:00',

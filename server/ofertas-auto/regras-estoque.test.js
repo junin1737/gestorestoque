@@ -168,6 +168,29 @@ test('fundo transparente da foto sai branco', async () => {
   assert.equal(lido.bitmap.data[2], 255);
 });
 
+test('a mensagem mostra o preco cheio e o promocional', () => {
+  const { linhaPreco } = require('./regras-postagem');
+  assert.equal(linhaPreco({ preco: 12.9, preco_promocional: 9.9 }), 'De R$ 12,90 por R$ 9,90');
+  assert.equal(linhaPreco({ preco: 12.9, preco_promocional: 0 }), 'R$ 12,90');
+});
+
+test('o story sai em tela cheia com a foto no espaco do banner', async () => {
+  const { Jimp } = require('jimp');
+  const { comporArte } = require('./publicador');
+  const banner = new Jimp({ width: 400, height: 400, color: 0xff0000ff });
+  const foto = new Jimp({ width: 300, height: 300, color: 0x2266ffff });
+  const saida = await comporArte(foto, banner, { x: 25, y: 25, w: 50, h: 50 }, 'story', [
+    'De R$ 12,90 por R$ 9,90',
+    'https://loja.exemplo/produto',
+  ]);
+  assert.equal(saida.width, 1080);
+  assert.equal(saida.height, 1920);
+  const canto = saida.bitmap.data;
+  assert.ok(canto[0] > 200 && canto[1] < 40, 'o banner preenche o story');
+  const idx = (580 * 1080 + 200) * 4;
+  assert.ok(saida.bitmap.data[idx + 2] > 200, 'a foto do produto entra no espaco');
+});
+
 test('campanha nova marca so o dia de inicio', () => {
   const { diaDaOferta } = require('./regras-publicacao');
   assert.deepEqual(diaDaOferta('2026-10-28'), [3]);

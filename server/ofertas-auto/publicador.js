@@ -1,7 +1,7 @@
 'use strict';
 
 const { lerArquivo, gravarArquivo, lerConfig } = require('./config-loja');
-const { caixaInstagram, escalaMinima, escolherSlot } = require('./regras-postagem');
+const { caixaInstagram, escalaMinima, escolherSlot, linhaPreco } = require('./regras-postagem');
 
 const ESPERA_FALHA_MS = 10 * 60 * 1000;
 let fila = Promise.resolve();
@@ -18,12 +18,10 @@ function fotoDoSlot(dados, oferta, slot) {
   return String(slot?.foto_url || produto?.foto_url || dados?.produtos?.[id]?.foto_url || '').trim();
 }
 
-function textoPublicacao(oferta, slot) {
-  return [oferta?.legenda, slot?.descricao, slot?.detalhe]
-    .map((v) => String(v || '').trim())
-    .filter(Boolean)
-    .join('\n')
-    .slice(0, 2000);
+function textoPublicacao(oferta, slot, produto, forma) {
+  const partes = [oferta?.legenda, slot?.descricao, slot?.detalhe, linhaPreco(produto)];
+  if (forma === 'story') partes.push(oferta?.link);
+  return partes.map((v) => String(v || '').trim()).filter(Boolean).join('\n').slice(0, 2000);
 }
 
 function branco() {
@@ -77,16 +75,83 @@ function encaixarStory(img) {
   return centralizar(cheio, alvoW, alvoH);
 }
 
-async function jpegAte(img) {
+async function jpegAte(img, travarTamanho) {
+  const qualidades = travarTamanho ? [90, 82, 74, 66, 58, 50] : [92, 84, 76];
   let atual = img;
-  for (let volta = 0; volta < 4; volta += 1) {
-    for (const quality of [92, 84, 76]) {
+  for (let volta = 0; volta < (travarTamanho ? 1 : 4); volta += 1) {
+    for (const quality of qualidades) {
       const jpeg = await atual.getBuffer('image/jpeg', { quality });
       if (jpeg.length <= 1_450_000) return jpeg;
     }
+    if (travarTamanho) break;
     atual = atual.scale(0.85);
   }
   throw new Error('A foto ficou maior que 1,5 MB depois de ajustar para o Instagram.');
+}
+
+function cobrir(img, alvoW, alvoH) {
+  const escala = Math.max(alvoW / img.width, alvoH / img.height);
+  const maior = Math.abs(escala - 1) < 0.015 ? img.clone() : img.clone().scale(escala);
+  const sw = maior.width;
+  const sh = maior.height;
+  const cropX = Math.max(0, Math.round((sw - alvoW) / 2));
+  const cropY = Math.max(0, Math.round((sh - alvoH) / 2));
+  if (sw !== alvoW || sh !== alvoH) maior.crop({ x: cropX, y: cropY, w: alvoW, h: alvoH });
+  return { img: maior, sw, sh, cropX, cropY };
+}
+
+function prepararBase(bannerImg, forma) {
+  if (forma === 'story') return cobrir(bannerImg, 1080, 1920);
+  let alvo = bannerImg.width;
+  if (alvo < 1080) alvo = 1080;
+  if (alvo > 1440) alvo = 1440;
+  const escala = alvo / bannerImg.width;
+  const maior = Math.abs(escala - 1) < 0.015 ? bannerImg.clone() : bannerImg.clone().scale(escala);
+  return { img: maior, sw: maior.width, sh: maior.height, cropX: 0, cropY: 0 };
+}
+
+function colarFoto(base, foto, furo, mapa) {
+  let x = Math.round(mapa.sw * Number(furo.x) / 100) - mapa.cropX;
+  let y = Math.round(mapa.sh * Number(furo.y) / 100) - mapa.cropY;
+  let w = Math.max(1, Math.round(mapa.sw * Number(furo.w) / 100));
+  let h = Math.max(1, Math.round(mapa.sh * Number(furo.h) / 100));
+  if (x < 0) { w += x; x = 0; }
+  if (y < 0) { h += y; y = 0; }
+  if (x + w > base.width) w = base.width - x;
+  if (y + h > base.height) h = base.height - y;
+  if (w < 8 || h < 8) return base;
+  const escala = Math.max(w / foto.width, h / foto.height);
+  let peca = Math.abs(escala - 1) > 0.01 ? foto.clone().scale(escala) : foto.clone();
+  const corteW = Math.min(w, peca.width);
+  const corteH = Math.min(h, peca.height);
+  peca.crop({
+    x: Math.max(0, Math.round((peca.width - corteW) / 2)),
+    y: Math.max(0, Math.round((peca.height - corteH) / 2)),
+    w: corteW,
+    h: corteH,
+  });
+  base.composite(peca, x, y);
+  return base;
+}
+
+async function desenharOferta(img, linhas) {
+  const textos = (linhas || []).map((v) => String(v || '').trim()).filter(Boolean).slice(0, 2);
+  if (!textos.length) return img;
+  const { Jimp, loadFont, rgbaToInt } = require('jimp');
+  const { SANS_64_BLACK, SANS_32_BLACK } = require('@jimp/plugin-print/fonts');
+  const faixaH = Math.max(120, Math.round(img.height * (textos.length > 1 ? 0.18 : 0.12)));
+  const faixaY = Math.max(0, img.height - faixaH - Math.round(img.height * 0.08));
+  const faixa = new Jimp({ width: img.width, height: faixaH, color: rgbaToInt(255, 255, 255, 255) });
+  img.composite(faixa, 0, faixaY);
+  const fontePreco = await loadFont(SANS_64_BLACK);
+  const fonteLink = await loadFont(SANS_32_BLACK);
+  let y = faixaY + Math.round(faixaH * 0.16);
+  textos.forEach((texto, i) => {
+    const font = i === 0 ? fontePreco : fonteLink;
+    img.print({ font, x: 36, y, text: texto, maxWidth: img.width - 72 });
+    y += i === 0 ? 74 : 42;
+  });
+  return img;
 }
 
 async function arquivoParaGuardar(bruto, maxLado = 1920) {
@@ -162,9 +227,11 @@ async function prepararFoto(dados, oferta, slot, forma) {
   if (!resposta.ok) throw new Error('Não foi possível ler a foto do produto.');
   const bruto = Buffer.from(await resposta.arrayBuffer());
   if (!bruto.length || bruto.length > 8_000_000) throw new Error('A foto do produto não pôde ser lida.');
-  const montada = await montarPublicacao(bruto, lerConfig().banner, forma);
-  const jpeg = await jpegAte(montada);
   const produto = (oferta.produtos || []).find((p) => String(p.id) === String(slot.produto_id));
+  const linhas = [linhaPreco(produto)];
+  if (forma === 'story') linhas.push(oferta?.link);
+  const montada = await montarPublicacao(bruto, lerConfig().banner, forma, linhas);
+  const jpeg = await jpegAte(montada, forma === 'story');
   const ean = String(produto?.ean || dados.produtos?.[String(slot.produto_id)]?.ean || '').replace(/\D/g, '').slice(0, 20);
   return enviarJpeg(`m${Date.now().toString(36)}`, ean, jpeg);
 }
@@ -179,30 +246,23 @@ async function lerBanner(banner) {
   return fundoBranco(await Jimp.read(Buffer.from(await resposta.arrayBuffer())));
 }
 
-async function montarPublicacao(fotoBuf, banner, forma) {
-  const { Jimp } = require('jimp');
-  let foto = await fundoBranco(await Jimp.read(fotoBuf));
-  let base = await lerBanner(banner);
-  if (base) {
-    const x = Math.round(base.width * Number(banner.x) / 100);
-    const y = Math.round(base.height * Number(banner.y) / 100);
-    const w = Math.max(1, Math.round(base.width * Number(banner.w) / 100));
-    const h = Math.max(1, Math.round(base.height * Number(banner.h) / 100));
-    const escala = Math.max(w / foto.width, h / foto.height);
-    if (Math.abs(escala - 1) > 0.01) foto = foto.scale(escala);
-    const corteW = Math.min(w, foto.width);
-    const corteH = Math.min(h, foto.height);
-    foto.crop({
-      x: Math.max(0, Math.round((foto.width - corteW) / 2)),
-      y: Math.max(0, Math.round((foto.height - corteH) / 2)),
-      w: corteW,
-      h: corteH,
-    });
-    base.composite(foto, x, y);
+async function comporArte(foto, arte, furo, forma, linhas) {
+  let base;
+  if (arte) {
+    const mapa = prepararBase(arte, forma);
+    base = colarFoto(mapa.img, foto, furo || {}, mapa);
+    if (forma !== 'story') base = encaixarFeed(base);
   } else {
-    base = foto;
+    base = forma === 'story' ? encaixarStory(foto) : encaixarFeed(foto);
   }
-  return forma === 'story' ? encaixarStory(base) : encaixarFeed(base);
+  return desenharOferta(base, linhas);
+}
+
+async function montarPublicacao(fotoBuf, banner, forma, linhas) {
+  const { Jimp } = require('jimp');
+  const foto = await fundoBranco(await Jimp.read(fotoBuf));
+  const arte = await lerBanner(banner);
+  return comporArte(foto, arte, banner, forma, linhas);
 }
 
 async function cicloInstagram(url, legenda, forma, link) {
@@ -274,7 +334,8 @@ async function executar(oferta, slot) {
       if (tipo === 'post' && ids.post_id) continue;
       if (tipo === 'story' && ids.story_id) continue;
       const foto = await prepararFoto(dados, viva, alvo, tipo);
-      const publicado = await cicloInstagram(foto.url, textoPublicacao(viva, alvo), tipo, tipo === 'story' ? viva.link : '');
+      const produto = (viva.produtos || []).find((p) => String(p.id) === String(alvo.produto_id));
+      const publicado = await cicloInstagram(foto.url, textoPublicacao(viva, alvo, produto, tipo), tipo, tipo === 'story' ? viva.link : '');
       if (tipo === 'story') ids.story_id = String(publicado.post_id || '');
       else ids.post_id = String(publicado.post_id || '');
       gravarResultado(viva.id, alvo, { post_id: ids.post_id, story_id: ids.story_id, creation_id: '', erro: '', tentativa_em: '' });
@@ -337,4 +398,4 @@ function pulso() {
   });
 }
 
-module.exports = { enquadrarJpeg, arquivoParaGuardar, fundoBranco, publicarOferta, pulso };
+module.exports = { enquadrarJpeg, arquivoParaGuardar, fundoBranco, comporArte, publicarOferta, pulso };

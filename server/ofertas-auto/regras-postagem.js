@@ -55,6 +55,25 @@ function escolherSlot(ofertas, agora, esperaMs = 10 * 60 * 1000) {
   return melhor;
 }
 
+function moeda(valor) {
+  const n = Number(valor);
+  if (!Number.isFinite(n)) return '';
+  const [inteiro, decimal] = n.toFixed(2).split('.');
+  return `R$ ${inteiro.replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${decimal}`;
+}
+
+/** De R$ cheio por R$ promocional, quando a campanha tem os dois preços. */
+function linhaPreco(produto) {
+  const de = Number(produto?.preco);
+  const por = Number(produto?.preco_promocional);
+  const temDe = Number.isFinite(de) && de > 0;
+  const temPor = Number.isFinite(por) && por > 0;
+  if (temDe && temPor && por < de) return `De ${moeda(de)} por ${moeda(por)}`;
+  if (temPor) return moeda(por);
+  if (temDe) return moeda(de);
+  return '';
+}
+
 function faixa(v, min, max, fallback) {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
@@ -73,4 +92,4 @@ function furoBanner(body, atual) {
   return { x, y, w, h };
 }
 
-module.exports = { caixaInstagram, escalaMinima, quandoSlot, escolherSlot, furoBanner };
+module.exports = { caixaInstagram, escalaMinima, quandoSlot, escolherSlot, furoBanner, linhaPreco, moeda };

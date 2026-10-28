@@ -237,7 +237,7 @@
 
   function cfgRotina(o) {
     const base = {
-      posts_por_dia: 4, intervalo_minutos: 90, hora_inicio: '08:00', hora_fim: '20:00',
+      posts_por_dia: 1, intervalo_minutos: 90, hora_inicio: '08:00', hora_fim: '20:00',
       dias_semana: [1, 2, 3, 4, 5], fds_ativo: false, fds_qtd: 1, encarte: false,
     };
     return { ...base, ...(o.rotina_cfg || {}) };
@@ -269,7 +269,7 @@
         <section class="co-card">
           <h3>Configurações de Rotina</h3>
           <div class="co-rotina">
-            <label>Posts<input id="co-r-posts" class="co-curto" type="number" min="1" max="50" value="${Number(r.posts_por_dia) || 4}" /></label>
+            <label>Posts<input id="co-r-posts" class="co-curto" type="number" min="1" max="50" value="${Number(r.posts_por_dia) || 1}" /></label>
             <label>Min<input id="co-r-int" class="co-curto" type="number" min="1" max="1440" value="${Number(r.intervalo_minutos) || 90}" /></label>
             <label>Início<input id="co-r-ini" class="co-hora" type="time" value="${esc(String(r.hora_inicio || '08:00').slice(0, 5))}" /></label>
             <label>Fim<input id="co-r-fim" class="co-hora" type="time" value="${esc(String(r.hora_fim || '20:00').slice(0, 5))}" /></label>
@@ -698,10 +698,10 @@
     campo('co-of-nome')?.addEventListener('change', () => salvarCapa(false));
     campo('co-of-ini')?.addEventListener('change', () => salvarCapa(true));
     campo('co-of-fim')?.addEventListener('change', () => salvarCapa(true));
-    campo('co-legenda')?.addEventListener('input', atualizarPrevia);
-    campo('co-link')?.addEventListener('input', atualizarPrevia);
-    campo('co-legenda')?.addEventListener('change', () => salvarTexto());
-    campo('co-link')?.addEventListener('change', () => salvarTexto());
+    campo('co-legenda')?.addEventListener('input', () => { atualizarPrevia(); agendarTexto(); });
+    campo('co-link')?.addEventListener('input', () => { atualizarPrevia(); agendarTexto(); });
+    campo('co-legenda')?.addEventListener('change', () => salvarTexto(true));
+    campo('co-link')?.addEventListener('change', () => salvarTexto(true));
     campo('co-arquivo')?.addEventListener('change', () => {
       const file = campo('co-arquivo').files?.[0];
       const id = fotoAlvo;
@@ -953,6 +953,24 @@
     return [dia.getDay()];
   }
 
+  function moeda(valor) {
+    const n = Number(valor);
+    if (!Number.isFinite(n)) return '';
+    const partes = n.toFixed(2).split('.');
+    return `R$ ${partes[0].replace(/\B(?=(\d{3})+(?!\d))/g, '.')},${partes[1]}`;
+  }
+
+  function linhaPreco(produto) {
+    const de = Number(produto?.preco);
+    const por = Number(produto?.preco_promocional);
+    const temDe = Number.isFinite(de) && de > 0;
+    const temPor = Number.isFinite(por) && por > 0;
+    if (temDe && temPor && por < de) return `De ${moeda(de)} por ${moeda(por)}`;
+    if (temPor) return moeda(por);
+    if (temDe) return moeda(de);
+    return '';
+  }
+
   function formaOferta(o) {
     return o?.forma === 'story' || o?.forma === 'ambos' ? o.forma : 'post';
   }
@@ -967,6 +985,8 @@
     linhas.push(String(produto?.descricao || 'Nome do produto'));
     const detalhe = String(produto?.detalhe || '').trim();
     if (detalhe) linhas.push(detalhe);
+    const preco = linhaPreco(produto);
+    if (preco) linhas.push(preco);
     if ((forma === 'story' || forma === 'ambos') && link) linhas.push('', link);
     return linhas.join('\n');
   }
@@ -1067,19 +1087,33 @@
     trocarOferta(r.oferta);
   }
 
-  async function salvarTexto() {
+  let textoTimer = 0;
+
+  function agendarTexto() {
+    clearTimeout(textoTimer);
+    textoTimer = setTimeout(() => salvarTexto(true), 400);
+  }
+
+  async function salvarTexto(silencioso) {
     const o = ofertaAtual();
-    if (!o) return;
+    if (!o) return false;
     const legenda = String(campo('co-legenda')?.value || '');
     const link = String(campo('co-link')?.value || '').trim();
-    if (link && !/^https?:\/\/\S+$/i.test(link)) return showMsg('O link precisa começar com http:// ou https://');
+    if (link && !/^https?:\/\/\S+$/i.test(link)) {
+      if (!silencioso) showMsg('O link precisa começar com http:// ou https://');
+      return false;
+    }
     atualizarPrevia();
     const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
       method: 'PUT',
       body: { legenda, link },
     });
-    if (!r.ok) return showMsg(r.error || 'Falha ao salvar a mensagem.');
+    if (!r.ok) {
+      if (!silencioso) showMsg(r.error || 'Falha ao salvar a mensagem.');
+      return false;
+    }
     trocarOferta(r.oferta);
+    return true;
   }
 
   async function definirStatus(ativa) {
@@ -1135,6 +1169,8 @@
   async function postarAgora() {
     const o = ofertaAtual();
     if (!o || postando) return;
+    clearTimeout(textoTimer);
+    if (!(await salvarTexto(false))) return;
     postando = true;
     desenhar();
     const andamento = campo('co-rotina-status');
