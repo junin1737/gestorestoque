@@ -401,6 +401,7 @@ function equipe() {
         produtos,
         rotina_cfg: { ...rotinaPadrao(), dias_semana: diaDaOferta(inicio) },
         forma: 'post',
+        usar_banner: req.body?.usar_banner !== false,
         legenda: '',
         link: '',
         rotina: [],
@@ -438,6 +439,9 @@ function equipe() {
       if (req.body?.ativa != null) oferta.ativa = req.body.ativa !== false && req.body.ativa !== 0 && req.body.ativa !== '0';
       if (req.body?.rotina_cfg) oferta.rotina_cfg = normalizarRotina(req.body.rotina_cfg);
       if (req.body?.forma != null) oferta.forma = formaOferta(req.body.forma);
+      if (req.body?.usar_banner != null) {
+        oferta.usar_banner = req.body.usar_banner !== false && req.body.usar_banner !== 0 && req.body.usar_banner !== '0';
+      }
       if (req.body?.legenda != null) oferta.legenda = String(req.body.legenda || '').slice(0, 1000);
       if (req.body?.link != null) oferta.link = linkOferta(req.body.link);
       dados.ofertas = lista;

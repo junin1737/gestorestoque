@@ -3670,6 +3670,7 @@ html[data-theme="escuro"] .compras-row:hover {
   font-weight: 650;
   cursor: pointer;
 }
+#page-central-ofertas .co-banner-dica { margin: -0.2rem 0 0.55rem; }
 #page-central-ofertas .co-forma button[aria-pressed="true"] {
   background: #2563eb;
   border-color: #2563eb;

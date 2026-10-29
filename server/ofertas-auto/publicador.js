@@ -228,9 +228,10 @@ async function prepararFoto(dados, oferta, slot, forma) {
   const bruto = Buffer.from(await resposta.arrayBuffer());
   if (!bruto.length || bruto.length > 8_000_000) throw new Error('A foto do produto não pôde ser lida.');
   const produto = (oferta.produtos || []).find((p) => String(p.id) === String(slot.produto_id));
-  const linhas = [linhaPreco(produto)];
-  if (forma === 'story') linhas.push(oferta?.link);
-  const montada = await montarPublicacao(bruto, lerConfig().banner, forma, linhas);
+  const comBanner = oferta.usar_banner !== false;
+  const linhas = comBanner ? [linhaPreco(produto)] : [];
+  if (comBanner && forma === 'story') linhas.push(oferta?.link);
+  const montada = await montarPublicacao(bruto, comBanner ? lerConfig().banner : null, forma, linhas);
   const jpeg = await jpegAte(montada, forma === 'story');
   const ean = String(produto?.ean || dados.produtos?.[String(slot.produto_id)]?.ean || '').replace(/\D/g, '').slice(0, 20);
   return enviarJpeg(`m${Date.now().toString(36)}`, ean, jpeg);

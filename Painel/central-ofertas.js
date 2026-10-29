@@ -286,6 +286,12 @@
               <button type="button" data-co-forma="story" aria-pressed="${formaOferta(o) === 'story' ? 'true' : 'false'}">Story</button>
               <button type="button" data-co-forma="ambos" aria-pressed="${formaOferta(o) === 'ambos' ? 'true' : 'false'}">Ambos</button>
             </div>
+            <span class="co-rotulo">Banner</span>
+            <div class="co-forma" id="co-banner-uso" role="group" aria-label="Uso do banner">
+              <button type="button" data-co-banner-uso="1" aria-pressed="${usaBanner(o) ? 'true' : 'false'}">Com banner</button>
+              <button type="button" data-co-banner-uso="0" aria-pressed="${usaBanner(o) ? 'false' : 'true'}">Sem banner</button>
+            </div>
+            <p class="hint co-banner-dica">${usaBanner(o) ? 'A foto do produto entra no espaço do banner.' : 'A foto anexada sai inteira, como um cupom.'}</p>
             <label class="co-campo">Legenda
               <textarea id="co-legenda" maxlength="1000" rows="3">${esc(o.legenda || '')}</textarea>
             </label>
@@ -761,6 +767,8 @@
     if (statusBtn && ofertaAtual()) return definirStatus(statusBtn.dataset.coStatus === '1');
     const formaBtn = ev.target.closest('[data-co-forma]');
     if (formaBtn && ofertaAtual()) return definirForma(formaBtn.dataset.coForma);
+    const bannerUso = ev.target.closest('[data-co-banner-uso]');
+    if (bannerUso && ofertaAtual()) return definirUsoBanner(bannerUso.dataset.coBannerUso === '1');
     if (ev.target.closest('#co-of-rotina')) return gerarRotina();
     if (ev.target.closest('#co-of-agora')) return postarAgora();
     if (!ofertaAtual()) return;
@@ -971,6 +979,10 @@
     return '';
   }
 
+  function usaBanner(o) {
+    return o?.usar_banner !== false;
+  }
+
   function formaOferta(o) {
     return o?.forma === 'story' || o?.forma === 'ambos' ? o.forma : 'post';
   }
@@ -1084,6 +1096,22 @@
       body: { forma },
     });
     if (!r.ok) return showMsg(r.error || 'Falha ao salvar o modo.');
+    trocarOferta(r.oferta);
+  }
+
+  async function definirUsoBanner(usar) {
+    const o = ofertaAtual();
+    if (!o || usaBanner(o) === usar) return;
+    document.querySelectorAll('#co-banner-uso [data-co-banner-uso]').forEach((b) => {
+      b.setAttribute('aria-pressed', (b.dataset.coBannerUso === '1') === usar ? 'true' : 'false');
+    });
+    const dica = raiz()?.querySelector('.co-banner-dica');
+    if (dica) dica.textContent = usar ? 'A foto do produto entra no espaço do banner.' : 'A foto anexada sai inteira, como um cupom.';
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
+      method: 'PUT',
+      body: { usar_banner: usar },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao salvar o banner.');
     trocarOferta(r.oferta);
   }
 

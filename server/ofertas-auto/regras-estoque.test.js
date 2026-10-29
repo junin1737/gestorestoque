@@ -191,6 +191,17 @@ test('o story sai em tela cheia com a foto no espaco do banner', async () => {
   assert.ok(saida.bitmap.data[idx + 2] > 200, 'a foto do produto entra no espaco');
 });
 
+test('sem banner a foto anexada ocupa o story inteira', async () => {
+  const { Jimp } = require('jimp');
+  const { comporArte } = require('./publicador');
+  const cupom = new Jimp({ width: 600, height: 1000, color: 0x1144aaff });
+  const saida = await comporArte(cupom, null, null, 'story', []);
+  assert.equal(saida.width, 1080);
+  assert.equal(saida.height, 1920);
+  const meio = (900 * 1080 + 540) * 4;
+  assert.ok(saida.bitmap.data[meio + 2] > 120, 'o cupom permanece na imagem');
+});
+
 test('campanha nova marca so o dia de inicio', () => {
   const { diaDaOferta } = require('./regras-publicacao');
   assert.deepEqual(diaDaOferta('2026-10-28'), [3]);
