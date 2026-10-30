@@ -400,6 +400,8 @@ function equipe() {
         ativa: req.body?.ativa !== false,
         produtos,
         rotina_cfg: { ...rotinaPadrao(), dias_semana: diaDaOferta(inicio) },
+        origem: 'integrada',
+        simples: { foto_url: '', descricao: '' },
         forma: 'post',
         usar_banner: req.body?.usar_banner !== false,
         legenda: '',
@@ -438,6 +440,14 @@ function equipe() {
       }
       if (req.body?.ativa != null) oferta.ativa = req.body.ativa !== false && req.body.ativa !== 0 && req.body.ativa !== '0';
       if (req.body?.rotina_cfg) oferta.rotina_cfg = normalizarRotina(req.body.rotina_cfg);
+      if (req.body?.origem != null) oferta.origem = req.body.origem === 'simples' ? 'simples' : 'integrada';
+      if (req.body?.simples && typeof req.body.simples === 'object') {
+        const url = String(req.body.simples.foto_url || oferta.simples?.foto_url || '');
+        oferta.simples = {
+          foto_url: /^https:\/\//.test(url) ? url : '',
+          descricao: String(req.body.simples.descricao ?? oferta.simples?.descricao ?? '').slice(0, 500),
+        };
+      }
       if (req.body?.forma != null) oferta.forma = formaOferta(req.body.forma);
       if (req.body?.usar_banner != null) {
         oferta.usar_banner = req.body.usar_banner !== false && req.body.usar_banner !== 0 && req.body.usar_banner !== '0';
@@ -526,6 +536,28 @@ function equipe() {
       if (!oferta) return res.status(404).json({ ok: false, error: 'Oferta não encontrada.' });
       const cfg = normalizarRotina(req.body?.rotina || oferta.rotina_cfg);
       oferta.rotina_cfg = cfg;
+      if (oferta.origem === 'simples') {
+        const foto = String(oferta.simples?.foto_url || '');
+        if (!/^https:\/\//.test(foto)) throw new Error('Anexe a foto da postagem simples.');
+        const texto = String(oferta.legenda || oferta.simples?.descricao || oferta.nome || '').trim();
+        if (texto.length < 2) throw new Error('Escreva a descrição da postagem.');
+        const gerada = require('./regras-publicacao').montarRotinaSimples({
+          inicio: oferta.inicio,
+          fim: oferta.fim,
+          publicacao: cfg,
+          descricao: texto,
+          foto_url: foto,
+        });
+        const publicados = (oferta.rotina || []).filter((s) => s.publicado);
+        const datas = new Set(publicados.map((s) => s.data));
+        oferta.rotina = publicados.concat(gerada.rotina.filter((s) => !datas.has(s.data)));
+        oferta.aviso = gerada.rotina.length
+          ? `Rotina simples com ${gerada.rotina.length} postagem(ns).`
+          : 'Nenhum dia novo para agendar.';
+        dados.ofertas = lista;
+        gravarArquivo(dados);
+        return res.json({ ok: true, oferta, aviso: oferta.aviso });
+      }
       aplicarDetalhes(oferta, req.body?.detalhes);
       const usar = oferta.usar_detalhes !== false;
       const campo = oferta.detalhes?.campo_origem || 'OBSERVACAO';

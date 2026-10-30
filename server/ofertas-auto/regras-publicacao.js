@@ -138,4 +138,31 @@ function montarRotina({ inicio, fim, produtos, publicacao, fds }) {
   };
 }
 
-module.exports = { minutos, capacidadeJanela, montarRotina, diaDaOferta };
+/** Uma postagem por dia marcado, com a mesma foto e o mesmo texto. */
+function montarRotinaSimples({ inicio, fim, publicacao, descricao, foto_url }) {
+  const pub = publicacao || {};
+  const dias = new Set((pub.dias_semana || []).map(Number));
+  const hora = String(pub.hora_inicio || '08:00').slice(0, 5);
+  const rotina = [];
+  const dia = new Date(`${inicio}T12:00:00`);
+  const limite = new Date(`${fim}T12:00:00`);
+  let voltas = 0;
+  while (dia <= limite && voltas < 120) {
+    voltas += 1;
+    if (dias.has(dia.getDay())) {
+      rotina.push({
+        produto_id: 'simples',
+        descricao: String(descricao || '').slice(0, 120),
+        detalhe: '',
+        data: isoDia(dia),
+        hora,
+        foto_url: String(foto_url || ''),
+      });
+    }
+    dia.setDate(dia.getDate() + 1);
+  }
+  if (!rotina.length) throw new Error('Marque ao menos um dia da semana dentro do período.');
+  return { rotina, aviso: '' };
+}
+
+module.exports = { minutos, capacidadeJanela, montarRotina, montarRotinaSimples, diaDaOferta };

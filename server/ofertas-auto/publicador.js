@@ -19,7 +19,11 @@ function fotoDoSlot(dados, oferta, slot) {
 }
 
 function textoPublicacao(oferta, slot, produto, forma) {
-  const partes = [oferta?.legenda, slot?.descricao, slot?.detalhe, linhaPreco(produto)];
+  const legenda = String(oferta?.legenda || '').trim();
+  const descricao = String(slot?.descricao || '').trim();
+  const partes = [legenda];
+  if (descricao && !legenda.includes(descricao)) partes.push(descricao);
+  partes.push(slot?.detalhe, linhaPreco(produto));
   if (forma === 'story') partes.push(oferta?.link);
   return partes.map((v) => String(v || '').trim()).filter(Boolean).join('\n').slice(0, 2000);
 }

@@ -207,3 +207,16 @@ test('campanha nova marca so o dia de inicio', () => {
   assert.deepEqual(diaDaOferta('2026-10-28'), [3]);
   assert.deepEqual(diaDaOferta(''), []);
 });
+
+test('postagem simples cai nos dias marcados', () => {
+  const { montarRotinaSimples } = require('./regras-publicacao');
+  const gerada = montarRotinaSimples({
+    inicio: '2026-10-30',
+    fim: '2026-11-03',
+    publicacao: { dias_semana: [6, 0, 1, 2], hora_inicio: '09:30' },
+    descricao: 'Cupom de sexta',
+    foto_url: 'https://fotos.smsjrdeveloper.com.br/loja/simples.jpg',
+  });
+  assert.deepEqual(gerada.rotina.map((s) => s.data), ['2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03']);
+  assert.ok(gerada.rotina.every((s) => s.hora === '09:30' && s.produto_id === 'simples' && s.foto_url.startsWith('https://')));
+});

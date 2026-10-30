@@ -109,6 +109,44 @@
     return lista.sort((a, b) => String(a.hora).localeCompare(String(b.hora)) || String(a.oferta).localeCompare(String(b.oferta), 'pt'));
   }
 
+  function previstosNoDia(dia) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(dia || ''))) return [];
+    const semana = new Date(`${dia}T12:00:00`).getDay();
+    const lista = [];
+    for (const o of ofertas) {
+      if (!ativaNoDia(o, dia)) continue;
+      if ((o.rotina || []).some((s) => s.data === dia)) continue;
+      const dias = (o.rotina_cfg?.dias_semana || []).map(Number);
+      if (!dias.includes(semana)) continue;
+      lista.push({
+        hora: String(o.rotina_cfg?.hora_inicio || '08:00').slice(0, 5),
+        oferta: o.nome || 'Campanha',
+        oferta_id: o.id,
+        descricao: o.nome || '',
+        previsto: true,
+        publicado: false,
+      });
+    }
+    return lista.sort((a, b) => String(a.hora).localeCompare(String(b.hora)) || String(a.oferta).localeCompare(String(b.oferta), 'pt'));
+  }
+
+  function gradeDoDia(dia) {
+    const posts = postsNoDia(dia);
+    return posts.length ? posts : previstosNoDia(dia);
+  }
+
+  function rotuloCal(p) {
+    const hora = String(p.hora || '').slice(0, 5);
+    const nome = String(p.oferta || '').trim();
+    return nome ? `${hora} ${nome}` : hora;
+  }
+
+  function htmlChip(p) {
+    const hora = esc(String(p.hora || '').slice(0, 5));
+    const nome = esc(String(p.oferta || '').trim());
+    return `<span class="co-cal-post${p.publicado ? ' is-feito' : ''}"><b>${hora}</b>${nome ? ` ${nome}` : ''}</span>`;
+  }
+
   function htmlCalendario() {
     const primeiro = new Date(calAno, calMes, 1);
     const ultimoDia = new Date(calAno, calMes + 1, 0).getDate();
@@ -119,9 +157,9 @@
     while (casas.length % 7) casas.push('');
     const grade = casas.map((dia) => {
       if (!dia) return '<div class="co-cal-vazio"></div>';
-      const posts = postsNoDia(dia);
+      const posts = gradeDoDia(dia);
       const ofertasDia = ofertas.filter((o) => ativaNoDia(o, dia));
-      const itens = posts.slice(0, 3).map((p) => `<span class="co-cal-post${p.publicado ? ' is-feito' : ''}">${esc(String(p.hora || '').slice(0, 5))}</span>`).join('');
+      const itens = posts.slice(0, 3).map((p) => htmlChip(p)).join('');
       const extra = posts.length > 3 ? `<span class="co-cal-mais">+${posts.length - 3}</span>` : '';
       const sem = !posts.length && ofertasDia.length ? `<span class="co-cal-post">${ofertasDia.length} oferta${ofertasDia.length === 1 ? '' : 's'}</span>` : '';
       return `<button type="button" class="co-cal-dia${dia === hoje ? ' is-hoje' : ''}${dia === diaAberto ? ' is-on' : ''}" data-co-dia-cal="${dia}">
@@ -163,19 +201,42 @@
     const hoje = isoHoje(0);
     const limite = isoHoje(-7);
     const lista = [];
+    const vistos = new Set();
+    const empurrar = (item) => {
+      const chave = `${item.oferta_id}|${item.data}|${item.hora}`;
+      if (vistos.has(chave)) return;
+      vistos.add(chave);
+      lista.push(item);
+    };
     for (const o of ofertas) {
       if (!ofertaLigada(o)) continue;
       for (const slot of o.rotina || []) {
         if (slot.publicado || !slot.data || !slot.hora) continue;
         if (slot.data < limite) continue;
-        lista.push({
+        empurrar({
           oferta_id: o.id,
           oferta: o.nome,
-          descricao: slot.descricao || '',
+          descricao: slot.descricao || o.nome || '',
           hora: String(slot.hora).slice(0, 5),
           data: slot.data,
           diaCurto: slot.data.split('-').reverse().slice(0, 2).join('/'),
           atrasada: slot.data < hoje,
+        });
+      }
+    }
+    for (let i = 0; i < 14; i += 1) {
+      const data = new Date();
+      data.setDate(data.getDate() + i);
+      const dia = isoDia(data);
+      for (const p of previstosNoDia(dia)) {
+        empurrar({
+          oferta_id: p.oferta_id,
+          oferta: p.oferta,
+          descricao: p.oferta,
+          hora: p.hora,
+          data: dia,
+          diaCurto: dia.split('-').reverse().slice(0, 2).join('/'),
+          atrasada: false,
         });
       }
     }
@@ -192,7 +253,7 @@
       </button></li>`).join('');
     return `<section class="co-card"><h3>Próximas postagens</h3>${linhas
       ? `<ul class="co-proximas">${linhas}</ul>`
-      : '<p class="hint">Gere a rotina na campanha para ver os horários.</p>'}</section>`;
+      : '<p class="hint">Marque os dias na campanha para ver os horários.</p>'}</section>`;
   }
 
   function bannerAtual() {
@@ -222,12 +283,12 @@
 
   function htmlDia(dia) {
     if (!dia) return '';
-    const posts = postsNoDia(dia);
+    const posts = gradeDoDia(dia);
     const linhas = posts.map((p) => `<li class="${p.publicado ? 'is-feito' : ''}">
-      <button type="button" data-co-oferta="${esc(p.oferta_id)}">${esc(p.hora)} · ${esc(p.oferta)}</button>
-      <span>${esc(p.descricao || 'Engajamento')}${p.publicado ? ' · publicado' : ''}</span>
+      <button type="button" data-co-oferta="${esc(p.oferta_id)}">${esc(rotuloCal(p))}</button>
+      <span>${esc(p.descricao || p.oferta || 'Campanha')}${p.publicado ? ' · publicado' : ''}</span>
     </li>`).join('');
-    const semRotina = ofertas.filter((o) => ativaNoDia(o, dia) && !(o.rotina || []).some((s) => s.data === dia));
+    const semRotina = posts.length ? [] : ofertas.filter((o) => ativaNoDia(o, dia) && !(o.rotina || []).some((s) => s.data === dia));
     const extras = semRotina.map((o) => `<li><button type="button" data-co-oferta="${esc(o.id)}">${esc(o.nome)}</button><span>Sem horário neste dia</span></li>`).join('');
     return `<section class="co-dia-painel">
       <h4>${esc(dia.split('-').reverse().join('/'))}</h4>
@@ -252,7 +313,7 @@
     const ligada = ofertaLigada(o);
     return `<div class="co-oferta-head">
         <button type="button" class="btn" id="co-of-voltar"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M8 3.5v3M16 3.5v3M4 10h16" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg> Calendário</button>
-        <input id="co-of-nome" class="co-oferta-nome-input" maxlength="80" value="${esc(o.nome)}" aria-label="Nome da campanha" />
+        <input id="co-of-nome" class="co-oferta-nome-input" maxlength="80" placeholder="Nome da campanha" value="${esc(o.nome)}" aria-label="Nome da campanha" required />
         <input id="co-of-ini" class="co-oferta-data" type="date" value="${esc(o.inicio)}" aria-label="Início da campanha" />
         <span class="co-oferta-datas">a</span>
         <input id="co-of-fim" class="co-oferta-data" type="date" value="${esc(o.fim)}" aria-label="Fim da campanha" />
@@ -262,10 +323,10 @@
         </div>
       </div>
       <div class="co-par">
-        <section class="co-card">
+        ${origemOferta(o) === 'simples' ? htmlSimples(o) : `<section class="co-card">
           <h3>Adicionar Item</h3>
           ${htmlBusca()}
-        </section>
+        </section>`}
         <section class="co-card">
           <h3>Configurações de Rotina</h3>
           <div class="co-rotina">
@@ -292,6 +353,12 @@
               <button type="button" data-co-banner-uso="0" aria-pressed="${usaBanner(o) ? 'false' : 'true'}">Sem banner</button>
             </div>
             <p class="hint co-banner-dica">${usaBanner(o) ? 'A foto do produto entra no espaço do banner.' : 'A foto anexada sai inteira, como um cupom.'}</p>
+            <span class="co-rotulo">Tipo</span>
+            <div class="co-forma" id="co-origem" role="group" aria-label="Tipo da campanha">
+              <button type="button" data-co-tipo="integrada" aria-pressed="${origemOferta(o) === 'integrada' ? 'true' : 'false'}">Integrada</button>
+              <button type="button" data-co-tipo="simples" aria-pressed="${origemOferta(o) === 'simples' ? 'true' : 'false'}">Simples</button>
+            </div>
+            <p class="hint">${origemOferta(o) === 'simples' ? 'A foto, a descrição e o link são desta postagem. Não usa o estoque.' : 'Cada item vem do estoque, com preço e foto do produto.'}</p>
             <label class="co-campo">Legenda
               <textarea id="co-legenda" maxlength="1000" rows="3">${esc(o.legenda || '')}</textarea>
             </label>
@@ -315,15 +382,29 @@
           <p class="hint" id="co-rotina-status">${esc(o.aviso || '')}</p>
         </section>
       </div>
-      <section class="co-card">
+      ${origemOferta(o) === 'simples' ? '' : `<section class="co-card">
         <div class="co-itens-head">
           <h3>Itens Adicionados na Campanha</h3>
           <label class="co-check"><input id="co-det-on" type="checkbox" ${d.ativo ? 'checked' : ''} /> Usar os detalhes do item</label>
         </div>
         ${htmlCampanha(o)}
         <p class="hint co-contagem">${n} na oferta</p>
-      </section>
+      </section>`}
       <input id="co-arquivo" class="co-arquivo" type="file" accept="image/jpeg,image/png,image/webp" />`;
+  }
+
+  function origemOferta(o) {
+    return o?.origem === 'simples' ? 'simples' : 'integrada';
+  }
+
+  function htmlSimples(o) {
+    const url = /^https:\/\//.test(String(o.simples?.foto_url || '')) ? String(o.simples.foto_url) : '';
+    return `<section class="co-card">
+      <h3>Postagem simples</h3>
+      <p class="hint">A mesma foto sai em cada dia marcado. A descrição e o link ficam ao lado.</p>
+      <button type="button" class="btn" id="co-simples-foto">Escolher foto</button>
+      ${url ? `<img class="co-simples-foto" src="${esc(url)}" alt="Foto da postagem simples" />` : '<p class="hint">Nenhuma foto anexada.</p>'}
+    </section>`;
   }
 
   function atalho(id, nome) {
@@ -671,6 +752,7 @@
   }
 
   async function enviarFoto(id, ean, file) {
+    if (id === 'simples') return enviarFotoSimples(file);
     let dataUrl = '';
     try { dataUrl = await reduzirFoto(file); }
     catch (err) { return showMsg(err.message || 'Não abri a foto.'); }
@@ -684,6 +766,27 @@
     await persistirItem({ ...atual, foto: true, foto_url: r.foto_url, foto_chave: r.foto_chave });
     desenhar();
     if (r.aviso) showMsg(r.aviso);
+  }
+
+  async function enviarFotoSimples(file) {
+    const o = ofertaAtual();
+    if (!o) return;
+    let dataUrl = '';
+    try { dataUrl = await reduzirFoto(file); }
+    catch (err) { return showMsg(err.message || 'Não abri a foto.'); }
+    const base64 = dataUrl.split(',')[1] || '';
+    const r = await api(`/central-ofertas/produtos/${encodeURIComponent(o.id)}/foto`, {
+      method: 'POST',
+      body: { base64, tipo: 'image/jpeg', ean: 'simples' },
+    });
+    if (!r.ok || !r.foto_url) return showMsg(r.error || 'Falha ao anexar a foto.');
+    const salvo = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
+      method: 'PUT',
+      body: { simples: { foto_url: r.foto_url, descricao: campo('co-legenda')?.value || o.legenda || '' } },
+    });
+    if (!salvo.ok) return showMsg(salvo.error || 'Falha ao guardar a foto.');
+    trocarOferta(salvo.oferta);
+    desenhar();
   }
 
   function ligarArquivo() {
@@ -704,6 +807,7 @@
     campo('co-of-nome')?.addEventListener('change', () => salvarCapa(false));
     campo('co-of-ini')?.addEventListener('change', () => salvarCapa(true));
     campo('co-of-fim')?.addEventListener('change', () => salvarCapa(true));
+    campo('co-r-ini')?.addEventListener('change', () => agendarDias());
     campo('co-legenda')?.addEventListener('input', () => { atualizarPrevia(); agendarTexto(); });
     campo('co-link')?.addEventListener('input', () => { atualizarPrevia(); agendarTexto(); });
     campo('co-legenda')?.addEventListener('change', () => salvarTexto(true));
@@ -769,6 +873,13 @@
     if (formaBtn && ofertaAtual()) return definirForma(formaBtn.dataset.coForma);
     const bannerUso = ev.target.closest('[data-co-banner-uso]');
     if (bannerUso && ofertaAtual()) return definirUsoBanner(bannerUso.dataset.coBannerUso === '1');
+    const tipoBtn = ev.target.closest('[data-co-tipo]');
+    if (tipoBtn && ofertaAtual()) return definirOrigem(tipoBtn.dataset.coTipo);
+    if (ev.target.closest('#co-simples-foto')) {
+      fotoAlvo = 'simples';
+      campo('co-arquivo')?.click();
+      return;
+    }
     if (ev.target.closest('#co-of-rotina')) return gerarRotina();
     if (ev.target.closest('#co-of-agora')) return postarAgora();
     if (!ofertaAtual()) return;
@@ -869,6 +980,7 @@
     const extraId = t.dataset.coLimite || t.dataset.coOrigem || t.dataset.coOnde;
     if (extraId) return salvarExtra(extraId);
     if (t.dataset.coModo) await salvarModo(t.dataset.coModo, t.value);
+    if (t.matches('[data-co-dia]')) agendarDias();
   }
 
   async function salvarExtra(id) {
@@ -948,10 +1060,21 @@
   }
 
   function diasMarcados(o, r) {
-    const salvos = (r.dias_semana || []).map(Number).filter((n) => n >= 0 && n <= 6).sort((a, b) => a - b);
-    const padraoAntigo = salvos.length === 5 && salvos.every((n, i) => n === i + 1);
-    if (padraoAntigo) return diaDaOferta(o.inicio);
+    const salvos = (r.dias_semana || []).map(Number).filter((n) => n >= 0 && n <= 6);
     return salvos.length ? salvos : diaDaOferta(o.inicio);
+  }
+
+  function fimCoberto(inicio, dias) {
+    if (!dias.length || !/^\d{4}-\d{2}-\d{2}$/.test(String(inicio || ''))) return '';
+    const base = new Date(`${inicio}T12:00:00`);
+    if (Number.isNaN(base.getTime())) return '';
+    let ultimo = '';
+    for (let i = 0; i < 7; i += 1) {
+      const data = new Date(base);
+      data.setDate(base.getDate() + i);
+      if (dias.includes(data.getDay())) ultimo = isoDia(data);
+    }
+    return ultimo;
   }
 
   function diaDaOferta(inicio) {
@@ -1075,13 +1198,64 @@
       inicio,
       fim,
     };
-    if (ajustarDias) body.rotina_cfg = { ...lerRotinaForm(), dias_semana: diaDaOferta(inicio) };
+    if (ajustarDias) {
+      const marcados = lerRotinaForm().dias_semana;
+      const dias = marcados.length ? marcados : diaDaOferta(inicio);
+      body.rotina_cfg = { ...lerRotinaForm(), dias_semana: dias };
+      const coberto = fimCoberto(inicio, dias);
+      if (coberto && coberto > fim) {
+        body.fim = coberto;
+        const inputFim = campo('co-of-fim');
+        if (inputFim) inputFim.value = coberto;
+      }
+    }
     const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
       method: 'PUT',
       body,
     });
     if (!r.ok) return showMsg(r.error || 'Falha ao salvar a campanha.');
     trocarOferta(r.oferta);
+  }
+
+  let diasTimer = 0;
+
+  function agendarDias() {
+    clearTimeout(diasTimer);
+    diasTimer = setTimeout(() => salvarDias(), 300);
+  }
+
+  async function salvarDias() {
+    const o = ofertaAtual();
+    if (!o) return;
+    const inicio = campo('co-of-ini')?.value || o.inicio;
+    let fim = campo('co-of-fim')?.value || o.fim;
+    const dias = lerRotinaForm().dias_semana;
+    const coberto = fimCoberto(inicio, dias);
+    if (coberto && coberto > fim) {
+      fim = coberto;
+      const inputFim = campo('co-of-fim');
+      if (inputFim) inputFim.value = fim;
+    }
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
+      method: 'PUT',
+      body: { inicio, fim, rotina_cfg: lerRotinaForm() },
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao salvar os dias.');
+    trocarOferta(r.oferta);
+  }
+
+  async function definirOrigem(origem) {
+    const o = ofertaAtual();
+    if (!o || (origem !== 'simples' && origem !== 'integrada') || origemOferta(o) === origem) return;
+    const body = { origem };
+    if (origem === 'simples') body.usar_banner = false;
+    const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}`, {
+      method: 'PUT',
+      body,
+    });
+    if (!r.ok) return showMsg(r.error || 'Falha ao salvar o tipo.');
+    trocarOferta(r.oferta);
+    desenhar();
   }
 
   async function definirForma(forma) {
