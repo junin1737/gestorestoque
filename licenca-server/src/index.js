@@ -419,7 +419,7 @@ async function check(request, env) {
   const instalacaoConfirmada = await confirmarInstalacao(
     env, cli, body.segredo, `NSE ${nse || '—'} · ${texto(body.maquina, 80) || '?'}`
   );
-  const urlTunel = instalacaoConfirmada ? urlTunelValida(body.url) : '';
+  const urlTunel = instalacaoConfirmada ? linkEntradas(body.url, nse) : '';
   if (urlTunel) {
     await garantirTabelaMt(env);
     const nome = texto(body.fantasia, 120) || texto(body.razao, 120);
@@ -1443,9 +1443,26 @@ async function garantirTabelaMt(env) {
 /** O check grava o contato no máximo a cada 10 min. Janela um pouco maior para o Gestor aberto aparecer. */
 const JANELA_ONLINE_MS = 15 * 60 * 1000;
 
+const ACESSO_BASE = 'https://acesso.smsjrdeveloper.com.br';
+const APELIDO_RE = /^(?=[a-z]*[0-9])[a-z0-9]{4,40}$/;
+const APELIDOS_RESERVADOS = new Set(['www', 'acesso', 'painel', 'api', 'admin', 'mail', 'smtp', 'ftp', 'webmail', 'cpanel', 'ns1', 'ns2']);
+
+function apelidoDe(v) {
+  const a = String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  return APELIDO_RE.test(a) && !APELIDOS_RESERVADOS.has(a) ? a : '';
+}
+
+/** /t/ do túnel, ou /i/ do NSE. /f/ vira /i/ para não cair no site do cliente. */
 function urlTunelValida(v) {
-  const s = String(v || '').trim().replace(/\/$/, '');
-  return /^https:\/\/acesso\.smsjrdeveloper\.com\.br\/t\/[a-z2-7]{20,32}$/.test(s) ? s : '';
+  const s = String(v || '').trim().replace(/\/$/, '').split('?')[0];
+  if (/^https:\/\/acesso\.smsjrdeveloper\.com\.br\/t\/[a-z2-7]{20,32}$/.test(s)) return s;
+  const fav = s.match(/^https:\/\/acesso\.smsjrdeveloper\.com\.br\/[fi]\/([a-z0-9]{4,40})$/);
+  const apelido = apelidoDe(fav?.[1]);
+  return apelido ? `${ACESSO_BASE}/i/${apelido}` : '';
+}
+
+function linkEntradas(url, nse) {
+  return urlTunelValida(url) || (apelidoDe(nse) ? `${ACESSO_BASE}/i/${apelidoDe(nse)}` : '');
 }
 
 async function listarEmpresasMt(url, env, opcoes = {}) {
@@ -1475,7 +1492,7 @@ async function listarEmpresasMt(url, env, opcoes = {}) {
       cnpj: r.cnpj,
       nse: r.nse || '',
       nome: r.nome || '',
-      url: urlTunelValida(r.url) ? `${urlTunelValida(r.url)}?mt=1` : '',
+      url: linkEntradas(r.url, r.nse) ? `${linkEntradas(r.url, r.nse)}?mt=1` : '',
       online: true,
       ultimo_contato: r.ultimo_contato || null,
     });
@@ -1527,7 +1544,7 @@ async function fichaEmpresaMt(env, app, cnpj) {
   return {
     cnpj,
     nome: row?.nome || cnpj,
-    url: urlTunelValida(row?.url) || '',
+    url: linkEntradas(row?.url, '') || '',
   };
 }
 
@@ -1577,7 +1594,7 @@ async function listarCadastroMt(url, env) {
     cnpj: r.cnpj,
     nse: r.nse || '',
     nome: r.nome || '',
-    url: urlTunelValida(r.url) || '',
+    url: linkEntradas(r.url, r.nse) || '',
     online: !!r.ultimo_contato && r.ultimo_contato >= desde,
   }));
   itens.sort((a, b) => String(a.nome).localeCompare(String(b.nome), 'pt-BR'));
@@ -2098,7 +2115,10 @@ async function clientesDoContador(sess, env) {
   const rows = await env.DB.prepare(`
     SELECT c.cnpj, c.razao, c.fantasia, c.aplicacao, m.nome AS nome_online, m.url,
            (SELECT MAX(i.ultimo_contato) FROM instalacoes i
-             WHERE i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao) AS ultimo_contato
+             WHERE i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao) AS ultimo_contato,
+           (SELECT i.nse FROM instalacoes i
+             WHERE i.cnpj = c.cnpj AND i.aplicacao = c.aplicacao
+             ORDER BY i.ultimo_contato DESC LIMIT 1) AS nse
     FROM clientes c
     LEFT JOIN mt_empresas m ON m.cnpj = c.cnpj AND m.aplicacao = c.aplicacao
     WHERE c.contador_id = ? AND c.aplicacao = ?
@@ -2106,7 +2126,7 @@ async function clientesDoContador(sess, env) {
   `).bind(sess.id, APP_PADRAO).all();
   const desde = new Date(Date.now() - JANELA_ONLINE_MS).toISOString();
   const itens = await Promise.all((rows.results || []).map(async (r) => {
-    const tunel = urlTunelValida(r.url);
+    const tunel = linkEntradas(r.url, r.nse);
     const conectado = await tunelConectado(env, tunel);
     const online = conectado === null ? !!r.ultimo_contato && r.ultimo_contato >= desde : conectado;
     return {
