@@ -4548,7 +4548,7 @@ const ImportacaoNfe = (() => {
       await ensureUnidades();
       deps.showToast?.(`Unidade ${resCad.item?.unidade || unidade} cadastrada`);
     });
-    showView('params');
+    if (!paraConfig) showView('params');
   }
 
   function paramsConvRowHtml(c = {}) {
@@ -5304,7 +5304,7 @@ const ImportacaoNfe = (() => {
       showView('sessao');
       return;
     }
-    if (state.view === 'params') {
+    if (state.view === 'params' && !state.paramsNaConfig) {
       loadParamsView();
       return;
     }
