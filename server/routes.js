@@ -424,9 +424,24 @@ router.get('/usuarios', somenteSupervisor, (req, res) => {
 router.post('/usuarios', somenteSupervisor, async (req, res) => {
   const appCfg = loadAppConfig();
   const cfg = loadUsersConfig(appCfg);
-  const { supervisorSenha, usuarios } = req.body || {};
+  const { supervisorSenha, revendaSenha, revendaNova, usuarios } = req.body || {};
   const supervisor = cfg.usuarios.find((u) => u.supervisor);
-  if (!supervisor || !(await auth.conferirSenhaUsuario(supervisor, supervisorSenha))) {
+  if (revendaSenha) {
+    let confere;
+    try {
+      confere = await require('./licenca').autorizarRevenda(revendaSenha, revendaNova);
+    } catch (err) {
+      return res.json({ ok: false, error: err.message || 'Não foi possível conferir a senha da revenda.' });
+    }
+    if (confere?.trocar) {
+      return res.json({
+        ok: false,
+        code: 'TROCAR_SENHA_REVENDA',
+        error: 'No primeiro acesso, a revenda precisa definir uma senha nova.',
+      });
+    }
+    if (!confere?.ok) return res.json({ ok: false, error: confere?.error || 'Senha da revenda inválida.' });
+  } else if (!supervisor || !(await auth.conferirSenhaUsuario(supervisor, supervisorSenha))) {
     return res.json({ ok: false, error: 'Senha de supervisor inválida.' });
   }
   const currentById = new Map(cfg.usuarios.map((u) => [Number(u.id), u]));
@@ -2478,6 +2493,7 @@ router.post('/importacao/sessoes', async (req, res) => {
       xmlText: body.xmlText || body.xml || null,
       xmlPath: body.xmlPath || null,
       allowDemo: DEMO_ATIVO && (!!body.allowDemo || !!body.demo),
+      ciencia: body.ciencia === true,
       usuario: req.usuario.nome,
     });
     if (!out.ok) return res.json(out);
@@ -2510,7 +2526,7 @@ router.post('/importacao/sessoes', async (req, res) => {
     }
     res.json({ ok: true, sessao, fonte: out.fonte, sefazErro: out.sefazErro || null });
   } catch (err) {
-    res.json({ ok: false, error: err.message });
+    res.json({ ok: false, error: err.message, code: err.code || undefined });
   }
 });
 
@@ -3084,9 +3100,27 @@ router.get('/compras', async (req, res) => {
   }
 });
 
-router.post('/compras/parametro', (req, res) => {
-  if (!guardCompras(req, res)) return;
+router.get('/compras/parametro', (req, res) => {
+  if (!req.usuario?.supervisor) {
+    return res.status(403).json({ ok: false, error: 'Só o supervisor vê este parâmetro.' });
+  }
   try {
+    res.json({ ok: true, importarAutomatico: comprasDfe.loadStore().importarAutomatico === true });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/compras/parametro', async (req, res) => {
+  if (!req.usuario?.supervisor) {
+    return res.status(403).json({ ok: false, error: 'Só o supervisor altera este parâmetro.' });
+  }
+  try {
+    const appCfg = loadAppConfig();
+    const supervisor = loadUsersConfig(appCfg).usuarios.find((u) => u.supervisor);
+    if (!supervisor || !(await auth.conferirSenhaUsuario(supervisor, req.body?.supervisorSenha))) {
+      return res.json({ ok: false, error: 'Senha de supervisor inválida.' });
+    }
     const flag = req.body?.importarAutomatico === true || req.body?.importar_automatico === true;
     res.json({ ok: true, importarAutomatico: comprasDfe.setImportarAutomatico(flag) });
   } catch (err) {

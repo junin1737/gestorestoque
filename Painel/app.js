@@ -123,6 +123,37 @@ function showConfirm(message, { okLabel = 'Confirmar', cancelLabel = 'Cancelar' 
   });
 }
 
+function pedirAutorizacao() {
+  return new Promise((resolve) => {
+    const dlg = $('#dlg-autorizar');
+    const tipo = $('#dlg-autorizar-tipo');
+    const senha = $('#dlg-autorizar-senha');
+    const btnOk = $('#dlg-autorizar-ok');
+    const btnCancel = $('#dlg-autorizar-cancel');
+    if (!dlg || !tipo || !senha || !btnOk || !btnCancel) {
+      resolve(null);
+      return;
+    }
+    tipo.value = 'supervisor';
+    senha.value = '';
+    const finish = (value) => {
+      btnOk.onclick = null;
+      btnCancel.onclick = null;
+      dlg.onclose = null;
+      try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
+      resolve(value);
+    };
+    btnOk.onclick = () => {
+      if (!String(senha.value || '').trim()) return;
+      finish({ tipo: tipo.value === 'revenda' ? 'revenda' : 'supervisor', senha: senha.value });
+    };
+    btnCancel.onclick = () => finish(null);
+    dlg.onclose = () => resolve(null);
+    if (!dlg.open) dlg.showModal();
+    setTimeout(() => senha.focus(), 30);
+  });
+}
+
 function showPrompt({ message, password = false, defaultValue = '' } = {}) {
   return new Promise((resolve) => {
     const dlg = $('#dlg-prompt');
@@ -193,25 +224,39 @@ function pintarConexaoInstagram() {
 }
 
 function setCfgTab(tab) {
+  if (tab === 'supervisor' && !state.usuario?.supervisor) tab = 'tema';
   stateCfgTab = tab || 'tema';
   state.cfgTab = stateCfgTab;
   $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
-  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'etiquetas', 'conexoes'].forEach((id) => {
+  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'etiquetas', 'conexoes', 'supervisor'].forEach((id) => {
     const pane = $(`#cfg-tab-${id}`);
     if (pane) pane.hidden = id !== stateCfgTab;
   });
   const salvar = $('#cfg-params-salvar');
   if (salvar) {
-    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas' || stateCfgTab === 'conexoes';
+    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas' || stateCfgTab === 'conexoes' || stateCfgTab === 'supervisor';
     const barra = salvar.closest('.toolbar');
     if (barra) barra.hidden = salvar.hidden;
   }
   if (stateCfgTab === 'etiquetas') window.Gondola?.onEtiquetas();
   if (stateCfgTab === 'conexoes') pintarConexaoInstagram();
+  if (stateCfgTab === 'supervisor') carregarAbaSupervisor();
   if (stateCfgTab !== 'tema' && stateCfgTab !== 'etiquetas' && !cfgMontada) {
     cfgMontada = true;
     window.ImportacaoNfe?.mountConfig?.();
   }
+}
+
+async function carregarAbaSupervisor() {
+  const chk = $('#cfg-importar-auto');
+  const aviso = $('#cfg-supervisor-aviso');
+  if (aviso) {
+    aviso.textContent = state.consultarCompras
+      ? 'A importação das notas continua manual. O parâmetro fica guardado aqui e só muda com a senha do supervisor.'
+      : 'Consultar compras está desligado no painel. O parâmetro fica guardado, e a consulta só passa a valer quando o módulo estiver em Sim.';
+  }
+  const res = await api('/compras/parametro');
+  if (chk && res?.ok) chk.checked = !!res.importarAutomatico;
 }
 
 async function loadEmpresas() {
@@ -1252,6 +1297,8 @@ async function enterApp() {
   if ($('#nav-central-ofertas')) $('#nav-central-ofertas').hidden = !showCentral;
   if ($('#nav-central-ofertas-mobile')) $('#nav-central-ofertas-mobile').hidden = !showCentral;
   if ($('#dash-central-ofertas')) $('#dash-central-ofertas').hidden = !showCentral;
+  const tabSup = $('#cfg-tab-btn-supervisor');
+  if (tabSup) tabSup.hidden = !state.usuario?.supervisor;
   const cfgSrv = $('#btn-config-servidor');
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
@@ -1480,6 +1527,21 @@ $$('#cfg-tabs .tab').forEach((btn) => {
   btn.addEventListener('click', () => setCfgTab(btn.dataset.cfgTab));
 });
 $('#cfg-params-salvar')?.addEventListener('click', () => window.ImportacaoNfe?.saveConfig?.());
+$('#cfg-importar-auto-salvar')?.addEventListener('click', async () => {
+  if (!state.usuario?.supervisor) return;
+  const senha = await showPrompt({ message: 'Senha do supervisor para gravar a importação automática:', password: true });
+  if (senha == null) return;
+  const res = await api('/compras/parametro', {
+    method: 'POST',
+    body: { importarAutomatico: !!$('#cfg-importar-auto')?.checked, supervisorSenha: senha },
+  });
+  if (!res?.ok) {
+    showMsg(res?.error || 'Não foi possível guardar o parâmetro.');
+    carregarAbaSupervisor();
+    return;
+  }
+  showToast('Parâmetro do supervisor guardado. A importação das notas continua manual.');
+});
 $('#cfg-aniv-salvar')?.addEventListener('click', async () => {
   const aviso = $('#cfg-aniv-aviso');
   const mensagem = $('#cfg-aniv-msg')?.value || '';
@@ -3151,12 +3213,23 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     if (senha) next.senha = senha;
     return next;
   });
-  const senhaSup = await showPrompt({ message: 'Confirme a senha do supervisor para salvar:', password: true });
-  if (senhaSup == null) return;
-  const res = await api('/usuarios', {
-    method: 'POST',
-    body: { supervisorSenha: senhaSup, usuarios },
-  });
+  const authz = await pedirAutorizacao();
+  if (!authz) return;
+  const corpo = { usuarios };
+  if (authz.tipo === 'revenda') corpo.revendaSenha = authz.senha;
+  else corpo.supervisorSenha = authz.senha;
+  let res = await api('/usuarios', { method: 'POST', body: corpo });
+  if (!res.ok && res.code === 'TROCAR_SENHA_REVENDA') {
+    const nova = await showPrompt({ message: 'Primeiro acesso da revenda. Defina a senha nova (letras e números, 8 ou mais):', password: true });
+    if (nova == null) return;
+    const deNovo = await showPrompt({ message: 'Repita a senha nova da revenda:', password: true });
+    if (deNovo == null) return;
+    if (nova !== deNovo) return showMsg('As senhas não conferem.');
+    if (nova.length < 8 || !/[A-Za-z]/.test(nova) || !/\d/.test(nova)) {
+      return showMsg('A senha precisa ter pelo menos 8 caracteres, com letras e números.');
+    }
+    res = await api('/usuarios', { method: 'POST', body: { ...corpo, revendaNova: nova } });
+  }
   if (!res.ok) return showMsg(res.error || 'Erro ao salvar');
   state.usuarios = res.usuarios;
   const eu = (res.usuarios || []).find((u) => Number(u.id) === Number(state.usuario?.id));

@@ -1276,12 +1276,94 @@ async function conferirRevenda(env, campos) {
 
 // ─── Revendas ─────────────────────────────────────────────────────────────────
 
+let colunasSenhaRevendaProntas = false;
+
+async function garantirSenhaRevenda(env) {
+  if (colunasSenhaRevendaProntas) return;
+  const colunas = ['senha_hash TEXT', 'senha_temporaria INTEGER NOT NULL DEFAULT 0', 'senha_atualizado_em TEXT'];
+  for (const coluna of colunas) {
+    try {
+      await env.DB.prepare(`ALTER TABLE revendas ADD COLUMN ${coluna}`).run();
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (!/duplicate column/i.test(msg)) throw e;
+    }
+  }
+  colunasSenhaRevendaProntas = true;
+}
+
+function b64Bytes(u8) {
+  let s = '';
+  for (const n of u8) s += String.fromCharCode(n);
+  return btoa(s);
+}
+
+function bytesB64(s) {
+  const bin = atob(String(s || ''));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function senhaRevendaFraca(s) {
+  const t = String(s || '');
+  if (t.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.';
+  if (!/[A-Za-z]/.test(t) || !/\d/.test(t)) return 'Use letras e números.';
+  return '';
+}
+
+async function hashPbkdf2(senha) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const chave = await crypto.subtle.importKey('raw', enc.encode(senha), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: 120000 }, chave, 256);
+  return JSON.stringify({ alg: 'pbkdf2-sha256', iter: 120000, salt: b64Bytes(salt), hash: b64Bytes(new Uint8Array(bits)) });
+}
+
+async function conferirPbkdf2(senha, valor) {
+  const v = supHashValido(valor);
+  if (!v) return false;
+  const salt = bytesB64(v.salt);
+  const esperado = bytesB64(v.hash);
+  const chave = await crypto.subtle.importKey('raw', enc.encode(String(senha || '')), 'PBKDF2', false, ['deriveBits']);
+  const bits = await crypto.subtle.deriveBits({ name: 'PBKDF2', hash: 'SHA-256', salt, iterations: v.iter }, chave, esperado.length * 8);
+  const calc = new Uint8Array(bits);
+  if (calc.length !== esperado.length) return false;
+  let diff = 0;
+  for (let i = 0; i < calc.length; i++) diff |= calc[i] ^ esperado[i];
+  return diff === 0;
+}
+
+function gerarSenhaTemporaria() {
+  const letras = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz';
+  const nums = '23456789';
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  let s = '';
+  for (let i = 0; i < 4; i++) s += letras[bytes[i] % letras.length];
+  for (let i = 4; i < 8; i++) s += nums[bytes[i] % nums.length];
+  return s;
+}
+
+async function gravarSenhaTemporaria(env, id) {
+  const senha = gerarSenhaTemporaria();
+  const agora = agoraIso();
+  await env.DB.prepare(
+    'UPDATE revendas SET senha_hash = ?, senha_temporaria = 1, senha_atualizado_em = ?, atualizado_em = ? WHERE id = ?'
+  ).bind(await hashPbkdf2(senha), agora, agora, id).run();
+  return senha;
+}
+
+function revendaPublica(r) {
+  const { senha_hash: senhaHash, ...resto } = r;
+  return { ...resto, senha_definida: !!senhaHash, senha_temporaria: Number(r.senha_temporaria) === 1 };
+}
+
 async function listarRevendas(env) {
+  await garantirSenhaRevenda(env);
   const { results } = await env.DB.prepare(`
     SELECT r.*, (SELECT COUNT(*) FROM clientes c WHERE c.revenda_id = r.id) AS clientes
     FROM revendas r ORDER BY r.id`).all();
   const semRevenda = await env.DB.prepare('SELECT COUNT(*) AS n FROM clientes WHERE revenda_id IS NULL').first();
-  return json({ ok: true, revendas: results, sem_revenda: semRevenda?.n || 0 });
+  return json({ ok: true, revendas: results.map(revendaPublica), sem_revenda: semRevenda?.n || 0 });
 }
 
 function camposRevenda(body, parcial) {
@@ -1310,10 +1392,78 @@ async function criarRevenda(request, env) {
     return json({ ok: false, error: 'Revenda já cadastrada com este CNPJ.' }, 409);
   }
   const agora = agoraIso();
+  await garantirSenhaRevenda(env);
   await env.DB.prepare('INSERT INTO revendas (cnpj, nome, contato, ativo, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?, ?)')
     .bind(cnpj, campos.nome, campos.contato ?? null, campos.ativo ?? 1, agora, agora).run();
+  const criada = await env.DB.prepare('SELECT id FROM revendas WHERE cnpj = ?').bind(cnpj).first();
+  const senha = await gravarSenhaTemporaria(env, criada.id);
   await registrarEvento(env, '*', null, 'revenda', `Revenda cadastrada: ${campos.nome} (${cnpj})`);
-  return listarRevendas(env);
+  const lista = await listarRevendas(env);
+  const data = await lista.json();
+  return json({ ...data, senha_temporaria: senha, revenda_nome: campos.nome });
+}
+
+async function senhaDaRevenda(id, request, env) {
+  await garantirSenhaRevenda(env);
+  const atual = await env.DB.prepare('SELECT id, nome FROM revendas WHERE id = ?').bind(id).first();
+  if (!atual) return json({ ok: false, error: 'Revenda não encontrada.' }, 404);
+  const body = await request.json().catch(() => ({}));
+  if (body.acao === 'remover') {
+    const agora = agoraIso();
+    await env.DB.prepare(
+      'UPDATE revendas SET senha_hash = NULL, senha_temporaria = 0, senha_atualizado_em = ?, atualizado_em = ? WHERE id = ?'
+    ).bind(agora, agora, id).run();
+    await registrarEvento(env, '*', null, 'revenda', `Senha removida: ${atual.nome}`);
+    const lista = await listarRevendas(env);
+    const data = await lista.json();
+    return json({ ...data, removida: true, revenda_nome: atual.nome });
+  }
+  if (body.acao === 'temporaria') {
+    const senha = await gravarSenhaTemporaria(env, id);
+    await registrarEvento(env, '*', null, 'revenda', `Senha temporária definida: ${atual.nome}`);
+    const lista = await listarRevendas(env);
+    const data = await lista.json();
+    return json({ ...data, senha_temporaria: senha, revenda_nome: atual.nome });
+  }
+  return json({ ok: false, error: 'Ação inválida.' }, 400);
+}
+
+async function autorizarSenhaRevenda(request, env) {
+  await garantirSenhaRevenda(env);
+  const cnpj = await instalacaoDaRequisicao(request, env, APP_PADRAO);
+  if (!cnpj) return json({ ok: false, error: 'Instalação não confirmada.' }, 401);
+  const body = await request.json().catch(() => ({}));
+  const cli = await env.DB.prepare('SELECT revenda_id FROM clientes WHERE cnpj = ? AND aplicacao = ?')
+    .bind(cnpj, APP_PADRAO).first();
+  if (!cli?.revenda_id) return json({ ok: false, error: 'Esta loja não tem revenda definida no painel.' }, 400);
+  const rev = await env.DB.prepare(
+    'SELECT id, nome, ativo, senha_hash, senha_temporaria FROM revendas WHERE id = ?'
+  ).bind(cli.revenda_id).first();
+  if (!rev || Number(rev.ativo) !== 1) return json({ ok: false, error: 'A revenda desta loja está inativa.' }, 400);
+  if (!rev.senha_hash) {
+    return json({ ok: false, error: 'A revenda desta loja ainda não tem senha. Defina uma senha temporária no painel.' }, 400);
+  }
+  let hash = null;
+  try { hash = JSON.parse(rev.senha_hash); } catch { hash = null; }
+  if (!(await conferirPbkdf2(body.senha, hash))) {
+    await new Promise((r) => setTimeout(r, 800));
+    return json({ ok: false, error: 'Senha da revenda inválida.' }, 401);
+  }
+  if (Number(rev.senha_temporaria) === 1) {
+    const nova = String(body.nova || '');
+    if (!nova) return json({ ok: true, trocar: true });
+    const fraca = senhaRevendaFraca(nova);
+    if (fraca) return json({ ok: false, error: fraca }, 400);
+    if (nova === String(body.senha || '')) {
+      return json({ ok: false, error: 'A senha nova precisa ser diferente da temporária.' }, 400);
+    }
+    const agora = agoraIso();
+    await env.DB.prepare(
+      'UPDATE revendas SET senha_hash = ?, senha_temporaria = 0, senha_atualizado_em = ?, atualizado_em = ? WHERE id = ?'
+    ).bind(await hashPbkdf2(nova), agora, agora, rev.id).run();
+    await registrarEvento(env, cnpj, APP_PADRAO, 'revenda', `Senha da revenda ${rev.nome} trocada no primeiro acesso`);
+  }
+  return json({ ok: true });
 }
 
 async function atualizarRevenda(id, request, env) {
@@ -2251,6 +2401,8 @@ async function rotaAdmin(request, env, url) {
     if (request.method === 'GET') return listarRevendas(env);
     if (request.method === 'POST') return criarRevenda(request, env);
   }
+  const mrSenha = url.pathname.match(/^\/api\/admin\/revendas\/(\d{1,9})\/senha$/);
+  if (mrSenha && request.method === 'PUT') return senhaDaRevenda(Number(mrSenha[1]), request, env);
   const mr = url.pathname.match(ROTA_REVENDA);
   if (mr) {
     const id = Number(mr[1]);
@@ -2402,6 +2554,7 @@ export default {
         return await atualizacaoArquivo(request, env, decodeURIComponent(arquivo[1]));
       }
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
+      if (url.pathname === '/api/revenda/autorizar' && request.method === 'POST') return await autorizarSenhaRevenda(request, env);
       if (url.pathname.startsWith('/api/ofertas/')) return await rotaOfertas(request, env, url, instalacaoDaRequisicao);
       if (url.pathname.startsWith('/api/mt/')) return await rotaMt(request, env, url);
       if (url.pathname === '/api/instagram/retorno' && request.method === 'GET') return await retornoInstagram(request, env, url);

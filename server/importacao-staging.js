@@ -11,7 +11,7 @@ const { getAppDataDir } = require('./config');
 const importacaoParams = require('./importacao-params');
 const { parseNfeXml } = require('./importacao-xml');
 const { aplicarRateiosDoXml, syncSistemaComXmlItem, validarFinanceiroNf, completarParcelaVista } = require('./importacao-rateio');
-const { obterXmlCompleto, fiscalReady, xmlNfeCompleto } = require('./importacao-sefaz');
+const { obterXmlCompleto, manifestarCiencia, fiscalReady, xmlNfeCompleto } = require('./importacao-sefaz');
 const { getFiscalConfig } = require('./certificado');
 
 function todayYmd() {
@@ -656,7 +656,7 @@ function cacheXmlLocal(chave, raw) {
   }
 }
 
-async function resolveXmlPayload({ chave, xmlText, xmlPath, allowDemo, preferSefaz = true } = {}) {
+async function resolveXmlPayload({ chave, xmlText, xmlPath, allowDemo, preferSefaz = true, ciencia = false } = {}) {
   let raw = xmlText ? String(xmlText) : '';
   let fonteOrigem = raw ? 'xml' : null;
   if (!raw && xmlPath && fs.existsSync(xmlPath)) {
@@ -678,7 +678,7 @@ async function resolveXmlPayload({ chave, xmlText, xmlPath, allowDemo, preferSef
     }
   }
 
-  // SEFAZ só quando ainda não há XML completo. Não envia manifesto.
+  // SEFAZ só quando ainda não há XML completo. A ciência só sai se a loja confirmou.
   let sefazErro = null;
   if (!raw && preferSefaz && ch.length === 44 && fiscalReady(getFiscalConfig())) {
     try {
@@ -688,8 +688,32 @@ async function resolveXmlPayload({ chave, xmlText, xmlPath, allowDemo, preferSef
         fonteOrigem = 'sefaz';
       }
     } catch (err) {
-      sefazErro = err;
-      console.warn('Consulta SEFAZ:', err.message);
+      if (err.code === 'SEM_XML_COMPLETO' && !ciencia) {
+        const e = new Error('A SEFAZ devolveu só o resumo da NF-e. O XML completo sai depois da manifestação de ciência da operação.');
+        e.code = 'SEM_XML_COMPLETO';
+        throw e;
+      }
+      if (err.code === 'SEM_XML_COMPLETO' && ciencia) {
+        await manifestarCiencia(ch);
+        await new Promise((r) => setTimeout(r, 3000));
+        try {
+          const deNovo = await obterXmlCompleto(ch);
+          if (deNovo?.xmlText) {
+            raw = deNovo.xmlText;
+            fonteOrigem = 'sefaz';
+          }
+        } catch (err2) {
+          if (err2.code === 'SEM_XML_COMPLETO') {
+            const e = new Error('A ciência da operação foi registrada. A SEFAZ ainda não liberou o XML completo. Consulte a nota de novo em alguns minutos.');
+            e.code = 'CIENCIA_REGISTRADA';
+            throw e;
+          }
+          throw err2;
+        }
+      } else {
+        sefazErro = err;
+        console.warn('Consulta SEFAZ:', err.message);
+      }
     }
   }
 
@@ -744,6 +768,7 @@ async function createSessao(opts = {}) {
     xmlPath: typeof opts === 'object' ? opts.xmlPath : null,
     allowDemo,
     preferSefaz: typeof opts === 'object' ? opts.preferSefaz !== false : true,
+    ciencia: typeof opts === 'object' && opts.ciencia === true,
   });
 
   const editarId = typeof opts === 'object' ? Number(opts.editarIdNfcompra || 0) : 0;

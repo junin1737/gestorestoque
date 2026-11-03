@@ -66,8 +66,6 @@ const Compras = (() => {
     partes.push(`${pend} pendente(s)`);
     partes.push('últimos 90 dias');
     el.textContent = partes.join(' · ');
-    const chk = $('#compras-auto');
-    if (chk && document.activeElement !== chk) chk.checked = !!dados.importarAutomatico;
     renderRelogio();
   }
 
@@ -163,21 +161,6 @@ const Compras = (() => {
     renderLista();
   }
 
-  async function salvarParametro() {
-    const chk = $('#compras-auto');
-    const res = await deps.api('/compras/parametro', {
-      method: 'POST',
-      body: { importarAutomatico: !!chk?.checked },
-    });
-    if (!res?.ok) {
-      if (chk) chk.checked = !!dados?.importarAutomatico;
-      deps.showMsg?.(res?.error || 'Não foi possível guardar o parâmetro.');
-      return;
-    }
-    if (dados) dados.importarAutomatico = !!res.importarAutomatico;
-    deps.showToast?.('Parâmetro guardado. A importação automática ainda não entra em vigor.');
-  }
-
   async function importar(chave, btn) {
     if (importando) return;
     const digits = String(chave || '').replace(/\D/g, '');
@@ -246,7 +229,6 @@ const Compras = (() => {
       renderLista();
     });
     $('#compras-busca')?.addEventListener('input', () => renderLista());
-    $('#compras-auto')?.addEventListener('change', () => salvarParametro());
   }
 
   function init(options) {

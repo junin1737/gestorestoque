@@ -419,6 +419,18 @@ function versaoSupervisor() {
   return sup ? crypto.createHash('sha256').update(`${sup.salt}:${sup.hash}`).digest('hex').slice(0, 16) : 'legado';
 }
 
+async function autorizarRevenda(senha, nova) {
+  const headers = await cabecalhosInstalacao();
+  const res = await fetch(`${LICENCA_URL}/api/revenda/autorizar`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ senha: String(senha || ''), nova: nova ? String(nova) : undefined }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!data || typeof data !== 'object') return { ok: false, error: 'Não foi possível conferir a senha da revenda.' };
+  return data;
+}
+
 async function conferirSenhaSupervisor(senha, senhaLegada) {
   const informada = String(senha || '');
   const legado = Buffer.from(String(senhaLegada || ''));
@@ -491,4 +503,5 @@ module.exports = {
   hashSupervisor,
   versaoSupervisor,
   conferirSenhaSupervisor,
+  autorizarRevenda,
 };

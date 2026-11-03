@@ -254,7 +254,7 @@ async function parseDistResponse(soapBody) {
   }
   const soResumo = lote.docs.some((d) => /<resNFe[\s>]/i.test(d.xml));
   const e = new Error(soResumo
-    ? 'A SEFAZ devolveu só o resumo da NF-e. O XML completo aparece depois do manifesto, e este aplicativo não envia esse evento.'
+    ? 'A SEFAZ devolveu só o resumo da NF-e. O XML completo sai depois da manifestação de ciência da operação.'
     : (xMotivo || 'SEFAZ não retornou o XML da NF-e nesta consulta.'));
   e.cStat = cStat;
   e.code = soResumo ? 'SEM_XML_COMPLETO' : 'SEM_XML';
@@ -597,7 +597,7 @@ async function cnpjConsulta(fiscal) {
 async function obterXmlCompleto(chave, opts = {}) {
   const direto = await consultarChaveSefaz(chave, opts);
   if (direto?.xmlText && xmlNfeCompleto(direto.xmlText)) return direto;
-  const e = new Error('A SEFAZ devolveu só o resumo da NF-e. O XML completo aparece depois do manifesto, e este aplicativo não envia esse evento.');
+  const e = new Error('A SEFAZ devolveu só o resumo da NF-e. O XML completo sai depois da manifestação de ciência da operação.');
   e.code = 'SEM_XML_COMPLETO';
   throw e;
 }

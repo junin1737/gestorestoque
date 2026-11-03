@@ -4294,6 +4294,29 @@ const ImportacaoNfe = (() => {
 
   /* ── CONSULTAR / MANUAL ─────────────────────────────────────────────────── */
 
+  function voltarListaNotas() {
+    state.chaveConsulta = '';
+    state.xmlTextPendente = null;
+    showView('inicio');
+    loadHome();
+  }
+
+  async function confirmarCiencia() {
+    const c1 = await askConfirm('Confirmo ter realizado essa compra. Confirma ter efetuado essa compra?', { okLabel: 'Sim', cancelLabel: 'Não' });
+    if (!c1) return false;
+    const c2 = await askConfirm('Confirma o envio da manifestação de Ciência da operação dessa nota?', { okLabel: 'Sim', cancelLabel: 'Não' });
+    if (!c2) {
+      voltarListaNotas();
+      return false;
+    }
+    const c3 = await askConfirm('Essa ação não pode ser desfeita, confirma?', { okLabel: 'Sim', cancelLabel: 'Não' });
+    if (!c3) {
+      voltarListaNotas();
+      return false;
+    }
+    return true;
+  }
+
   async function consultarChave(opts = {}) {
     const chave = String($('#imp-chave')?.value || '').replace(/\D/g, '');
     if (chave.length !== 44) {
@@ -4307,7 +4330,7 @@ const ImportacaoNfe = (() => {
     if (!xmlText && fileInput?.files?.[0]) {
       xmlText = await fileInput.files[0].text();
     }
-    const res = await api('/importacao/sessoes', {
+    let res = await api('/importacao/sessoes', {
       method: 'POST',
       body: {
         chave,
@@ -4315,6 +4338,25 @@ const ImportacaoNfe = (() => {
         allowDemo: !!opts.allowDemo,
       },
     });
+    if (!res.ok && res.code === 'SEM_XML_COMPLETO') {
+      if (btn) btn.disabled = false;
+      const seguir = await confirmarCiencia();
+      if (!seguir) return;
+      if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Registrando ciência…';
+      }
+      res = await api('/importacao/sessoes', {
+        method: 'POST',
+        body: {
+          chave,
+          xmlText,
+          allowDemo: !!opts.allowDemo,
+          ciencia: true,
+        },
+      });
+      if (btn) btn.textContent = 'Consultar';
+    }
     if (btn) btn.disabled = false;
     if (!res.ok) {
       deps.showMsg?.(res.error || 'Não foi possível consultar a NF-e');

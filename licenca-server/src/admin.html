@@ -600,6 +600,14 @@
           </select>
         </label>
       </div>
+      <div id="r-senha-box" hidden>
+        <p class="sub" id="r-senha-info"></p>
+        <div class="linha">
+          <button class="btn ghost" type="button" id="r-senha-nova">Nova senha temporária</button>
+          <button class="btn ghost" type="button" id="r-senha-remover">Remover senha</button>
+        </div>
+      </div>
+      <p class="sub" id="r-senha-aviso" hidden></p>
       <div class="erro" id="r-erro"></div>
       <div class="linha" style="justify-content:flex-end">
         <button class="btn ghost" type="button" id="r-cancelar" hidden>Cancelar edição</button>
@@ -1134,7 +1142,7 @@ async function carregarRevendas() {
   $('#r-lista').innerHTML = st.revendas.length
     ? st.revendas.map((v) => `<tr data-id="${v.id}">
         <td>${v.id}</td><td><b>${esc(v.nome)}</b></td><td>${fmtCnpj(v.cnpj)}</td><td class="col-hide">${esc(v.contato || '—')}</td>
-        <td>${v.clientes}</td><td><span class="badge ${v.ativo ? 'b-liberado' : 'b-bloqueado'}">${v.ativo ? 'Ativa' : 'Inativa'}</span></td>
+        <td>${v.clientes}</td><td><span class="badge ${v.ativo ? 'b-liberado' : 'b-bloqueado'}">${v.ativo ? 'Ativa' : 'Inativa'}</span><div class="sub">${!v.senha_definida ? 'Sem senha' : (v.senha_temporaria ? 'Senha temporária' : 'Senha definida')}</div></td>
         <td class="acoes"><button class="btn sm ghost" data-r="editar">Editar</button>${v.clientes ? '' : '<button class="btn sm danger" data-r="excluir">Excluir</button>'}</td>
       </tr>`).join('')
     : '<tr><td colspan="7" class="sub">Nenhuma revenda cadastrada.</td></tr>';
@@ -1152,10 +1160,28 @@ function formRevenda(v) {
   $('#r-salvar').textContent = v ? 'Salvar alterações' : 'Cadastrar revenda';
   $('#r-cancelar').hidden = !v;
   $('#r-erro').textContent = '';
+  const box = $('#r-senha-box');
+  if (box) box.hidden = !v;
+  const info = $('#r-senha-info');
+  if (info) {
+    info.textContent = !v ? '' : (!v.senha_definida
+      ? 'Sem senha. A revenda não autoriza alterações no Gestor até você definir uma temporária.'
+      : (v.senha_temporaria
+        ? `Senha temporária definida em ${fmtData(v.senha_atualizado_em)}. No primeiro uso, a revenda troca.`
+        : `Senha definida em ${fmtData(v.senha_atualizado_em)}.`));
+  }
+}
+
+function mostrarSenhaTemporaria(nome, senha) {
+  const aviso = $('#r-senha-aviso');
+  if (!aviso) return;
+  aviso.hidden = false;
+  aviso.textContent = `Senha temporária de ${nome}: ${senha}. Anote agora — ela não aparece de novo. No primeiro uso no Gestor, a revenda troca essa senha.`;
 }
 
 $('#btn-revendas').addEventListener('click', async () => {
   formRevenda(null);
+  if ($('#r-senha-aviso')) $('#r-senha-aviso').hidden = true;
   await carregarRevendas();
   $('#dlg-revendas').showModal();
 });
@@ -1186,8 +1212,31 @@ $('#form-revenda').addEventListener('submit', async (e) => {
     : await api('/revendas', { method: 'POST', body: { ...body, cnpj: $('#r-cnpj').value } });
   if (!r.ok) { $('#r-erro').textContent = r.error || 'Falha ao salvar.'; return; }
   toast(st.revendaEditando ? 'Revenda atualizada.' : 'Revenda cadastrada.');
+  if (r.senha_temporaria) mostrarSenhaTemporaria(r.revenda_nome || $('#r-nome').value, r.senha_temporaria);
+  else if ($('#r-senha-aviso')) $('#r-senha-aviso').hidden = true;
   formRevenda(null);
   carregarRevendas();
+});
+$('#r-senha-nova')?.addEventListener('click', async () => {
+  if (!st.revendaEditando) return;
+  if (!confirm('Gerar uma senha temporária nova? A senha atual deixa de valer, e a revenda troca no primeiro uso.')) return;
+  const r = await api(`/revendas/${st.revendaEditando}/senha`, { method: 'PUT', body: { acao: 'temporaria' } });
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  mostrarSenhaTemporaria(r.revenda_nome || 'revenda', r.senha_temporaria);
+  carregarRevendas();
+  const atual = (r.revendas || []).find((x) => x.id === st.revendaEditando);
+  if (atual) formRevenda(atual);
+});
+$('#r-senha-remover')?.addEventListener('click', async () => {
+  if (!st.revendaEditando) return;
+  if (!confirm('Remover a senha desta revenda? Ela deixa de autorizar alterações até você definir outra temporária.')) return;
+  const r = await api(`/revendas/${st.revendaEditando}/senha`, { method: 'PUT', body: { acao: 'remover' } });
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  if ($('#r-senha-aviso')) $('#r-senha-aviso').hidden = true;
+  toast('Senha da revenda removida.');
+  carregarRevendas();
+  const atual = (r.revendas || []).find((x) => x.id === st.revendaEditando);
+  if (atual) formRevenda(atual);
 });
 
 $('#tabs').addEventListener('click', (e) => {

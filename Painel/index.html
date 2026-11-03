@@ -480,11 +480,6 @@
             <div class="compras-head">
               <div class="compras-head-main">
                 <p class="hint" id="compras-status">A SEFAZ envia as NF-e dos últimos 90 dias. Pendente compara com o que já está lançado.</p>
-                <label class="compras-auto">
-                  <input type="checkbox" id="compras-auto" />
-                  <span>Importar pendentes automaticamente</span>
-                </label>
-                <p class="hint">Desmarcado. A importação continua manual; o parâmetro fica guardado para o futuro.</p>
               </div>
               <div class="compras-relogio" id="compras-relogio" title="Minutos até a próxima consulta na SEFAZ">
                 <svg class="compras-ico-relogio" viewBox="0 0 24 24" aria-hidden="true">
@@ -980,6 +975,7 @@
             <button type="button" class="tab" data-cfg-tab="clientes">Clientes</button>
             <button type="button" class="tab" data-cfg-tab="etiquetas">Etiquetas</button>
             <button type="button" class="tab" data-cfg-tab="conexoes">Conexões</button>
+            <button type="button" class="tab" data-cfg-tab="supervisor" id="cfg-tab-btn-supervisor" hidden>Supervisor</button>
           </div>
           <div id="cfg-tab-tema" class="cfg-tab">
             <div class="pref-card">
@@ -1046,6 +1042,17 @@
               <h3>Instagram</h3>
               <p id="cfg-ig-status">Nenhuma conta informada no cadastro do cliente, no painel.</p>
               <p class="hint">Usuário, ID e token ficam no cadastro do cliente, no painel. Aqui só aparece se a conta está conectada e até quando o token vale.</p>
+            </div>
+          </div>
+          <div id="cfg-tab-supervisor" class="cfg-tab" hidden>
+            <div class="pref-card">
+              <h3>Consultar compras</h3>
+              <label class="pref-check">
+                <input type="checkbox" id="cfg-importar-auto" />
+                <span>Importar pendentes automaticamente</span>
+              </label>
+              <p class="hint" id="cfg-supervisor-aviso">A importação das notas continua manual. O parâmetro fica guardado aqui e só muda com a senha do supervisor.</p>
+              <button type="button" class="btn primary" id="cfg-importar-auto-salvar">Salvar</button>
             </div>
           </div>
           <div id="cfg-tab-clientes" class="cfg-tab" hidden>
@@ -1253,6 +1260,24 @@
       </div>
     </dialog>
 
+    <dialog id="dlg-autorizar" class="dlg">
+      <div class="dlg-card msg-card">
+        <p id="dlg-autorizar-text">Quem autoriza esta alteração?</p>
+        <label>Autorização
+          <select id="dlg-autorizar-tipo">
+            <option value="supervisor">Supervisor</option>
+            <option value="revenda">Revenda</option>
+          </select>
+        </label>
+        <label>Senha
+          <input id="dlg-autorizar-senha" type="password" autocomplete="off" />
+        </label>
+        <div class="dlg-actions">
+          <button type="button" id="dlg-autorizar-cancel" class="btn">Cancelar</button>
+          <button type="button" id="dlg-autorizar-ok" class="btn primary">OK</button>
+        </div>
+      </div>
+    </dialog>
     <dialog id="dlg-prompt" class="dlg">
       <div class="dlg-card msg-card">
         <p id="dlg-prompt-text"></p>
@@ -1333,14 +1358,14 @@
   </div>
   <div id="gond-impressao" aria-hidden="true"></div>
   <script src="vendor/zxing-browser.min.js?v=240"></script>
-  <script src="importacao-nfe.js?v=244"></script>
-  <script src="compras.js?v=240"></script>
+  <script src="importacao-nfe.js?v=245"></script>
+  <script src="compras.js?v=241"></script>
   <script src="condicionais.js?v=252"></script>
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=262"></script>
   <script src="gondola.js?v=2"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=274"></script>
+  <script src="app.js?v=275"></script>
 </body>
 </html>
