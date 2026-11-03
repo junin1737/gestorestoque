@@ -221,7 +221,9 @@ async function enviarJpeg(produtoId, ean, jpeg) {
 
 async function prepararFoto(dados, oferta, slot, forma) {
   const url = fotoDoSlot(dados, oferta, slot);
-  if (!/^https:\/\//.test(url)) throw new Error('Anexe a foto deste produto antes de postar.');
+  if (!/^https:\/\//.test(url)) {
+    throw new Error(oferta?.origem === 'simples' ? 'Anexe a foto da postagem antes de postar.' : 'Anexe a foto deste produto antes de postar.');
+  }
   let resposta;
   try {
     resposta = await fetch(url, { signal: AbortSignal.timeout(20000) });
@@ -305,12 +307,18 @@ async function cicloInstagram(url, legenda, forma, link) {
   throw erro;
 }
 
+function mesmoSlot(slot, chave) {
+  if (chave?.id && slot?.id) return String(slot.id) === String(chave.id);
+  return String(slot?.produto_id) === String(chave?.produto_id)
+    && slot?.data === chave?.data
+    && slot?.hora === chave?.hora;
+}
+
 function gravarResultado(ofertaId, chave, patch) {
   const dados = lerArquivo();
   const oferta = (dados.ofertas || []).find((o) => o.id === ofertaId);
   if (!oferta) return null;
-  const slot = (oferta.rotina || []).find((s) => String(s.produto_id) === String(chave.produto_id)
-    && s.data === chave.data && s.hora === chave.hora && !s.publicado);
+  const slot = (oferta.rotina || []).find((s) => !s.publicado && mesmoSlot(s, chave));
   if (!slot) return oferta;
   Object.assign(slot, patch);
   if ('aviso' in patch) oferta.aviso = patch.aviso || '';
@@ -320,8 +328,7 @@ function gravarResultado(ofertaId, chave, patch) {
 }
 
 function textoProxima(oferta, atual) {
-  const prox = (oferta?.rotina || []).find((s) => !s.publicado
-    && !(String(s.produto_id) === String(atual.produto_id) && s.data === atual.data && s.hora === atual.hora));
+  const prox = (oferta?.rotina || []).find((s) => !s.publicado && !mesmoSlot(s, atual));
   if (!prox) return 'Publicado no Instagram.';
   return `Publicado. A próxima é ${prox.data} ${String(prox.hora || '').slice(0, 5)}.`;
 }
@@ -329,7 +336,7 @@ function textoProxima(oferta, atual) {
 async function executar(oferta, slot) {
   const dados = lerArquivo();
   const viva = (dados.ofertas || []).find((o) => o.id === oferta.id) || oferta;
-  const alvo = (viva.rotina || []).find((s) => String(s.produto_id) === String(slot.produto_id) && s.data === slot.data && s.hora === slot.hora) || slot;
+  const alvo = (viva.rotina || []).find((s) => mesmoSlot(s, slot)) || slot;
   if (alvo.publicado) return { ok: true, etapa: 'publicado', mensagem: 'Este horário já foi publicado.', oferta: viva };
   const forma = viva.forma === 'story' || viva.forma === 'ambos' ? viva.forma : 'post';
   const tipos = forma === 'ambos' ? ['post', 'story'] : [forma];

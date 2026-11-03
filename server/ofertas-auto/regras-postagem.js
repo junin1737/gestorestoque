@@ -23,13 +23,15 @@ function escalaMinima(largura, altura) {
   return 320 / curto;
 }
 
+/** Data e hora da rotina são o relógio de Brasília, independente do fuso do computador. */
 function quandoSlot(slot) {
   const data = String(slot?.data || '');
   const hora = String(slot?.hora || '');
   if (!/^\d{4}-\d{2}-\d{2}$/.test(data)) return null;
   const m = hora.match(/^(\d{2}):(\d{2})/);
   if (!m) return null;
-  return new Date(Number(data.slice(0, 4)), Number(data.slice(5, 7)) - 1, Number(data.slice(8, 10)), Number(m[1]), Number(m[2]), 0, 0);
+  const instante = new Date(`${data}T${m[1]}:${m[2]}:00-03:00`);
+  return Number.isNaN(instante.getTime()) ? null : instante;
 }
 
 function esperaCumprida(slot, agora, esperaMs) {
@@ -39,16 +41,37 @@ function esperaCumprida(slot, agora, esperaMs) {
   return agora.getTime() - em >= esperaMs;
 }
 
-/** O horário vencido mais antigo de uma campanha ativa, pulando falha recente. */
+function ultimaPublicacao(oferta) {
+  let ultima = 0;
+  for (const slot of oferta?.rotina || []) {
+    if (!slot?.publicado) continue;
+    const em = Date.parse(String(slot.publicado_em || ''));
+    if (Number.isFinite(em) && em > ultima) ultima = em;
+  }
+  return ultima;
+}
+
+/**
+ * O horário vencido mais antigo de uma campanha ativa.
+ * O próximo só entra quando o relógio dele chega. Se vários já venceram juntos,
+ * o intervalo da campanha separa um do outro.
+ */
 function escolherSlot(ofertas, agora, esperaMs = 10 * 60 * 1000) {
   let melhor = null;
+  const agoraMs = agora.getTime();
   for (const oferta of ofertas || []) {
     if (!oferta || oferta.ativa === false) continue;
+    const minutos = Number(oferta.rotina_cfg?.intervalo_minutos);
+    const intervalo = (Number.isFinite(minutos) && minutos >= 1 ? minutos : 60) * 60 * 1000;
+    const ultima = ultimaPublicacao(oferta);
     for (const slot of oferta.rotina || []) {
       if (!slot || slot.publicado || !slot.produto_id) continue;
       const quando = quandoSlot(slot);
-      if (!quando || quando.getTime() > agora.getTime()) continue;
+      if (!quando) continue;
       if (!esperaCumprida(slot, agora, esperaMs)) continue;
+      let esperaAte = quando.getTime();
+      if (ultima && quando.getTime() <= ultima + 60 * 1000) esperaAte = ultima + intervalo;
+      if (agoraMs < esperaAte) continue;
       if (!melhor || quando.getTime() < melhor.quando.getTime()) melhor = { oferta, slot, quando };
     }
   }

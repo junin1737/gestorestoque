@@ -96,6 +96,14 @@ function montar(router, deps) {
     return auth.exigirModulo('central_ofertas')(req, res, next);
   }
 
+  async function camposDaLoja() {
+    try {
+      const campos = await conectores.erp.camposTexto();
+      if (Array.isArray(campos) && campos.length) return campos;
+    } catch { /* sem base: a postagem simples não consulta o estoque */ }
+    return [{ coluna: 'OBSERVACAO', rotulo: 'Observação' }];
+  }
+
   async function lojaId() {
     try {
       const rows = await deps.withDb((db) => deps.query(db, 'SELECT FIRST 1 CNPJ FROM TB_EMITENTE'));
@@ -137,7 +145,7 @@ function equipe() {
   router.get('/central-ofertas/config', acesso, async (req, res) => {
     try {
       const config = configEfetiva();
-      const campos = await conectores.erp.camposTexto();
+      const campos = await camposDaLoja();
       const sit = require('../licenca').situacao();
       const ig = {
         conectada: sit.instagram_configurado === true,
@@ -164,7 +172,7 @@ function equipe() {
 
   router.put('/central-ofertas/config', acesso, async (req, res) => {
     try {
-      const campos = await conectores.erp.camposTexto();
+      const campos = await camposDaLoja();
       const { config, janela } = sanitizar(req.body || {}, campos);
       const { saveAppConfig, loadAppConfig: lerApp } = require('../config');
       saveAppConfig({
@@ -549,8 +557,10 @@ function equipe() {
           foto_url: foto,
         });
         const publicados = (oferta.rotina || []).filter((s) => s.publicado);
-        const datas = new Set(publicados.map((s) => s.data));
-        oferta.rotina = publicados.concat(gerada.rotina.filter((s) => !datas.has(s.data)));
+        const ocupados = new Set(publicados.map((s) => `${s.data}|${s.hora}`));
+        oferta.rotina = publicados.concat(
+          gerada.rotina.filter((s) => !ocupados.has(`${s.data}|${s.hora}`)).map(marcarSlot),
+        );
         oferta.aviso = gerada.rotina.length
           ? `Rotina simples com ${gerada.rotina.length} postagem(ns).`
           : 'Nenhum dia novo para agendar.';
@@ -582,7 +592,7 @@ function equipe() {
       });
       const fotos = dados.produtos || {};
       oferta.rotina = publicados.concat(gerada.rotina.map((slot) => ({
-        ...slot,
+        ...marcarSlot(slot),
         publicado: false,
         foto_url: String(fotos[String(slot.produto_id)]?.foto_url
           || (oferta.produtos || []).find((p) => String(p.id) === String(slot.produto_id))?.foto_url
@@ -624,6 +634,10 @@ function aplicarDetalhes(oferta, body) {
     onde,
     limite_banner: Number.isInteger(limite) ? Math.min(120, Math.max(10, limite)) : (oferta.detalhes?.limite_banner || 40),
   };
+}
+
+function marcarSlot(slot) {
+  return { ...slot, id: slot.id || randomUUID(), publicado: false };
 }
 
 function formaOferta(v) {

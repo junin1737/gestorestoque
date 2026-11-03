@@ -1117,6 +1117,10 @@
     const link = String(campo('co-link')?.value ?? o?.link ?? '').trim();
     const linhas = [];
     if (legenda) linhas.push(legenda);
+    if (origemOferta(o) === 'simples') {
+      if ((forma === 'story' || forma === 'ambos') && link) linhas.push('', link);
+      return linhas.join('\n');
+    }
     linhas.push(String(produto?.descricao || 'Nome do produto'));
     const detalhe = String(produto?.detalhe || '').trim();
     if (detalhe) linhas.push(detalhe);
@@ -1349,7 +1353,9 @@
   async function gerarRotina() {
     const o = ofertaAtual();
     if (!o) return;
-    if (!(o.produtos || []).length) return avisoRotina('Inclua um produto na oferta antes de gerar.');
+    if (origemOferta(o) !== 'simples' && !(o.produtos || []).length) {
+      return avisoRotina('Inclua um produto na oferta antes de gerar.');
+    }
     const status = campo('co-rotina-status');
     if (status) status.textContent = 'Gerando a rotina…';
     const r = await api(`/central-ofertas/ofertas/${encodeURIComponent(o.id)}/rotina`, {

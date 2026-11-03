@@ -117,7 +117,7 @@ test('o espaço em branco do banner fica dentro da imagem', () => {
 
 test('o horário vencido de uma campanha ativa é o que publica', () => {
   const { escolherSlot } = require('./regras-postagem');
-  const agora = new Date(2026, 9, 28, 15, 21, 0, 0);
+  const agora = new Date('2026-10-28T15:21:00-03:00');
   const alvo = escolherSlot([
     {
       id: '1',
@@ -219,4 +219,49 @@ test('postagem simples cai nos dias marcados', () => {
   });
   assert.deepEqual(gerada.rotina.map((s) => s.data), ['2026-10-31', '2026-11-01', '2026-11-02', '2026-11-03']);
   assert.ok(gerada.rotina.every((s) => s.hora === '09:30' && s.produto_id === 'simples' && s.foto_url.startsWith('https://')));
+});
+
+test('postagem simples reparte os horários do dia', () => {
+  const { montarRotinaSimples } = require('./regras-publicacao');
+  const gerada = montarRotinaSimples({
+    inicio: '2026-11-03',
+    fim: '2026-11-03',
+    publicacao: {
+      dias_semana: [2],
+      posts_por_dia: 3,
+      intervalo_minutos: 60,
+      hora_inicio: '10:00',
+      hora_fim: '12:00',
+    },
+    descricao: 'Cupom',
+    foto_url: 'https://fotos.smsjrdeveloper.com.br/loja/simples.jpg',
+  });
+  assert.deepEqual(gerada.rotina.map((s) => s.hora), ['10:00', '11:00', '12:00']);
+});
+
+test('cada horário publica na própria hora e um atraso não dispara os seguintes', () => {
+  const { escolherSlot } = require('./regras-postagem');
+  const oferta = {
+    id: '1',
+    ativa: true,
+    rotina_cfg: { intervalo_minutos: 60 },
+    rotina: [
+      { id: 'a', produto_id: 'simples', data: '2026-11-03', hora: '10:00', publicado: false },
+      { id: 'b', produto_id: 'simples', data: '2026-11-03', hora: '11:00', publicado: false },
+      { id: 'c', produto_id: 'simples', data: '2026-11-03', hora: '12:00', publicado: false },
+    ],
+  };
+  const as10 = escolherSlot([oferta], new Date('2026-11-03T10:00:00-03:00'));
+  assert.equal(as10.slot.id, 'a');
+  const cedo = escolherSlot([oferta], new Date('2026-11-03T09:59:00-03:00'));
+  assert.equal(cedo, null);
+  const juntos = {
+    ...oferta,
+    rotina: oferta.rotina.map((s) => ({ ...s, hora: '10:00' })),
+  };
+  juntos.rotina[0] = { ...juntos.rotina[0], publicado: true, publicado_em: '2026-11-03T13:00:00.000Z' };
+  const logoDepois = escolherSlot([juntos], new Date('2026-11-03T10:01:00-03:00'));
+  assert.equal(logoDepois, null);
+  const umaHora = escolherSlot([juntos], new Date('2026-11-03T11:00:00-03:00'));
+  assert.equal(umaHora.slot.id, 'b');
 });

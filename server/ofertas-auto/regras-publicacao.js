@@ -138,11 +138,15 @@ function montarRotina({ inicio, fim, produtos, publicacao, fds }) {
   };
 }
 
-/** Uma postagem por dia marcado, com a mesma foto e o mesmo texto. */
+/** A mesma foto e o mesmo texto, um horário por post dentro da janela de cada dia marcado. */
 function montarRotinaSimples({ inicio, fim, publicacao, descricao, foto_url }) {
   const pub = publicacao || {};
   const dias = new Set((pub.dias_semana || []).map(Number));
-  const hora = String(pub.hora_inicio || '08:00').slice(0, 5);
+  const ini = minutos(pub.hora_inicio);
+  const horaBase = ini == null ? minutos('08:00') : ini;
+  const fimMin = minutos(pub.hora_fim);
+  const posts = Math.min(50, Math.max(1, Number(pub.posts_por_dia) || 1));
+  const intervalo = Math.min(1440, Math.max(1, Number(pub.intervalo_minutos) || 60));
   const rotina = [];
   const dia = new Date(`${inicio}T12:00:00`);
   const limite = new Date(`${fim}T12:00:00`);
@@ -150,14 +154,18 @@ function montarRotinaSimples({ inicio, fim, publicacao, descricao, foto_url }) {
   while (dia <= limite && voltas < 120) {
     voltas += 1;
     if (dias.has(dia.getDay())) {
-      rotina.push({
-        produto_id: 'simples',
-        descricao: String(descricao || '').slice(0, 120),
-        detalhe: '',
-        data: isoDia(dia),
-        hora,
-        foto_url: String(foto_url || ''),
-      });
+      for (let n = 0; n < posts; n += 1) {
+        const marca = horaBase + n * intervalo;
+        if (fimMin != null && marca > fimMin) break;
+        rotina.push({
+          produto_id: 'simples',
+          descricao: String(descricao || '').slice(0, 120),
+          detalhe: '',
+          data: isoDia(dia),
+          hora: horaDe(marca),
+          foto_url: String(foto_url || ''),
+        });
+      }
     }
     dia.setDate(dia.getDate() + 1);
   }
