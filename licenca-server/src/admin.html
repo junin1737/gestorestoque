@@ -399,7 +399,21 @@
         <option value="1">Sim</option>
       </select>
     </label>
-    <p class="sub">Com Sim, o Gestor desta loja pode mostrar a aba Central de Ofertas para quem tiver a permissão.</p>
+    <p class="sub">Com Sim, o Gestor desta loja mostra a Central de Ofertas para quem tiver a permissão em Usuários.</p>
+    <label>Consultar compras
+      <select id="d-consultar-compras">
+        <option value="0">Não</option>
+        <option value="1">Sim</option>
+      </select>
+    </label>
+    <p class="sub">Com Sim, o Gestor mostra Consultar compras para quem tiver a permissão em Usuários.</p>
+    <label>Alteração em massa
+      <select id="d-alteracao-massa">
+        <option value="0">Não</option>
+        <option value="1">Sim</option>
+      </select>
+    </label>
+    <p class="sub">Com Sim, o Gestor mostra Alteração em massa para quem tiver a permissão em Usuários. O contador vinculado também entra quando estiver Sim.</p>
     <label class="check"><input id="d-usa-dominio" type="checkbox" /> Usar domínio próprio</label>
     <label>Domínio do site<input id="d-dominio" maxlength="120" placeholder="www.loja.com.br" /></label>
     <p class="sub" id="d-dominio-aviso">Desmarcado, o Gestor continua no link gerado. Marcado, o link passa a ser o domínio sem www, com /mtgestoronline.</p>
@@ -1224,6 +1238,8 @@ function preencherCliente(r) {
   preencherSelectContador(c.contador_id);
   $('#d-pacote-entrada').value = Number(c.pacote_entrada) === 1 ? '1' : '0';
   $('#d-central-ofertas').value = Number(c.central_ofertas) === 1 ? '1' : '0';
+  $('#d-consultar-compras').value = Number(c.consultar_compras) === 1 ? '1' : '0';
+  $('#d-alteracao-massa').value = Number(c.alteracao_massa) === 1 ? '1' : '0';
   $('#d-usa-dominio').checked = Number(c.usa_dominio) === 1;
   $('#d-dominio').value = c.dominio_proprio || '';
   atualizarAvisoDominio();
@@ -1395,6 +1411,8 @@ $('#d-salvar').addEventListener('click', async () => {
       contador_id: $('#d-contador').value || null,
       pacote_entrada: $('#d-pacote-entrada').value === '1' ? 1 : 0,
       central_ofertas: $('#d-central-ofertas').value === '1' ? 1 : 0,
+      consultar_compras: $('#d-consultar-compras').value === '1' ? 1 : 0,
+      alteracao_massa: $('#d-alteracao-massa').value === '1' ? 1 : 0,
       usa_dominio: $('#d-usa-dominio').checked ? 1 : 0,
       dominio_proprio: $('#d-dominio').value,
       ig_usuario: $('#d-ig-usuario').value,

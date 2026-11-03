@@ -1202,6 +1202,8 @@ function guardarVinculos(licenca) {
   state.pacoteEntrada = licenca?.pacote_entrada === true;
   state.contadorVinculado = licenca?.contador_vinculado === true;
   state.centralOfertas = licenca?.central_ofertas === true;
+  state.consultarCompras = licenca?.consultar_compras === true;
+  state.alteracaoMassa = licenca?.alteracao_massa === true;
   const btn = $('#login-modo-contador');
   if (btn) btn.hidden = !state.contadorVinculado && !loginModoContador;
 }
@@ -1235,7 +1237,7 @@ async function enterApp() {
   if ($('#nav-importacao')) $('#nav-importacao').hidden = !showImp;
   if ($('#nav-importacao-mobile')) $('#nav-importacao-mobile').hidden = !showImp;
   if ($('#dash-importacao')) $('#dash-importacao').hidden = !showImp;
-  const showCompras = can('compras', 'acesso');
+  const showCompras = !!state.consultarCompras && can('compras', 'acesso');
   if ($('#nav-compras')) $('#nav-compras').hidden = !showCompras;
   if ($('#nav-compras-mobile')) $('#nav-compras-mobile').hidden = !showCompras;
   if ($('#dash-compras')) $('#dash-compras').hidden = !showCompras;
@@ -1254,8 +1256,7 @@ async function enterApp() {
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
   if (cfgMais) cfgMais.hidden = !isNativeApk();
-  const showContador = !!state.usuario?.contador
-    || (!!state.contadorVinculado && (!!state.usuario?.supervisor || can('massa', 'acesso')));
+  const showContador = !!state.alteracaoMassa && (!!state.usuario?.contador || can('massa', 'acesso'));
   if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
   if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
   if ($('#nav-empresas')) $('#nav-empresas').hidden = true;
@@ -1270,7 +1271,7 @@ async function enterApp() {
       const perfil = btn.dataset.perfil;
       const inicio = pagina === 'dashboard' && !perfil;
       const dashContador = pagina === 'dashboard' && perfil === 'CONTADOR_ACESSA';
-      btn.hidden = !(inicio || dashContador || pagina === 'contador');
+      btn.hidden = !(inicio || dashContador || (pagina === 'contador' && state.alteracaoMassa));
     });
   }
   const paginaInicial = state.usuario?.contador && guardada?.page !== 'contador'
@@ -1580,7 +1581,7 @@ async function showPage(page) {
     showMsg('Sem permissão para notas de entrada.');
     page = 'dashboard';
   }
-  if (page === 'compras' && !can('compras', 'acesso')) {
+  if (page === 'compras' && !(state.consultarCompras && can('compras', 'acesso'))) {
     showMsg('Sem permissão para consultar compras.');
     page = 'dashboard';
   }
@@ -1601,8 +1602,8 @@ async function showPage(page) {
     showMsg('Só o supervisor cadastra os usuários do painel.');
     page = 'dashboard';
   }
-  if (page === 'contador' && !(state.usuario?.supervisor || state.usuario?.contador)) {
-    showMsg('Entre como contador para abrir esta tela.');
+  if (page === 'contador' && !(state.alteracaoMassa && (state.usuario?.contador || can('massa', 'acesso')))) {
+    showMsg('Sem permissão para alteração em massa.');
     page = 'dashboard';
   }
   if (state.usuario?.contador && page !== 'contador' && page !== 'dashboard') page = 'dashboard';
@@ -3168,6 +3169,13 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     if ($('#nav-central-ofertas')) $('#nav-central-ofertas').hidden = !showCentral;
     if ($('#nav-central-ofertas-mobile')) $('#nav-central-ofertas-mobile').hidden = !showCentral;
     if ($('#dash-central-ofertas')) $('#dash-central-ofertas').hidden = !showCentral;
+    const showCompras = !!state.consultarCompras && can('compras', 'acesso');
+    if ($('#nav-compras')) $('#nav-compras').hidden = !showCompras;
+    if ($('#nav-compras-mobile')) $('#nav-compras-mobile').hidden = !showCompras;
+    if ($('#dash-compras')) $('#dash-compras').hidden = !showCompras;
+    const showMassa = !!state.alteracaoMassa && can('massa', 'acesso');
+    if ($('#nav-contador')) $('#nav-contador').hidden = !showMassa;
+    if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showMassa;
   }
   renderUsuarios();
   showToast('Usuários atualizados.');

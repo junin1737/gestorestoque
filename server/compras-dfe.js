@@ -357,6 +357,10 @@ function agendar(ms) {
 
 async function executarCiclo() {
   if (running) return;
+  if (require('./licenca').situacao().consultar_compras !== true) {
+    agendar(INTERVALO_MS);
+    return;
+  }
   running = true;
   const cnpjBase = await definirCnpj();
   const store = loadStore();

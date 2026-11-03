@@ -79,6 +79,7 @@ function pemParaDer(pem) {
 let chaveAssinatura = null;
 let colunaPacotePronta = false;
 let colunaCentralPronta = false;
+let colunasAdicionaisProntas = false;
 
 /** Pacote de Entrada (Sim/Não) no cadastro do cliente. 0 até a coluna existir. */
 async function garantirPacoteEntrada(env) {
@@ -110,6 +111,32 @@ function pacoteEntradaAtivo(cli) {
 
 function centralOfertasAtiva(cli) {
   return Number(cli?.central_ofertas) === 1;
+}
+
+/** Consultar compras e Alteração em massa (Sim/Não) no cadastro do cliente. 0 até a coluna existir. */
+async function garantirAdicionais(env) {
+  if (colunasAdicionaisProntas) return;
+  const colunas = [
+    'consultar_compras INTEGER NOT NULL DEFAULT 0',
+    'alteracao_massa INTEGER NOT NULL DEFAULT 0',
+  ];
+  for (const coluna of colunas) {
+    try {
+      await env.DB.prepare(`ALTER TABLE clientes ADD COLUMN ${coluna}`).run();
+    } catch (e) {
+      const msg = String(e?.message || e);
+      if (!/duplicate column/i.test(msg)) throw e;
+    }
+  }
+  colunasAdicionaisProntas = true;
+}
+
+function consultarComprasAtiva(cli) {
+  return Number(cli?.consultar_compras) === 1;
+}
+
+function alteracaoMassaAtiva(cli) {
+  return Number(cli?.alteracao_massa) === 1;
 }
 
 let colunasDominioProntas = false;
@@ -336,6 +363,7 @@ async function instalacaoDaRequisicao(request, env, app) {
 async function check(request, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
+  await garantirAdicionais(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   let body;
@@ -456,6 +484,8 @@ async function check(request, env) {
     pacote_entrada: pacoteEntradaAtivo(cli),
     contador_vinculado: contadorVinculado(cli),
     central_ofertas: centralOfertasAtiva(cli),
+    consultar_compras: consultarComprasAtiva(cli),
+    alteracao_massa: alteracaoMassaAtiva(cli),
     url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });
@@ -576,6 +606,7 @@ async function login(request, env) {
 async function listarClientes(url, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
+  await garantirAdicionais(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   const q = String(url.searchParams.get('q') || '').trim();
@@ -769,6 +800,12 @@ function camposEditaveis(body) {
   }
   if (body.central_ofertas !== undefined) {
     out.central_ofertas = body.central_ofertas === true || body.central_ofertas === 1 || body.central_ofertas === '1' ? 1 : 0;
+  }
+  if (body.consultar_compras !== undefined) {
+    out.consultar_compras = body.consultar_compras === true || body.consultar_compras === 1 || body.consultar_compras === '1' ? 1 : 0;
+  }
+  if (body.alteracao_massa !== undefined) {
+    out.alteracao_massa = body.alteracao_massa === true || body.alteracao_massa === 1 || body.alteracao_massa === '1' ? 1 : 0;
   }
   if (body.usa_dominio !== undefined) {
     out.usa_dominio = body.usa_dominio === true || body.usa_dominio === 1 || body.usa_dominio === '1' ? 1 : 0;
@@ -1305,6 +1342,7 @@ async function excluirRevenda(id, env) {
 }
 
 async function criarCliente(request, env) {
+  await garantirAdicionais(env);
   const body = await request.json().catch(() => ({}));
   const cnpj = soDigitos(body.cnpj);
   if (cnpj.length !== 14 && cnpj.length !== 11) return json({ ok: false, error: 'CNPJ/CPF inválido.' }, 400);
@@ -1331,6 +1369,7 @@ async function criarCliente(request, env) {
 async function atualizarCliente(cnpj, app, request, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
+  await garantirAdicionais(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   const cli = await buscarCliente(env, cnpj, app);
@@ -1367,6 +1406,8 @@ async function atualizarCliente(cnpj, app, request, env) {
       em_teste: 'teste grátis',
       pacote_entrada: 'pacote de entrada',
       central_ofertas: 'central de ofertas',
+      consultar_compras: 'consultar compras',
+      alteracao_massa: 'alteração em massa',
       usa_dominio: 'domínio próprio',
       dominio_proprio: 'domínio',
       ig_usuario: 'instagram',
@@ -1378,7 +1419,7 @@ async function atualizarCliente(cnpj, app, request, env) {
     const valor = (k) => {
       if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
       if (k === 'ig_token') return 'atualizado';
-      if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas' || k === 'usa_dominio') return campos[k] ? 'sim' : 'não';
+      if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas' || k === 'consultar_compras' || k === 'alteracao_massa' || k === 'usa_dominio') return campos[k] ? 'sim' : 'não';
       if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
       return campos[k] ?? '—';
     };
@@ -1399,6 +1440,7 @@ async function excluirCliente(cnpj, app, env) {
 /** Código para colar na tela de serviço quando o cliente está sem internet. */
 async function licencaOffline(cnpj, app, request, env) {
   await garantirCentralOfertas(env);
+  await garantirAdicionais(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
@@ -1420,6 +1462,8 @@ async function licencaOffline(cnpj, app, request, env) {
     pacote_entrada: pacoteEntradaAtivo(cli),
     contador_vinculado: contadorVinculado(cli),
     central_ofertas: centralOfertasAtiva(cli),
+    consultar_compras: consultarComprasAtiva(cli),
+    alteracao_massa: alteracaoMassaAtiva(cli),
     url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });

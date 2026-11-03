@@ -347,6 +347,8 @@ function situacao() {
     pacote_entrada: dados.pacote_entrada === true,
     contador_vinculado: dados.contador_vinculado === true,
     central_ofertas: dados.central_ofertas === true,
+    consultar_compras: dados.consultar_compras === true,
+    alteracao_massa: dados.alteracao_massa === true,
     instagram_configurado: dados.instagram_configurado === true,
     instagram_expira: dados.instagram_expira || null,
     url_propria: /^https:\/\/[a-z0-9.-]+\/mtgestoronline$/.test(String(dados.url_propria || '')) ? dados.url_propria : '',

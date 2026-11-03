@@ -3057,6 +3057,10 @@ router.post('/fiscal/testar', somenteServidorLocal, async (req, res) => {
 const comprasDfe = require('./compras-dfe');
 
 function guardCompras(req, res) {
+  if (require('./licenca').situacao().consultar_compras !== true) {
+    res.status(403).json({ ok: false, error: 'Consultar compras não está liberado para esta loja.' });
+    return false;
+  }
   if (auth.temAcesso(req.usuario, 'compras')) return true;
   res.status(403).json({ ok: false, code: 'SEM_PERMISSAO', error: 'Sem permissão para consultar compras.' });
   return false;
@@ -3438,6 +3442,10 @@ router.put('/contador/itens/:id', async (req, res) => {
 const massa = require('./massa');
 
 function modoMassa(req, res) {
+  if (require('./licenca').situacao().alteracao_massa !== true) {
+    res.status(403).json({ ok: false, error: 'Alteração em massa não está liberada para esta loja.' });
+    return Promise.resolve(null);
+  }
   if (req.contador) return Promise.resolve('contador');
   if (req.usuario?.supervisor) return Promise.resolve('loja');
   if (req.usuario?.permissoes?.massa?.acesso === true) {

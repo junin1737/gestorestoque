@@ -1,0 +1,2 @@
+ALTER TABLE clientes ADD COLUMN consultar_compras INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE clientes ADD COLUMN alteracao_massa INTEGER NOT NULL DEFAULT 0;
