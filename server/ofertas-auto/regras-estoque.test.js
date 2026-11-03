@@ -264,4 +264,10 @@ test('cada horário publica na própria hora e um atraso não dispara os seguint
   assert.equal(logoDepois, null);
   const umaHora = escolherSlot([juntos], new Date('2026-11-03T11:00:00-03:00'));
   assert.equal(umaHora.slot.id, 'b');
+  const naNuvem = escolherSlot([{
+    id: '9',
+    ativa: true,
+    rotina: [{ id: 'z', produto_id: 'simples', data: '2026-11-03', hora: '10:00', publicado: false, nuvem: true }],
+  }], new Date('2026-11-03T10:05:00-03:00'));
+  assert.equal(naNuvem, null);
 });

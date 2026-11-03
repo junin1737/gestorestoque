@@ -132,6 +132,10 @@ export async function rotaOfertas(request, env, url, instalacaoDaRequisicao) {
     return publicarNoInstagram(request, env, cnpj);
   }
 
+  if (url.pathname === '/api/ofertas/agenda' && (request.method === 'GET' || request.method === 'POST')) {
+    return await rotaAgenda(request, env, cnpj);
+  }
+
   return json({ ok: false, error: 'Rota não encontrada.' }, 404);
 }
 
@@ -144,18 +148,156 @@ function erroInstagram(msg) {
 
 async function publicarNoInstagram(request, env, cnpj) {
   const body = await request.json().catch(() => ({}));
+  const passo = await passoInstagram(env, cnpj, body);
+  return json(passo.ok ? passo : { ok: false, error: passo.error }, passo.status || (passo.ok ? 200 : 400));
+}
+
+async function garantirAgenda(env) {
+  await env.DB.prepare(`CREATE TABLE IF NOT EXISTS oferta_agenda (
+    id TEXT PRIMARY KEY,
+    loja_id TEXT NOT NULL,
+    oferta_id TEXT NOT NULL,
+    slot_id TEXT NOT NULL,
+    forma TEXT NOT NULL,
+    quando TEXT NOT NULL,
+    image_url TEXT NOT NULL,
+    caption TEXT,
+    link TEXT,
+    status TEXT NOT NULL,
+    creation_id TEXT,
+    post_id TEXT,
+    erro TEXT,
+    tentativa_em TEXT,
+    criado_em TEXT NOT NULL
+  )`).run();
+  await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_oferta_agenda_slot ON oferta_agenda (loja_id, oferta_id, slot_id, forma)').run();
+  await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_oferta_agenda_quando ON oferta_agenda (status, quando)').run();
+}
+
+function idAgenda(loja, oferta, slot, forma) {
+  return `${loja}:${oferta}:${slot}:${forma}`.slice(0, 180);
+}
+
+async function rotaAgenda(request, env, cnpj) {
+  await garantirAgenda(env);
+  if (request.method === 'GET') {
+    const res = await env.DB.prepare(
+      `SELECT oferta_id, slot_id, forma, quando, status, post_id, erro FROM oferta_agenda
+       WHERE loja_id = ? AND status != 'cancelado' ORDER BY quando`
+    ).bind(cnpj).all();
+    return json({ ok: true, itens: res.results || [] });
+  }
+  const body = await request.json().catch(() => ({}));
+  const ofertaId = String(body.oferta_id || '').replace(/[^\w.-]/g, '').slice(0, 80);
+  if (!ofertaId) return json({ ok: false, error: 'Oferta inválida.' }, 400);
+  const manter = body.manter === true;
+  const retirar = new Set((Array.isArray(body.retirar) ? body.retirar : []).map((id) => String(id).slice(0, 80)).filter(Boolean));
+  if (!manter) {
+    await env.DB.prepare(
+      `UPDATE oferta_agenda SET status = 'cancelado'
+       WHERE loja_id = ? AND oferta_id = ? AND status IN ('pendente', 'erro', 'criado')`
+    ).bind(cnpj, ofertaId).run();
+  }
+  for (const slotId of retirar) {
+    await env.DB.prepare(
+      `UPDATE oferta_agenda SET status = 'cancelado'
+       WHERE loja_id = ? AND oferta_id = ? AND slot_id = ? AND status IN ('pendente', 'erro', 'criado')`
+    ).bind(cnpj, ofertaId, slotId).run();
+  }
+  const base = String(env.FOTOS_PUBLIC_BASE || '').replace(/\/$/, '');
+  const itens = Array.isArray(body.itens) ? body.itens.slice(0, 40) : [];
+  const agora = new Date().toISOString();
+  for (const item of itens) {
+    const slotId = String(item?.slot_id || '').replace(/[^\w|.:-]/g, '').slice(0, 80);
+    const forma = item?.forma === 'story' ? 'story' : (item?.forma === 'post' ? 'post' : '');
+    const quando = new Date(String(item?.quando || ''));
+    const imagem = String(item?.image_url || '').trim();
+    if (!slotId || !forma || Number.isNaN(quando.getTime()) || !base || !imagem.startsWith(`${base}/`)) continue;
+    const id = idAgenda(cnpj, ofertaId, slotId, forma);
+    const atual = await env.DB.prepare('SELECT status FROM oferta_agenda WHERE id = ?').bind(id).first();
+    if (atual?.status === 'publicado' || atual?.status === 'criado') continue;
+    const caption = String(item?.caption || '').slice(0, 2000);
+    const link = String(item?.link || '').trim().slice(0, 300);
+    await env.DB.prepare(
+      `INSERT INTO oferta_agenda (id, loja_id, oferta_id, slot_id, forma, quando, image_url, caption, link, status, creation_id, post_id, erro, tentativa_em, criado_em)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendente', '', '', '', '', ?)
+       ON CONFLICT (id) DO UPDATE SET
+         quando = excluded.quando, image_url = excluded.image_url, caption = excluded.caption, link = excluded.link,
+         status = 'pendente', creation_id = '', post_id = '', erro = '', tentativa_em = ''`
+    ).bind(id, cnpj, ofertaId, slotId, forma, quando.toISOString(), imagem, caption, link, agora).run();
+  }
+  return json({ ok: true });
+}
+
+/** Um passo por vez: o cron de 1 minuto não espera o Instagram dentro da mesma chamada. */
+export async function publicarAgenda(env) {
+  await garantirAgenda(env);
+  const agora = new Date();
+  const limite = new Date(agora.getTime() - 6 * 3600 * 1000).toISOString();
+  const res = await env.DB.prepare(
+    `SELECT * FROM oferta_agenda
+     WHERE status IN ('pendente', 'criado', 'erro') AND quando <= ? AND quando >= ?
+     ORDER BY quando LIMIT 4`
+  ).bind(agora.toISOString(), limite).all();
+  for (const linha of res.results || []) {
+    try {
+      await passoAgenda(env, linha, agora);
+    } catch (err) {
+      console.error('Agenda da oferta:', err?.message || err);
+    }
+  }
+}
+
+async function passoAgenda(env, linha, agora) {
+  if (linha.status === 'erro') {
+    const em = Date.parse(String(linha.tentativa_em || ''));
+    if (Number.isFinite(em) && agora.getTime() - em < 10 * 60 * 1000) return;
+  }
+  const cli = await env.DB.prepare(
+    'SELECT ig_token, ig_user_id, central_ofertas, status FROM clientes WHERE cnpj = ? AND aplicacao = ?'
+  ).bind(linha.loja_id, APP_PADRAO).first();
+  if (Number(cli?.central_ofertas) !== 1 || cli?.status !== 'liberado') return;
+  const etapa = linha.status === 'criado' && linha.creation_id ? 'consultar' : 'criar';
+  const passo = await passoInstagram(env, linha.loja_id, {
+    etapa,
+    creation_id: linha.creation_id,
+    image_url: linha.image_url,
+    caption: linha.caption,
+    forma: linha.forma,
+    link: linha.link,
+  });
+  if (!passo.ok) {
+    await env.DB.prepare(
+      `UPDATE oferta_agenda SET status = 'erro', erro = ?, tentativa_em = ?, creation_id = '' WHERE id = ?`
+    ).bind(String(passo.error || 'Falha ao publicar.').slice(0, 180), agora.toISOString(), linha.id).run();
+    return;
+  }
+  if (passo.etapa === 'criado' || passo.etapa === 'processando') {
+    await env.DB.prepare(
+      `UPDATE oferta_agenda SET status = 'criado', creation_id = ?, erro = '' WHERE id = ?`
+    ).bind(String(passo.creation_id || linha.creation_id || ''), linha.id).run();
+    return;
+  }
+  if (passo.etapa === 'publicado') {
+    await env.DB.prepare(
+      `UPDATE oferta_agenda SET status = 'publicado', post_id = ?, creation_id = ?, erro = '', tentativa_em = ? WHERE id = ?`
+    ).bind(String(passo.post_id || ''), String(passo.creation_id || ''), agora.toISOString(), linha.id).run();
+  }
+}
+
+async function passoInstagram(env, cnpj, body) {
   const cli = await env.DB.prepare(
     'SELECT ig_token, ig_user_id FROM clientes WHERE cnpj = ? AND aplicacao = ?'
   ).bind(cnpj, APP_PADRAO).first();
   const token = String(cli?.ig_token || '').trim();
   const igId = String(cli?.ig_user_id || '').replace(/\D/g, '');
   if (!token || igId.length < 5) {
-    return json({ ok: false, error: 'Nenhuma conta do Instagram conectada no cadastro do cliente.' }, 400);
+    return { ok: false, status: 400, error: 'Nenhuma conta do Instagram conectada no cadastro do cliente.' };
   }
   const base = String(env.FOTOS_PUBLIC_BASE || '').replace(/\/$/, '');
   const imagem = String(body.image_url || '').trim();
   if (!base || !imagem.startsWith(`${base}/`)) {
-    return json({ ok: false, error: 'Anexe a foto do produto antes de postar.' }, 400);
+    return { ok: false, status: 400, error: 'Anexe a foto do produto antes de postar.' };
   }
   const versao = /^v\d+\.\d+$/.test(String(env.IG_GRAPH_VERSION || '').trim())
     ? String(env.IG_GRAPH_VERSION).trim()
@@ -179,43 +321,44 @@ async function publicarNoInstagram(request, env, cnpj) {
         body: params.toString(),
       });
     } catch {
-      return json({ ok: false, error: 'Não foi possível falar com o Instagram.' }, 502);
+      return { ok: false, status: 502, error: 'Não foi possível falar com o Instagram.' };
     }
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data.error || !data.id) return json({ ok: false, error: erroInstagram(data.error?.message) }, 400);
-    return json({
+    if (!resp.ok || data.error || !data.id) return { ok: false, status: 400, error: erroInstagram(data.error?.message) };
+    return {
       ok: true,
       etapa: 'criado',
       creation_id: String(data.id),
       espera_ms: 4000,
       mensagem: 'Imagem enviada. Aguardando o Instagram.',
-    });
+    };
   }
   const creationId = String(body.creation_id || '').trim();
-  if (!/^\d{5,40}$/.test(creationId)) return json({ ok: false, error: 'Publicação sem identificador.' }, 400);
+  if (!/^\d{5,40}$/.test(creationId)) return { ok: false, status: 400, error: 'Publicação sem identificador.' };
   const statusUrl = new URL(`https://graph.instagram.com/${versao}/${creationId}`);
   statusUrl.searchParams.set('fields', 'status_code');
   statusUrl.searchParams.set('access_token', token);
   let statusResp;
   try { statusResp = await fetch(statusUrl); }
-  catch { return json({ ok: false, error: 'Não foi possível falar com o Instagram.' }, 502); }
+  catch { return { ok: false, status: 502, error: 'Não foi possível falar com o Instagram.' }; }
   const status = await statusResp.json().catch(() => ({}));
-  if (!statusResp.ok || status.error) return json({ ok: false, error: erroInstagram(status.error?.message) }, 400);
+  if (!statusResp.ok || status.error) return { ok: false, status: 400, error: erroInstagram(status.error?.message) };
   const codigo = String(status.status_code || '');
   if (codigo === 'ERROR' || codigo === 'EXPIRED') {
-    return json({
+    return {
       ok: false,
+      status: 400,
       error: codigo === 'EXPIRED' ? 'A imagem expirou antes da publicação.' : 'O Instagram recusou a imagem.',
-    }, 400);
+    };
   }
   if (codigo !== 'FINISHED') {
-    return json({
+    return {
       ok: true,
       etapa: 'processando',
       creation_id: creationId,
       espera_ms: 8000,
       mensagem: 'A imagem ainda está sendo preparada.',
-    });
+    };
   }
   const publicar = new URLSearchParams();
   publicar.set('creation_id', creationId);
@@ -228,11 +371,11 @@ async function publicarNoInstagram(request, env, cnpj) {
       body: publicar.toString(),
     });
   } catch {
-    return json({ ok: false, error: 'Não foi possível publicar.' }, 502);
+    return { ok: false, status: 502, error: 'Não foi possível publicar.' };
   }
   const publicado = await pubResp.json().catch(() => ({}));
   if (!pubResp.ok || publicado.error || !publicado.id) {
-    return json({ ok: false, error: erroInstagram(publicado.error?.message) }, 400);
+    return { ok: false, status: 400, error: erroInstagram(publicado.error?.message) };
   }
-  return json({ ok: true, etapa: 'publicado', post_id: String(publicado.id), creation_id: creationId, mensagem: 'Publicado.' });
+  return { ok: true, etapa: 'publicado', post_id: String(publicado.id), creation_id: creationId, mensagem: 'Publicado.' };
 }

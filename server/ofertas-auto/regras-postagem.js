@@ -65,7 +65,7 @@ function escolherSlot(ofertas, agora, esperaMs = 10 * 60 * 1000) {
     const intervalo = (Number.isFinite(minutos) && minutos >= 1 ? minutos : 60) * 60 * 1000;
     const ultima = ultimaPublicacao(oferta);
     for (const slot of oferta.rotina || []) {
-      if (!slot || slot.publicado || !slot.produto_id) continue;
+      if (!slot || slot.publicado || slot.nuvem || !slot.produto_id) continue;
       const quando = quandoSlot(slot);
       if (!quando) continue;
       if (!esperaCumprida(slot, agora, esperaMs)) continue;

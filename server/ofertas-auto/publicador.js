@@ -379,6 +379,26 @@ async function executar(oferta, slot) {
   }
 }
 
+async function prepararArtes(oferta, slot) {
+  const dados = lerArquivo();
+  const viva = (dados.ofertas || []).find((o) => o.id === oferta.id) || oferta;
+  const alvo = (viva.rotina || []).find((s) => mesmoSlot(s, slot)) || slot;
+  const forma = viva.forma === 'story' || viva.forma === 'ambos' ? viva.forma : 'post';
+  const tipos = forma === 'ambos' ? ['post', 'story'] : [forma];
+  const produto = (viva.produtos || []).find((p) => String(p.id) === String(alvo.produto_id));
+  const artes = [];
+  for (const tipo of tipos) {
+    const foto = await prepararFoto(dados, viva, alvo, tipo);
+    artes.push({
+      forma: tipo,
+      image_url: foto.url,
+      caption: textoPublicacao(viva, alvo, produto, tipo),
+      link: tipo === 'story' ? String(viva.link || '') : '',
+    });
+  }
+  return artes;
+}
+
 function publicarOferta(ofertaId) {
   return emFila(async () => {
     const dados = lerArquivo();
@@ -392,12 +412,29 @@ function publicarOferta(ofertaId) {
       erro.oferta = oferta;
       throw erro;
     }
+    if (slot.nuvem) {
+      const fila = require('./fila-nuvem');
+      await fila.retirarSlot(oferta.id, fila.slotId(slot));
+      slot.nuvem = false;
+      gravarArquivo(dados);
+    }
     return executar(oferta, slot);
   });
 }
 
 function pulso() {
   return emFila(async () => {
+    const fila = require('./fila-nuvem');
+    try {
+      await fila.subirProxima();
+    } catch (err) {
+      console.warn('Fila da oferta:', err.message);
+    }
+    try {
+      await fila.atualizarStatus();
+    } catch (err) {
+      console.warn('Fila da oferta:', err.message);
+    }
     const dados = lerArquivo();
     const alvo = escolherSlot(dados.ofertas, new Date(), ESPERA_FALHA_MS);
     if (!alvo) return null;
@@ -410,4 +447,4 @@ function pulso() {
   });
 }
 
-module.exports = { enquadrarJpeg, arquivoParaGuardar, fundoBranco, comporArte, publicarOferta, pulso };
+module.exports = { enquadrarJpeg, arquivoParaGuardar, fundoBranco, comporArte, prepararArtes, publicarOferta, pulso };

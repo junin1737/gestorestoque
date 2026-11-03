@@ -383,7 +383,10 @@ function equipe() {
     return Array.isArray(lista) ? lista : [];
   }
 
-  router.get('/central-ofertas/ofertas', acesso, (_req, res) => {
+  router.get('/central-ofertas/ofertas', acesso, async (_req, res) => {
+    try {
+      await require('./fila-nuvem').atualizarStatus();
+    } catch { /* a tela segue com o que já está neste computador */ }
     res.json({ ok: true, ofertas: lerOfertas() });
   });
 
@@ -427,7 +430,7 @@ function equipe() {
     }
   });
 
-  router.put('/central-ofertas/ofertas/:id', acesso, (req, res) => {
+  router.put('/central-ofertas/ofertas/:id', acesso, async (req, res) => {
     try {
       const dados = lerArquivo();
       const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
@@ -462,15 +465,20 @@ function equipe() {
       }
       if (req.body?.legenda != null) oferta.legenda = String(req.body.legenda || '').slice(0, 1000);
       if (req.body?.link != null) oferta.link = linkOferta(req.body.link);
+      const mudaFila = ['legenda', 'link', 'forma', 'usar_banner', 'simples', 'origem', 'ativa'].some((k) => req.body?.[k] != null);
+      if (mudaFila) {
+        for (const slot of oferta.rotina || []) if (!slot.publicado) slot.nuvem = false;
+      }
       dados.ofertas = lista;
       gravarArquivo(dados);
+      if (mudaFila) await soltarFila(oferta);
       res.json({ ok: true, oferta });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message || 'Falha ao salvar a oferta.' });
     }
   });
 
-  router.post('/central-ofertas/ofertas/:id/apagar', acesso, (req, res) => {
+  router.post('/central-ofertas/ofertas/:id/apagar', acesso, async (req, res) => {
     try {
       const dados = lerArquivo();
       const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
@@ -479,6 +487,7 @@ function equipe() {
       if ((oferta.rotina || []).some((s) => s.publicado)) {
         throw new Error('Esta campanha já tem post publicado.');
       }
+      await require('./fila-nuvem').cancelarOferta(oferta.id);
       dados.ofertas = lista.filter((o) => o.id !== oferta.id);
       gravarArquivo(dados);
       res.json({ ok: true });
@@ -487,7 +496,7 @@ function equipe() {
     }
   });
 
-  router.post('/central-ofertas/ofertas/:id/produtos', acesso, (req, res) => {
+  router.post('/central-ofertas/ofertas/:id/produtos', acesso, async (req, res) => {
     try {
       const dados = lerArquivo();
       const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
@@ -512,13 +521,16 @@ function equipe() {
       }
       dados.ofertas = lista;
       gravarArquivo(dados);
+      if (entrou) {
+        try { await require('./fila-nuvem').cancelarOferta(oferta.id); } catch { /* a rotina local já foi limpa */ }
+      }
       res.json({ ok: true, oferta });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message || 'Falha ao incluir os produtos.' });
     }
   });
 
-  router.post('/central-ofertas/ofertas/:id/produtos/remover', acesso, (req, res) => {
+  router.post('/central-ofertas/ofertas/:id/produtos/remover', acesso, async (req, res) => {
     try {
       const dados = lerArquivo();
       const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
@@ -530,13 +542,14 @@ function equipe() {
       oferta.aviso = '';
       dados.ofertas = lista;
       gravarArquivo(dados);
+      try { await require('./fila-nuvem').cancelarOferta(oferta.id); } catch { /* a rotina local já foi limpa */ }
       res.json({ ok: true, oferta });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message || 'Falha ao tirar o produto.' });
     }
   });
 
-  router.post('/central-ofertas/ofertas/:id/rotina', acesso, (req, res) => {
+  router.post('/central-ofertas/ofertas/:id/rotina', acesso, async (req, res) => {
     try {
       const dados = lerArquivo();
       const lista = Array.isArray(dados.ofertas) ? dados.ofertas : [];
@@ -566,6 +579,7 @@ function equipe() {
           : 'Nenhum dia novo para agendar.';
         dados.ofertas = lista;
         gravarArquivo(dados);
+        await soltarFila(oferta);
         return res.json({ ok: true, oferta, aviso: oferta.aviso });
       }
       aplicarDetalhes(oferta, req.body?.detalhes);
@@ -601,6 +615,7 @@ function equipe() {
       oferta.aviso = gerada.aviso || '';
       dados.ofertas = lista;
       gravarArquivo(dados);
+      await soltarFila(oferta);
       res.json({ ok: true, oferta, aviso: oferta.aviso });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message || 'Falha ao gerar a rotina.' });
@@ -634,6 +649,22 @@ function aplicarDetalhes(oferta, body) {
     onde,
     limite_banner: Number.isInteger(limite) ? Math.min(120, Math.max(10, limite)) : (oferta.detalhes?.limite_banner || 40),
   };
+}
+
+async function soltarFila(oferta) {
+  try {
+    await require('./fila-nuvem').cancelarOferta(oferta.id);
+    const texto = 'Os horários sobem para a nuvem enquanto este Gestor estiver aberto. Depois disso o computador pode desligar.';
+    if (!String(oferta.aviso || '').includes('sobem para a nuvem')) {
+      oferta.aviso = [oferta.aviso, texto].filter(Boolean).join(' ');
+    }
+  } catch (err) {
+    oferta.aviso = `${oferta.aviso || ''} A fila na nuvem não respondeu: ${err.message}. Enquanto isso, o horário sai neste computador.`.trim();
+  }
+  const dados = lerArquivo();
+  const atual = (dados.ofertas || []).find((o) => o.id === oferta.id);
+  if (atual) atual.aviso = oferta.aviso;
+  gravarArquivo(dados);
 }
 
 function marcarSlot(slot) {

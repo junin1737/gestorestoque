@@ -221,6 +221,7 @@
           data: slot.data,
           diaCurto: slot.data.split('-').reverse().slice(0, 2).join('/'),
           atrasada: slot.data < hoje,
+          nuvem: slot.nuvem === true,
         });
       }
     }
@@ -249,7 +250,7 @@
     const linhas = itens.map((p) => `<li><button type="button" data-co-oferta="${esc(p.oferta_id)}">
         <span class="co-prox-hora">${esc(p.hora)}</span>
         <span class="co-prox-dia">${esc(p.diaCurto)}</span>
-        <span class="co-prox-txt"><strong>${esc(p.descricao || p.oferta)}</strong><small>${esc(p.oferta)}${p.atrasada ? ' · atrasada' : ''}</small></span>
+        <span class="co-prox-txt"><strong>${esc(p.descricao || p.oferta)}</strong><small>${esc(p.oferta)}${p.nuvem ? ' · na nuvem' : ''}${p.atrasada ? ' · atrasada' : ''}</small></span>
       </button></li>`).join('');
     return `<section class="co-card"><h3>Próximas postagens</h3>${linhas
       ? `<ul class="co-proximas">${linhas}</ul>`
@@ -380,6 +381,7 @@
             </div>
           </div>
           <p class="hint" id="co-rotina-status">${esc(o.aviso || '')}</p>
+          <p class="hint">A fila fica na nuvem. Cada horário sobe enquanto este Gestor está aberto; depois o computador pode desligar.</p>
         </section>
       </div>
       ${origemOferta(o) === 'simples' ? '' : `<section class="co-card">

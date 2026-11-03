@@ -32,6 +32,9 @@ bucket_name = "gestor-atualizacao"
 binding = "FOTOS"
 bucket_name = "gestor-ofertas"
 
+[triggers]
+crons = ["* * * * *"]
+
 [vars]
 FOTOS_PUBLIC_BASE = "https://fotos.smsjrdeveloper.com.br"
 IG_GRAPH_VERSION = "v26.0"

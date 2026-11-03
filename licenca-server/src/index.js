@@ -1,5 +1,5 @@
 import ADMIN_HTML from './admin.html';
-import { rotaOfertas } from './ofertas-nuvem.js';
+import { rotaOfertas, publicarAgenda } from './ofertas-nuvem.js';
 
 const TOLERANCIA_OFFLINE_DIAS = 7;
 const SESSAO_HORAS = 12;
@@ -2346,6 +2346,9 @@ async function atualizacaoArquivo(request, env, nome) {
 }
 
 export default {
+  async scheduled(_event, env, ctx) {
+    ctx.waitUntil(publicarAgenda(env));
+  },
   async fetch(request, env) {
     const url = new URL(request.url);
     try {
