@@ -152,7 +152,7 @@ async function publicarNoInstagram(request, env, cnpj) {
   return json(passo.ok ? passo : { ok: false, error: passo.error }, passo.status || (passo.ok ? 200 : 400));
 }
 
-async function garantirAgenda(env) {
+export async function garantirAgenda(env) {
   await env.DB.prepare(`CREATE TABLE IF NOT EXISTS oferta_agenda (
     id TEXT PRIMARY KEY,
     loja_id TEXT NOT NULL,
@@ -174,7 +174,7 @@ async function garantirAgenda(env) {
   await env.DB.prepare('CREATE INDEX IF NOT EXISTS idx_oferta_agenda_quando ON oferta_agenda (status, quando)').run();
 }
 
-function idAgenda(loja, oferta, slot, forma) {
+export function idAgenda(loja, oferta, slot, forma) {
   return `${loja}:${oferta}:${slot}:${forma}`.slice(0, 180);
 }
 
@@ -254,9 +254,13 @@ async function passoAgenda(env, linha, agora) {
     if (Number.isFinite(em) && agora.getTime() - em < 10 * 60 * 1000) return;
   }
   const cli = await env.DB.prepare(
-    'SELECT ig_token, ig_user_id, central_ofertas, status FROM clientes WHERE cnpj = ? AND aplicacao = ?'
-  ).bind(linha.loja_id, APP_PADRAO).first();
-  if (Number(cli?.central_ofertas) !== 1 || cli?.status !== 'liberado') return;
+    `SELECT ig_token, ig_user_id, central_ofertas, status, aplicacao FROM clientes
+     WHERE cnpj = ? AND COALESCE(central_ofertas, 0) = 1 AND status = 'liberado'
+       AND ig_token IS NOT NULL AND TRIM(ig_token) != ''
+     ORDER BY CASE aplicacao WHEN 'GestorEstoque' THEN 0 WHEN 'CentralOfertas' THEN 1 ELSE 2 END
+     LIMIT 1`
+  ).bind(linha.loja_id).first();
+  if (!cli) return;
   const etapa = linha.status === 'criado' && linha.creation_id ? 'consultar' : 'criar';
   const passo = await passoInstagram(env, linha.loja_id, {
     etapa,
@@ -265,7 +269,7 @@ async function passoAgenda(env, linha, agora) {
     caption: linha.caption,
     forma: linha.forma,
     link: linha.link,
-  });
+  }, cli.aplicacao);
   if (!passo.ok) {
     await env.DB.prepare(
       `UPDATE oferta_agenda SET status = 'erro', erro = ?, tentativa_em = ?, creation_id = '' WHERE id = ?`
@@ -285,10 +289,10 @@ async function passoAgenda(env, linha, agora) {
   }
 }
 
-async function passoInstagram(env, cnpj, body) {
+async function passoInstagram(env, cnpj, body, aplicacao = APP_PADRAO) {
   const cli = await env.DB.prepare(
     'SELECT ig_token, ig_user_id FROM clientes WHERE cnpj = ? AND aplicacao = ?'
-  ).bind(cnpj, APP_PADRAO).first();
+  ).bind(cnpj, aplicacao).first();
   const token = String(cli?.ig_token || '').trim();
   const igId = String(cli?.ig_user_id || '').replace(/\D/g, '');
   if (!token || igId.length < 5) {

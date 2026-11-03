@@ -354,6 +354,14 @@
     <span class="badge" id="d-badge"></span>
   </div>
   <div class="dlg-body">
+    <div id="d-link-box" hidden>
+      <h3>Link da Central de Ofertas</h3>
+      <p class="sub">O cliente abre este endereço no navegador e entra com a senha do supervisor. Não precisa instalar o Gestor. Conecte o Instagram nesta ficha para as postagens saírem.</p>
+      <div class="linha">
+        <input id="d-link-ofertas" readonly />
+        <button class="btn ghost" id="d-link-copiar" type="button">Copiar</button>
+      </div>
+    </div>
     <div class="validade-box">
       <div class="grid2">
         <label>Situação
@@ -715,7 +723,13 @@ function limparFiltrosVisiveis() {
   st.revenda = '';
   aplicarFiltrosNaTela();
 }
-const st = { token: localStorage.getItem('mt_licenca_token') || '', papel: localStorage.getItem('mt_licenca_papel') || 'admin', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque'], revendas: [], revendaEditando: null, contadorEditando: null, contadores: [] };
+const ROTULO_APP = { GestorEstoque: 'Gestor Estoque', CentralOfertas: 'Somente Central de Ofertas' };
+function rotuloApp(id) { return ROTULO_APP[id] || id; }
+function opcoesApp(lista, selecionada) {
+  const ids = [...new Set(['GestorEstoque', 'CentralOfertas', ...(lista || [])])];
+  return ids.map((a) => `<option value="${esc(a)}"${a === selecionada ? ' selected' : ''}>${esc(rotuloApp(a))}</option>`).join('');
+}
+const st = { token: localStorage.getItem('mt_licenca_token') || '', papel: localStorage.getItem('mt_licenca_papel') || 'admin', status: '', q: '', app: '', revenda: '', atual: null, aplicacoes: ['GestorEstoque', 'CentralOfertas'], revendas: [], revendaEditando: null, contadorEditando: null, contadores: [] };
 st.papel = st.token ? papelDoToken(st.token) : 'admin';
 (function guardarRetornoInstagram() {
   const q = new URLSearchParams(location.search);
@@ -983,8 +997,7 @@ async function carregar() {
   if (Array.isArray(r.aplicacoes)) {
     st.aplicacoes = r.aplicacoes;
     const sel = $('#f-app');
-    sel.innerHTML = '<option value="">Todas as aplicações</option>'
-      + r.aplicacoes.map((a) => `<option value="${esc(a)}"${a === st.app ? ' selected' : ''}>${esc(a)}</option>`).join('');
+    sel.innerHTML = '<option value="">Todas as aplicações</option>' + opcoesApp(r.aplicacoes, st.app);
   }
   const t = r.totais || {};
   const p = r.prazos || {};
@@ -1008,7 +1021,7 @@ async function carregar() {
       <td class="c-sit"><span class="badge b-${esc(sit)}">${solic ? 'Solicitação' : (ROTULO[sit] || esc(sit))}</span></td>
       <td class="c-cli"><div class="nome">${esc(c.fantasia || c.razao || 'Sem nome')}</div><div class="sub">${fmtCnpj(c.cnpj)}${c.razao && c.fantasia ? ` · ${esc(c.razao)}` : ''}${solic ? ` · solicitado ${fmtData(c.criado_em)}` : ''}</div></td>
       <td class="c-rev">${c.revenda_id ? `<div>${esc(c.revenda_nome || `Revenda ${c.revenda_id}`)}</div><div class="sub">Nº ${esc(c.revenda_id)} · ${fmtCnpj(c.revenda_cnpj)}</div>` : '<span class="sub">Sem revenda</span>'}</td>
-      <td class="c-app"><div>${esc(c.aplicacao)}</div><div class="sub">NSE ${esc(c.nse || '—')}</div></td>
+      <td class="c-app"><div>${esc(rotuloApp(c.aplicacao))}</div><div class="sub">NSE ${esc(c.nse || '—')}</div></td>
       <td class="col-hide"><div>${esc(c.maquina || '—')}</div><div class="sub">${c.versao_gestor ? `v${esc(c.versao_gestor)}` : ''}${c.instalacoes > 1 ? ` · ${c.instalacoes} instalações` : ''}</div></td>
       <td class="col-hide"><div>${relativo(c.ultimo_contato)}</div><div class="sub">${fmtData(c.ultimo_contato)}</div></td>
       <td class="c-val">${validade(c).html}</td>
@@ -1029,7 +1042,7 @@ async function carregar() {
         <td><div class="nome">${esc(c.fantasia || c.razao || 'Sem nome')}</div><div class="sub">${c.razao && c.fantasia ? esc(c.razao) : ''}</div></td>
         <td>${fmtCnpj(c.cnpj)}</td>
         <td>${c.revenda_id ? esc(c.revenda_nome || `Revenda ${c.revenda_id}`) : '<span class="sub">Sem revenda</span>'}</td>
-        <td class="col-hide">${esc(c.aplicacao)}</td>
+        <td class="col-hide">${esc(rotuloApp(c.aplicacao))}</td>
         <td class="acoes"><button class="btn mais sm" data-acao="abrir">Editar</button></td>
       </tr>`).join('');
     const vazioCad = $('#vazio-cadastro');
@@ -1272,7 +1285,11 @@ function preencherCliente(r) {
   const c = r.cliente;
   st.atual = { cnpj: c.cnpj, app: c.aplicacao };
   $('#d-titulo').textContent = c.fantasia || c.razao || 'Sem nome';
-  $('#d-sub').textContent = `${c.aplicacao} · ${fmtCnpj(c.cnpj)} · cadastrado ${fmtData(c.criado_em)} · último contato ${fmtData(c.ultimo_contato)}`;
+  $('#d-sub').textContent = `${rotuloApp(c.aplicacao)} · ${fmtCnpj(c.cnpj)} · cadastrado ${fmtData(c.criado_em)} · último contato ${fmtData(c.ultimo_contato)}`;
+  const link = c.link_ofertas ? `${location.origin}/ofertas/${c.link_ofertas}` : '';
+  const linkBox = $('#d-link-box');
+  if (linkBox) linkBox.hidden = !link;
+  if ($('#d-link-ofertas')) $('#d-link-ofertas').value = link;
   const sit = c.situacao === 'liberado' && c.em_teste ? 'teste' : c.situacao;
   $('#d-badge').className = `badge b-${sit}`;
   $('#d-badge').textContent = ROTULO[sit] || sit;
@@ -1700,16 +1717,33 @@ $('#d-off-copiar').addEventListener('click', async () => {
   }
 });
 
-$('#btn-novo').addEventListener('click', () => {
-  $('#form-novo').reset();
-  $('#n-app').innerHTML = st.aplicacoes.map((a) => `<option value="${esc(a)}">${esc(a)}</option>`).join('');
-  if (st.app) $('#n-app').value = st.app;
-  $('#n-revenda').innerHTML = opcoesRevenda(st.revendas.length === 1 ? st.revendas[0].id : null);
-  $('#n-erro').textContent = '';
+function atualizarInfoNovo() {
+  if ($('#n-app')?.value === 'CentralOfertas') {
+    $('#n-info').textContent = 'Somente Central de Ofertas. Ao cadastrar, o painel gera o link. O cliente abre no navegador, sem instalar o Gestor.';
+    return;
+  }
   $('#n-info').textContent = 'Use para liberar um cliente antes da primeira conexão do Gestor. '
     + (st.diasTeste ? `Quem pedir a liberação pelo Gestor sem cadastro entra em teste grátis de ${plural(st.diasTeste, 'dia', 'dias')}.`
       : 'Quem pedir a liberação pelo Gestor sem cadastro entra como pendente.');
+}
+$('#btn-novo').addEventListener('click', () => {
+  $('#form-novo').reset();
+  $('#n-app').innerHTML = opcoesApp(st.aplicacoes, st.app || 'GestorEstoque');
+  $('#n-revenda').innerHTML = opcoesRevenda(st.revendas.length === 1 ? st.revendas[0].id : null);
+  $('#n-erro').textContent = '';
+  atualizarInfoNovo();
   $('#dlg-novo').showModal();
+});
+$('#n-app').addEventListener('change', atualizarInfoNovo);
+$('#d-link-copiar')?.addEventListener('click', async () => {
+  const link = $('#d-link-ofertas')?.value || '';
+  if (!link) return;
+  try {
+    await navigator.clipboard.writeText(link);
+    toast('Link copiado.');
+  } catch {
+    $('#d-link-ofertas').select();
+  }
 });
 $('#form-novo').addEventListener('submit', async (e) => {
   if (e.submitter && e.submitter.value === 'cancel') return;
@@ -1729,8 +1763,9 @@ $('#form-novo').addEventListener('submit', async (e) => {
   });
   if (!r.ok) { $('#n-erro').textContent = r.error || 'Falha.'; return; }
   $('#dlg-novo').close();
-  toast('Cliente cadastrado.');
-  carregar();
+  toast(r.cliente?.link_ofertas ? 'Cliente cadastrado. O link está na ficha.' : 'Cliente cadastrado.');
+  await carregar();
+  if (r.cliente?.link_ofertas) abrirCliente({ cnpj: r.cliente.cnpj, app: r.cliente.aplicacao });
 });
 
 /* Janelas: "‹ Voltar" fecha; o voltar do celular/navegador também fecha a janela em vez de sair do painel. */

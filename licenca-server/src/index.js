@@ -1,5 +1,6 @@
 import ADMIN_HTML from './admin.html';
-import { rotaOfertas, publicarAgenda } from './ofertas-nuvem.js';
+import { rotaOfertas, publicarAgenda, garantirAgenda, idAgenda } from './ofertas-nuvem.js';
+import { paginaOfertas, entrarOferta, lojaOferta, agendarOferta, sessaoOferta } from './ofertas-pagina.js';
 
 const TOLERANCIA_OFFLINE_DIAS = 7;
 const SESSAO_HORAS = 12;
@@ -8,6 +9,7 @@ const MSG_PENDENTE = 'Cadastro recebido. Aguardando liberação da MT Automaçõ
 const MSG_BLOQUEADO = 'Acesso bloqueado. Entre em contato com a MT Automações — (34) 3674-1937.';
 /** Gestor até 1.2.59 não envia o nome da aplicação. */
 const APP_PADRAO = 'GestorEstoque';
+const APP_OFERTAS = 'CentralOfertas';
 const APP_RE = /^[A-Za-z][A-Za-z0-9_.-]{1,39}$/;
 const APP_ROTA = '[A-Za-z][A-Za-z0-9_.-]{1,39}';
 
@@ -80,6 +82,7 @@ let chaveAssinatura = null;
 let colunaPacotePronta = false;
 let colunaCentralPronta = false;
 let colunasAdicionaisProntas = false;
+let colunaOfertaTokenPronta = false;
 
 /** Pacote de Entrada (Sim/Não) no cadastro do cliente. 0 até a coluna existir. */
 async function garantirPacoteEntrada(env) {
@@ -129,6 +132,25 @@ async function garantirAdicionais(env) {
     }
   }
   colunasAdicionaisProntas = true;
+}
+
+/** Link da Central de Ofertas para quem não instala o Gestor. */
+async function garantirOfertaLink(env) {
+  if (colunaOfertaTokenPronta) return;
+  try {
+    await env.DB.prepare('ALTER TABLE clientes ADD COLUMN oferta_token TEXT').run();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (!/duplicate column/i.test(msg)) throw e;
+  }
+  await env.DB.prepare('CREATE UNIQUE INDEX IF NOT EXISTS idx_clientes_oferta_token ON clientes (oferta_token)').run();
+  colunaOfertaTokenPronta = true;
+}
+
+function novoTokenOferta() {
+  const bytes = new Uint8Array(18);
+  crypto.getRandomValues(bytes);
+  return b64url(bytes);
 }
 
 function consultarComprasAtiva(cli) {
@@ -604,6 +626,7 @@ async function login(request, env) {
 }
 
 async function listarClientes(url, env) {
+  await garantirOfertaLink(env);
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
@@ -667,18 +690,19 @@ async function listarClientes(url, env) {
     totais: Object.fromEntries(totais.results.map((r) => [r.status, r.n])),
     prazos: { teste: prazos?.teste || 0, vencido: prazos?.vencido || 0 },
     hoje,
-    aplicacoes: [...new Set([APP_PADRAO, ...apps.results.map((r) => r.aplicacao)])],
+    aplicacoes: [...new Set([APP_PADRAO, APP_OFERTAS, ...apps.results.map((r) => r.aplicacao)])],
   });
 }
 
 /** Nunca devolve o hash da senha do supervisor nem o do segredo da instalação ao painel. */
 function clientePublico(c, agora = new Date()) {
-  const { sup_hash: supHash, segredo_hash: segredoHash, ig_token: igToken, ...resto } = c;
+  const { sup_hash: supHash, segredo_hash: segredoHash, ig_token: igToken, oferta_token: ofertaToken, ...resto } = c;
   return {
     ...resto,
     sup_propria: !!supHash,
     instalacao_confirmada: !!segredoHash,
     ig_token_informado: !!igToken,
+    link_ofertas: c.aplicacao === APP_OFERTAS && Number(c.central_ofertas) === 1 && ofertaToken ? String(ofertaToken) : '',
     situacao: situacaoCliente(c, agora).status,
   };
 }
@@ -694,6 +718,7 @@ async function liberarTrocaInstalacao(cnpj, app, env) {
 
 async function detalheCliente(cnpj, app, env) {
   await garantirInstagram(env);
+  await garantirOfertaLink(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const inst = await env.DB.prepare('SELECT * FROM instalacoes WHERE cnpj = ? AND aplicacao = ? ORDER BY ultimo_contato DESC')
@@ -1512,6 +1537,13 @@ async function criarCliente(request, env) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(cnpj, app, campos.razao ?? null, campos.fantasia ?? null, campos.status, campos.pago_ate ?? null,
     campos.mensagem ?? null, campos.observacao ?? null, agora, agora, campos.revenda_id ?? null).run();
+  if (app === APP_OFERTAS) {
+    await garantirCentralOfertas(env);
+    await garantirOfertaLink(env);
+    await env.DB.prepare(
+      'UPDATE clientes SET central_ofertas = 1, oferta_token = ? WHERE cnpj = ? AND aplicacao = ?'
+    ).bind(novoTokenOferta(), cnpj, app).run();
+  }
   await registrarEvento(env, cnpj, app, 'cadastro_manual', `status ${campos.status}`);
   return detalheCliente(cnpj, app, env);
 }
@@ -2541,6 +2573,31 @@ async function atualizacaoArquivo(request, env, nome) {
   return new Response(obj.body, { headers });
 }
 
+async function assinarTexto(env, texto) {
+  const sig = await crypto.subtle.sign('HMAC', await chaveSessao(env), enc.encode(texto));
+  return b64url(sig);
+}
+
+async function emitirSessaoOferta(env, cnpj) {
+  const corpo = b64url(enc.encode(JSON.stringify({
+    exp: Date.now() + SESSAO_HORAS * 3600000,
+    tipo: 'oferta',
+    cnpj,
+    app: APP_OFERTAS,
+  })));
+  return `${corpo}.${await assinarTexto(env, `oferta.${corpo}`)}`;
+}
+
+function lerSessaoOferta(env, request) {
+  return sessaoOferta(env, request, (texto) => assinarTexto(env, texto));
+}
+
+async function conferirSenhaSupervisorCliente(env, cli, senha) {
+  const sup = await supDoCliente(env, cli);
+  if (!sup) return 'indefinida';
+  return (await conferirPbkdf2(String(senha || ''), sup)) ? 'ok' : 'invalida';
+}
+
 export default {
   async scheduled(_event, env, ctx) {
     ctx.waitUntil(publicarAgenda(env));
@@ -2555,6 +2612,20 @@ export default {
       }
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
       if (url.pathname === '/api/revenda/autorizar' && request.method === 'POST') return await autorizarSenhaRevenda(request, env);
+      const paginaOferta = url.pathname.match(/^\/ofertas\/([A-Za-z0-9_-]{20,80})$/);
+      if (paginaOferta && request.method === 'GET') return paginaOfertas();
+      if (url.pathname === '/api/ofertas/acesso' && request.method === 'POST') {
+        return entrarOferta(request, env, {
+          conferirSenha: (cli, senha) => conferirSenhaSupervisorCliente(env, cli, senha),
+          emitir: (cnpj) => emitirSessaoOferta(env, cnpj),
+        });
+      }
+      if (url.pathname === '/api/ofertas/loja' && request.method === 'GET') {
+        return lojaOferta(request, env, url, (req) => lerSessaoOferta(env, req));
+      }
+      if (url.pathname === '/api/ofertas/agendar' && request.method === 'POST') {
+        return agendarOferta(request, env, url, (req) => lerSessaoOferta(env, req), { garantirAgenda, idAgenda });
+      }
       if (url.pathname.startsWith('/api/ofertas/')) return await rotaOfertas(request, env, url, instalacaoDaRequisicao);
       if (url.pathname.startsWith('/api/mt/')) return await rotaMt(request, env, url);
       if (url.pathname === '/api/instagram/retorno' && request.method === 'GET') return await retornoInstagram(request, env, url);
