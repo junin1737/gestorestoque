@@ -136,10 +136,13 @@ function pedirAutorizacao() {
     }
     tipo.value = 'supervisor';
     senha.value = '';
+    mascararSenha(senha, true);
     const finish = (value) => {
       btnOk.onclick = null;
       btnCancel.onclick = null;
       dlg.onclose = null;
+      senha.value = '';
+      mascararSenha(senha, false);
       try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
       resolve(value);
     };
@@ -1261,7 +1264,7 @@ async function enterApp() {
   const senhaEl = $('#login-senha');
   if (senhaEl) {
     senhaEl.value = '';
-    mascararSenha(senhaEl, true);
+    mascararSenha(senhaEl, false);
   }
   $('#view-login').hidden = true;
   $('#view-app').hidden = false;
@@ -1382,6 +1385,7 @@ function voltarAoLogin() {
   state.selecionado = null;
   state.isNovo = false;
   $('#login-senha').value = '';
+  mascararSenha($('#login-senha'), true);
   $('#view-app').hidden = true;
   $('#view-login').hidden = false;
   document.body.classList.remove('sidebar-open');

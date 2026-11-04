@@ -1167,7 +1167,7 @@ const ImportacaoNfe = (() => {
         : opts.third
           ? 'imp-field third'
           : 'imp-field';
-    const input = `<input id="${id}" type="${type}" value="${esc(value ?? '')}" ${ro} ${dis}${step}${ph} />`;
+    const input = `<input id="${id}" type="${type}" value="${esc(value ?? '')}" autocomplete="off" data-1p-ignore="true" data-lpignore="true" ${ro} ${dis}${step}${ph} />`;
     const control = opts.money
       ? `<div class="imp-input-affix"><span>R$</span>${input}</div>`
       : input;

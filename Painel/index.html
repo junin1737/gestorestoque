@@ -559,8 +559,8 @@
               <p class="hint">Informe a chave (44 dígitos). Com certificado, a consulta busca na SEFAZ; senão use o XML.</p>
               <div class="imp-capture-row">
                 <div class="search-field">
-                  <input id="imp-chave" type="text" inputmode="numeric" maxlength="54"
-                    placeholder="Chave de acesso (44 dígitos)" autocomplete="off"
+                  <input id="imp-chave" type="text" name="nfe-chave" inputmode="numeric" maxlength="54"
+                    placeholder="Chave de acesso (44 dígitos)" autocomplete="off" data-1p-ignore="true" data-lpignore="true"
                     aria-describedby="imp-chave-count" />
                 </div>
                 <button type="button" id="imp-btn-scan-chave" class="btn icon-cam primary" title="Ler chave" aria-label="Ler chave">
@@ -1270,7 +1270,7 @@
           </select>
         </label>
         <label>Senha
-          <input id="dlg-autorizar-senha" type="password" autocomplete="off" />
+          <input id="dlg-autorizar-senha" type="text" autocomplete="off" data-1p-ignore="true" data-lpignore="true" />
         </label>
         <div class="dlg-actions">
           <button type="button" id="dlg-autorizar-cancel" class="btn">Cancelar</button>
@@ -1358,7 +1358,7 @@
   </div>
   <div id="gond-impressao" aria-hidden="true"></div>
   <script src="vendor/zxing-browser.min.js?v=240"></script>
-  <script src="importacao-nfe.js?v=245"></script>
+  <script src="importacao-nfe.js?v=246"></script>
   <script src="compras.js?v=241"></script>
   <script src="condicionais.js?v=252"></script>
   <script src="clientes.js?v=6"></script>
@@ -1366,6 +1366,6 @@
   <script src="dashboard.js?v=262"></script>
   <script src="gondola.js?v=2"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=275"></script>
+  <script src="app.js?v=276"></script>
 </body>
 </html>
