@@ -110,14 +110,30 @@ function qtdPacotes(sistema = {}) {
   return sistema?.vender_pacote && n > 0 ? n : 0;
 }
 
+/**
+ * Quantidade que entra no estoque. A tela e a gravação usam esta conta.
+ * Pacote informado vence. Quantidade digitada à mão só vale com conversor manual.
+ * Nos demais casos é a quantidade da nota vezes o conversor gravado.
+ */
+function qtdEntradaEstoque(sistema = {}, xmlItem = {}) {
+  const qtdXml = Number(sistema.qtd_xml) > 0
+    ? Number(sistema.qtd_xml)
+    : (Number(xmlItem.qCom || 0) || 0);
+  const conversor = Number(sistema.conversor ?? 1) || 1;
+  const pacotes = qtdPacotes(sistema);
+  let qtdEstoque = 0;
+  if (pacotes > 0) qtdEstoque = pacotes;
+  else if (sistema.conversor_manual && Number(sistema.qtd) > 0) qtdEstoque = Number(sistema.qtd);
+  else qtdEstoque = Number((qtdXml * conversor).toFixed(6));
+  if (!(qtdEstoque > 0)) qtdEstoque = qtdXml;
+  return { qtdXml, conversor, qtdEstoque };
+}
+
 /** Custo unitário líquido da nota (por unid. estoque, após conversor). */
 function calcCustoUnitarioItem(sistema = {}, xmlItem = {}) {
   const trib = sistema.tributos || {};
   const imp = xmlItem.imposto || {};
-  const qtdXml = Number(sistema.qtd_xml ?? xmlItem.qCom ?? 0) || 0;
-  const conversor = Number(sistema.conversor ?? 1) || 1;
-  // Sempre usa conversão — não confiar em sistema.qtd antigo (pode ser qtd da XML)
-  const qtdEstoque = qtdPacotes(sistema) || Number((qtdXml * conversor).toFixed(6)) || 0;
+  const { qtdXml, conversor, qtdEstoque } = qtdEntradaEstoque(sistema, xmlItem);
 
   const vProd = Number(
     xmlItem.vProd != null ? xmlItem.vProd : (Number(xmlItem.vUnCom || 0) * qtdXml)
@@ -320,6 +336,7 @@ module.exports = {
   syncSistemaComXmlItem,
   calcCustoUnitarioItem,
   qtdPacotes,
+  qtdEntradaEstoque,
   valorProdutoItem,
   totalMercadoriaItem,
   validarTotaisNf,

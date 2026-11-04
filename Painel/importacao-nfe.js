@@ -1130,8 +1130,6 @@ const ImportacaoNfe = (() => {
       const sys = it.sistema || {};
       const cls = it.status === 'conferido' ? 'ok' : (it.status === 'vinculado' ? 'warn' : 'pending');
       const descForn = xml.xProd || '—';
-      const qtdXml = Number(sys.qtd_xml ?? xml.qCom ?? 0);
-      const uniXml = sys.uni_medida_xml || xml.uCom || '';
       const done = it.status === 'conferido' || !!it.conferido;
       return `
         <button type="button" class="imp-item-row ${done ? 'ok' : cls}${Number(state.itemIndex) === Number(idx) && state.view === 'item' ? ' is-current' : ''}" data-idx="${idx}">
@@ -1141,7 +1139,7 @@ const ImportacaoNfe = (() => {
             ${(sys.id_identificador || sys.criar_novo) && sys.descricao
     ? `<span class="imp-item-estoque">${esc(sys.descricao)}</span>`
     : ''}
-            <span class="hint">${sys.id_identificador || sys.criar_novo ? `${esc(String(sys.id_identificador || 'novo'))} · ${num(qtdXml)} ${esc(uniXml)}` : 'Sem vínculo'}</span>
+            ${htmlQtdItem(sys, xml)}
           </div>
           <span class="imp-item-val">${money(xml.vProd || xml.vUnCom)}</span>
         </button>
@@ -1890,6 +1888,8 @@ const ImportacaoNfe = (() => {
               <div><dt>EAN</dt><dd>${esc(sys.cod_barras || '—')}</dd></div>
               <div><dt>NCM</dt><dd>${esc(sys.ncm || '—')}</dd></div>
               <div><dt>Unid. estoque</dt><dd>${esc(sys.uni_medida || '—')}</dd></div>
+              <div><dt>Qtd na nota</dt><dd>${num(qtdEntradaItem(sys, xml).qtdXml)} ${esc(sys.uni_medida_xml || xml.uCom || '')}</dd></div>
+              <div><dt>Entra no estoque</dt><dd>${htmlEntraEstoque(sys, xml)}</dd></div>
               <div><dt>Custo / venda</dt><dd>${money(sys.prc_custo)} / ${Number(sys.prc_venda) > 0 ? money(sys.prc_venda) : '—'}</dd></div>
               <div><dt>Cód. no fornec.</dt><dd>${esc(sys.cod_fornecedor || xml.cProd || '—')}</dd></div>
             </dl>`
@@ -2074,6 +2074,38 @@ const ImportacaoNfe = (() => {
         </div>
       </section>
     `;
+  }
+
+  /**
+   * Mesma conta de server/importacao-rateio.js qtdEntradaEstoque.
+   * Pacote informado vence. Quantidade digitada só vale com conversor manual.
+   */
+  function qtdEntradaItem(sys = {}, xml = {}) {
+    const qtdXml = Number(sys.qtd_xml) > 0 ? Number(sys.qtd_xml) : (Number(xml.qCom || 0) || 0);
+    const conversor = Number(sys.conversor ?? 1) || 1;
+    const pacotes = qtdPacotes(sys);
+    let qtdEstoque = 0;
+    if (pacotes > 0) qtdEstoque = pacotes;
+    else if (sys.conversor_manual && Number(sys.qtd) > 0) qtdEstoque = Number(sys.qtd);
+    else qtdEstoque = Number((qtdXml * conversor).toFixed(6));
+    if (!(qtdEstoque > 0)) qtdEstoque = qtdXml;
+    return { qtdXml, conversor, qtdEstoque };
+  }
+
+  function htmlEntraEstoque(sys, xml) {
+    if (String(sys.gera_estoque || 'S').toUpperCase() === 'N') return 'Não entra';
+    const q = qtdEntradaItem(sys, xml);
+    return `${num(q.qtdEstoque)} ${esc(sys.uni_medida || 'UN')}`.trim();
+  }
+
+  function htmlQtdItem(sys, xml) {
+    const q = qtdEntradaItem(sys, xml);
+    const uniXml = sys.uni_medida_xml || xml.uCom || '';
+    const nota = `${num(q.qtdXml)} ${esc(uniXml)}`.trim();
+    const vinculado = !!(sys.id_identificador || sys.criar_novo);
+    if (!vinculado) return `<span class="hint">Sem vínculo · Nota ${nota}</span>`;
+    const id = esc(String(sys.id_identificador || 'novo'));
+    return `<span class="imp-item-qtds"><span>Nota <b>${nota}</b></span><span class="entra">Estoque <b>${htmlEntraEstoque(sys, xml)}</b></span></span><span class="hint">${id}</span>`;
   }
 
   /** "Vender por pacote": quantidade de pacotes digitada (0 quando o item não usa). */

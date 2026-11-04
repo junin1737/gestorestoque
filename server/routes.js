@@ -2174,14 +2174,6 @@ router.get('/importacao/notas', async (req, res) => {
         return nome.includes(fornQ);
       });
     }
-    const de = String(req.query.de || '').slice(0, 10);
-    const ate = String(req.query.ate || '').slice(0, 10);
-    if (!nnf && de && ate) {
-      sessoes = sessoes.filter((s) => {
-        const d = String(s.xml?.ide?.dhEmi || s.createdAt || '').slice(0, 10);
-        return d >= de && d <= ate;
-      });
-    }
     let confirmadas = importacaoStaging.listSessoesConfirmadas();
     if (cnpjBase) confirmadas = confirmadas.filter(daBase);
     res.json({ ok: true, notas, sessoes, confirmadas });

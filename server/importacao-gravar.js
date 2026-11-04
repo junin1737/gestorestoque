@@ -3,7 +3,7 @@
 const { withDb, withTransaction, query, writeTargets, hasTable, columnExists, nextGenId } = require('./db');
 const { findNfDuplicada, getNaturezaById, getNaturezaByCfop, classTribPorCodigoDb } = require('./importacao-notas');
 const importacaoParams = require('./importacao-params');
-const { round2, calcCustoUnitarioItem, qtdPacotes, valorProdutoItem, validarTotaisNf, validarFinanceiroNf, valorSemFinanceiro } = require('./importacao-rateio');
+const { round2, calcCustoUnitarioItem, qtdPacotes, qtdEntradaEstoque, valorProdutoItem, validarTotaisNf, validarFinanceiroNf, valorSemFinanceiro } = require('./importacao-rateio');
 const { ensureContaMovtos } = require('./importacao-cancel');
 const {
   RAMO_TRANSPORTES, buscarPorCnpj, buscarTransportador, cadastrarFornecedor, getFornecedorById,
@@ -1314,14 +1314,7 @@ async function gravarNfCompra(sessao, {
           console.warn('TB_MT_REGRA_TRIBUTO:', e.message);
         }
 
-        const conversor = Number(it.sistema.conversor ?? 1) || 1;
-        const qtdXml = Number(it.sistema.qtd_xml) > 0
-          ? Number(it.sistema.qtd_xml)
-          : (Number(it.xml?.qCom || 0) || 0);
-        let qtdEstoque = qtdPacotes(it.sistema) || Number(it.sistema.qtd);
-        if (!(qtdEstoque > 0)) {
-          qtdEstoque = Number((qtdXml * conversor).toFixed(6));
-        }
+        const { qtdXml, conversor, qtdEstoque } = qtdEntradaEstoque(it.sistema || {}, it.xml || {});
         it.sistema.qtd = qtdEstoque;
         it.sistema.conversor = conversor;
         it.sistema.qtd_xml = qtdXml;
