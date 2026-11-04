@@ -1954,7 +1954,7 @@ const ImportacaoNfe = (() => {
   function panelEntrada(sys, xml, trib, imp, simples) {
     const csosnEnt = sys.csosn_entrada || sys.csosn || trib.csosn || imp.CSOSN || '';
     const cstIcmsSys = trib.cst_icms || sys.cst_icms || imp.CST || '';
-    const cstIpiSys = trib.cst_ipi || '49';
+    const cstIpiSys = trib.cst_ipi_informado && trib.cst_ipi ? trib.cst_ipi : '49';
     const cstPisSys = trib.cst_pis || imp.CST_PIS || '';
     const cstCofSys = trib.cst_cofins || imp.CST_COFINS || '';
     const custoInfo = calcCustoNotaUnitario(sys, xml);
@@ -3410,7 +3410,10 @@ const ImportacaoNfe = (() => {
           has_pis: !!trib.has_pis,
           has_cofins: !!trib.has_cofins,
           has_ipi: !!trib.has_ipi,
-          cst_ipi: g('#imp-cst-ipi') != null ? (g('#imp-cst-ipi') || trib.cst_ipi || '') : (trib.cst_ipi || ''),
+          cst_ipi: g('#imp-cst-ipi') != null
+            ? (g('#imp-cst-ipi') || '49')
+            : (trib.cst_ipi_informado ? (trib.cst_ipi || '49') : '49'),
+          cst_ipi_informado: g('#imp-cst-ipi') != null ? true : !!trib.cst_ipi_informado,
           p_ipi: gn('#imp-pipi') ?? trib.p_ipi ?? 0,
           v_ipi: gn('#imp-vipi') ?? trib.v_ipi ?? 0,
           cst_pis: g('#imp-cst-pis') != null ? g('#imp-cst-pis') : (trib.cst_pis || ''),

@@ -80,7 +80,9 @@ function syncSistemaComXmlItem(sistema, xmlItem) {
     has_pis: !!imp.has_pis,
     has_cofins: !!imp.has_cofins,
     has_ipi: !!imp.has_ipi,
-    cst_ipi: imp.CST_IPI || sistema.tributos?.cst_ipi || '',
+    cst_ipi: sistema.tributos?.cst_ipi_informado
+      ? (String(sistema.tributos?.cst_ipi || '').trim() || '49')
+      : '49',
     v_ipi: Number(imp.vIPI || 0),
     p_ipi: Number(imp.pIPI || 0),
     cst_pis: imp.CST_PIS || sistema.tributos?.cst_pis || '',

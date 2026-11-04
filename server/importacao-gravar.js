@@ -690,7 +690,7 @@ async function insertTributosItem(db, idNfcItem, trib = {}, xmlImp = {}, tribNfe
           (ID_NFCITEM, CST_IPI, ALIQ_IPI, VLR_IPI, CENQ, IPI_VBC)
         VALUES (?, ?, ?, ?, '999', 0)`, [
         idNfcItem,
-        String(trib.cst_ipi || xmlImp.CST_IPI || '').trim().slice(0, 2) || null,
+        String(trib.cst_ipi || '49').trim().slice(0, 2) || '49',
         Number(trib.p_ipi || xmlImp.pIPI || 0),
         Number(trib.v_ipi || xmlImp.vIPI || 0),
       ]);
@@ -1274,7 +1274,7 @@ async function gravarNfCompra(sessao, {
               uni_medida: it.sistema.uni_medida || '',
               cfop: it.sistema.cfop || '',
               ipi: trib.p_ipi || null,
-              cst_ipi: trib.cst_ipi || '',
+              cst_ipi: trib.cst_ipi || '49',
               cod_barras: it.sistema.cod_barras || '',
             }, { db });
           }
