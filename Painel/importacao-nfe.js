@@ -1888,8 +1888,8 @@ const ImportacaoNfe = (() => {
               <div><dt>EAN</dt><dd>${esc(sys.cod_barras || '—')}</dd></div>
               <div><dt>NCM</dt><dd>${esc(sys.ncm || '—')}</dd></div>
               <div><dt>Unid. estoque</dt><dd>${esc(sys.uni_medida || '—')}</dd></div>
-              <div><dt>Qtd na nota</dt><dd>${num(qtdEntradaItem(sys, xml).qtdXml)} ${esc(sys.uni_medida_xml || xml.uCom || '')}</dd></div>
-              <div><dt>Entra no estoque</dt><dd>${htmlEntraEstoque(sys, xml)}</dd></div>
+              <div><dt>Conversão</dt><dd>${esc(textoConversao(sys, xml))}</dd></div>
+              <div class="imp-cmp-entra"><dt>Entra no estoque</dt><dd>${htmlEntraEstoque(sys, xml)}</dd></div>
               <div><dt>Custo / venda</dt><dd>${money(sys.prc_custo)} / ${Number(sys.prc_venda) > 0 ? money(sys.prc_venda) : '—'}</dd></div>
               <div><dt>Cód. no fornec.</dt><dd>${esc(sys.cod_fornecedor || xml.cProd || '—')}</dd></div>
             </dl>`
@@ -2090,6 +2090,13 @@ const ImportacaoNfe = (() => {
     else qtdEstoque = Number((qtdXml * conversor).toFixed(6));
     if (!(qtdEstoque > 0)) qtdEstoque = qtdXml;
     return { qtdXml, conversor, qtdEstoque };
+  }
+
+  function textoConversao(sys, xml) {
+    const q = qtdEntradaItem(sys, xml);
+    const uniXml = sys.uni_medida_xml || xml.uCom || '';
+    if (qtdPacotes(sys) > 0) return `${convFatorFmt(q.qtdEstoque)} pacote(s)`;
+    return `${convFatorFmt(q.qtdXml)} ${uniXml} × ${convFatorFmt(q.conversor)}`.replace(/\s+/g, ' ').trim();
   }
 
   function htmlEntraEstoque(sys, xml) {

@@ -1675,6 +1675,12 @@
   white-space: nowrap;
 }
 
+.imp-cmp-dl > div.imp-cmp-entra dd {
+  font-size: 1.05rem;
+  font-weight: 800;
+  color: var(--ok, #1f9d55);
+}
+
 .imp-cmp-dl dd {
   margin: 0;
   font-size: 0.86rem;
