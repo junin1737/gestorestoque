@@ -1093,7 +1093,7 @@ const ImportacaoNfe = (() => {
 
   function setFiltroItens(filtro) {
     state.itensFiltro = filtro;
-    ['todos', 'pendentes', 'verificados'].forEach((id) => {
+    ['todos', 'pendentes', 'sem-vinculo', 'verificados'].forEach((id) => {
       const btn = $(`#imp-itens-${id}`);
       if (btn) btn.classList.toggle('active', id === filtro);
     });
@@ -1112,8 +1112,11 @@ const ImportacaoNfe = (() => {
     const filtro = state.itensFiltro || 'todos';
     const visiveis = itens.map((it, idx) => ({ it, idx })).filter(({ it }) => {
       const done = it.status === 'conferido' || !!it.conferido;
+      const sys = it.sistema || {};
+      const vinculado = !!(sys.id_identificador || sys.criar_novo);
       if (filtro === 'pendentes') return !done;
       if (filtro === 'verificados') return done;
+      if (filtro === 'sem-vinculo') return !vinculado;
       return true;
     });
     if (!visiveis.length) {
@@ -1121,16 +1124,19 @@ const ImportacaoNfe = (() => {
         ? 'Nenhum item pendente'
         : filtro === 'verificados'
           ? 'Nenhum item verificado'
-          : 'Nenhum item na nota';
+          : filtro === 'sem-vinculo'
+            ? 'Nenhum item sem vínculo'
+            : 'Nenhum item na nota';
       box.innerHTML = `<p class="empty">${vazio}</p>`;
       return;
     }
     box.innerHTML = visiveis.map(({ it, idx }) => {
       const xml = it.xml || {};
       const sys = it.sistema || {};
-      const cls = it.status === 'conferido' ? 'ok' : (it.status === 'vinculado' ? 'warn' : 'pending');
-      const descForn = xml.xProd || '—';
+      const vinculado = !!(sys.id_identificador || sys.criar_novo);
       const done = it.status === 'conferido' || !!it.conferido;
+      const cls = done ? 'ok' : (vinculado ? 'warn' : 'sem-vinculo');
+      const descForn = xml.xProd || '—';
       return `
         <button type="button" class="imp-item-row ${done ? 'ok' : cls}${Number(state.itemIndex) === Number(idx) && state.view === 'item' ? ' is-current' : ''}" data-idx="${idx}">
           <span class="imp-item-num">${done ? '✓' : esc(it.nItem)}</span>
@@ -5014,6 +5020,7 @@ const ImportacaoNfe = (() => {
     $('#imp-btn-manual')?.addEventListener('click', () => criarManual());
     $('#imp-itens-todos')?.addEventListener('click', () => setFiltroItens('todos'));
     $('#imp-itens-pendentes')?.addEventListener('click', () => setFiltroItens('pendentes'));
+    $('#imp-itens-sem-vinculo')?.addEventListener('click', () => setFiltroItens('sem-vinculo'));
     $('#imp-itens-verificados')?.addEventListener('click', () => setFiltroItens('verificados'));
     $('#imp-btn-params')?.addEventListener('click', () => deps.openConfig?.('tributos'));
     $('#imp-btn-params-sessao')?.addEventListener('click', () => deps.openConfig?.('tributos'));

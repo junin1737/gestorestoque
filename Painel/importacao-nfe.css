@@ -242,7 +242,10 @@
   display: flex;
   gap: 0.4rem;
   flex-wrap: wrap;
+  width: 100%;
+  align-items: center;
 }
+#imp-itens-sem-vinculo { margin-left: auto; }
 
 .imp-nota-row {
   display: flex;
@@ -2018,10 +2021,13 @@
   color: inherit;
   font: inherit;
 }
+.imp-item-row.sem-vinculo { border: 2px solid #e23b3b; }
+.imp-item-row.warn { border: 2px solid #e6a700; }
+.imp-item-row.ok { border: 2px solid var(--ok, #1f9d55); }
+#imp-itens-lista { display: flex; flex-direction: column; gap: 0.4rem; }
 .imp-item-row.is-current {
   background: color-mix(in srgb, var(--accent) 18%, var(--bg-elev));
   color: var(--text);
-  box-shadow: inset 3px 0 0 var(--accent);
 }
 .imp-item-row.is-current .imp-item-main strong { color: var(--text); }
 .imp-item-row.ok .imp-item-num { background: var(--ok); color: #fff; font-size: 0.8rem; }
