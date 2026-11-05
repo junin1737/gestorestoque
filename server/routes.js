@@ -3129,10 +3129,10 @@ router.post('/compras/parametro', async (req, res) => {
 router.get('/importacao/auto-produtos', async (req, res) => {
   try {
     const autoParams = require('./importacao-auto-params');
-    const produtos = await autoParams.buscar(req.query.q);
-    res.json({ ok: true, produtos });
+    const data = await autoParams.buscar(req.query.q, req.query.grupo);
+    res.json({ ok: true, ...data });
   } catch (err) {
-    res.json({ ok: false, error: err.message, produtos: [] });
+    res.json({ ok: false, error: err.message, produtos: [], grupos: [] });
   }
 });
 
@@ -3143,11 +3143,24 @@ router.put('/importacao/auto-produtos/:id', async (req, res) => {
       return res.json({ ok: false, error: 'Senha do supervisor ou da revenda inválida.' });
     }
     const autoParams = require('./importacao-auto-params');
-    const salvo = autoParams.definir(req.params.id, {
+    const salvo = autoParams.definir(req.body?.id_fornec, req.params.id, {
       importar: req.body?.importar,
       ciencia: req.body?.ciencia,
     });
     res.json({ ok: true, ...salvo });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/importacao/auto-produtos/todos', async (req, res) => {
+  try {
+    if (!(await autorizadoSupervisorOuRevenda(req.body))) {
+      return res.json({ ok: false, error: 'Senha do supervisor ou da revenda inválida.' });
+    }
+    const autoParams = require('./importacao-auto-params');
+    const out = await autoParams.aplicarTodos(req.body?.marcar === true);
+    res.json({ ok: true, ...out });
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

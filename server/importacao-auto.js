@@ -4,7 +4,6 @@ const params = require('./importacao-auto-params');
 const staging = require('./importacao-staging');
 const sefaz = require('./importacao-sefaz');
 const fornecedor = require('./importacao-fornecedor');
-const { buscarRegra } = require('./importacao-regra');
 
 const HORA_MS = 60 * 60 * 1000;
 const LOTE = 5;
@@ -16,17 +15,18 @@ function daquiUmaHora() {
 }
 
 /**
- * xml incompleto: espera, sem ciência (o resumo não traz os produtos).
- * sem vínculo ou sem regra do fornecedor+produto: para e avisa.
- * algum produto com importar ou ciência em Não: não grava e não manifesta.
- * os dois Sim em todos, XML completo, vínculo e regra: grava.
+ * Resumo da SEFAZ não entra: só XML completo.
+ * Produto novo na nota: avisa e não grava.
+ * Algum produto sem importação automática: avisa para importar na mão.
+ * Todos marcados: confere, salva o financeiro e grava.
+ * O relógio não envia ciência da operação.
  */
 function decisao({ xmlCompleto, itens }) {
   if (!xmlCompleto) return 'aguardar_xml';
   const lista = Array.isArray(itens) ? itens : [];
   if (!lista.length) return 'manual';
-  if (lista.some((i) => !i.vinculado || !i.parametrizado)) return 'manual';
-  if (lista.some((i) => !i.importar || !i.ciencia)) return 'pessoa';
+  if (lista.some((i) => i.novo)) return 'produto_novo';
+  if (lista.some((i) => !i.importar)) return 'manual';
   return 'gravar';
 }
 
@@ -35,21 +35,12 @@ async function classificarItens(sessao) {
   const itens = [];
   for (const it of sessao?.itens || []) {
     const id = Number(it.sistema?.id_identificador || 0);
-    const vinculado = id > 0 && !it.sistema?.criar_novo;
-    let parametrizado = false;
-    if (vinculado && idFornec) {
-      const regra = await buscarRegra({ idFornec, idIdentificador: id });
-      parametrizado = !!(regra
-        && Number(regra.id_identificador) === id
-        && Number(regra.id_fornec) === idFornec);
+    const novo = !(id > 0) || !!it.sistema?.criar_novo;
+    let importar = false;
+    if (!novo && idFornec && await params.parametrizado(idFornec, id)) {
+      importar = params.flag(idFornec, id).importar === true;
     }
-    const f = vinculado ? params.flag(id) : { importar: false, ciencia: false };
-    itens.push({
-      vinculado,
-      parametrizado,
-      importar: f.importar === true,
-      ciencia: f.ciencia === true,
-    });
+    itens.push({ novo, importar });
   }
   return { idFornec, itens, acao: decisao({ xmlCompleto: true, itens }) };
 }
@@ -83,21 +74,30 @@ async function tentarGravar(nota, arquivo) {
     await staging.aplicarVinculosSessao(id);
     const sessao = staging.getSessao(id);
     const visto = await classificarItens(sessao);
-    if (!visto.idFornec || visto.acao === 'manual') {
+    if (!visto.idFornec) {
       staging.deleteSessao(id);
       compras.atualizarNota(nota.chave, {
         autoMotivo: 'manual',
-        autoAviso: 'Nota nova para tratar na mão: há produto sem cadastro, sem vínculo ou sem a parametrização deste fornecedor.',
+        autoAviso: 'O fornecedor desta nota não está vinculado. Importe a nota manualmente.',
         proximaTentativa: null,
       });
       return;
     }
-    if (visto.acao === 'pessoa') {
+    if (visto.acao === 'produto_novo') {
       staging.deleteSessao(id);
       compras.atualizarNota(nota.chave, {
-        autoMotivo: '',
-        autoAviso: 'Esta nota não entra sozinha. Algum produto está com importação ou ciência automática em Não. Use Importar.',
-        proximaTentativa: daquiUmaHora(),
+        autoMotivo: 'produto_novo',
+        autoAviso: 'Esta nota tem produto novo e não pode ser importada automaticamente. Use Importar em Consultar compras.',
+        proximaTentativa: null,
+      });
+      return;
+    }
+    if (visto.acao === 'manual') {
+      staging.deleteSessao(id);
+      compras.atualizarNota(nota.chave, {
+        autoMotivo: 'manual',
+        autoAviso: 'Algum produto desta nota não permite importação automática. Importe a nota manualmente.',
+        proximaTentativa: null,
       });
       return;
     }
@@ -105,8 +105,18 @@ async function tentarGravar(nota, arquivo) {
     if (!conf.ok || (conf.pendentes || []).length) {
       staging.deleteSessao(id);
       compras.atualizarNota(nota.chave, {
+        autoMotivo: 'produto_novo',
+        autoAviso: 'Esta nota tem produto novo e não pode ser importada automaticamente. Use Importar em Consultar compras.',
+        proximaTentativa: null,
+      });
+      return;
+    }
+    const fin = await staging.sugerirFinanceiroSessao(id);
+    if (!fin?.ok) {
+      staging.deleteSessao(id);
+      compras.atualizarNota(nota.chave, {
         autoMotivo: 'manual',
-        autoAviso: 'Nota nova para tratar na mão: há produto sem cadastro, sem vínculo ou sem a parametrização deste fornecedor.',
+        autoAviso: fin?.error || 'O financeiro da nota não pôde ser salvo. Importe a nota manualmente.',
         proximaTentativa: null,
       });
       return;
@@ -139,7 +149,7 @@ async function tentarGravar(nota, arquivo) {
 
 async function avaliarNota(nota) {
   const compras = require('./compras-dfe');
-  if (nota.autoMotivo === 'manual' || nota.autoMotivo === 'falha') return;
+  if (nota.autoMotivo === 'manual' || nota.autoMotivo === 'falha' || nota.autoMotivo === 'produto_novo') return;
   const espera = nota.proximaTentativa ? Date.parse(nota.proximaTentativa) : 0;
   if (espera > Date.now()) return;
   const arquivo = compras.lerXmlArquivo(nota.chave);
@@ -189,7 +199,7 @@ async function avaliarPendentes() {
   try {
     const lista = await compras.listar();
     const fila = (lista.notas || [])
-      .filter((n) => n.status === 'Pendente' && n.autoMotivo !== 'manual' && n.autoMotivo !== 'falha')
+      .filter((n) => n.status === 'Pendente' && n.autoMotivo !== 'manual' && n.autoMotivo !== 'falha' && n.autoMotivo !== 'produto_novo')
       .slice(0, LOTE);
     for (const nota of fila) {
       try {

@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=290" />
+  <link rel="stylesheet" href="styles.css?v=291" />
   <link rel="stylesheet" href="importacao-nfe.css?v=253" />
 </head>
 <body>
@@ -1053,15 +1053,24 @@
                 <input type="checkbox" id="cfg-auto-geral" />
                 <span>Importar pendentes automaticamente</span>
               </label>
-              <p class="hint">Os dois campos nascem em Não. A nota só é lançada sozinha quando o interruptor geral está ligado, o XML completo já chegou, todos os itens estão cadastrados e parametrizados, e os dois campos estão em Sim em todos os produtos da nota. Supervisor e revenda autorizam a alteração. O relógio não envia ciência da operação.</p>
+              <label class="pref-check">
+                <input type="checkbox" id="cfg-auto-todos" />
+                <span>Definir importação automática em todos os produtos</span>
+              </label>
+              <p class="hint">A lista traz o produto que já está na parametrização do fornecedor, na tabela de estoque do fornecedor e na conversão. A nota pendente só entra sozinha com o interruptor geral ligado, o XML completo e Importar em Sim em todos os produtos da nota. Produto novo ou só o resumo da SEFAZ não entra: a nota avisa em Consultar compras. Marcado em todos, os produtos desta lista e os que forem parametrizados depois nascem em Sim. Supervisor e revenda autorizam. O relógio não envia ciência da operação.</p>
               <button type="button" class="btn primary" id="cfg-auto-geral-salvar">Salvar</button>
               <div class="auto-prod-busca">
                 <label>Produto
-                  <input type="search" id="cfg-auto-busca" placeholder="Nome, código ou EAN" autocomplete="off" />
+                  <input type="search" id="cfg-auto-busca" placeholder="Código, descrição, referência ou barras" autocomplete="off" />
+                </label>
+                <label class="auto-prod-grupo">Grupo
+                  <select id="cfg-auto-grupo">
+                    <option value="">Todos</option>
+                  </select>
                 </label>
                 <button type="button" class="btn" id="cfg-auto-buscar">Buscar</button>
               </div>
-              <p class="hint" id="cfg-auto-aviso">Digite pelo menos duas letras ou o código.</p>
+              <p class="hint" id="cfg-auto-aviso">Carregando produtos parametrizados…</p>
               <div id="cfg-auto-lista" class="auto-prod-lista"></div>
             </div>
           </div>
@@ -1072,7 +1081,7 @@
                 <input type="checkbox" id="cfg-importar-auto" />
                 <span>Importar pendentes automaticamente</span>
               </label>
-              <p class="hint" id="cfg-supervisor-aviso">Ligado, a nota só entra sozinha se o XML já estiver completo e cada produto da nota permitir importação e ciência automática na aba Importação. Sem isso, ela fica em Consultar compras para o botão Importar. O relógio não envia ciência da operação.</p>
+              <p class="hint" id="cfg-supervisor-aviso">Ligado, a nota pendente só entra sozinha se o XML já estiver completo e cada produto da nota permitir importação automática na aba Importação. Produto novo ou resumo da SEFAZ fica em Consultar compras, com o aviso na nota. O relógio não envia ciência da operação.</p>
               <button type="button" class="btn primary" id="cfg-importar-auto-salvar">Salvar</button>
             </div>
           </div>
@@ -1381,13 +1390,13 @@
   <script src="vendor/zxing-browser.min.js?v=240"></script>
   <script src="importacao-nfe.js?v=253"></script>
   <script src="compras.js?v=242"></script>
-  <script src="importacao-auto.js?v=2"></script>
+  <script src="importacao-auto.js?v=3"></script>
   <script src="condicionais.js?v=252"></script>
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=262"></script>
   <script src="gondola.js?v=2"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=278"></script>
+  <script src="app.js?v=279"></script>
 </body>
 </html>

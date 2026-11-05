@@ -3927,13 +3927,16 @@ html[data-theme="escuro"] .compras-row:hover {
 .auto-prod-busca label,
 .auto-prod label { margin-bottom: 0; }
 .auto-prod-busca label { flex: 1; min-width: 0; }
-.auto-prod-busca input { width: 100%; }
+.auto-prod-busca input,
+.auto-prod-busca select { width: 100%; }
+.auto-prod-grupo { flex: 0 0 12.5rem; }
 .auto-prod-lista { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.6rem; }
 .pref-card.auto-card { max-width: 52rem; }
+.auto-card .pref-check { margin-bottom: 0.4rem; }
 #cfg-auto-geral-salvar { margin: 0 0 0.9rem; }
 .auto-prod {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 8.5rem 8.5rem;
+  grid-template-columns: minmax(0, 1fr) 8.5rem;
   gap: 0.55rem;
   align-items: end;
   padding: 0.55rem 0.65rem;
@@ -3947,6 +3950,7 @@ html[data-theme="escuro"] .compras-row:hover {
 .compras-auto { margin: 0.35rem 0 0; color: #a15c00; }
 @media (max-width: 720px) {
   .auto-prod-busca { flex-direction: column; align-items: stretch; }
+  .auto-prod-grupo { flex-basis: auto; }
   .auto-prod { grid-template-columns: 1fr; }
 }
 

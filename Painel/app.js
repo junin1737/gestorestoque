@@ -256,7 +256,7 @@ async function carregarAbaSupervisor() {
   const aviso = $('#cfg-supervisor-aviso');
   if (aviso) {
     aviso.textContent = state.consultarCompras
-      ? 'Ligado, a nota só entra sozinha se o XML já estiver completo e cada produto da nota permitir importação e ciência automática na aba Importação. Sem isso, ela fica em Consultar compras para o botão Importar. O relógio não envia ciência da operação.'
+      ? 'Ligado, a nota pendente só entra sozinha se o XML já estiver completo e cada produto da nota permitir importação automática na aba Importação. Produto novo ou resumo da SEFAZ fica em Consultar compras, com o aviso na nota. O relógio não envia ciência da operação.'
       : 'Consultar compras está desligado no painel. O parâmetro fica guardado, e a consulta só passa a valer quando o módulo estiver em Sim.';
   }
   const res = await api('/compras/parametro');

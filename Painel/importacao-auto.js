@@ -6,11 +6,11 @@
   function $(sel) { return document.querySelector(sel); }
   function esc(v) { return deps?.escapeHtml ? deps.escapeHtml(v) : String(v ?? ''); }
 
-  function select(nome, valor) {
+  function selectImportar(valor) {
     const sim = valor ? ' selected' : '';
     const nao = valor ? '' : ' selected';
-    return `<label>${esc(nome)}
-      <select data-campo="${esc(nome === 'Importar' ? 'importar' : 'ciencia')}">
+    return `<label>Importar
+      <select data-campo="importar">
         <option value="N"${nao}>Não</option>
         <option value="S"${sim}>Sim</option>
       </select>
@@ -25,20 +25,33 @@
       return;
     }
     box.innerHTML = produtos.map((p) => `
-      <article class="auto-prod" data-id="${esc(p.id_identificador)}">
+      <article class="auto-prod" data-id="${esc(p.id_identificador)}" data-fornec="${esc(p.id_fornec)}">
         <div>
           <strong>${esc(p.descricao || 'Produto')}</strong>
           <div class="item-meta">
             <span class="chip">${esc(p.id_identificador)}</span>
+            ${p.fornecedor ? `<span class="chip">${esc(p.fornecedor)}</span>` : ''}
+            ${p.grupo ? `<span class="chip">${esc(p.grupo)}</span>` : ''}
+            ${p.referencia ? `<span class="chip">${esc(p.referencia)}</span>` : ''}
             ${p.cod_barras ? `<span class="chip">${esc(p.cod_barras)}</span>` : ''}
+            ${p.cod_fornecedor ? `<span class="chip">${esc(p.cod_fornecedor)}</span>` : ''}
           </div>
         </div>
-        ${select('Importar', p.importar === true)}
-        ${select('Ciência', p.ciencia === true)}
+        ${selectImportar(p.importar === true)}
       </article>`).join('');
     box.querySelectorAll('select').forEach((sel) => {
       sel.addEventListener('change', () => salvar(sel));
     });
+  }
+
+  function pintarGrupos(grupos) {
+    const sel = $('#cfg-auto-grupo');
+    if (!sel) return;
+    const atual = sel.value;
+    const opts = ['<option value="">Todos</option>']
+      .concat((grupos || []).map((g) => `<option value="${esc(g.id_grupo)}">${esc(g.descricao || g.id_grupo)}</option>`));
+    sel.innerHTML = opts.join('');
+    if ([...sel.options].some((o) => o.value === atual)) sel.value = atual;
   }
 
   async function autorizacao() {
@@ -50,13 +63,20 @@
     return { autorizacao: authz };
   }
 
+  function credenciais(auth) {
+    if (!auth) return {};
+    if (auth.tipo === 'revenda') return { revendaSenha: auth.senha };
+    if (auth.senha) return { supervisorSenha: auth.senha };
+    return {};
+  }
+
   async function salvar(sel) {
     const card = sel.closest('.auto-prod');
     const aviso = $('#cfg-auto-aviso');
     const id = card?.dataset.id;
+    const idFornec = card?.dataset.fornec;
     const anterior = sel.value === 'S' ? 'N' : 'S';
-    const importar = card?.querySelector('[data-campo="importar"]')?.value === 'S';
-    const ciencia = card?.querySelector('[data-campo="ciencia"]')?.value === 'S';
+    const importar = sel.value === 'S';
     const extra = await autorizacao();
     if (!extra) {
       sel.value = anterior;
@@ -64,7 +84,7 @@
     }
     const res = await deps.api(`/importacao/auto-produtos/${id}`, {
       method: 'PUT',
-      body: { importar, ciencia, ...extra },
+      body: { id_fornec: Number(idFornec), importar, ...extra },
     });
     if (!res?.ok) {
       authz = null;
@@ -78,20 +98,26 @@
   async function buscar() {
     const aviso = $('#cfg-auto-aviso');
     const q = String($('#cfg-auto-busca')?.value || '').trim();
-    if (q.length < 2) {
-      if (aviso) aviso.textContent = 'Digite pelo menos duas letras ou o código.';
-      render([]);
-      return;
-    }
+    const grupo = String($('#cfg-auto-grupo')?.value || '').trim();
     if (aviso) aviso.textContent = 'Buscando…';
-    const res = await deps.api(`/importacao/auto-produtos?q=${encodeURIComponent(q)}`);
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    if (grupo) qs.set('grupo', grupo);
+    const res = await deps.api(`/importacao/auto-produtos?${qs.toString()}`);
     if (!res?.ok) {
       if (aviso) aviso.textContent = res?.error || 'Não foi possível buscar.';
       render([]);
       return;
     }
+    pintarGrupos(res.grupos || []);
+    const todos = $('#cfg-auto-todos');
+    if (todos) todos.checked = !!res.importarTodos;
     const lista = res.produtos || [];
-    if (aviso) aviso.textContent = lista.length ? `${lista.length} produto(s). A alteração grava na hora.` : 'Nenhum produto encontrado.';
+    if (aviso) {
+      aviso.textContent = lista.length
+        ? `${lista.length} produto(s) parametrizado(s). A alteração grava na hora.`
+        : 'Nenhum produto parametrizado com esse filtro.';
+    }
     render(lista);
   }
 
@@ -103,6 +129,7 @@
 
   function montar() {
     carregarGeral();
+    buscar();
     if (ligado) return;
     ligado = true;
     $('#cfg-auto-buscar')?.addEventListener('click', () => buscar());
@@ -112,10 +139,43 @@
         buscar();
       }
     });
+    $('#cfg-auto-grupo')?.addEventListener('change', () => buscar());
     $('#cfg-auto-geral-salvar')?.addEventListener('click', async () => {
-      const chk = $('#cfg-auto-geral');
-      const ok = await deps.salvarGeral?.(!!chk?.checked);
-      if (!ok) carregarGeral();
+      const aviso = $('#cfg-auto-aviso');
+      const auth = await deps.pedirAutorizacao?.();
+      if (!auth) {
+        carregarGeral();
+        buscar();
+        return;
+      }
+      const cred = credenciais(auth);
+      const geral = !!$('#cfg-auto-geral')?.checked;
+      const marcar = !!$('#cfg-auto-todos')?.checked;
+      const r1 = await deps.api('/compras/parametro', {
+        method: 'POST',
+        body: { importarAutomatico: geral, ...cred },
+      });
+      if (!r1?.ok) {
+        if (aviso) aviso.textContent = r1?.error || 'Não foi possível guardar o interruptor geral.';
+        carregarGeral();
+        return;
+      }
+      const r2 = await deps.api('/importacao/auto-produtos/todos', {
+        method: 'POST',
+        body: { marcar, ...cred },
+      });
+      if (!r2?.ok) {
+        if (aviso) aviso.textContent = r2?.error || 'Não foi possível aplicar a importação em todos os produtos.';
+        buscar();
+        return;
+      }
+      const chk = $('#cfg-importar-auto');
+      if (chk) chk.checked = !!r1.importarAutomatico;
+      if (aviso) aviso.textContent = marcar
+        ? 'Importação automática definida em todos os produtos parametrizados.'
+        : 'Parâmetros guardados.';
+      deps.showToast?.('Importação automática guardada.');
+      buscar();
     });
   }
 
