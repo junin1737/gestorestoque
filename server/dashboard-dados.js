@@ -1285,58 +1285,90 @@ async function lerMovimentoDre(db, filtros, usaManage, appCfg) {
     : `NOT IN (SELECT ID_CTAPLA FROM TB_PLANO_CONTAS WHERE UPPER(DESCRICAO) CONTAINING 'MERCADORIAS PARA REVENDA')`;
   const temCentroPag = await colunaExiste(db, 'TB_CONTA_PAGAR', 'CC_CUSTO');
   const temCentroRec = await colunaExiste(db, 'TB_CONTA_RECEBER', 'CC_CUSTO');
-  const temCentroBanco = await colunaExiste(db, 'TB_BANCO_CTA_MOVTO', 'ID_CCUSTO');
+  const temTabelaBanco = await relacaoExiste(db, 'TB_BANCO_CTA_MOVTO');
+  const temCentroBanco = temTabelaBanco && await colunaExiste(db, 'TB_BANCO_CTA_MOVTO', 'ID_CCUSTO');
+  const colRec = await colunaPlanoTitulo(db, 'TB_CONTA_RECEBER');
+  const colPag = await colunaPlanoTitulo(db, 'TB_CONTA_PAGAR');
   const centro = (tem, coluna) => (tem
     ? sqlOctets(coluna, 80)
     : 'CAST(NULL AS VARCHAR(80) CHARACTER SET OCTETS)');
   const joinCentro = (tem, coluna) => (tem ? `LEFT JOIN TB_CENTRO_CUSTO CC ON CC.ID = ${coluna}` : '');
-  const plano = `
+  const planoCheio = `
              ${sqlOctets('P.COD_CONTA', 40)} AS CODIGO,
              ${sqlOctets('P.DESCRICAO', 120)} AS PLANO`;
+  const planoVazio = `
+             CAST(NULL AS VARCHAR(40) CHARACTER SET OCTETS) AS CODIGO,
+             CAST(NULL AS VARCHAR(120) CHARACTER SET OCTETS) AS PLANO`;
+  const planoDe = (col) => (col ? planoCheio : planoVazio);
+  const joinPlano = (col) => (col ? `LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = ${col}` : '');
+  let sqlBanco = '';
+  if (temTabelaBanco) {
+    const colsBanco = await colunasTabela(db, 'TB_BANCO_CTA_MOVTO');
+    const temPlanoMov = colsBanco.has('ID_CTAPLA');
+    const temConta = colsBanco.has('ID_CONTA')
+      && await relacaoExiste(db, 'TB_BANCO_CTA')
+      && await colunaExiste(db, 'TB_BANCO_CTA', 'ID_CTAPLA');
+    if ((temPlanoMov || temConta) && colsBanco.has('VALOR') && colsBanco.has('DT_MOVTO')) {
+      const exprBanco = temPlanoMov && temConta
+        ? 'COALESCE(B.ID_CTAPLA, CTA.ID_CTAPLA)'
+        : (temPlanoMov ? 'B.ID_CTAPLA' : 'CTA.ID_CTAPLA');
+      const joinConta = temConta ? 'LEFT JOIN TB_BANCO_CTA CTA ON CTA.ID_CONTA = B.ID_CONTA' : '';
+      const destino = colsBanco.has('ID_CTA_DEST') ? 'AND COALESCE(B.ID_CTA_DEST, 0) <> 5' : '';
+      const historico = colsBanco.has('HISTORICO') ? sqlOctets('B.HISTORICO', 250) : sqlOctets(`''`, 250);
+      const semTransf = colsBanco.has('HISTORICO')
+        ? `AND COALESCE(B.HISTORICO, '') NOT LIKE 'Transferencia.%'
+      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno Transf.%'
+      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno de pagamen%'
+      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno de Receb%'`
+        : '';
+      sqlBanco = `
+    UNION ALL
+    SELECT ${sqlOctets(`CASE WHEN B.VALOR > 0 THEN 'ENTRADAS' ELSE 'SAIDAS' END`, 20)}, ${exprBanco},
+           ${planoDe(exprBanco)},
+           ${centro(temCentroBanco, 'CC.NOME')},
+           ${historico},
+           CASE WHEN B.VALOR < 0 THEN B.VALOR * -1 ELSE B.VALOR END, B.DT_MOVTO
+    FROM TB_BANCO_CTA_MOVTO B
+    ${joinConta}
+    ${joinPlano(exprBanco)}
+    ${joinCentro(temCentroBanco, 'B.ID_CCUSTO')}
+    WHERE B.DT_MOVTO >= '${inicio}' AND B.DT_MOVTO < '${fim}'
+      AND ${exprBanco} IS NOT NULL
+      ${destino}
+      ${semTransf}
+      AND (B.VALOR > 0 OR ${exprBanco} ${fora})`;
+    }
+  }
+  const exprRec = colRec ? `C.${colRec}` : 'CAST(NULL AS INTEGER)';
+  const exprPag = colPag ? `C.${colPag}` : 'CAST(NULL AS INTEGER)';
   const sql = `
-    SELECT ${sqlOctets(`'ENTRADAS'`, 20)} AS TIPO, C.ID_CTAPLA AS ID,
-           ${plano},
+    SELECT ${sqlOctets(`'ENTRADAS'`, 20)} AS TIPO, ${exprRec} AS ID,
+           ${planoDe(colRec)},
            ${centro(temCentroRec, 'CC.NOME')} AS CENTRO,
            ${sqlOctets('C.HISTORICO', 250)} AS HISTORICO,
            B.VLR_RECEB AS VALOR, B.DT_BAIXA AS DATA
     FROM TB_CTAREC_BAIXA B
     JOIN TB_CONTA_RECEBER C ON C.ID_CTAREC = B.ID_CTAREC
-    LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.ID_CTAPLA
+    ${joinPlano(exprRec)}
     ${joinCentro(temCentroRec, 'C.CC_CUSTO')}
     WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
       AND TRIM(COALESCE(B.TIP_RECBTO, '')) NOT IN ('C', 'B')
       AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'E'
     UNION ALL
-    SELECT ${sqlOctets(`'SAIDAS'`, 20)}, C.ID_CTAPLA,
-           ${plano},
+    SELECT ${sqlOctets(`'SAIDAS'`, 20)}, ${exprPag},
+           ${planoDe(colPag)},
            ${centro(temCentroPag, 'CC.NOME')},
            ${sqlOctets('C.HISTORICO', 250)},
            B.VLR_PAGO, B.DT_BAIXA
     FROM TB_CTAPAG_BAIXA B
     JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = B.ID_CTAPAG
-    LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.ID_CTAPLA
+    ${joinPlano(exprPag)}
     ${joinCentro(temCentroPag, 'C.CC_CUSTO')}
     WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
       AND TRIM(COALESCE(B.TIP_PAGTO, '')) NOT IN ('C', 'B')
       AND TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'E'
-      AND C.ID_CTAPLA ${fora}
-    UNION ALL
-    SELECT ${sqlOctets(`CASE WHEN B.VALOR > 0 THEN 'ENTRADAS' ELSE 'SAIDAS' END`, 20)}, B.ID_CTAPLA,
-           ${plano},
-           ${centro(temCentroBanco, 'CC.NOME')},
-           ${sqlOctets('B.HISTORICO', 250)},
-           CASE WHEN B.VALOR < 0 THEN B.VALOR * -1 ELSE B.VALOR END, B.DT_MOVTO
-    FROM TB_BANCO_CTA_MOVTO B
-    LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = B.ID_CTAPLA
-    ${joinCentro(temCentroBanco, 'B.ID_CCUSTO')}
-    WHERE B.DT_MOVTO >= '${inicio}' AND B.DT_MOVTO < '${fim}'
-      AND B.ID_CTAPLA IS NOT NULL
-      AND COALESCE(B.ID_CTA_DEST, 0) <> 5
-      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Transferencia.%'
-      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno Transf.%'
-      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno de pagamen%'
-      AND COALESCE(B.HISTORICO, '') NOT LIKE 'Estorno de Receb%'
-      AND (B.VALOR > 0 OR B.ID_CTAPLA ${fora})`;
+      ${colPag ? `AND C.${colPag} ${fora}` : ''}
+    ${sqlBanco}`;
   const rows = await lerRelatorio(db, sql, appCfg);
   const entradas = ladoDre((rows || []).filter((r) => texto(r.TIPO).toUpperCase() === 'ENTRADAS'));
   const saidas = ladoDre((rows || []).filter((r) => texto(r.TIPO).toUpperCase() === 'SAIDAS'));

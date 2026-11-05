@@ -17,6 +17,30 @@
     </label>`;
   }
 
+  function linhaParam(p) {
+    const itens = [];
+    const por = (rotulo, valor) => {
+      const texto = String(valor == null ? '' : valor).trim();
+      if (texto) itens.push(`<span><b>${esc(rotulo)}</b> ${esc(texto)}</span>`);
+    };
+    por('CFOP', p.cfop);
+    por('CST', p.cst);
+    por('CSOSN', p.csosn);
+    por('ICMS', p.aliq_icms);
+    por('CST IPI', p.cst_ipi);
+    por('IPI', p.ipi);
+    por('CST PIS', p.cst_pis);
+    por('PIS', p.pis);
+    por('CST COFINS', p.cst_cofins);
+    por('COFINS', p.cofins);
+    por('MVA', p.mva);
+    por('Unidade', p.uni_medida);
+    if (p.conversor_clipp && !(p.conversoes || []).length) por('Conversão', p.conversor_clipp);
+    (p.conversoes || []).forEach((c) => por('Conversão', c));
+    if (!itens.length) return '';
+    return `<p class="auto-prod-param">${itens.join('')}</p>`;
+  }
+
   function render(produtos) {
     const box = $('#cfg-auto-lista');
     if (!box) return;
@@ -36,6 +60,7 @@
             ${p.cod_barras ? `<span class="chip">${esc(p.cod_barras)}</span>` : ''}
             ${p.cod_fornecedor ? `<span class="chip">${esc(p.cod_fornecedor)}</span>` : ''}
           </div>
+          ${linhaParam(p)}
         </div>
         ${selectImportar(p.importar === true)}
       </article>`).join('');

@@ -123,10 +123,21 @@ function filtros(q, grupo) {
   return { where, params };
 }
 
-function mapLinha(r, flags) {
+function textoNumero(v) {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return '';
+  return n.toFixed(4).replace(/\.?0+$/, '').replace('.', ',');
+}
+
+function textoPreenchido(v) {
+  return String(v == null ? '' : v).trim();
+}
+
+function mapLinha(r, flags, conversoes) {
   const id = Number(r.ID_IDENTIFICADOR);
   const idFornec = Number(r.ID_FORNEC);
   const f = flags(idFornec, id);
+  const fatores = conversoes.get(`${idFornec}:${id}`) || [];
   return {
     id_identificador: id,
     id_fornec: idFornec,
@@ -138,6 +149,20 @@ function mapLinha(r, flags) {
     grupo: String(r.GRUPO || '').trim(),
     fornecedor: String(r.FORNECEDOR || '').trim(),
     importar: f.importar === true,
+    cfop: textoPreenchido(r.CFOP),
+    cst: textoPreenchido(r.CST),
+    csosn: textoPreenchido(r.CSOSN),
+    aliq_icms: Number(r.ALIQ_ICMS) > 0 ? textoNumero(r.ALIQ_ICMS) : '',
+    uni_medida: textoPreenchido(r.UNI_MEDIDA),
+    conversor_clipp: Number(r.CONVERSOR) > 0 ? textoNumero(r.CONVERSOR) : '',
+    cst_ipi: textoPreenchido(r.CST_IPI),
+    ipi: Number(r.IPI) > 0 ? textoNumero(r.IPI) : '',
+    cst_pis: textoPreenchido(r.CST_PIS),
+    pis: Number(r.PIS) > 0 ? textoNumero(r.PIS) : '',
+    cst_cofins: textoPreenchido(r.CST_COFINS),
+    cofins: Number(r.COFINS) > 0 ? textoNumero(r.COFINS) : '',
+    mva: Number(r.MVA) > 0 ? textoNumero(r.MVA) : '',
+    conversoes: fatores,
   };
 }
 
@@ -158,7 +183,20 @@ async function buscar(q, grupo) {
           TRIM(COALESCE(F.COD_NO_FORNECEDOR, '')) AS COD_FORNECEDOR,
           E.ID_GRUPO,
           TRIM(COALESCE(G.DESCRICAO, '')) AS GRUPO,
-          TRIM(COALESCE(NULLIF(TRIM(FN.NOME_FANTA), ''), FN.NOME, '')) AS FORNECEDOR
+          TRIM(COALESCE(NULLIF(TRIM(FN.NOME_FANTA), ''), FN.NOME, '')) AS FORNECEDOR,
+          TRIM(COALESCE(F.CFOP, '')) AS CFOP,
+          TRIM(COALESCE(F.CST, '')) AS CST,
+          TRIM(COALESCE(F.CSOSN, '')) AS CSOSN,
+          F.ALIQ_ICMS,
+          TRIM(COALESCE(F.UNI_MEDIDA, '')) AS UNI_MEDIDA,
+          F.CONVERSOR,
+          TRIM(COALESCE(F.CST_IPI, '')) AS CST_IPI,
+          F.IPI,
+          TRIM(COALESCE(F.CST_PIS, '')) AS CST_PIS,
+          F.PIS,
+          TRIM(COALESCE(F.CST_COFINS, '')) AS CST_COFINS,
+          F.COFINS,
+          F.MVA
         ${sqlBase(t)}
         ${extra}
         ORDER BY 3, 2`, params);
@@ -167,9 +205,33 @@ async function buscar(q, grupo) {
         ${sqlBase(t)}
           AND E.ID_GRUPO IS NOT NULL
         ORDER BY 2`, []);
+      const ids = [...new Set((rows || []).map((r) => Number(r.ID_IDENTIFICADOR)).filter((n) => n > 0))];
+      const conversoes = new Map();
+      if (ids.length) {
+        const fatores = await query(db, `
+          SELECT ID_IDENTIFICADOR, ID_FORNEC,
+                 TRIM(COALESCE(UNI_XML, '')) AS UNI_XML,
+                 TRIM(COALESCE(UNI_ESTOQUE, '')) AS UNI_ESTOQUE,
+                 CONVERSOR, TRIM(COALESCE(PACOTE, '')) AS PACOTE
+          FROM TB_MT_CONVERSAO
+          WHERE ID_IDENTIFICADOR IN (${ids.join(',')})`, []);
+        for (const c of fatores || []) {
+          const chaveConv = `${Number(c.ID_FORNEC)}:${Number(c.ID_IDENTIFICADOR)}`;
+          const lista = conversoes.get(chaveConv) || [];
+          const pacote = String(c.PACOTE || '').trim().toUpperCase() === 'S';
+          const fator = Number(c.CONVERSOR);
+          const uniXml = String(c.UNI_XML || '').trim();
+          const uniEst = String(c.UNI_ESTOQUE || '').trim();
+          const texto = pacote
+            ? `${textoNumero(fator) || '1'} pacote(s)`
+            : [uniXml, fator > 0 ? `× ${textoNumero(fator)}` : '', uniEst].filter(Boolean).join(' ');
+          if (texto && !lista.includes(texto)) lista.push(texto);
+          conversoes.set(chaveConv, lista);
+        }
+      }
       const f = (idFornec, id) => flag(idFornec, id);
       return {
-        produtos: (rows || []).map((r) => mapLinha(r, f)),
+        produtos: (rows || []).map((r) => mapLinha(r, f, conversoes)),
         grupos: (gruposRows || [])
           .filter((g) => Number(g.ID_GRUPO) > 0)
           .map((g) => ({ id_grupo: Number(g.ID_GRUPO), descricao: String(g.GRUPO || '').trim() })),

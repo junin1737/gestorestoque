@@ -3938,12 +3938,22 @@ html[data-theme="escuro"] .compras-row:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 8.5rem;
   gap: 0.55rem;
-  align-items: end;
+  align-items: start;
   padding: 0.55rem 0.65rem;
   border: 1px solid var(--line, rgba(0, 0, 0, 0.12));
   border-radius: 8px;
 }
 .auto-prod strong { display: block; }
+.auto-prod-param {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.15rem 0.7rem;
+  margin: 0.28rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: var(--muted);
+}
+.auto-prod-param b { color: var(--text); font-weight: 650; }
 .auto-prod .item-meta { margin-top: 0.15rem; }
 .auto-prod label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; }
 .auto-prod select { width: 100%; }
