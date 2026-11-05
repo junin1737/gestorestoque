@@ -1,6 +1,7 @@
 'use strict';
 
-const { withDb, useDb, query, nextGenId } = require('./db');
+const { withDb, useDb, query, nextGenId, columnExists } = require('./db');
+const { inteiroClipp } = require('./importacao-conversao-decisao');
 
 function mapEstFornec(r) {
   if (!r) return null;
@@ -62,9 +63,12 @@ async function buscarEstoqueFornecedor({ idFornec, idIdentificador, codFornecedo
       WHERE ${where}
       ORDER BY ID_EST_FORNEC DESC`, params);
     const mapped = mapEstFornec(rows[0] || null);
-    if (mapped?.uni_medida && !(mapped.conversor > 0)) {
+    if (mapped?.uni_medida) {
       const conv = await lookupConversorUnidade(db, mapped.uni_medida);
-      if (conv != null) mapped.conversor = conv;
+      const inteiro = inteiroClipp(conv);
+      mapped.unidade_no_clipp = inteiro != null;
+      mapped.conversor_clipp = inteiro;
+      if (!(mapped.conversor > 0) && inteiro != null) mapped.conversor = inteiro;
     }
     return mapped;
   });
@@ -94,6 +98,8 @@ async function upsertEstoqueFornecedor(body = {}, { db: conn = null } = {}) {
     const ipi = body.ipi != null && body.ipi !== '' ? Number(body.ipi) : null;
     const cstIpi = String(body.cst_ipi || '').trim() || null;
     const barras = String(body.cod_barras || '').trim() || null;
+    const temConversor = await columnExists(db, 'TB_ESTOQUE_FORNECEDOR', 'CONVERSOR');
+    const conversorInt = temConversor && uni ? inteiroClipp(await lookupConversorUnidade(db, uni)) : null;
 
     if (existing[0]) {
       const id = Number(existing[0].ID_EST_FORNEC);
@@ -107,8 +113,11 @@ async function upsertEstoqueFornecedor(body = {}, { db: conn = null } = {}) {
           COD_NO_FORNECEDOR=?, CST=?, CSOSN=?, COFINS=?, CST_COFINS=?,
           PIS=?, CST_PIS=?, ALIQ_ICMS=?, UNI_MEDIDA=?, MVA=?, CFOP=?,
           IPI=?, CST_IPI=?, COD_BARRAS=?, STATUS='A'
+          ${conversorInt != null ? ', CONVERSOR=?' : ''}
         WHERE ID_EST_FORNEC=?`, [
-        cod, cst, csosn, cofins, cstCofins, pis, cstPis, aliq, uni, mva, cfop, ipi, cstIpi, barras, id,
+        cod, cst, csosn, cofins, cstCofins, pis, cstPis, aliq, uni, mva, cfop, ipi, cstIpi, barras,
+        ...(conversorInt != null ? [conversorInt] : []),
+        id,
       ]);
       const rows = await query(db, `SELECT * FROM TB_ESTOQUE_FORNECEDOR WHERE ID_EST_FORNEC=?`, [id]);
       return mapEstFornec(rows[0]);
@@ -120,9 +129,12 @@ async function upsertEstoqueFornecedor(body = {}, { db: conn = null } = {}) {
       INSERT INTO TB_ESTOQUE_FORNECEDOR (
         ID_IDENTIFICADOR, ID_FORNEC, COD_NO_FORNECEDOR, CST, CSOSN, COFINS, CST_COFINS,
         PIS, CST_PIS, ALIQ_ICMS, UNI_MEDIDA, ID_EST_FORNEC, STATUS, MVA, CFOP, IPI, CST_IPI, COD_BARRAS
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'A', ?, ?, ?, ?, ?)`, [
+        ${conversorInt != null ? ', CONVERSOR' : ''}
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'A', ?, ?, ?, ?, ?
+        ${conversorInt != null ? ', ?' : ''})`, [
       idIdent, idFornec, cod, cst, csosn, cofins, cstCofins,
       pis, cstPis, aliq, uni, idEstFornec, mva, cfop, ipi, cstIpi, barras,
+      ...(conversorInt != null ? [conversorInt] : []),
     ]);
     const rows = await query(db, `SELECT * FROM TB_ESTOQUE_FORNECEDOR WHERE ID_EST_FORNEC=?`, [idEstFornec]);
     return mapEstFornec(rows[0]);

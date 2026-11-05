@@ -983,6 +983,95 @@ async function gravarLotesItem(db, appCfg, idNfcItem, idIdent, it) {
 /**
  * Grava a sessão de importação nas tabelas nativas do Clipp.
  */
+async function gravarParametroFornecedor(db, sessao, it, idIdent) {
+  const idFornec = sessao.fornecedor?.id_fornec ? Number(sessao.fornecedor.id_fornec) : null;
+  if (!idFornec || !idIdent) return;
+  const trib = it.sistema?.tributos || {};
+  const { upsertEstoqueFornecedor } = require('./importacao-estoque-fornec');
+  await upsertEstoqueFornecedor({
+    id_identificador: idIdent,
+    id_fornec: idFornec,
+    cod_no_fornecedor: it.sistema?.cod_fornecedor || it.xml?.cProd || '',
+    cst: trib.cst_icms || it.sistema?.cst_icms || '',
+    csosn: it.sistema?.csosn_saida || trib.csosn || '',
+    cofins: trib.p_cofins || 0,
+    cst_cofins: trib.cst_cofins || '',
+    pis: trib.p_pis || 0,
+    cst_pis: trib.cst_pis || '',
+    aliq_icms: trib.p_icms || 0,
+    uni_medida: it.sistema?.uni_medida || '',
+    conversor: it.sistema?.conversor,
+    cfop: it.sistema?.cfop || '',
+    ipi: trib.p_ipi || null,
+    cst_ipi: trib.cst_ipi || '49',
+    cod_barras: it.sistema?.cod_barras || '',
+  }, { db });
+  const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
+  await salvarConversaoGestor({
+    id_identificador: idIdent,
+    id_fornec: idFornec,
+    uni_xml: it.sistema?.uni_medida_xml || it.xml?.uCom || '',
+    uni_estoque: it.sistema?.uni_medida || 'UN',
+    conversor: it.sistema?.conversor ?? 1,
+    pacote: !!(it.sistema?.vender_pacote && Number(it.sistema?.qtd_pacotes) > 0),
+  }, db);
+}
+
+async function atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario) {
+  const linhas = await query(db, `
+    SELECT ID_NFCITEM, NUM_ITEM, QTD_ITEM, UNI_MEDIDA, EST_BX, ID_IDENTIFICADOR
+    FROM TB_NFC_ITEM WHERE ID_NFCOMPRA = ?`, [idNf]);
+  const porItem = new Map((linhas || []).map((r) => [Number(r.NUM_ITEM), r]));
+  for (const it of sessao.itens || []) {
+    const idIdent = it.sistema?.id_identificador ? Number(it.sistema.id_identificador) : null;
+    if (!idIdent) continue;
+    const { qtdXml, conversor, qtdEstoque } = qtdEntradaEstoque(it.sistema || {}, it.xml || {});
+    it.sistema.qtd = qtdEstoque;
+    it.sistema.conversor = conversor;
+    it.sistema.qtd_xml = qtdXml;
+    try {
+      await gravarParametroFornecedor(db, sessao, it, idIdent);
+    } catch (e) {
+      console.warn('Parametrização na edição:', e.message);
+    }
+    const linha = porItem.get(Number(it.nItem));
+    if (!linha) continue;
+    const custoInfo = calcCustoUnitarioItem(it.sistema || {}, it.xml || {});
+    const vTotal = valorProdutoItem(it.xml || {});
+    const qtdNova = qtdEstoque > 0 ? qtdEstoque : qtdXml;
+    const vUnCom = Number(it.xml?.vUnCom || 0) || 0;
+    const vUnitNota = Math.abs(qtdNova - qtdXml) < 1e-9 && vUnCom > 0
+      ? vUnCom
+      : (qtdNova > 0 ? Number((vTotal / qtdNova).toFixed(4)) : vUnCom);
+    const prcMedio = custoInfo.custoEstoque > 0 ? custoInfo.custoEstoque : vUnitNota;
+    await query(db, `
+      UPDATE TB_NFC_ITEM SET QTD_ITEM = ?, UNI_MEDIDA = 'UN', VLR_UNIT = ?, PRC_MEDIO = ?
+      WHERE ID_NFCITEM = ?`, [
+      qtdNova, vUnitNota, prcMedio, Number(linha.ID_NFCITEM),
+    ]);
+    const entrou = String(linha.EST_BX || '').trim().toUpperCase() === 'S';
+    if (!entrou) continue;
+    let qtdAntiga = Number(linha.QTD_ITEM || 0);
+    const uniAntiga = String(linha.UNI_MEDIDA || '').trim().toUpperCase();
+    if (uniAntiga && uniAntiga !== 'UN') {
+      const urows = await query(db, `
+        SELECT FIRST 1 CONVERSOR FROM TB_UNI_MEDIDA WHERE UPPER(TRIM(UNIDADE)) = ?`, [uniAntiga]);
+      const convAnt = Number(urows[0]?.CONVERSOR);
+      if (convAnt > 0) qtdAntiga = Number((qtdAntiga * convAnt).toFixed(6));
+    }
+    const delta = Number((qtdNova - qtdAntiga).toFixed(6));
+    if (Math.abs(delta) < 1e-6) continue;
+    await entradaEstoque(db, appCfg, {
+      idIdentificador: idIdent,
+      qtd: delta,
+      prcCusto: prcMedio,
+      usuario: usuario || 'Edição',
+      nfLabel: String(idNf),
+      registrarAlteracao: false,
+    });
+  }
+}
+
 async function gravarNfCompra(sessao, {
   usuario = 'Supervisor',
   idFuncionario = 0,
@@ -1038,7 +1127,13 @@ async function gravarNfCompra(sessao, {
 
   if (Number(sessao.editar_id_nfcompra)) {
     const idNf = Number(sessao.editar_id_nfcompra);
-    return withDb((conn, appCfg) => withTransaction(conn, async (db) => {
+    return withDb(async (conn, appCfg) => {
+      try {
+        await require('./importacao-conversao-gestor').ensureConversaoGestor(conn);
+      } catch (e) {
+        console.warn('TB_MT_CONVERSAO:', e.message);
+      }
+      return withTransaction(conn, async (db) => {
       const nfAtual = await query(db, `
         SELECT FIRST 1 STATUS FROM TB_NFCOMPRA WHERE ID_NFCOMPRA = ?`, [idNf]);
       if (String(nfAtual[0]?.STATUS || '').trim().toUpperCase() === 'C') {
@@ -1074,6 +1169,7 @@ async function gravarNfCompra(sessao, {
       for (const it of itens) {
         await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       }
+      await atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario);
       try {
         const dtEntrada = toDateSql(sessao.dt_entrada);
         if (dtEntrada) {
@@ -1094,7 +1190,8 @@ async function gravarNfCompra(sessao, {
         parcelas: parcelasXml.length,
         editado: true,
       };
-    }));
+      });
+    });
   }
 
   return withDb(async (conn, appCfg) => {
@@ -1272,6 +1369,7 @@ async function gravarNfCompra(sessao, {
               cst_pis: trib.cst_pis || '',
               aliq_icms: trib.p_icms || 0,
               uni_medida: it.sistema.uni_medida || '',
+              conversor: it.sistema.conversor,
               cfop: it.sistema.cfop || '',
               ipi: trib.p_ipi || null,
               cst_ipi: trib.cst_ipi || '49',

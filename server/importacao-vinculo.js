@@ -211,23 +211,41 @@ async function aplicarSugestoesVinculo(sessao) {
     aplicarFiscalPreservandoSaida(p.it.sistema, f);
     const xmlItem = p.it.xml || {};
     const idFornecConv = Number(sessao?.fornecedor?.id_fornec || 0);
-    let usouGestor = false;
+    let usouConversao = false;
     try {
       const { buscarConversaoGestor } = require('./importacao-conversao-gestor');
+      const { buscarEstoqueFornecedor } = require('./importacao-estoque-fornec');
+      const { decidirConversao } = require('./importacao-conversao-decisao');
       const gest = await buscarConversaoGestor({
         idIdentificador: p.idLigado,
         idFornec: idFornecConv,
         uniXml: xmlItem.uCom,
       });
-      if (gest?.uni_estoque) {
-        usouGestor = true;
-        p.it.sistema.uni_medida = gest.uni_estoque;
-        p.it.sistema.conversor = gest.conversor;
-        p.it.sistema.conversor_origem = 'gestor';
+      let ef = null;
+      if (idFornecConv && p.idLigado) {
+        ef = await buscarEstoqueFornecedor({
+          idFornec: idFornecConv,
+          idIdentificador: p.idLigado,
+          codFornecedor: xmlItem.cProd || p.it.sistema?.cod_fornecedor,
+        });
+      }
+      const escolha = decidirConversao({
+        clipp: ef?.unidade_no_clipp ? { uni: ef.uni_medida, conversor: ef.conversor_clipp } : null,
+        gestor: gest?.uni_estoque ? {
+          uni: gest.uni_estoque,
+          conversor: gest.conversor,
+          pacote: gest.pacote,
+        } : null,
+      });
+      if (escolha && !p.it.sistema.conversor_manual) {
+        usouConversao = true;
+        if (!p.it.sistema.uni_medida_saida && ef?.uni_medida) p.it.sistema.uni_medida_saida = ef.uni_medida;
+        p.it.sistema.uni_medida = escolha.uni || p.it.sistema.uni_medida;
+        p.it.sistema.conversor = escolha.conversor;
+        p.it.sistema.conversor_origem = escolha.origem;
         const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
-        p.it.sistema.qtd = Number((qtdXml * Number(p.it.sistema.conversor || 1)).toFixed(6));
-        if (gest.pacote && p.it.sistema.qtd > 0) {
-          // O conversor guardado é pacotes por unidade da nota; arredonda o resto da divisão.
+        p.it.sistema.qtd = Number((qtdXml * Number(escolha.conversor || 1)).toFixed(6));
+        if (escolha.pacote && p.it.sistema.qtd > 0) {
           p.it.sistema.vender_pacote = true;
           p.it.sistema.qtd_pacotes = Number(p.it.sistema.qtd.toFixed(3));
           p.it.sistema.qtd = p.it.sistema.qtd_pacotes;
@@ -235,9 +253,9 @@ async function aplicarSugestoesVinculo(sessao) {
         }
       }
     } catch (e) {
-      console.warn('Conversão Gestor:', e.message);
+      console.warn('Conversão do item:', e.message);
     }
-    if (!usouGestor) {
+    if (!usouConversao) {
     const conv = importacaoParams.findConversao(xmlItem.uCom, p.idLigado);
     if (conv) {
       p.it.sistema.uni_medida = conv.uni_estoque || p.it.sistema.uni_medida;
@@ -245,32 +263,8 @@ async function aplicarSugestoesVinculo(sessao) {
       const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
       p.it.sistema.qtd = Number((qtdXml * Number(conv.conversor || 1)).toFixed(6));
     }
-    // Primeira entrada: sugere a parametrização do Clipp (TB_ESTOQUE_FORNECEDOR).
-    try {
-      const idFornec = idFornecConv;
-      if (idFornec && p.idLigado) {
-        const { buscarEstoqueFornecedor } = require('./importacao-estoque-fornec');
-        const { calcCustoUnitarioItem } = require('./importacao-rateio');
-        const ef = await buscarEstoqueFornecedor({
-          idFornec,
-          idIdentificador: p.idLigado,
-          codFornecedor: xmlItem.cProd || p.it.sistema?.cod_fornecedor,
-        });
-        if (ef?.uni_medida && !p.it.sistema.conversor_manual) {
-          if (!p.it.sistema.uni_medida_saida) p.it.sistema.uni_medida_saida = ef.uni_medida;
-          p.it.sistema.uni_medida = ef.uni_medida;
-          if (ef.conversor > 0) p.it.sistema.conversor = ef.conversor;
-          const qtdXml = Number(p.it.sistema.qtd_xml ?? xmlItem.qCom ?? 0);
-          p.it.sistema.qtd = Number((qtdXml * Number(p.it.sistema.conversor || 1)).toFixed(6));
-          const custoInfo = calcCustoUnitarioItem(p.it.sistema, xmlItem);
-          if (custoInfo.custoEstoque > 0) p.it.sistema.prc_custo = custoInfo.custoEstoque;
-        }
-      }
-    } catch (e) {
-      console.warn('Conversão estoque-fornecedor:', e.message);
     }
-    }
-    if (Number(p.it.sistema.conversor || 1) !== 1 || p.it.sistema.conversor_origem === 'gestor') {
+    if (Number(p.it.sistema.conversor || 1) !== 1 || p.it.sistema.conversor_origem) {
       try {
         const { calcCustoUnitarioItem } = require('./importacao-rateio');
         const custoInfo = calcCustoUnitarioItem(p.it.sistema, xmlItem);

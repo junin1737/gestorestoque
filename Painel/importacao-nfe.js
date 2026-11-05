@@ -2086,6 +2086,26 @@ const ImportacaoNfe = (() => {
    * Mesma conta de server/importacao-rateio.js qtdEntradaEstoque.
    * Pacote informado vence. Quantidade digitada só vale com conversor manual.
    */
+  function inteiroClipp(valor) {
+    const n = Number(valor);
+    if (!(n > 0) || Math.abs(n - Math.round(n)) > 1e-6) return null;
+    return Math.round(n);
+  }
+
+  function decidirConversao({ clipp, gestor } = {}) {
+    const temClipp = !!(clipp && clipp.uni && inteiroClipp(clipp.conversor) != null);
+    const temGestor = !!(gestor && (gestor.uni || Number(gestor.conversor) > 0));
+    const igual = temClipp && temGestor && inteiroClipp(gestor.conversor) === inteiroClipp(clipp.conversor);
+    if (temGestor && gestor.pacote) {
+      return { origem: 'gestor', uni: gestor.uni || clipp?.uni || '', conversor: Number(gestor.conversor) || 1, pacote: true };
+    }
+    if (temGestor && (!temClipp || !igual)) {
+      return { origem: 'gestor', uni: gestor.uni || clipp?.uni || '', conversor: Number(gestor.conversor) || 1, pacote: false };
+    }
+    if (temClipp) return { origem: 'clipp', uni: clipp.uni, conversor: inteiroClipp(clipp.conversor), pacote: false };
+    return null;
+  }
+
   function qtdEntradaItem(sys = {}, xml = {}) {
     const qtdXml = Number(sys.qtd_xml) > 0 ? Number(sys.qtd_xml) : (Number(xml.qCom || 0) || 0);
     const conversor = Number(sys.conversor ?? 1) || 1;
@@ -2952,7 +2972,7 @@ const ImportacaoNfe = (() => {
       if (estFornec.cofins != null && sys.tributos?.p_cofins == null) {
         sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
       }
-      if (estFornec.uni_medida && sys.conversor_origem !== 'gestor') {
+      if (estFornec.uni_medida && sys.conversor_origem !== 'gestor' && sys.conversor_origem !== 'clipp') {
         if (!filled(sys.uni_medida_saida)) sys.uni_medida_saida = estFornec.uni_medida;
         // Primeira entrada: sugere TB_ESTOQUE_FORNECEDOR só se o Gestor ainda não gravou conversão.
         if (!sys.conversor_manual) {
@@ -3158,20 +3178,34 @@ const ImportacaoNfe = (() => {
       const idFornec = state.sessao?.fornecedor?.id_fornec;
       const codForn = it.xml?.cProd || it.sistema.cod_fornecedor || '';
       try {
+        const qs = new URLSearchParams();
+        if (idFornec) qs.set('id_fornec', String(idFornec));
+        qs.set('id_identificador', String(patch.id_identificador));
+        if (codForn) qs.set('cod_fornecedor', codForn);
         const qsConv = new URLSearchParams();
         qsConv.set('id_identificador', String(patch.id_identificador));
         if (idFornec) qsConv.set('id_fornec', String(idFornec));
         if (it.xml?.uCom) qsConv.set('uni_xml', it.xml.uCom);
-        const cv = await api(`/importacao/conversao-gestor?${qsConv}`);
-        it.sistema.vender_pacote = false;
-        it.sistema.qtd_pacotes = null;
-        if (cv.item?.uni_estoque) {
-          it.sistema.uni_medida = cv.item.uni_estoque;
-          it.sistema.conversor = Number(cv.item.conversor || 1) || 1;
-          it.sistema.conversor_origem = 'gestor';
+        const [efRes, rgRes, cv] = await Promise.all([
+          idFornec ? api(`/importacao/estoque-fornecedor?${qs}`) : Promise.resolve({ item: null }),
+          api(`/importacao/regra-tributo?${qs}${it.sistema.cfop ? `&cfop_entrada=${encodeURIComponent(it.sistema.cfop)}` : ''}`),
+          api(`/importacao/conversao-gestor?${qsConv}`),
+        ]);
+        const ef = efRes.item;
+        const gest = cv.item;
+        const escolha = decidirConversao({
+          clipp: ef?.unidade_no_clipp ? { uni: ef.uni_medida, conversor: ef.conversor_clipp } : null,
+          gestor: gest?.uni_estoque ? { uni: gest.uni_estoque, conversor: gest.conversor, pacote: gest.pacote } : null,
+        });
+        if (escolha && !it.sistema.conversor_manual) {
+          it.sistema.vender_pacote = false;
+          it.sistema.qtd_pacotes = null;
+          it.sistema.uni_medida = escolha.uni || it.sistema.uni_medida;
+          it.sistema.conversor = Number(escolha.conversor || 1) || 1;
+          it.sistema.conversor_origem = escolha.origem;
           const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0);
           it.sistema.qtd = Number((qtdXml * Number(it.sistema.conversor || 1)).toFixed(6));
-          if (cv.item.pacote && it.sistema.qtd > 0) {
+          if (escolha.pacote && it.sistema.qtd > 0) {
             it.sistema.vender_pacote = true;
             it.sistema.qtd_pacotes = Number(it.sistema.qtd.toFixed(3));
             it.sistema.qtd = it.sistema.qtd_pacotes;
@@ -3180,17 +3214,7 @@ const ImportacaoNfe = (() => {
           const custoInfo = calcCustoNotaUnitario(it.sistema, it.xml || {});
           if (custoInfo.custoEstoque > 0) it.sistema.prc_custo = custoInfo.custoEstoque;
         }
-      } catch (_) { /* ignore */ }
-      try {
-        const qs = new URLSearchParams();
-        if (idFornec) qs.set('id_fornec', String(idFornec));
-        qs.set('id_identificador', String(patch.id_identificador));
-        if (codForn) qs.set('cod_fornecedor', codForn);
-        const [efRes, rgRes] = await Promise.all([
-          idFornec ? api(`/importacao/estoque-fornecedor?${qs}`) : Promise.resolve({ item: null }),
-          api(`/importacao/regra-tributo?${qs}${it.sistema.cfop ? `&cfop_entrada=${encodeURIComponent(it.sistema.cfop)}` : ''}`),
-        ]);
-        applySugestoesRegra(it.sistema, rgRes.item, efRes.item, it.xml || {});
+        applySugestoesRegra(it.sistema, rgRes.item, ef, it.xml || {});
         if (rgRes.item || efRes.item) {
           deps.showToast?.('Parâmetros anteriores carregados (regra / fornecedor)');
         }
@@ -3558,6 +3582,7 @@ const ImportacaoNfe = (() => {
           cst_pis: trib.cst_pis || '',
           aliq_icms: trib.p_icms || 0,
           uni_medida: sys.uni_medida || '',
+          conversor: Number(sys.conversor ?? 1) || 1,
           cfop: sys.cfop || '',
           ipi: trib.p_ipi || null,
           cst_ipi: trib.cst_ipi || '49',
