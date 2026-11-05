@@ -3930,6 +3930,7 @@ html[data-theme="escuro"] .compras-row:hover {
 .auto-prod-busca input { width: 100%; }
 .auto-prod-lista { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.6rem; }
 .pref-card.auto-card { max-width: 52rem; }
+#cfg-auto-geral-salvar { margin: 0 0 0.9rem; }
 .auto-prod {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 8.5rem 8.5rem;

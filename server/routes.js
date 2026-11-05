@@ -3092,10 +3092,21 @@ router.get('/compras', async (req, res) => {
   }
 });
 
-router.get('/compras/parametro', (req, res) => {
-  if (!req.usuario?.supervisor) {
-    return res.status(403).json({ ok: false, error: 'Só o supervisor vê este parâmetro.' });
+async function autorizadoSupervisorOuRevenda(body = {}) {
+  const tipo = body.autorizacao?.tipo === 'revenda' || body.revendaSenha ? 'revenda' : 'supervisor';
+  const senha = tipo === 'revenda'
+    ? (body.revendaSenha || body.autorizacao?.senha)
+    : (body.supervisorSenha || body.autorizacao?.senha);
+  if (!String(senha || '').trim()) return false;
+  if (tipo === 'revenda') {
+    const confere = await licenca.autorizarRevenda(senha);
+    return confere?.ok === true;
   }
+  const supervisor = loadUsersConfig(loadAppConfig()).usuarios.find((u) => u.supervisor);
+  return !!(supervisor && await auth.conferirSenhaUsuario(supervisor, senha));
+}
+
+router.get('/compras/parametro', (req, res) => {
   try {
     res.json({ ok: true, importarAutomatico: comprasDfe.loadStore().importarAutomatico === true });
   } catch (err) {
@@ -3104,14 +3115,9 @@ router.get('/compras/parametro', (req, res) => {
 });
 
 router.post('/compras/parametro', async (req, res) => {
-  if (!req.usuario?.supervisor) {
-    return res.status(403).json({ ok: false, error: 'Só o supervisor altera este parâmetro.' });
-  }
   try {
-    const appCfg = loadAppConfig();
-    const supervisor = loadUsersConfig(appCfg).usuarios.find((u) => u.supervisor);
-    if (!supervisor || !(await auth.conferirSenhaUsuario(supervisor, req.body?.supervisorSenha))) {
-      return res.json({ ok: false, error: 'Senha de supervisor inválida.' });
+    if (!(await autorizadoSupervisorOuRevenda(req.body))) {
+      return res.json({ ok: false, error: 'Senha do supervisor ou da revenda inválida.' });
     }
     const flag = req.body?.importarAutomatico === true || req.body?.importar_automatico === true;
     res.json({ ok: true, importarAutomatico: comprasDfe.setImportarAutomatico(flag) });
@@ -3121,9 +3127,6 @@ router.post('/compras/parametro', async (req, res) => {
 });
 
 router.get('/importacao/auto-produtos', async (req, res) => {
-  if (!req.usuario?.supervisor) {
-    return res.status(403).json({ ok: false, error: 'Só o supervisor vê estes parâmetros.' });
-  }
   try {
     const autoParams = require('./importacao-auto-params');
     const produtos = await autoParams.buscar(req.query.q);
@@ -3133,11 +3136,12 @@ router.get('/importacao/auto-produtos', async (req, res) => {
   }
 });
 
-router.put('/importacao/auto-produtos/:id', (req, res) => {
-  if (!req.usuario?.supervisor) {
-    return res.status(403).json({ ok: false, error: 'Só o supervisor altera estes parâmetros.' });
-  }
+router.put('/importacao/auto-produtos/:id', async (req, res) => {
   try {
+    const supervisorLogado = !!req.usuario?.supervisor && !req.body?.autorizacao;
+    if (!supervisorLogado && !(await autorizadoSupervisorOuRevenda(req.body))) {
+      return res.json({ ok: false, error: 'Senha do supervisor ou da revenda inválida.' });
+    }
     const autoParams = require('./importacao-auto-params');
     const salvo = autoParams.definir(req.params.id, {
       importar: req.body?.importar,

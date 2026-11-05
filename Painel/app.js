@@ -227,7 +227,7 @@ function pintarConexaoInstagram() {
 }
 
 function setCfgTab(tab) {
-  if ((tab === 'supervisor' || tab === 'importacao') && !state.usuario?.supervisor) tab = 'tema';
+  if (tab === 'supervisor' && !state.usuario?.supervisor) tab = 'tema';
   stateCfgTab = tab || 'tema';
   state.cfgTab = stateCfgTab;
   $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
@@ -1304,7 +1304,7 @@ async function enterApp() {
   const tabSup = $('#cfg-tab-btn-supervisor');
   if (tabSup) tabSup.hidden = !state.usuario?.supervisor;
   const tabImp = $('#cfg-tab-btn-importacao');
-  if (tabImp) tabImp.hidden = !state.usuario?.supervisor;
+  if (tabImp) tabImp.hidden = false;
   const cfgSrv = $('#btn-config-servidor');
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
@@ -1534,20 +1534,28 @@ $$('#cfg-tabs .tab').forEach((btn) => {
   btn.addEventListener('click', () => setCfgTab(btn.dataset.cfgTab));
 });
 $('#cfg-params-salvar')?.addEventListener('click', () => window.ImportacaoNfe?.saveConfig?.());
-$('#cfg-importar-auto-salvar')?.addEventListener('click', async () => {
-  if (!state.usuario?.supervisor) return;
-  const senha = await showPrompt({ message: 'Senha do supervisor para gravar a importação automática:', password: true });
-  if (senha == null) return;
-  const res = await api('/compras/parametro', {
-    method: 'POST',
-    body: { importarAutomatico: !!$('#cfg-importar-auto')?.checked, supervisorSenha: senha },
-  });
+async function salvarImportarAutomatico(marcado) {
+  const authz = await pedirAutorizacao();
+  if (!authz) return false;
+  const body = { importarAutomatico: !!marcado };
+  if (authz.tipo === 'revenda') body.revendaSenha = authz.senha;
+  else body.supervisorSenha = authz.senha;
+  const res = await api('/compras/parametro', { method: 'POST', body });
   if (!res?.ok) {
     showMsg(res?.error || 'Não foi possível guardar o parâmetro.');
-    carregarAbaSupervisor();
-    return;
+    return false;
   }
-  showToast('Parâmetro do supervisor guardado. A importação das notas continua manual.');
+  const chk = $('#cfg-importar-auto');
+  const geral = $('#cfg-auto-geral');
+  if (chk) chk.checked = !!res.importarAutomatico;
+  if (geral) geral.checked = !!res.importarAutomatico;
+  showToast('Importação automática guardada.');
+  return true;
+}
+
+$('#cfg-importar-auto-salvar')?.addEventListener('click', async () => {
+  const ok = await salvarImportarAutomatico(!!$('#cfg-importar-auto')?.checked);
+  if (!ok) carregarAbaSupervisor();
 });
 $('#cfg-aniv-salvar')?.addEventListener('click', async () => {
   const aviso = $('#cfg-aniv-aviso');
@@ -4318,7 +4326,14 @@ window.ImportacaoNfe?.init({
   getUsuario: () => state.usuario,
 });
 
-window.ImportacaoAuto?.init({ api, escapeHtml });
+window.ImportacaoAuto?.init({
+  api,
+  escapeHtml,
+  isSupervisor: () => !!state.usuario?.supervisor,
+  pedirAutorizacao,
+  salvarGeral: salvarImportarAutomatico,
+  showMsg,
+});
 
 window.Compras?.init({
   api,

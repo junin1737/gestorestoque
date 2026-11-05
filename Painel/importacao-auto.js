@@ -1,6 +1,7 @@
 (() => {
   let deps = null;
   let ligado = false;
+  let authz = null;
 
   function $(sel) { return document.querySelector(sel); }
   function esc(v) { return deps?.escapeHtml ? deps.escapeHtml(v) : String(v ?? ''); }
@@ -40,17 +41,38 @@
     });
   }
 
+  async function autorizacao() {
+    if (deps.isSupervisor?.()) return {};
+    if (!authz) {
+      authz = await deps.pedirAutorizacao?.();
+      if (!authz) return null;
+    }
+    return { autorizacao: authz };
+  }
+
   async function salvar(sel) {
     const card = sel.closest('.auto-prod');
     const aviso = $('#cfg-auto-aviso');
     const id = card?.dataset.id;
+    const anterior = sel.value === 'S' ? 'N' : 'S';
     const importar = card?.querySelector('[data-campo="importar"]')?.value === 'S';
     const ciencia = card?.querySelector('[data-campo="ciencia"]')?.value === 'S';
+    const extra = await autorizacao();
+    if (!extra) {
+      sel.value = anterior;
+      return;
+    }
     const res = await deps.api(`/importacao/auto-produtos/${id}`, {
       method: 'PUT',
-      body: { importar, ciencia },
+      body: { importar, ciencia, ...extra },
     });
-    if (aviso) aviso.textContent = res?.ok ? 'Salvo.' : (res?.error || 'Não foi possível salvar.');
+    if (!res?.ok) {
+      authz = null;
+      sel.value = anterior;
+      if (aviso) aviso.textContent = res?.error || 'Não foi possível salvar.';
+      return;
+    }
+    if (aviso) aviso.textContent = 'Salvo.';
   }
 
   async function buscar() {
@@ -73,7 +95,14 @@
     render(lista);
   }
 
+  async function carregarGeral() {
+    const res = await deps.api('/compras/parametro');
+    const chk = $('#cfg-auto-geral');
+    if (chk && res?.ok) chk.checked = !!res.importarAutomatico;
+  }
+
   function montar() {
+    carregarGeral();
     if (ligado) return;
     ligado = true;
     $('#cfg-auto-buscar')?.addEventListener('click', () => buscar());
@@ -82,6 +111,11 @@
         ev.preventDefault();
         buscar();
       }
+    });
+    $('#cfg-auto-geral-salvar')?.addEventListener('click', async () => {
+      const chk = $('#cfg-auto-geral');
+      const ok = await deps.salvarGeral?.(!!chk?.checked);
+      if (!ok) carregarGeral();
     });
   }
 
