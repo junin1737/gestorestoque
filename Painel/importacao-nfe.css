@@ -2048,16 +2048,19 @@
 .imp-item-main .hint { display: block; overflow-wrap: anywhere; }
 .imp-item-qtds {
   display: flex;
-  flex-wrap: wrap;
-  gap: 0.15rem 0.75rem;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.05rem;
   margin-top: 0.18rem;
   font-size: 0.75rem;
   line-height: 1.3;
   color: var(--muted);
 }
-.imp-item-qtds b { color: var(--text); font-weight: 700; }
-.imp-item-qtds .entra { color: var(--ok, #1f9d55); font-size: 0.84rem; }
-.imp-item-qtds .entra b { color: var(--ok, #1f9d55); }
+.imp-item-qtds .entra {
+  color: var(--ok, #1f9d55);
+  font-weight: 700;
+  font-size: 0.8rem;
+}
 .imp-item-estoque {
   display: block;
   margin-top: 0.12rem;

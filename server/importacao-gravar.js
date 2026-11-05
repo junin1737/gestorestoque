@@ -1018,6 +1018,7 @@ async function gravarParametroFornecedor(db, sessao, it, idIdent) {
 }
 
 async function atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario) {
+  const relatorio = [];
   const linhas = await query(db, `
     SELECT ID_NFCITEM, NUM_ITEM, QTD_ITEM, UNI_MEDIDA, EST_BX, ID_IDENTIFICADOR
     FROM TB_NFC_ITEM WHERE ID_NFCOMPRA = ?`, [idNf]);
@@ -1025,6 +1026,7 @@ async function atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario) {
   for (const it of sessao.itens || []) {
     const idIdent = it.sistema?.id_identificador ? Number(it.sistema.id_identificador) : null;
     if (!idIdent) continue;
+    const fotoAntes = await lerFotoProduto(db, appCfg, idIdent);
     const { qtdXml, conversor, qtdEstoque } = qtdEntradaEstoque(it.sistema || {}, it.xml || {});
     it.sistema.qtd = qtdEstoque;
     it.sistema.conversor = conversor;
@@ -1050,7 +1052,6 @@ async function atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario) {
       qtdNova, vUnitNota, prcMedio, Number(linha.ID_NFCITEM),
     ]);
     const entrou = String(linha.EST_BX || '').trim().toUpperCase() === 'S';
-    if (!entrou) continue;
     let qtdAntiga = Number(linha.QTD_ITEM || 0);
     const uniAntiga = String(linha.UNI_MEDIDA || '').trim().toUpperCase();
     if (uniAntiga && uniAntiga !== 'UN') {
@@ -1060,16 +1061,33 @@ async function atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario) {
       if (convAnt > 0) qtdAntiga = Number((qtdAntiga * convAnt).toFixed(6));
     }
     const delta = Number((qtdNova - qtdAntiga).toFixed(6));
-    if (Math.abs(delta) < 1e-6) continue;
-    await entradaEstoque(db, appCfg, {
-      idIdentificador: idIdent,
-      qtd: delta,
-      prcCusto: prcMedio,
-      usuario: usuario || 'Edição',
-      nfLabel: String(idNf),
-      registrarAlteracao: false,
+    if (entrou && Math.abs(delta) >= 1e-6) {
+      await entradaEstoque(db, appCfg, {
+        idIdentificador: idIdent,
+        qtd: delta,
+        prcCusto: prcMedio,
+        usuario: usuario || 'Edição',
+        nfLabel: String(idNf),
+        registrarAlteracao: false,
+      });
+    }
+    const fotoDepois = await lerFotoProduto(db, appCfg, idIdent);
+    const numFoto = (foto, col) => Number(foto?.[col] || 0);
+    relatorio.push({
+      status: 'Alterado',
+      id_identificador: idIdent,
+      descricao: String(fotoDepois?.DESCRICAO || fotoAntes?.DESCRICAO || it.sistema?.descricao || it.xml?.xProd || '').trim(),
+      qtd_anterior: numFoto(fotoAntes, 'QTD_ATUAL'),
+      qtd_entrada: entrou ? delta : 0,
+      qtd_atual: numFoto(fotoDepois || fotoAntes, 'QTD_ATUAL'),
+      venda_anterior: numFoto(fotoAntes, 'PRC_VENDA'),
+      venda_atual: numFoto(fotoDepois || fotoAntes, 'PRC_VENDA'),
+      custo_anterior: numFoto(fotoAntes, 'PRC_CUSTO'),
+      custo_atual: numFoto(fotoDepois || fotoAntes, 'PRC_CUSTO'),
+      custo_medio: numFoto(fotoDepois || fotoAntes, 'PRC_MEDIO'),
     });
   }
+  return relatorio;
 }
 
 async function gravarNfCompra(sessao, {
@@ -1169,7 +1187,7 @@ async function gravarNfCompra(sessao, {
       for (const it of itens) {
         await atualizarCadastroProduto(db, appCfg, it.sistema || {}, it.xml || {});
       }
-      await atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario);
+      const relatorio = await atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario);
       try {
         const dtEntrada = toDateSql(sessao.dt_entrada);
         if (dtEntrada) {
@@ -1189,6 +1207,7 @@ async function gravarNfCompra(sessao, {
         itens_gravados: itens.length,
         parcelas: parcelasXml.length,
         editado: true,
+        relatorio,
       };
       });
     });

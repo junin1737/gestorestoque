@@ -18,6 +18,7 @@ const ImportacaoNfe = (() => {
     filtroForn: '',
     filtroDataCampo: 'entrada',
     unidades: [],
+    unidadesPedidas: false,
     formasPagto: [],
     parcelamentos: [],
     emitenteSimples: null,
@@ -1101,6 +1102,10 @@ const ImportacaoNfe = (() => {
   }
 
   function renderItensLista() {
+    if (!state.unidades.length && !state.unidadesPedidas) {
+      state.unidadesPedidas = true;
+      ensureUnidades().then(() => renderItensLista()).catch(() => {});
+    }
     const s = state.sessao;
     const box = $('#imp-itens-lista');
     if (!box || !s) return;
@@ -2125,36 +2130,52 @@ const ImportacaoNfe = (() => {
     return `${convFatorFmt(q.qtdXml)} ${uniXml} × ${convFatorFmt(q.conversor)}`.replace(/\s+/g, ' ').trim();
   }
 
-  function nomeUnidadeEstoque(sys, qtd) {
-    const bruta = String(sys.uni_medida_saida || sys.uni_medida || 'UN').trim().toUpperCase();
-    const base = bruta.replace(/[^A-Z]/g, '');
-    const um = Math.abs(Number(qtd) - 1) < 1e-6;
+  function nomeUnidade(codigo, qtd) {
+    const code = String(codigo || 'UN').trim().toUpperCase();
+    const um = (state.unidades || []).find((u) => String(u.unidade || '').trim().toUpperCase() === code);
+    const desc = String(um?.descricao || '').trim().toUpperCase();
+    const plural = Math.abs(Number(qtd) || 0) > 1;
+    const escolher = (um, varios) => (plural ? varios : um);
+    const texto = `${code} ${desc}`;
+    if (/QUILO/.test(texto)) return escolher('quilo', 'quilos');
+    if (/GRAMA/.test(texto)) return escolher('grama', 'gramas');
+    if (/METRO/.test(texto) && !/MILIM|CENTIM/.test(texto)) return escolher('metro', 'metros');
+    if (/CENTIM/.test(texto)) return escolher('centímetro', 'centímetros');
+    if (/MILIM/.test(texto)) return escolher('milímetro', 'milímetros');
+    if (/LITRO/.test(texto) && !/MILI/.test(texto)) return escolher('litro', 'litros');
+    if (/MILIL/.test(texto)) return escolher('mililitro', 'mililitros');
+    if (/UNID/.test(texto) || /^(UN|UND|UNID|UNI)$/.test(code)) return escolher('unidade', 'unidades');
+    if (/CAIXA/.test(texto) || code === 'CX') return escolher('caixa', 'caixas');
+    if (/PACOTE/.test(texto) || code === 'PCT') return escolher('pacote', 'pacotes');
+    if (/PE[CÇ]A/.test(texto)) return escolher('peça', 'peças');
+    if (/D[UÚ]ZIA/.test(texto) || code === 'DZ') return escolher('dúzia', 'dúzias');
+    if (/FARDO/.test(texto)) return escolher('fardo', 'fardos');
+    if (/SACO/.test(texto)) return escolher('saco', 'sacos');
+    if (/GAL[AÃ]O/.test(texto)) return escolher('galão', 'galões');
+    if (/PAR\b/.test(texto) || code === 'PAR') return escolher('par', 'pares');
     const mapa = {
-      UN: ['unidade', 'unidades'],
-      UND: ['unidade', 'unidades'],
-      UNID: ['unidade', 'unidades'],
-      UNI: ['unidade', 'unidades'],
-      PC: ['peça', 'peças'],
       KG: ['quilo', 'quilos'],
       G: ['grama', 'gramas'],
       GR: ['grama', 'gramas'],
       MT: ['metro', 'metros'],
       M: ['metro', 'metros'],
+      MTS: ['metro', 'metros'],
       CM: ['centímetro', 'centímetros'],
-      MM: ['milímetro', 'milímetros'],
       LT: ['litro', 'litros'],
       L: ['litro', 'litros'],
       ML: ['mililitro', 'mililitros'],
     };
-    const par = mapa[base];
-    if (par) return um ? par[0] : par[1];
-    return bruta.toLowerCase();
+    if (mapa[code]) return escolher(mapa[code][0], mapa[code][1]);
+    const base = (String(um?.descricao || '').trim() || code).toLocaleLowerCase('pt-BR');
+    if (plural && base && !base.endsWith('s')) return `${base}s`;
+    return base || 'unidades';
   }
 
   function htmlEntraEstoque(sys, xml) {
     if (String(sys.gera_estoque || 'S').toUpperCase() === 'N') return 'Não entra';
     const q = qtdEntradaItem(sys, xml);
-    return `${num(q.qtdEstoque)} ${esc(nomeUnidadeEstoque(sys, q.qtdEstoque))}`.trim();
+    const uni = sys.uni_medida_saida || sys.uni_medida || 'UN';
+    return `${num(q.qtdEstoque)} ${esc(nomeUnidade(uni, q.qtdEstoque))}`;
   }
 
   function htmlQtdItem(sys, xml) {
@@ -2163,8 +2184,13 @@ const ImportacaoNfe = (() => {
     const nota = `${num(q.qtdXml)} ${esc(uniXml)}`.trim();
     const vinculado = !!(sys.id_identificador || sys.criar_novo);
     if (!vinculado) return `<span class="hint">Sem vínculo · Nota ${nota}</span>`;
+    const frase = htmlEntraEstoque(sys, xml);
+    const entra = frase === 'Não entra'
+      ? 'Não entra no estoque'
+      : `Entra no estoque ${frase}`;
+    const converteu = Math.abs(Number(q.qtdEstoque) - Number(q.qtdXml)) > 1e-6;
     const id = esc(String(sys.id_identificador || 'novo'));
-    return `<span class="imp-item-qtds"><span class="entra">Entra no estoque <b>${htmlEntraEstoque(sys, xml)}</b></span><span>Nota <b>${nota}</b></span></span><span class="hint">${id}</span>`;
+    return `<span class="imp-item-qtds"><span class="entra">${entra}</span>${converteu ? `<span class="hint">Nota ${nota}</span>` : ''}<span class="hint">${id}</span></span>`;
   }
 
   /** "Vender por pacote": quantidade de pacotes digitada (0 quando o item não usa). */
@@ -5198,7 +5224,14 @@ const ImportacaoNfe = (() => {
         if (res.ok) {
           deps.showMsg?.(res.message || 'Entrada confirmada');
           limparRascunhoNota(state.sessao);
-          abrirRelatorioEntrada(res.gravacao);
+          const querRelatorio = await askConfirm(
+            'Deseja gerar o relatório com as alterações?',
+            { okLabel: 'Gerar relatório', cancelLabel: 'Agora não' }
+          );
+          if (querRelatorio) {
+            if (res.gravacao?.relatorio?.length) abrirRelatorioEntrada(res.gravacao);
+            else deps.showMsg?.('Esta gravação não teve alteração de quantidade para o relatório.');
+          }
           state.sessao = null;
           showView('inicio');
           loadHome();
