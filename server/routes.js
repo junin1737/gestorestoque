@@ -3120,6 +3120,35 @@ router.post('/compras/parametro', async (req, res) => {
   }
 });
 
+router.get('/importacao/auto-produtos', async (req, res) => {
+  if (!req.usuario?.supervisor) {
+    return res.status(403).json({ ok: false, error: 'Só o supervisor vê estes parâmetros.' });
+  }
+  try {
+    const autoParams = require('./importacao-auto-params');
+    const produtos = await autoParams.buscar(req.query.q);
+    res.json({ ok: true, produtos });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, produtos: [] });
+  }
+});
+
+router.put('/importacao/auto-produtos/:id', (req, res) => {
+  if (!req.usuario?.supervisor) {
+    return res.status(403).json({ ok: false, error: 'Só o supervisor altera estes parâmetros.' });
+  }
+  try {
+    const autoParams = require('./importacao-auto-params');
+    const salvo = autoParams.definir(req.params.id, {
+      importar: req.body?.importar,
+      ciencia: req.body?.ciencia,
+    });
+    res.json({ ok: true, ...salvo });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.post('/compras/notas/:chave/xml', async (req, res) => {
   if (!guardCompras(req, res)) return;
   try {

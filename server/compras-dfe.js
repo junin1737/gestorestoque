@@ -291,6 +291,9 @@ function mergeNota(store, nota) {
     modelo: '55',
     cancelada,
     temXml: !!(nota.temXml || prev.temXml),
+    autoAviso: prev.autoAviso || '',
+    autoMotivo: prev.autoMotivo || '',
+    proximaTentativa: prev.proximaTentativa || null,
     atualizadaEm: new Date().toISOString(),
   };
   if (nota.temXml && nota.xml) {
@@ -406,9 +409,11 @@ async function executarCiclo() {
     store.leituraInicial = true;
     saveStore(store);
     const incompleto = store.ultimoCStat === '138' && !filaCompleta(store);
-    // importarAutomatico fica guardado para uma próxima versão; a entrada continua manual.
     console.log(`Consultar compras: cStat ${store.ultimoCStat || '—'} · NSU ${store.ultNSU}/${store.maxNSU || '—'} · ${Object.keys(store.notas).length} nota(s) em 90 dias · ${recebidos} doc(s), ${resumos} resumo(s), ${procs} XML.`);
     agendar(incompleto ? CONTINUACAO_MS : INTERVALO_MS);
+    require('./importacao-auto').avaliarPendentes().catch((err) => {
+      console.warn('Importação automática:', err.message);
+    });
   } catch (err) {
     store.ultimoCStat = err.cStat || '';
     store.ultimoErro = err.code === 'SEM_CERTIFICADO'
@@ -438,6 +443,7 @@ function consultaRecente(store) {
 }
 
 function iniciar() {
+  require('./importacao-auto').iniciar();
   definirCnpj().then(() => {
   const store = loadStore();
   if (!store.leituraInicial) return;
@@ -528,6 +534,9 @@ async function listar() {
       status,
       id_nfcompra: id,
       temXml: !!(n.temXml && sefaz.xmlNfeCompleto(arquivo)),
+      autoAviso: n.autoAviso || '',
+      autoMotivo: n.autoMotivo || '',
+      proximaTentativa: n.proximaTentativa || null,
     };
   });
   notas.sort((a, b) => String(b.dhEmi).localeCompare(String(a.dhEmi)) || b.chave.localeCompare(a.chave));
@@ -548,6 +557,15 @@ async function listar() {
     janelaDias: 90,
     cnpj: cnpjBase,
   };
+}
+
+function atualizarNota(chave, patch) {
+  const store = loadStore();
+  const ch = soDigitos(chave);
+  if (!store.notas[ch]) return false;
+  Object.assign(store.notas[ch], patch || {});
+  saveStore(store);
+  return true;
 }
 
 function setImportarAutomatico(valor) {
@@ -595,4 +613,7 @@ module.exports = {
   ingerirLote,
   partesChave,
   loadStore,
+  lerXmlArquivo,
+  gravarXmlArquivo,
+  atualizarNota,
 };

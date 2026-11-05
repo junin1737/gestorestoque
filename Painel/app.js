@@ -227,22 +227,23 @@ function pintarConexaoInstagram() {
 }
 
 function setCfgTab(tab) {
-  if (tab === 'supervisor' && !state.usuario?.supervisor) tab = 'tema';
+  if ((tab === 'supervisor' || tab === 'importacao') && !state.usuario?.supervisor) tab = 'tema';
   stateCfgTab = tab || 'tema';
   state.cfgTab = stateCfgTab;
   $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
-  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'etiquetas', 'conexoes', 'supervisor'].forEach((id) => {
+  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'etiquetas', 'conexoes', 'importacao', 'supervisor'].forEach((id) => {
     const pane = $(`#cfg-tab-${id}`);
     if (pane) pane.hidden = id !== stateCfgTab;
   });
   const salvar = $('#cfg-params-salvar');
   if (salvar) {
-    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas' || stateCfgTab === 'conexoes' || stateCfgTab === 'supervisor';
+    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas' || stateCfgTab === 'conexoes' || stateCfgTab === 'importacao' || stateCfgTab === 'supervisor';
     const barra = salvar.closest('.toolbar');
     if (barra) barra.hidden = salvar.hidden;
   }
   if (stateCfgTab === 'etiquetas') window.Gondola?.onEtiquetas();
   if (stateCfgTab === 'conexoes') pintarConexaoInstagram();
+  if (stateCfgTab === 'importacao') window.ImportacaoAuto?.montar();
   if (stateCfgTab === 'supervisor') carregarAbaSupervisor();
   if (stateCfgTab !== 'tema' && stateCfgTab !== 'etiquetas' && !cfgMontada) {
     cfgMontada = true;
@@ -255,7 +256,7 @@ async function carregarAbaSupervisor() {
   const aviso = $('#cfg-supervisor-aviso');
   if (aviso) {
     aviso.textContent = state.consultarCompras
-      ? 'A importação das notas continua manual. O parâmetro fica guardado aqui e só muda com a senha do supervisor.'
+      ? 'Ligado, a nota só entra sozinha se o XML já estiver completo e cada produto da nota permitir importação e ciência automática na aba Importação. Sem isso, ela fica em Consultar compras para o botão Importar. O relógio não envia ciência da operação.'
       : 'Consultar compras está desligado no painel. O parâmetro fica guardado, e a consulta só passa a valer quando o módulo estiver em Sim.';
   }
   const res = await api('/compras/parametro');
@@ -1302,6 +1303,8 @@ async function enterApp() {
   if ($('#dash-central-ofertas')) $('#dash-central-ofertas').hidden = !showCentral;
   const tabSup = $('#cfg-tab-btn-supervisor');
   if (tabSup) tabSup.hidden = !state.usuario?.supervisor;
+  const tabImp = $('#cfg-tab-btn-importacao');
+  if (tabImp) tabImp.hidden = !state.usuario?.supervisor;
   const cfgSrv = $('#btn-config-servidor');
   if (cfgSrv) cfgSrv.hidden = !isNativeApk();
   const cfgMais = $('#btn-config-servidor-mais');
@@ -4314,6 +4317,8 @@ window.ImportacaoNfe?.init({
   isSupervisor: () => !!state.usuario?.supervisor,
   getUsuario: () => state.usuario,
 });
+
+window.ImportacaoAuto?.init({ api, escapeHtml });
 
 window.Compras?.init({
   api,

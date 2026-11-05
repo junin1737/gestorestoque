@@ -135,6 +135,7 @@ const Compras = (() => {
               <span class="chip">${esc(deps.fmtMoney ? deps.fmtMoney(n.vNF) : n.vNF)}</span>
             </div>
             <p class="compras-chave"><span>Chave</span> ${esc(fmtChave(n.chave))}</p>
+            ${n.autoAviso ? `<p class="hint compras-auto">${esc(n.autoAviso)}</p>` : ''}
           </div>
           <div class="item-side">
             <span class="stock-badge ${statusClass(n.status)}">${esc(n.status)}</span>

@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=288" />
+  <link rel="stylesheet" href="styles.css?v=289" />
   <link rel="stylesheet" href="importacao-nfe.css?v=251" />
 </head>
 <body>
@@ -976,6 +976,7 @@
             <button type="button" class="tab" data-cfg-tab="clientes">Clientes</button>
             <button type="button" class="tab" data-cfg-tab="etiquetas">Etiquetas</button>
             <button type="button" class="tab" data-cfg-tab="conexoes">Conexões</button>
+            <button type="button" class="tab" data-cfg-tab="importacao" id="cfg-tab-btn-importacao" hidden>Importação</button>
             <button type="button" class="tab" data-cfg-tab="supervisor" id="cfg-tab-btn-supervisor" hidden>Supervisor</button>
           </div>
           <div id="cfg-tab-tema" class="cfg-tab">
@@ -1045,6 +1046,20 @@
               <p class="hint">Usuário, ID e token ficam no cadastro do cliente, no painel. Aqui só aparece se a conta está conectada e até quando o token vale.</p>
             </div>
           </div>
+          <div id="cfg-tab-importacao" class="cfg-tab" hidden>
+            <div class="pref-card larga auto-card">
+              <h3>Importação automática por produto</h3>
+              <p class="hint">Os dois campos nascem em Não. A nota só é lançada sozinha quando o parâmetro geral está ligado, o XML completo já chegou, todos os itens estão cadastrados e parametrizados, e os dois campos estão em Sim em todos os produtos da nota. Se algum estiver em Não, a nota espera o botão Importar. O relógio não envia ciência da operação.</p>
+              <div class="auto-prod-busca">
+                <label>Produto
+                  <input type="search" id="cfg-auto-busca" placeholder="Nome, código ou EAN" autocomplete="off" />
+                </label>
+                <button type="button" class="btn" id="cfg-auto-buscar">Buscar</button>
+              </div>
+              <p class="hint" id="cfg-auto-aviso">Digite pelo menos duas letras ou o código.</p>
+              <div id="cfg-auto-lista" class="auto-prod-lista"></div>
+            </div>
+          </div>
           <div id="cfg-tab-supervisor" class="cfg-tab" hidden>
             <div class="pref-card">
               <h3>Consultar compras</h3>
@@ -1052,7 +1067,7 @@
                 <input type="checkbox" id="cfg-importar-auto" />
                 <span>Importar pendentes automaticamente</span>
               </label>
-              <p class="hint" id="cfg-supervisor-aviso">A importação das notas continua manual. O parâmetro fica guardado aqui e só muda com a senha do supervisor.</p>
+              <p class="hint" id="cfg-supervisor-aviso">Ligado, a nota só entra sozinha se o XML já estiver completo e cada produto da nota permitir importação e ciência automática na aba Importação. Sem isso, ela fica em Consultar compras para o botão Importar. O relógio não envia ciência da operação.</p>
               <button type="button" class="btn primary" id="cfg-importar-auto-salvar">Salvar</button>
             </div>
           </div>
@@ -1360,13 +1375,14 @@
   <div id="gond-impressao" aria-hidden="true"></div>
   <script src="vendor/zxing-browser.min.js?v=240"></script>
   <script src="importacao-nfe.js?v=250"></script>
-  <script src="compras.js?v=241"></script>
+  <script src="compras.js?v=242"></script>
+  <script src="importacao-auto.js?v=1"></script>
   <script src="condicionais.js?v=252"></script>
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
   <script src="dashboard.js?v=262"></script>
   <script src="gondola.js?v=2"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=276"></script>
+  <script src="app.js?v=277"></script>
 </body>
 </html>

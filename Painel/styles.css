@@ -3919,3 +3919,33 @@ html[data-theme="escuro"] .compras-row:hover {
   #page-central-ofertas .co-modo-sel { font-size: 16px; }
 }
 
+.auto-prod-busca {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.5rem;
+}
+.auto-prod-busca label,
+.auto-prod label { margin-bottom: 0; }
+.auto-prod-busca label { flex: 1; min-width: 0; }
+.auto-prod-busca input { width: 100%; }
+.auto-prod-lista { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.6rem; }
+.pref-card.auto-card { max-width: 52rem; }
+.auto-prod {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 8.5rem 8.5rem;
+  gap: 0.55rem;
+  align-items: end;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--line, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+}
+.auto-prod strong { display: block; }
+.auto-prod .item-meta { margin-top: 0.15rem; }
+.auto-prod label { display: flex; flex-direction: column; gap: 0.2rem; font-size: 0.78rem; }
+.auto-prod select { width: 100%; }
+.compras-auto { margin: 0.35rem 0 0; color: #a15c00; }
+@media (max-width: 720px) {
+  .auto-prod-busca { flex-direction: column; align-items: stretch; }
+  .auto-prod { grid-template-columns: 1fr; }
+}
+
