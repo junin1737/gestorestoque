@@ -2125,10 +2125,36 @@ const ImportacaoNfe = (() => {
     return `${convFatorFmt(q.qtdXml)} ${uniXml} × ${convFatorFmt(q.conversor)}`.replace(/\s+/g, ' ').trim();
   }
 
+  function nomeUnidadeEstoque(sys, qtd) {
+    const bruta = String(sys.uni_medida_saida || sys.uni_medida || 'UN').trim().toUpperCase();
+    const base = bruta.replace(/[^A-Z]/g, '');
+    const um = Math.abs(Number(qtd) - 1) < 1e-6;
+    const mapa = {
+      UN: ['unidade', 'unidades'],
+      UND: ['unidade', 'unidades'],
+      UNID: ['unidade', 'unidades'],
+      UNI: ['unidade', 'unidades'],
+      PC: ['peça', 'peças'],
+      KG: ['quilo', 'quilos'],
+      G: ['grama', 'gramas'],
+      GR: ['grama', 'gramas'],
+      MT: ['metro', 'metros'],
+      M: ['metro', 'metros'],
+      CM: ['centímetro', 'centímetros'],
+      MM: ['milímetro', 'milímetros'],
+      LT: ['litro', 'litros'],
+      L: ['litro', 'litros'],
+      ML: ['mililitro', 'mililitros'],
+    };
+    const par = mapa[base];
+    if (par) return um ? par[0] : par[1];
+    return bruta.toLowerCase();
+  }
+
   function htmlEntraEstoque(sys, xml) {
     if (String(sys.gera_estoque || 'S').toUpperCase() === 'N') return 'Não entra';
     const q = qtdEntradaItem(sys, xml);
-    return `${num(q.qtdEstoque)} ${esc(sys.uni_medida || 'UN')}`.trim();
+    return `${num(q.qtdEstoque)} ${esc(nomeUnidadeEstoque(sys, q.qtdEstoque))}`.trim();
   }
 
   function htmlQtdItem(sys, xml) {
@@ -2138,7 +2164,7 @@ const ImportacaoNfe = (() => {
     const vinculado = !!(sys.id_identificador || sys.criar_novo);
     if (!vinculado) return `<span class="hint">Sem vínculo · Nota ${nota}</span>`;
     const id = esc(String(sys.id_identificador || 'novo'));
-    return `<span class="imp-item-qtds"><span>Nota <b>${nota}</b></span><span class="entra">Estoque <b>${htmlEntraEstoque(sys, xml)}</b></span></span><span class="hint">${id}</span>`;
+    return `<span class="imp-item-qtds"><span class="entra">Entra no estoque <b>${htmlEntraEstoque(sys, xml)}</b></span><span>Nota <b>${nota}</b></span></span><span class="hint">${id}</span>`;
   }
 
   /** "Vender por pacote": quantidade de pacotes digitada (0 quando o item não usa). */

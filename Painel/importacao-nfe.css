@@ -2056,6 +2056,7 @@
   color: var(--muted);
 }
 .imp-item-qtds b { color: var(--text); font-weight: 700; }
+.imp-item-qtds .entra { color: var(--ok, #1f9d55); font-size: 0.84rem; }
 .imp-item-qtds .entra b { color: var(--ok, #1f9d55); }
 .imp-item-estoque {
   display: block;
