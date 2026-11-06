@@ -145,7 +145,7 @@ async function criarProdutoBasico(db, appCfg, sistema, xmlItem) {
   const idEstoque = await nextId(db, tPrimary.genEstoque, tPrimary.estoque, 'ID_ESTOQUE');
   const idIdentificador = await nextId(db, tPrimary.genIdentificador, tPrimary.identificador, 'ID_IDENTIFICADOR');
   const descricao = String(sistema.descricao || xmlItem?.xProd || 'PRODUTO NF-e').trim().slice(0, 120);
-  const uni = String(sistema.uni_medida_saida || sistema.uni_medida || xmlItem?.uCom || 'UN').trim().slice(0, 6) || 'UN';
+  const uni = String(sistema.uni_medida_saida || 'UN').trim().slice(0, 6) || 'UN';
   const margemNum = Number(sistema.margem_lb);
   const margem = Number.isFinite(margemNum) && margemNum > 0 ? margemNum : 0;
   const custoCalc = calcCustoUnitarioItem(sistema, xmlItem);
@@ -365,7 +365,7 @@ async function atualizarCadastroProduto(db, appCfg, sistema = {}, xmlItem = {}) 
   const barras = sistema.ean_em_referencia
     ? (String(sistema.cod_barras || '').trim() || null)
     : (String(sistema.cod_barras || eanXml).trim() || null);
-  const uni = String(sistema.uni_medida_saida || sistema.uni_medida || xmlItem?.uCom || '').trim().slice(0, 6) || null;
+  const uni = String(sistema.uni_medida_saida || '').trim().slice(0, 6) || null;
   const descricao = String(sistema.descricao || '').trim();
   const referencia = sistema.referencia != null ? String(sistema.referencia).trim() : null;
   const descCmpl = sistema.desc_cmpl != null ? String(sistema.desc_cmpl).trim() : null;
@@ -987,6 +987,16 @@ async function gravarParametroFornecedor(db, sessao, it, idIdent) {
   const idFornec = sessao.fornecedor?.id_fornec ? Number(sessao.fornecedor.id_fornec) : null;
   if (!idFornec || !idIdent) return;
   const trib = it.sistema?.tributos || {};
+  const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
+  const salvo = await salvarConversaoGestor({
+    id_identificador: idIdent,
+    id_fornec: idFornec,
+    uni_xml: it.sistema?.uni_medida_xml || it.xml?.uCom || '',
+    uni_estoque: it.sistema?.uni_medida || 'UN',
+    conversor: it.sistema?.conversor ?? 1,
+    pacote: !!(it.sistema?.vender_pacote && Number(it.sistema?.qtd_pacotes) > 0),
+  }, db);
+  if (salvo?.unidade && it.sistema) it.sistema.uni_medida = salvo.unidade;
   const { upsertEstoqueFornecedor } = require('./importacao-estoque-fornec');
   await upsertEstoqueFornecedor({
     id_identificador: idIdent,
@@ -999,22 +1009,13 @@ async function gravarParametroFornecedor(db, sessao, it, idIdent) {
     pis: trib.p_pis || 0,
     cst_pis: trib.cst_pis || '',
     aliq_icms: trib.p_icms || 0,
-    uni_medida: it.sistema?.uni_medida || '',
-    conversor: it.sistema?.conversor,
+    uni_medida: it.sistema?.uni_medida || salvo?.unidade || '',
+    conversor: salvo?.conversor ?? it.sistema?.conversor,
     cfop: it.sistema?.cfop || '',
     ipi: trib.p_ipi || null,
     cst_ipi: trib.cst_ipi || '49',
     cod_barras: it.sistema?.cod_barras || '',
   }, { db });
-  const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
-  await salvarConversaoGestor({
-    id_identificador: idIdent,
-    id_fornec: idFornec,
-    uni_xml: it.sistema?.uni_medida_xml || it.xml?.uCom || '',
-    uni_estoque: it.sistema?.uni_medida || 'UN',
-    conversor: it.sistema?.conversor ?? 1,
-    pacote: !!(it.sistema?.vender_pacote && Number(it.sistema?.qtd_pacotes) > 0),
-  }, db);
 }
 
 async function atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario) {
@@ -1148,6 +1149,7 @@ async function gravarNfCompra(sessao, {
     return withDb(async (conn, appCfg) => {
       try {
         await require('./importacao-conversao-gestor').ensureConversaoGestor(conn);
+        await require('./importacao-notas').ensureOrigemNota(conn);
       } catch (e) {
         console.warn('TB_MT_CONVERSAO:', e.message);
       }
@@ -1156,6 +1158,11 @@ async function gravarNfCompra(sessao, {
         SELECT FIRST 1 STATUS FROM TB_NFCOMPRA WHERE ID_NFCOMPRA = ?`, [idNf]);
       if (String(nfAtual[0]?.STATUS || '').trim().toUpperCase() === 'C') {
         throw new Error('Esta NF está cancelada e não pode ser editada.');
+      }
+      try {
+        await require('./importacao-notas').marcarNotaGestor(db, idNf);
+      } catch (e) {
+        console.warn('Origem da nota:', e.message);
       }
       const lock = await nfFinanceiroBloqueado(db, idNf);
       const parcelasXml = Array.isArray(fin.parcelas) && fin.parcelas.length
@@ -1247,6 +1254,7 @@ async function gravarNfCompra(sessao, {
     // DDL fora da transação da nota: no Firebird a coluna nova só vale depois do commit.
     try {
       await require('./importacao-conversao-gestor').ensureConversaoGestor(conn);
+      await require('./importacao-notas').ensureOrigemNota(conn);
     } catch (e) {
       console.warn('TB_MT_CONVERSAO:', e.message);
     }
@@ -1294,6 +1302,11 @@ async function gravarNfCompra(sessao, {
         vol0.nVol ? String(vol0.nVol).slice(0, 30) : null,
         chave || null,
       ]);
+      try {
+        await require('./importacao-notas').marcarNotaGestor(db, idNf);
+      } catch (e) {
+        console.warn('Origem da nota:', e.message);
+      }
 
       let parcelasGeradas = 0;
       if (geraFinanceiroNota) {

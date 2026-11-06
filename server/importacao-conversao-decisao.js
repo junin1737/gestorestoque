@@ -6,32 +6,46 @@ function inteiroClipp(valor) {
   return Math.round(n);
 }
 
+/** Fator positivo com a mesma escala de TB_UNI_MEDIDA.CONVERSOR (4 casas). */
+function fatorNumero(valor) {
+  const n = Number(valor);
+  if (!Number.isFinite(n) || !(n > 0)) return null;
+  return Math.round(n * 10000) / 10000;
+}
+
+function fatoresIguais(a, b) {
+  const x = fatorNumero(a);
+  const y = fatorNumero(b);
+  return x != null && y != null && Math.abs(x - y) < 0.00005;
+}
+
 function fatorEhDoClipp(fator, conversorClipp) {
-  const pedido = inteiroClipp(fator);
-  const cadastro = inteiroClipp(conversorClipp);
-  return pedido != null && cadastro != null && pedido === cadastro;
+  return fatoresIguais(fator, conversorClipp);
 }
 
 /**
- * Unidade que existe em TB_UNI_MEDIDA: o fator da nota é o inteiro dessa unidade.
- * Fator que o Clipp não tem (fração, pacote ou número diferente): só TB_MT_CONVERSAO.
+ * Cada item tem o seu fator. Se o Clipp e o Gestor divergem, vale o que foi
+ * digitado no Gestor. Iguais (inclusive fração, como 14,5) são o mesmo número.
+ * Pacote informado pelo usuário vence os dois.
  */
 function decidirConversao({ clipp, gestor } = {}) {
-  const temClipp = !!(clipp && clipp.uni && inteiroClipp(clipp.conversor) != null);
-  const temGestor = !!(gestor && (gestor.uni || Number(gestor.conversor) > 0));
+  const convClipp = clipp && clipp.uni ? fatorNumero(clipp.conversor) : null;
+  const temClipp = convClipp != null;
+  const convGestor = gestor ? fatorNumero(gestor.conversor) : null;
+  const temGestor = !!(gestor && (gestor.uni || convGestor != null));
   if (temGestor && gestor.pacote) {
     return {
       origem: 'gestor',
       uni: gestor.uni || (clipp && clipp.uni) || '',
-      conversor: Number(gestor.conversor) || 1,
+      conversor: convGestor || 1,
       pacote: true,
     };
   }
-  if (temGestor && (!temClipp || !fatorEhDoClipp(gestor.conversor, clipp.conversor))) {
+  if (temGestor && (!temClipp || !fatoresIguais(convGestor, convClipp))) {
     return {
       origem: 'gestor',
       uni: gestor.uni || (temClipp ? clipp.uni : ''),
-      conversor: Number(gestor.conversor) || 1,
+      conversor: convGestor || 1,
       pacote: false,
     };
   }
@@ -39,7 +53,7 @@ function decidirConversao({ clipp, gestor } = {}) {
     return {
       origem: 'clipp',
       uni: clipp.uni,
-      conversor: inteiroClipp(clipp.conversor),
+      conversor: convClipp,
       pacote: false,
     };
   }
@@ -48,6 +62,8 @@ function decidirConversao({ clipp, gestor } = {}) {
 
 module.exports = {
   inteiroClipp,
+  fatorNumero,
+  fatoresIguais,
   fatorEhDoClipp,
   decidirConversao,
 };

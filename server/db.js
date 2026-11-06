@@ -311,6 +311,13 @@ async function ensureSchema(db) {
     console.warn('TB_MT_CONVERSAO:', err.message);
   }
 
+  try {
+    const { ensureOrigemNota } = require('./importacao-notas');
+    await ensureOrigemNota(db);
+  } catch (err) {
+    console.warn('TB_MT_NF_ORIGEM:', err.message);
+  }
+
   schemaReady = true;
   await refreshTables(db);
 }

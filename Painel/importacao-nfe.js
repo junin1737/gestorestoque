@@ -2091,23 +2091,25 @@ const ImportacaoNfe = (() => {
    * Mesma conta de server/importacao-rateio.js qtdEntradaEstoque.
    * Pacote informado vence. Quantidade digitada só vale com conversor manual.
    */
-  function inteiroClipp(valor) {
+  function fatorNumero(valor) {
     const n = Number(valor);
-    if (!(n > 0) || Math.abs(n - Math.round(n)) > 1e-6) return null;
-    return Math.round(n);
+    if (!Number.isFinite(n) || !(n > 0)) return null;
+    return Math.round(n * 10000) / 10000;
   }
 
   function decidirConversao({ clipp, gestor } = {}) {
-    const temClipp = !!(clipp && clipp.uni && inteiroClipp(clipp.conversor) != null);
-    const temGestor = !!(gestor && (gestor.uni || Number(gestor.conversor) > 0));
-    const igual = temClipp && temGestor && inteiroClipp(gestor.conversor) === inteiroClipp(clipp.conversor);
+    const convClipp = clipp && clipp.uni ? fatorNumero(clipp.conversor) : null;
+    const temClipp = convClipp != null;
+    const convGestor = gestor ? fatorNumero(gestor.conversor) : null;
+    const temGestor = !!(gestor && (gestor.uni || convGestor != null));
+    const igual = temClipp && temGestor && Math.abs(convGestor - convClipp) < 0.00005;
     if (temGestor && gestor.pacote) {
-      return { origem: 'gestor', uni: gestor.uni || clipp?.uni || '', conversor: Number(gestor.conversor) || 1, pacote: true };
+      return { origem: 'gestor', uni: gestor.uni || clipp?.uni || '', conversor: convGestor || 1, pacote: true };
     }
     if (temGestor && (!temClipp || !igual)) {
-      return { origem: 'gestor', uni: gestor.uni || clipp?.uni || '', conversor: Number(gestor.conversor) || 1, pacote: false };
+      return { origem: 'gestor', uni: gestor.uni || clipp?.uni || '', conversor: convGestor || 1, pacote: false };
     }
-    if (temClipp) return { origem: 'clipp', uni: clipp.uni, conversor: inteiroClipp(clipp.conversor), pacote: false };
+    if (temClipp) return { origem: 'clipp', uni: clipp.uni, conversor: convClipp, pacote: false };
     return null;
   }
 
@@ -3025,7 +3027,6 @@ const ImportacaoNfe = (() => {
         sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
       }
       if (estFornec.uni_medida && sys.conversor_origem !== 'gestor' && sys.conversor_origem !== 'clipp') {
-        if (!filled(sys.uni_medida_saida)) sys.uni_medida_saida = estFornec.uni_medida;
         // Primeira entrada: sugere TB_ESTOQUE_FORNECEDOR só se o Gestor ainda não gravou conversão.
         if (!sys.conversor_manual) {
           applyConversaoUnidade(
@@ -3569,7 +3570,7 @@ const ImportacaoNfe = (() => {
     const idFornec = state.sessao?.fornecedor?.id_fornec;
     if (sys.id_identificador) {
       try {
-        await api('/importacao/conversao-gestor', {
+        const cv = await api('/importacao/conversao-gestor', {
           method: 'POST',
           body: {
             id_identificador: sys.id_identificador,
@@ -3577,9 +3578,14 @@ const ImportacaoNfe = (() => {
             uni_xml: sys.uni_medida_xml || it.xml?.uCom || '',
             uni_estoque: sys.uni_medida || 'UN',
             conversor: Number(sys.conversor ?? 1) || 1,
+            pacote: !!(sys.vender_pacote && Number(sys.qtd_pacotes) > 0),
           },
         });
-        if (it.sistema) it.sistema.conversor_origem = 'gestor';
+        if (cv && cv.ok && it.sistema) {
+          if (cv.unidade) it.sistema.uni_medida = cv.unidade;
+          if (Number(cv.conversor) > 0) it.sistema.conversor = Number(cv.conversor);
+          it.sistema.conversor_origem = 'gestor';
+        }
       } catch (_) { /* ignore */ }
     }
     if (!idFornec) return;

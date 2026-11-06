@@ -3349,19 +3349,29 @@ async function abrirResumoNotaLancada(idNf) {
     return;
   }
   const n = res.nota;
+  const entrada = n.entrada === 'Gestor' ? 'Gestor' : 'Clipp';
+  const qtdEstoque = n.qtd_estoque != null
+    ? Number(n.qtd_estoque)
+    : (n.itens || []).reduce((acc, it) => acc + Number(it.qtd || 0), 0);
   const linhas = (n.itens || []).map((it) => {
     const desc = it.descricao || `ID ${it.id_identificador || '—'}`;
     return `${it.num_item || '—'} · ${desc}  ${fmtNum(it.qtd)} ${it.uni_medida || ''}  ${fmtMoney(it.vlr_total)}`;
   });
+  const fin = Array.isArray(n.financeiro) ? n.financeiro : [];
+  const finLinhas = fin.length
+    ? fin.map((p) => `${p.documento || 'Parcela'}  venc. ${fmtDate(p.dt_vencto)}  ${fmtMoney(p.valor)}`)
+    : ['sem parcelas'];
   const texto = [
     `NF ${n.nf_numero}/${n.nf_serie || '1'}`,
     `Fornecedor: ${n.fornecedor_nome || '—'}`,
     n.fornecedor_cnpj ? `CNPJ: ${n.fornecedor_cnpj}` : '',
-    `Entrada: ${fmtDate(n.dt_entrada)}  ·  Emissão: ${fmtDate(n.dt_emissao)}`,
-    `Itens: ${n.qtd_itens || (n.itens || []).length}  ·  Total: ${fmtMoney(n.vlr_itens)}`,
+    `Entrada no ${entrada}  ·  ${fmtDate(n.dt_entrada)}  ·  Emissão: ${fmtDate(n.dt_emissao)}`,
+    `Estoque: ${n.qtd_itens || (n.itens || []).length} itens · qtd ${fmtNum(qtdEstoque)} · ${fmtMoney(n.vlr_itens)}`,
+    `Financeiro: ${fmtMoney(n.vlr_financeiro != null ? n.vlr_financeiro : fin.reduce((acc, p) => acc + Number(p.valor || 0), 0))}`,
+    ...finLinhas,
     n.status ? `Status: ${n.status}` : '',
     '',
-    linhas.length ? linhas.join('\n') : 'Sem itens.',
+    linhas.length ? linhas.join('\n') : 'Sem itens de estoque.',
   ].filter((x, i, arr) => x !== '' || arr[i + 1] !== '').join('\n');
   showMsg(texto);
 }
@@ -3412,6 +3422,7 @@ function renderAlteracoes() {
             <span class="chip">#${it.id_estoque || '—'}</span>
             ${it.cod_barras ? `<span class="chip">${escapeHtml(it.cod_barras)}</span>` : ''}
             <span class="chip">${escapeHtml(it.funcionario || '—')}</span>
+            ${tipo === 'notas' && it.entrada ? `<span class="chip">${escapeHtml(it.entrada)}</span>` : ''}
             ${state.alteracoesTipo === 'todos' ? `<span class="chip chip-tipo ${escapeAttr(tipo)}">${escapeHtml(tipoAlteracaoLabel(tipo))}</span>` : ''}
           </div>
           ${detalhe ? `<p class="alt-obs">${escapeHtml(detalhe)}</p>` : ''}

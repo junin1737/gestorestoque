@@ -2056,36 +2056,92 @@ router.get('/alteracoes', exigirModulo('alteracoes'), async (req, res) => {
 
       if (wantNotas) {
         try {
-          const nfRows = await query(db, `
-            SELECT FIRST 200
-              N.ID_NFCOMPRA, N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.STATUS,
-              F.NOME_FANTA AS FORNEC_FANTA, F.NOME AS FORNEC_NOME
-            FROM TB_NFCOMPRA N
-            LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
-            WHERE N.DT_ENTRADA >= DATEADD(-${dias} DAY TO CURRENT_DATE)
-              AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
-            ORDER BY N.DT_ENTRADA DESC, N.ID_NFCOMPRA DESC`);
-          itens.push(...nfRows.map((r) => ({
-            id: `nf-${Number(r.ID_NFCOMPRA)}`,
-            origem: 'nota',
-            tipo: 'notas',
-            data: r.DT_ENTRADA,
-            hora: null,
-            data_hora: null,
-            id_identificador: null,
-            id_estoque: Number(r.ID_NFCOMPRA),
-            descricao: `NF ${r.NF_NUMERO}/${String(r.NF_SERIE || '').trim()}`,
-            uni_medida: '',
-            cod_barras: '',
-            saldo_antigo: null,
-            saldo_novo: null,
-            diferenca: null,
-            resumo: String(r.FORNEC_FANTA || r.FORNEC_NOME || '').trim() || 'Nota lançada',
-            detalhe: `Emissão ${r.DT_EMISSAO || '—'} · status ${String(r.STATUS || '').trim() || '—'}`,
-            id_funcionario: 0,
-            funcionario: '—',
-            observacao: '',
-          })));
+          const fmtQtd = (n) => Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+          const fmtMoney = (n) => Number(n || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+          const origemSql = (comTabela) => `CASE WHEN ${comTabela ? `EXISTS (
+                  SELECT 1 FROM TB_MT_NF_ORIGEM O
+                  WHERE O.ID_NFCOMPRA = N.ID_NFCOMPRA AND O.ORIGEM = 'G'
+                ) OR ` : ''}EXISTS (
+                  SELECT 1 FROM TB_NFC_CTAPAG L
+                  JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = L.ID_CTAPAG
+                  WHERE L.ID_NFCOMPRA = N.ID_NFCOMPRA
+                    AND C.OBSERVACAO CONTAINING 'Gestor Estoque'
+                ) THEN 'Gestor' ELSE 'Clipp' END`;
+          let nfRows = [];
+          try {
+            nfRows = await query(db, `
+              SELECT FIRST 200
+                N.ID_NFCOMPRA, N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.STATUS,
+                ${origemSql(true)} AS ENTRADA,
+                F.NOME_FANTA AS FORNEC_FANTA, F.NOME AS FORNEC_NOME,
+                (SELECT COUNT(*) FROM TB_NFC_ITEM I WHERE I.ID_NFCOMPRA = N.ID_NFCOMPRA) AS QTD_ITENS,
+                (SELECT COALESCE(SUM(I.QTD_ITEM), 0) FROM TB_NFC_ITEM I WHERE I.ID_NFCOMPRA = N.ID_NFCOMPRA) AS QTD_ESTOQUE,
+                (SELECT COALESCE(SUM(I.VLR_TOTAL), 0) FROM TB_NFC_ITEM I WHERE I.ID_NFCOMPRA = N.ID_NFCOMPRA) AS VLR_ESTOQUE,
+                (SELECT COUNT(*) FROM TB_NFC_CTAPAG L WHERE L.ID_NFCOMPRA = N.ID_NFCOMPRA) AS QTD_PARC,
+                (SELECT COALESCE(SUM(C.VLR_CTAPAG), 0)
+                   FROM TB_NFC_CTAPAG L
+                   JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = L.ID_CTAPAG
+                   WHERE L.ID_NFCOMPRA = N.ID_NFCOMPRA) AS VLR_FIN
+              FROM TB_NFCOMPRA N
+              LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
+              WHERE N.DT_ENTRADA >= DATEADD(-${dias} DAY TO CURRENT_DATE)
+                AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+              ORDER BY N.DT_ENTRADA DESC, N.ID_NFCOMPRA DESC`);
+          } catch (errRico) {
+            console.warn('Alterações notas (estoque/financeiro):', errRico.message);
+            nfRows = await query(db, `
+              SELECT FIRST 200
+                N.ID_NFCOMPRA, N.NF_NUMERO, N.NF_SERIE, N.DT_ENTRADA, N.DT_EMISSAO, N.STATUS,
+                ${origemSql(false)} AS ENTRADA,
+                F.NOME_FANTA AS FORNEC_FANTA, F.NOME AS FORNEC_NOME,
+                (SELECT COUNT(*) FROM TB_NFC_ITEM I WHERE I.ID_NFCOMPRA = N.ID_NFCOMPRA) AS QTD_ITENS,
+                (SELECT COALESCE(SUM(I.QTD_ITEM), 0) FROM TB_NFC_ITEM I WHERE I.ID_NFCOMPRA = N.ID_NFCOMPRA) AS QTD_ESTOQUE,
+                (SELECT COALESCE(SUM(I.VLR_TOTAL), 0) FROM TB_NFC_ITEM I WHERE I.ID_NFCOMPRA = N.ID_NFCOMPRA) AS VLR_ESTOQUE,
+                (SELECT COALESCE(SUM(C.VLR_CTAPAG), 0)
+                   FROM TB_NFC_CTAPAG L
+                   JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = L.ID_CTAPAG
+                   WHERE L.ID_NFCOMPRA = N.ID_NFCOMPRA) AS VLR_FIN,
+                (SELECT COUNT(*) FROM TB_NFC_CTAPAG L WHERE L.ID_NFCOMPRA = N.ID_NFCOMPRA) AS QTD_PARC
+              FROM TB_NFCOMPRA N
+              LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
+              WHERE N.DT_ENTRADA >= DATEADD(-${dias} DAY TO CURRENT_DATE)
+                AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
+              ORDER BY N.DT_ENTRADA DESC, N.ID_NFCOMPRA DESC`);
+          }
+          itens.push(...nfRows.map((r) => {
+            const entrada = String(r.ENTRADA || '').trim() === 'Gestor' ? 'Gestor' : 'Clipp';
+            const qtdItens = Number(r.QTD_ITENS || 0);
+            const qtdParc = Number(r.QTD_PARC || 0);
+            const temResumo = r.QTD_ITENS != null || r.QTD_PARC != null;
+            const finTxt = qtdParc > 0
+              ? `Financeiro: ${fmtMoney(r.VLR_FIN)} em ${qtdParc} parcela${qtdParc === 1 ? '' : 's'}`
+              : 'Financeiro: sem parcelas';
+            const detalhe = temResumo
+              ? `Entrada no ${entrada} · Estoque: ${qtdItens} ${qtdItens === 1 ? 'item' : 'itens'}, qtd ${fmtQtd(r.QTD_ESTOQUE)}, ${fmtMoney(r.VLR_ESTOQUE)} · ${finTxt}`
+              : `Entrada no ${entrada} · Emissão ${r.DT_EMISSAO || '—'} · status ${String(r.STATUS || '').trim() || '—'}`;
+            return {
+              id: `nf-${Number(r.ID_NFCOMPRA)}`,
+              origem: 'nota',
+              tipo: 'notas',
+              entrada,
+              data: r.DT_ENTRADA,
+              hora: null,
+              data_hora: null,
+              id_identificador: null,
+              id_estoque: Number(r.ID_NFCOMPRA),
+              descricao: `NF ${r.NF_NUMERO}/${String(r.NF_SERIE || '').trim()}`,
+              uni_medida: '',
+              cod_barras: '',
+              saldo_antigo: null,
+              saldo_novo: null,
+              diferenca: null,
+              resumo: String(r.FORNEC_FANTA || r.FORNEC_NOME || '').trim() || 'Nota lançada',
+              detalhe,
+              id_funcionario: 0,
+              funcionario: entrada,
+              observacao: '',
+            };
+          }));
         } catch (e) {
           console.warn('Alterações notas lançadas:', e.message);
         }

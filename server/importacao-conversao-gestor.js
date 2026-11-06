@@ -1,6 +1,7 @@
 'use strict';
 
 const { query, hasTable, refreshTables, withDb, columnExists } = require('./db');
+const { garantirUnidadeParaFator } = require('./importacao-unidade-conversao');
 
 const TABLE = 'TB_MT_CONVERSAO';
 
@@ -73,12 +74,27 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
   if (!idIdent) return null;
   const idForn = Number(dados.id_fornec || 0) || null;
   const uniXml = normUni(dados.uni_xml);
-  const uniEst = normUni(dados.uni_estoque) || 'UN';
-  const conversor = Number(dados.conversor || 1) || 1;
+  let uniEst = normUni(dados.uni_estoque) || 'UN';
+  let conversor = Number(dados.conversor || 1) || 1;
   const pacote = dados.pacote ? 'S' : 'N';
 
   const run = async (db) => {
     await ensureConversaoGestor(db);
+    let criada = false;
+    if (pacote !== 'S') {
+      const uni = await garantirUnidadeParaFator(db, conversor, uniEst);
+      if (uni?.unidade) {
+        uniEst = normUni(uni.unidade) || uniEst;
+        conversor = Number(uni.conversor) || conversor;
+        criada = !!uni.criada;
+      }
+      if (idForn && uniEst) {
+        await query(db, `
+          UPDATE TB_ESTOQUE_FORNECEDOR
+          SET UNI_MEDIDA = ?
+          WHERE ID_IDENTIFICADOR = ? AND ID_FORNEC = ?`, [uniEst, idIdent, idForn]);
+      }
+    }
     const exist = await query(db, `
       SELECT FIRST 1 ID FROM ${TABLE}
       WHERE ID_IDENTIFICADOR = ?
@@ -91,7 +107,7 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
         UPDATE ${TABLE}
         SET UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = ?, UPDATED_AT = CURRENT_TIMESTAMP
         WHERE ID = ?`, [uniEst, conversor, pacote, exist[0].ID]);
-      return { id: exist[0].ID, atualizado: true };
+      return { id: exist[0].ID, atualizado: true, unidade: uniEst, conversor, criada };
     }
     const next = await query(db, `SELECT COALESCE(MAX(ID), 0) + 1 AS ID FROM ${TABLE}`);
     const id = Number(next[0]?.ID || 1);
@@ -100,7 +116,7 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
       id, idIdent, idForn, uniXml || null, uniEst, conversor, pacote,
     ]);
-    return { id, atualizado: false };
+    return { id, atualizado: false, unidade: uniEst, conversor, criada };
   };
 
   if (dbExterno) return run(dbExterno);

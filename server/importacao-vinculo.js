@@ -239,7 +239,6 @@ async function aplicarSugestoesVinculo(sessao) {
       });
       if (escolha && !p.it.sistema.conversor_manual) {
         usouConversao = true;
-        if (!p.it.sistema.uni_medida_saida && ef?.uni_medida) p.it.sistema.uni_medida_saida = ef.uni_medida;
         p.it.sistema.uni_medida = escolha.uni || p.it.sistema.uni_medida;
         p.it.sistema.conversor = escolha.conversor;
         p.it.sistema.conversor_origem = escolha.origem;

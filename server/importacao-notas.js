@@ -1,6 +1,6 @@
 'use strict';
 
-const { withDb, query, columnExists } = require('./db');
+const { withDb, query, columnExists, hasTable, refreshTables } = require('./db');
 const importacaoParams = require('./importacao-params');
 
 let natFlagColsCache = null;
@@ -740,7 +740,7 @@ async function getNotaResumo(id) {
   return withDb(async (db) => {
     const cabRows = await query(db, `
       SELECT FIRST 1 N.ID_NFCOMPRA, N.NF_NUMERO, N.NF_SERIE, N.NFE_ORIGEM, N.STATUS,
-             N.DT_EMISSAO, N.DT_ENTRADA,
+             N.DT_EMISSAO, N.DT_ENTRADA, N.IMPORTADO_XML,
              F.NOME_FANTA AS FORNEC_FANTA, F.NOME AS FORNEC_NOME, F.CNPJ AS FORNEC_CNPJ
       FROM TB_NFCOMPRA N
       LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
@@ -773,14 +773,86 @@ async function getNotaResumo(id) {
       console.warn('Resumo itens NF:', err.message);
     }
     const totalItens = itens.reduce((acc, it) => acc + Number(it.vlr_total || 0), 0);
+    const qtdEstoque = itens.reduce((acc, it) => acc + Number(it.qtd || 0), 0);
+    let financeiro = [];
+    try {
+      const finRows = await query(db, `
+        SELECT C.DOCUMENTO, C.DT_VENCTO, C.VLR_CTAPAG, C.HISTORICO
+        FROM TB_NFC_CTAPAG L
+        JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = L.ID_CTAPAG
+        WHERE L.ID_NFCOMPRA = ?
+        ORDER BY C.DT_VENCTO, C.ID_CTAPAG`, [idNf]);
+      financeiro = finRows.map((r) => ({
+        documento: String(r.DOCUMENTO || '').trim(),
+        dt_vencto: toDateOnly(r.DT_VENCTO),
+        valor: Number(r.VLR_CTAPAG || 0),
+        historico: String(r.HISTORICO || '').trim(),
+      }));
+    } catch (err) {
+      console.warn('Resumo financeiro NF:', err.message);
+    }
     return {
       ...nota,
+      entrada: await origemNota(db, idNf),
       fornecedor_nome: nota.fornecedor_nome || String(cabRows[0].FORNEC_FANTA || cabRows[0].FORNEC_NOME || '').trim(),
       itens,
+      financeiro,
       qtd_itens: itens.length || nota.qtd_itens,
+      qtd_estoque: qtdEstoque,
       vlr_itens: totalItens || nota.vlr_itens,
+      vlr_financeiro: financeiro.reduce((acc, p) => acc + Number(p.valor || 0), 0),
     };
   });
+}
+
+const TABELA_ORIGEM = 'TB_MT_NF_ORIGEM';
+
+async function ensureOrigemNota(db) {
+  await refreshTables(db);
+  if (hasTable(TABELA_ORIGEM)) return;
+  await query(db, `
+    CREATE TABLE ${TABELA_ORIGEM} (
+      ID_NFCOMPRA INTEGER NOT NULL,
+      ORIGEM CHAR(1),
+      CONSTRAINT PK_TB_MT_NF_ORIGEM PRIMARY KEY (ID_NFCOMPRA)
+    )`);
+  await refreshTables(db);
+}
+
+async function marcarNotaGestor(db, idNf) {
+  const id = Number(idNf);
+  if (!id) return;
+  await query(db, `
+    UPDATE OR INSERT INTO ${TABELA_ORIGEM} (ID_NFCOMPRA, ORIGEM)
+    VALUES (?, 'G')
+    MATCHING (ID_NFCOMPRA)`, [id]);
+}
+
+async function origemNota(db, idNf) {
+  const id = Number(idNf);
+  if (!id) return 'Clipp';
+  try {
+    if (hasTable(TABELA_ORIGEM)) {
+      const marca = await query(db, `
+        SELECT FIRST 1 ORIGEM FROM ${TABELA_ORIGEM}
+        WHERE ID_NFCOMPRA = ? AND ORIGEM = 'G'`, [id]);
+      if (marca[0]) return 'Gestor';
+    }
+  } catch (err) {
+    console.warn('Origem da nota:', err.message);
+  }
+  try {
+    const texto = await query(db, `
+      SELECT FIRST 1 1 AS OK
+      FROM TB_NFC_CTAPAG L
+      JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = L.ID_CTAPAG
+      WHERE L.ID_NFCOMPRA = ?
+        AND C.OBSERVACAO CONTAINING 'Gestor Estoque'`, [id]);
+    if (texto[0]) return 'Gestor';
+  } catch (err) {
+    console.warn('Origem da nota pelo financeiro:', err.message);
+  }
+  return 'Clipp';
 }
 
 function numOrNull(v) {
@@ -1064,6 +1136,9 @@ module.exports = {
   listNotasCadastradas,
   getNotaById,
   getNotaResumo,
+  ensureOrigemNota,
+  marcarNotaGestor,
+  origemNota,
   findNfDuplicada,
   listFormasPagto,
   listParcelamentos,

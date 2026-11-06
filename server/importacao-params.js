@@ -385,36 +385,25 @@ function saveConversoes(itens) {
 
 function upsertConversao({ uni_xml, uni_estoque, conversor, id_identificador }) {
   const row = normConversao({ uni_xml, uni_estoque, conversor, updatedAt: new Date().toISOString() });
-  if (!row.uni_xml || !row.uni_estoque) return listConversoes();
-  const local = loadLocalParams() || { itens: [] };
-  const rest = (Array.isArray(local.conversoes) ? local.conversoes : [])
-    .map(normConversao)
-    .filter((c) => c.uni_xml !== row.uni_xml);
-  rest.push(row);
-  local.conversoes = rest.slice(-80);
   const id = Number(id_identificador || 0);
-  if (id) {
-    const prod = Array.isArray(local.conversoes_produto) ? local.conversoes_produto : [];
-    local.conversoes_produto = prod
-      .filter((c) => Number(c.id_identificador) !== id)
-      .concat([{ ...row, id_identificador: id }])
-      .slice(-200);
-  }
+  if (!id || !row.uni_xml || !row.uni_estoque) return row;
+  const local = loadLocalParams() || { itens: [] };
+  const prod = Array.isArray(local.conversoes_produto) ? local.conversoes_produto : [];
+  local.conversoes_produto = prod
+    .filter((c) => Number(c.id_identificador) !== id)
+    .concat([{ ...row, id_identificador: id }])
+    .slice(-200);
   saveLocalParams(local);
   return row;
 }
 
-function findConversao(uniXml, idIdentificador) {
-  const local = loadLocalParams();
+function findConversao(_uniXml, idIdentificador) {
   const id = Number(idIdentificador || 0);
-  if (id) {
-    const prod = Array.isArray(local?.conversoes_produto) ? local.conversoes_produto : [];
-    const found = prod.find((c) => Number(c.id_identificador) === id);
-    if (found) return normConversao(found);
-  }
-  const xml = String(uniXml || '').trim().toUpperCase();
-  if (!xml) return null;
-  return listConversoes().find((c) => c.uni_xml === xml) || null;
+  if (!id) return null;
+  const local = loadLocalParams();
+  const prod = Array.isArray(local?.conversoes_produto) ? local.conversoes_produto : [];
+  const found = prod.find((c) => Number(c.id_identificador) === id);
+  return found ? normConversao(found) : null;
 }
 
 function getCsosnPadrao() {

@@ -1,7 +1,7 @@
 'use strict';
 
 const { withDb, useDb, query, nextGenId, columnExists } = require('./db');
-const { inteiroClipp } = require('./importacao-conversao-decisao');
+const { fatorNumero } = require('./importacao-conversao-decisao');
 
 function mapEstFornec(r) {
   if (!r) return null;
@@ -65,10 +65,10 @@ async function buscarEstoqueFornecedor({ idFornec, idIdentificador, codFornecedo
     const mapped = mapEstFornec(rows[0] || null);
     if (mapped?.uni_medida) {
       const conv = await lookupConversorUnidade(db, mapped.uni_medida);
-      const inteiro = inteiroClipp(conv);
-      mapped.unidade_no_clipp = inteiro != null;
-      mapped.conversor_clipp = inteiro;
-      if (!(mapped.conversor > 0) && inteiro != null) mapped.conversor = inteiro;
+      const fator = fatorNumero(conv);
+      mapped.unidade_no_clipp = fator != null;
+      mapped.conversor_clipp = fator;
+      if (!(mapped.conversor > 0) && fator != null) mapped.conversor = fator;
     }
     return mapped;
   });
@@ -99,7 +99,7 @@ async function upsertEstoqueFornecedor(body = {}, { db: conn = null } = {}) {
     const cstIpi = String(body.cst_ipi || '').trim() || null;
     const barras = String(body.cod_barras || '').trim() || null;
     const temConversor = await columnExists(db, 'TB_ESTOQUE_FORNECEDOR', 'CONVERSOR');
-    const conversorInt = temConversor && uni ? inteiroClipp(await lookupConversorUnidade(db, uni)) : null;
+    const conversorInt = temConversor && uni ? fatorNumero(await lookupConversorUnidade(db, uni)) : null;
 
     if (existing[0]) {
       const id = Number(existing[0].ID_EST_FORNEC);
