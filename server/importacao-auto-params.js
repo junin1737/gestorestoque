@@ -189,7 +189,10 @@ async function buscar(q, grupo) {
           TRIM(COALESCE(F.CSOSN, '')) AS CSOSN,
           F.ALIQ_ICMS,
           TRIM(COALESCE(F.UNI_MEDIDA, '')) AS UNI_MEDIDA,
-          F.CONVERSOR,
+          ${hasTable('TB_UNI_MEDIDA')
+            ? `(SELECT FIRST 1 U.CONVERSOR FROM TB_UNI_MEDIDA U
+                WHERE UPPER(TRIM(U.UNIDADE)) = UPPER(TRIM(F.UNI_MEDIDA)))`
+            : 'CAST(NULL AS NUMERIC(18,4))'} AS CONVERSOR,
           TRIM(COALESCE(F.CST_IPI, '')) AS CST_IPI,
           F.IPI,
           TRIM(COALESCE(F.CST_PIS, '')) AS CST_PIS,
