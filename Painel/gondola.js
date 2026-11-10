@@ -269,28 +269,54 @@ const Gondola = (() => {
     };
   }
 
+  function htmlAcoesItem(item, idx, modelo) {
+    return `
+      <div class="gond-item-acoes">
+        <strong>${esc(item.descricao)}</strong>
+        <button type="button" class="btn small" data-alterar="${idx}">Alterar preço</button>
+        ${modelo.mostrarOferta ? `
+          <label class="gond-check">
+            <input type="checkbox" data-promo="${idx}" ${item.usarPromo ? 'checked' : ''} />
+            Usar preço promocional
+          </label>
+          ${item.usarPromo ? `<input class="gond-promo" data-promo-valor="${idx}" inputmode="decimal" value="${esc(valor(item.prc_promo || ''))}" placeholder="De por" />` : ''}
+        ` : ''}
+        <span class="gond-aviso" data-aviso="${idx}"></span>
+      </div>`;
+  }
+
   function renderPreview() {
     const folha = $('#gond-folha');
     const modelo = modeloAtual();
     const titulo = $('#gond-modal-medida');
+    const saida = $('#gond-modal-saida');
     if (!folha || !modelo) return;
-    if (titulo) titulo.textContent = `${modelo.nome} · ${modelo.larguraMm}×${modelo.alturaMm} mm`;
-    folha.innerHTML = preview.map((item, idx) => `
-      <section class="gond-preview-item">
-        ${htmlEtiqueta(item, modelo)}
-        <div class="gond-item-acoes">
-          <button type="button" class="btn small" data-alterar="${idx}">Alterar preço</button>
-          ${modelo.mostrarOferta ? `
-            <label class="gond-check">
-              <input type="checkbox" data-promo="${idx}" ${item.usarPromo ? 'checked' : ''} />
-              Usar preço promocional
-            </label>
-            ${item.usarPromo ? `<input class="gond-promo" data-promo-valor="${idx}" inputmode="decimal" value="${esc(valor(item.prc_promo || ''))}" placeholder="De por" />` : ''}
-          ` : ''}
-          <span class="gond-aviso" data-aviso="${idx}"></span>
-        </div>
-      </section>
-    `).join('');
+    const pagina = modelo.tipo === 'pagina';
+    const grade = gradeDaPagina(modelo);
+    if (titulo) {
+      titulo.textContent = pagina
+        ? `${modelo.nome} · A4 · ${grade.colunas} colunas × ${grade.linhas} linhas · espaço ${textoFaixa(grade.gap, 0, 30, 3)} mm`
+        : `${modelo.nome} · ${modelo.larguraMm}×${modelo.alturaMm} mm`;
+    }
+    if (saida) {
+      saida.textContent = pagina
+        ? 'A página sai na folha A4, com as etiquetas na grade e o espaço entre elas.'
+        : 'Cada etiqueta sai sozinha, no tamanho do modelo. Na Elgin, Bematech, Zebra ou Argox, escolha esse papel e margem zero.';
+    }
+    if (!pagina) {
+      folha.innerHTML = preview.map((item, idx) => `
+        <section class="gond-preview-item">
+          ${htmlEtiqueta(item, modelo)}
+          ${htmlAcoesItem(item, idx, modelo)}
+        </section>
+      `).join('');
+      return;
+    }
+    folha.innerHTML = `
+      <div class="etiq-paginas-preview">${htmlPaginas(preview, modelo)}</div>
+      <div class="etiq-pagina-acoes">
+        ${preview.map((item, idx) => htmlAcoesItem(item, idx, modelo)).join('')}
+      </div>`;
   }
 
   function abrirPreview(lista) {
@@ -407,7 +433,7 @@ const Gondola = (() => {
     const modal = $('#gond-modal');
     if (modal) modal.hidden = true;
     preview = [];
-    document.body.classList.remove('imprimindo-gondola');
+    document.body.classList.remove('imprimindo-gondola', 'imprimindo-pagina');
   }
 
   function imprimir() {
@@ -423,12 +449,21 @@ const Gondola = (() => {
       estilo.id = 'gond-page-size';
       document.head.appendChild(estilo);
     }
-    const largura = Number(modelo?.larguraMm) || 110;
-    const altura = Number(modelo?.alturaMm) || 30;
-    estilo.textContent = `@page { size: ${largura}mm ${altura}mm; margin: 0; }`;
+    const pagina = modelo?.tipo === 'pagina';
+    if (pagina) {
+      const paginas = document.querySelectorAll('#gond-folha .etiq-pagina');
+      destino.innerHTML = [...paginas].map((el) => el.outerHTML).join('');
+      estilo.textContent = '@page { size: A4 portrait; margin: 0; }';
+      document.body.classList.add('imprimindo-pagina');
+    } else {
+      document.body.classList.remove('imprimindo-pagina');
+      const largura = Number(modelo?.larguraMm) || 110;
+      const altura = Number(modelo?.alturaMm) || 30;
+      estilo.textContent = `@page { size: ${largura}mm ${altura}mm; margin: 0; }`;
+    }
     document.body.classList.add('imprimindo-gondola');
     const limpar = () => {
-      document.body.classList.remove('imprimindo-gondola');
+      document.body.classList.remove('imprimindo-gondola', 'imprimindo-pagina');
       destino.innerHTML = '';
       window.removeEventListener('afterprint', limpar);
     };
@@ -761,12 +796,59 @@ const Gondola = (() => {
     return String(Number.isFinite(n) ? n : fallback).replace('.', ',');
   }
 
-  function modeloEmBranco() {
+  function faixaNum(v, min, max, fallback) {
+    const n = Number(String(v ?? '').trim().replace(',', '.'));
+    if (!Number.isFinite(n)) return fallback;
+    return Math.round(Math.min(max, Math.max(min, n)) * 10) / 10;
+  }
+
+  function textoFaixa(v, min, max, fallback) {
+    return String(faixaNum(v, min, max, fallback)).replace('.', ',');
+  }
+
+  function gradeDaPagina(modelo) {
+    return {
+      colunas: Math.round(faixaNum(modelo?.colunas, 1, 8, 2)),
+      linhas: Math.round(faixaNum(modelo?.linhas, 1, 20, 8)),
+      gap: faixaNum(modelo?.gapMm, 0, 30, 3),
+      largura: Number(modelo?.larguraMm) || 90,
+      altura: Number(modelo?.alturaMm) || 30,
+    };
+  }
+
+  function cabeNaFolha(modelo) {
+    const g = gradeDaPagina(modelo);
+    const borda = 4;
+    const usadoW = g.colunas * g.largura + Math.max(0, g.colunas - 1) * g.gap;
+    const usadoH = g.linhas * g.altura + Math.max(0, g.linhas - 1) * g.gap;
+    return {
+      ...g,
+      cabe: usadoW <= 210 - borda * 2 && usadoH <= 297 - borda * 2,
+    };
+  }
+
+  function htmlPaginas(itens, modelo) {
+    const g = gradeDaPagina(modelo);
+    const capacidade = g.colunas * g.linhas;
+    const grupos = [];
+    const lista = itens.length ? itens : [];
+    for (let i = 0; i < lista.length; i += capacidade) grupos.push(lista.slice(i, i + capacidade));
+    if (!grupos.length) grupos.push([]);
+    const estilo = `--etiq-cols:${g.colunas};--etiq-rows:${g.linhas};--etiq-gap:${g.gap}mm;--etiq-w:${g.largura}mm;--etiq-h:${g.altura}mm`;
+    return grupos.map((grupo) => `
+      <div class="etiq-pagina" style="${estilo}">
+        ${grupo.map((item) => htmlEtiqueta(item, modelo)).join('')}
+      </div>
+    `).join('');
+  }
+
+  function modeloEmBranco(tipo) {
+    const pagina = tipo === 'pagina';
     return {
       id: `gondola-${Date.now().toString(36)}`,
-      tipo: 'gondola',
-      nome: 'Nova etiqueta',
-      larguraMm: 110,
+      tipo: pagina ? 'pagina' : 'gondola',
+      nome: pagina ? 'Nova página' : 'Nova etiqueta',
+      larguraMm: pagina ? 90 : 110,
       alturaMm: 30,
       margemTopoMm: 1.4,
       margemDireitaMm: 2.4,
@@ -786,6 +868,9 @@ const Gondola = (() => {
       mostrarPreco: true,
       mostrarOferta: true,
       mostrarUnidade: false,
+      colunas: 2,
+      linhas: 8,
+      gapMm: 3,
     };
   }
 
@@ -805,13 +890,17 @@ const Gondola = (() => {
       margemEsquerdaMm: mmNum(bruto.margemEsquerdaMm, atual.margemEsquerdaMm ?? 2.4),
       fundo: bruto.fundo || atual.fundo || '#ffe14a',
       tinta: bruto.tinta || atual.tinta || '#1a1a1a',
+      tipo: bruto.tipo === 'pagina' ? 'pagina' : 'gondola',
+      colunas: Math.round(faixaNum(bruto.colunas, 1, 8, atual.colunas || 2)),
+      linhas: Math.round(faixaNum(bruto.linhas, 1, 20, atual.linhas || 8)),
+      gapMm: faixaNum(bruto.gapMm, 0, 30, atual.gapMm ?? 3),
     };
   }
 
   function guardarFormulario() {
     const id = $('#etiq-host')?.dataset.id;
     if (!id || !$('#etiq-form')) return modelos.find((m) => m.id === id) || null;
-    const modelo = { ...modeloDoFormulario(), id, tipo: modelos.find((m) => m.id === id)?.tipo || 'gondola' };
+    const modelo = { ...modeloDoFormulario(), id };
     modelos = modelos.map((m) => (m.id === id ? modelo : m));
     return modelo;
   }
@@ -820,11 +909,10 @@ const Gondola = (() => {
     const visor = $('#etiq-visor');
     if (!visor || !$('#etiq-form')) return;
     const modelo = modeloDoFormulario();
+    const pagina = modelo.tipo === 'pagina';
+    $('#etiq-form [data-pagina]')?.toggleAttribute('hidden', !pagina);
     const medida = $('#etiq-medida');
-    if (medida) {
-      medida.textContent = `${textoMedida(modelo.larguraMm, 110)} × ${textoMedida(modelo.alturaMm, 30)} mm. Margens ${mmTexto(modelo.margemTopoMm, 1.4)} / ${mmTexto(modelo.margemDireitaMm, 2.4)} / ${mmTexto(modelo.margemBaixoMm, 1.4)} / ${mmTexto(modelo.margemEsquerdaMm, 2.4)} mm.`;
-    }
-    visor.innerHTML = htmlEtiqueta({
+    const exemplo = {
       descricao: 'REFRIGERANTE COCA-COLA PET 2L',
       referencia: 'REF-CC2L',
       cod_barras: '7891000100103',
@@ -833,7 +921,24 @@ const Gondola = (() => {
       prc_etiqueta: 9.9,
       usarPromo: !!modelo.mostrarOferta,
       prc_promo: 7.5,
-    }, modelo);
+    };
+    if (medida) {
+      if (pagina) {
+        const grade = cabeNaFolha(modelo);
+        medida.textContent = grade.cabe
+          ? `Folha A4 · ${grade.colunas} colunas × ${grade.linhas} linhas · espaço ${textoFaixa(grade.gap, 0, 30, 3)} mm. Etiqueta ${textoMedida(grade.largura, 90)} × ${textoMedida(grade.altura, 30)} mm.`
+          : `A grade passa da folha A4. Diminua colunas, linhas, o tamanho ou o espaço.`;
+      } else {
+        medida.textContent = `${textoMedida(modelo.larguraMm, 110)} × ${textoMedida(modelo.alturaMm, 30)} mm. Margens ${mmTexto(modelo.margemTopoMm, 1.4)} / ${mmTexto(modelo.margemDireitaMm, 2.4)} / ${mmTexto(modelo.margemBaixoMm, 1.4)} / ${mmTexto(modelo.margemEsquerdaMm, 2.4)} mm.`;
+      }
+    }
+    if (!pagina) {
+      visor.innerHTML = htmlEtiqueta(exemplo, modelo);
+      return;
+    }
+    const grade = gradeDaPagina(modelo);
+    const cheios = Array.from({ length: grade.colunas * grade.linhas }, () => exemplo);
+    visor.innerHTML = `<div class="etiq-folha-escala">${htmlPaginas(cheios, modelo)}</div>`;
   }
 
   function renderEtiquetas() {
@@ -856,12 +961,13 @@ const Gondola = (() => {
             ${modelos.map((m) => `
               <button type="button" class="etiq-modelo${atual && m.id === atual.id ? ' is-on' : ''}" data-modelo="${esc(m.id)}">
                 <strong>${esc(m.nome)}</strong>
-                <span>${m.larguraMm}×${m.alturaMm} mm</span>
+                <span>${m.tipo === 'pagina' ? `Página · ${m.colunas || 2}×${m.linhas || 8}` : 'Gôndola'} · ${m.larguraMm}×${m.alturaMm} mm</span>
               </button>
             `).join('') || '<p class="hint">Nenhuma etiqueta ainda.</p>'}
           </div>
           <div class="etiq-botoes">
-            <button type="button" class="btn primary" id="etiq-novo">Criar</button>
+            <button type="button" class="btn primary" id="etiq-novo">Criar gôndola</button>
+            <button type="button" class="btn" id="etiq-nova-pagina">Criar página</button>
             <button type="button" class="btn" id="etiq-duplicar" ${atual ? '' : 'disabled'}>Duplicar</button>
           </div>
         </div>
@@ -871,6 +977,21 @@ const Gondola = (() => {
             <h3>Editar etiqueta</h3>
             <p class="hint">A prévia muda junto. Salvar grava este modelo para a impressão.</p>
             <label>Nome <input data-campo="nome" value="${esc(atual.nome)}" maxlength="60" /></label>
+            <label>Formato
+              <select data-campo="tipo">
+                <option value="gondola" ${atual.tipo === 'pagina' ? '' : 'selected'}>Gôndola</option>
+                <option value="pagina" ${atual.tipo === 'pagina' ? 'selected' : ''}>Página</option>
+              </select>
+            </label>
+            <div class="etiq-grade" data-pagina ${atual.tipo === 'pagina' ? '' : 'hidden'}>
+              <h4 class="etiq-secao">Grade da página</h4>
+              <p class="hint">Quantas etiquetas cabem na folha A4 e o espaço entre uma e outra.</p>
+              <div class="etiq-margens">
+                <label>Colunas <input data-campo="colunas" inputmode="numeric" value="${esc(Math.round(faixaNum(atual.colunas, 1, 8, 2)))}" /></label>
+                <label>Linhas <input data-campo="linhas" inputmode="numeric" value="${esc(Math.round(faixaNum(atual.linhas, 1, 20, 8)))}" /></label>
+                <label>Espaço (mm) <input data-campo="gapMm" inputmode="decimal" value="${esc(textoFaixa(atual.gapMm, 0, 30, 3))}" /></label>
+              </div>
+            </div>
             <h4 class="etiq-secao">Tamanho</h4>
             <div class="etiq-medidas">
               <label>Largura (mm) <input data-campo="larguraMm" inputmode="decimal" value="${esc(atual.larguraMm)}" /></label>
@@ -920,7 +1041,7 @@ const Gondola = (() => {
             <h3>Prévia</h3>
             <p class="hint" id="etiq-medida"></p>
             <div id="etiq-visor"></div>
-            <p class="hint">Produto de exemplo. A impressão manda só a etiqueta, neste tamanho e com estas margens, para Elgin, Bematech, Zebra, Argox e as demais.</p>
+            <p class="hint">Produto de exemplo. Gôndola imprime uma etiqueta por folha. Página imprime a grade na folha A4.</p>
           </div>
         </div>` : ''}
       </div>`;
@@ -956,9 +1077,9 @@ const Gondola = (() => {
         renderEtiquetas();
       }
       if (ev.target.closest?.('#etiq-preview')) mostrarPreviewModelo();
-      if (ev.target.closest?.('#etiq-novo')) {
+      if (ev.target.closest?.('#etiq-novo') || ev.target.closest?.('#etiq-nova-pagina')) {
         guardarFormulario();
-        const novo = modeloEmBranco();
+        const novo = modeloEmBranco(ev.target.closest?.('#etiq-nova-pagina') ? 'pagina' : 'gondola');
         modelos = [...modelos, novo];
         $('#etiq-host').dataset.id = novo.id;
         renderEtiquetas();
@@ -991,7 +1112,7 @@ const Gondola = (() => {
       const id = $('#etiq-host').dataset.id;
       const atual = modelos.find((m) => m.id === id);
       const bruto = lerFormulario(id);
-      bruto.tipo = atual?.tipo || 'gondola';
+      bruto.tipo = bruto.tipo === 'pagina' ? 'pagina' : 'gondola';
       const lista = modelos.map((m) => (m.id === id ? { ...m, ...bruto, id } : m));
       salvarModelos(lista);
     });

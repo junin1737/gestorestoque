@@ -27,6 +27,9 @@ function modeloPadrao() {
     mostrarPreco: true,
     mostrarOferta: true,
     mostrarUnidade: false,
+    colunas: 2,
+    linhas: 8,
+    gapMm: 3,
   };
 }
 
@@ -47,6 +50,12 @@ function mmCampo(v, fallback) {
   return Math.round(valor * 10) / 10;
 }
 
+function mmFaixa(v, min, max, fallback) {
+  const n = Number(String(v ?? '').trim().replace(',', '.'));
+  const valor = clamp(n, min, max, fallback);
+  return Math.round(valor * 10) / 10;
+}
+
 function bool(v) {
   return v === true || v === 1 || v === '1' || v === 'true';
 }
@@ -56,10 +65,9 @@ function sanitizarModelo(bruto, idForcado) {
   const src = bruto && typeof bruto === 'object' ? bruto : {};
   const idBruto = String(idForcado || src.id || '').trim().toLowerCase();
   const id = /^[a-z0-9][a-z0-9_-]{2,40}$/.test(idBruto) ? idBruto : '';
-  const tipo = String(src.tipo || 'gondola').trim().toLowerCase();
   return {
     id,
-    tipo: /^[a-z0-9_-]{3,20}$/.test(tipo) ? tipo : 'gondola',
+    tipo: src.tipo === 'pagina' ? 'pagina' : 'gondola',
     nome: String(src.nome || base.nome).trim().slice(0, 60) || base.nome,
     larguraMm: clamp(src.larguraMm, 40, 200, base.larguraMm),
     alturaMm: clamp(src.alturaMm, 15, 120, base.alturaMm),
@@ -81,6 +89,9 @@ function sanitizarModelo(bruto, idForcado) {
     mostrarPreco: src.mostrarPreco === undefined ? true : bool(src.mostrarPreco),
     mostrarOferta: src.mostrarOferta === undefined ? true : bool(src.mostrarOferta),
     mostrarUnidade: bool(src.mostrarUnidade),
+    colunas: Math.round(mmFaixa(src.colunas, 1, 8, base.colunas)),
+    linhas: Math.round(mmFaixa(src.linhas, 1, 20, base.linhas)),
+    gapMm: mmFaixa(src.gapMm, 0, 30, base.gapMm),
   };
 }
 

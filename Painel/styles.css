@@ -3128,6 +3128,34 @@ html[data-theme="escuro"] .compras-row:hover {
 .etiq-margens {
   display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.55rem; align-items: end;
 }
+.etiq-grade[hidden] { display: none; }
+.etiq-pagina {
+  display: grid;
+  width: 210mm;
+  height: 297mm;
+  box-sizing: border-box;
+  grid-template-columns: repeat(var(--etiq-cols, 2), var(--etiq-w, 90mm));
+  grid-template-rows: repeat(var(--etiq-rows, 8), var(--etiq-h, 30mm));
+  gap: var(--etiq-gap, 3mm);
+  justify-content: center;
+  align-content: center;
+  padding: 4mm;
+  background: #fff;
+}
+.etiq-visor .etiq-folha-escala {
+  width: calc(210mm * 0.32);
+  height: calc(297mm * 0.32);
+  overflow: hidden;
+  margin-top: 0.45rem;
+}
+.etiq-visor .etiq-folha-escala .etiq-pagina {
+  transform: scale(0.32);
+  transform-origin: top left;
+  border: 1px solid var(--border);
+}
+.etiq-paginas-preview { display: flex; flex-direction: column; gap: 1rem; }
+.etiq-paginas-preview .etiq-pagina { zoom: 0.42; border: 1px solid var(--border); }
+.etiq-pagina-acoes { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.8rem; }
 .etiq-medidas {
   display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 0.55rem; align-items: end;
 }
@@ -3177,6 +3205,24 @@ html[data-theme="escuro"] .compras-row:hover {
   body.imprimindo-gondola #gond-impressao .gond-etiqueta:last-child {
     break-after: auto;
     page-break-after: auto;
+  }
+  body.imprimindo-gondola.imprimindo-pagina #gond-impressao .etiq-pagina {
+    zoom: 1;
+    transform: none;
+    border: 0;
+    box-shadow: none;
+    break-after: page;
+    page-break-after: always;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+  body.imprimindo-gondola.imprimindo-pagina #gond-impressao .etiq-pagina:last-child {
+    break-after: auto;
+    page-break-after: auto;
+  }
+  body.imprimindo-gondola.imprimindo-pagina #gond-impressao .gond-etiqueta {
+    break-after: auto !important;
+    page-break-after: auto !important;
   }
 }
 
