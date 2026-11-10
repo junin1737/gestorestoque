@@ -11,6 +11,10 @@ function modeloPadrao() {
     alturaMm: 30,
     fundo: '#ffe14a',
     tinta: '#1a1a1a',
+    margemTopoMm: 1.4,
+    margemDireitaMm: 2.4,
+    margemBaixoMm: 1.4,
+    margemEsquerdaMm: 2.4,
     mostrarEmpresa: false,
     empresaOrigem: 'fantasia',
     empresaTexto: '',
@@ -37,6 +41,12 @@ function clamp(n, min, max, fallback) {
   return Math.min(max, Math.max(min, v));
 }
 
+function mmCampo(v, fallback) {
+  const n = Number(String(v ?? '').trim().replace(',', '.'));
+  const valor = clamp(n, 0, 15, fallback);
+  return Math.round(valor * 10) / 10;
+}
+
 function bool(v) {
   return v === true || v === 1 || v === '1' || v === 'true';
 }
@@ -55,6 +65,10 @@ function sanitizarModelo(bruto, idForcado) {
     alturaMm: clamp(src.alturaMm, 15, 120, base.alturaMm),
     fundo: corHex(src.fundo, base.fundo),
     tinta: corHex(src.tinta, base.tinta),
+    margemTopoMm: mmCampo(src.margemTopoMm, base.margemTopoMm),
+    margemDireitaMm: mmCampo(src.margemDireitaMm, base.margemDireitaMm),
+    margemBaixoMm: mmCampo(src.margemBaixoMm, base.margemBaixoMm),
+    margemEsquerdaMm: mmCampo(src.margemEsquerdaMm, base.margemEsquerdaMm),
     mostrarEmpresa: bool(src.mostrarEmpresa),
     empresaOrigem: src.empresaOrigem === 'personalizado' ? 'personalizado' : 'fantasia',
     empresaTexto: String(src.empresaTexto || '').trim().slice(0, 40),

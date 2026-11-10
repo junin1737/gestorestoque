@@ -151,7 +151,11 @@ const Gondola = (() => {
     const promo = !!(modelo.mostrarOferta && item.usarPromo && Number(item.prc_promo) > 0);
     const desc = modelo.abreviarDescricao ? abreviar(item.descricao, modelo.maxDescricao) : item.descricao;
     const preco = promo ? item.prc_promo : item.prc_etiqueta;
-    const estilo = `--etiq-w:${modelo.larguraMm}mm;--etiq-h:${modelo.alturaMm}mm;--etiq-fundo:${modelo.fundo};--etiq-tinta:${modelo.tinta};`;
+    const mt = mmNum(modelo.margemTopoMm, 1.4);
+    const mr = mmNum(modelo.margemDireitaMm, 2.4);
+    const mb = mmNum(modelo.margemBaixoMm, 1.4);
+    const ml = mmNum(modelo.margemEsquerdaMm, 2.4);
+    const estilo = `--etiq-w:${modelo.larguraMm}mm;--etiq-h:${modelo.alturaMm}mm;--etiq-fundo:${modelo.fundo};--etiq-tinta:${modelo.tinta};--etiq-mt:${mt}mm;--etiq-mr:${mr}mm;--etiq-mb:${mb}mm;--etiq-ml:${ml}mm;`;
     const unidade = modelo.mostrarUnidade && item.uni_medida
       ? `<small>por ${esc(item.uni_medida)}</small>` : '';
     const blocoPreco = modelo.mostrarPreco ? `
@@ -742,6 +746,49 @@ const Gondola = (() => {
     });
   }
 
+  function mmNum(v, fallback) {
+    const n = Number(String(v ?? '').trim().replace(',', '.'));
+    if (!Number.isFinite(n)) return fallback;
+    return Math.round(Math.min(15, Math.max(0, n)) * 10) / 10;
+  }
+
+  function mmTexto(v, fallback) {
+    return String(mmNum(v, fallback)).replace('.', ',');
+  }
+
+  function textoMedida(v, fallback) {
+    const n = Number(String(v ?? '').trim().replace(',', '.'));
+    return String(Number.isFinite(n) ? n : fallback).replace('.', ',');
+  }
+
+  function modeloEmBranco() {
+    return {
+      id: `gondola-${Date.now().toString(36)}`,
+      tipo: 'gondola',
+      nome: 'Nova etiqueta',
+      larguraMm: 110,
+      alturaMm: 30,
+      margemTopoMm: 1.4,
+      margemDireitaMm: 2.4,
+      margemBaixoMm: 1.4,
+      margemEsquerdaMm: 2.4,
+      fundo: '#ffe14a',
+      tinta: '#1a1a1a',
+      mostrarEmpresa: false,
+      empresaOrigem: 'fantasia',
+      empresaTexto: '',
+      mostrarDescricao: true,
+      abreviarDescricao: false,
+      maxDescricao: 42,
+      mostrarReferencia: true,
+      mostrarBarras: true,
+      mostrarIdentificador: true,
+      mostrarPreco: true,
+      mostrarOferta: true,
+      mostrarUnidade: false,
+    };
+  }
+
   function modeloDoFormulario() {
     const id = $('#etiq-host')?.dataset.id;
     const atual = modelos.find((m) => m.id === id) || modelos[0] || {};
@@ -749,18 +796,34 @@ const Gondola = (() => {
     return {
       ...atual,
       ...bruto,
-      larguraMm: Number(bruto.larguraMm) || atual.larguraMm || 110,
-      alturaMm: Number(bruto.alturaMm) || atual.alturaMm || 30,
+      larguraMm: Number(String(bruto.larguraMm || '').replace(',', '.')) || atual.larguraMm || 110,
+      alturaMm: Number(String(bruto.alturaMm || '').replace(',', '.')) || atual.alturaMm || 30,
       maxDescricao: Number(bruto.maxDescricao) || atual.maxDescricao || 42,
+      margemTopoMm: mmNum(bruto.margemTopoMm, atual.margemTopoMm ?? 1.4),
+      margemDireitaMm: mmNum(bruto.margemDireitaMm, atual.margemDireitaMm ?? 2.4),
+      margemBaixoMm: mmNum(bruto.margemBaixoMm, atual.margemBaixoMm ?? 1.4),
+      margemEsquerdaMm: mmNum(bruto.margemEsquerdaMm, atual.margemEsquerdaMm ?? 2.4),
       fundo: bruto.fundo || atual.fundo || '#ffe14a',
       tinta: bruto.tinta || atual.tinta || '#1a1a1a',
     };
+  }
+
+  function guardarFormulario() {
+    const id = $('#etiq-host')?.dataset.id;
+    if (!id || !$('#etiq-form')) return modelos.find((m) => m.id === id) || null;
+    const modelo = { ...modeloDoFormulario(), id, tipo: modelos.find((m) => m.id === id)?.tipo || 'gondola' };
+    modelos = modelos.map((m) => (m.id === id ? modelo : m));
+    return modelo;
   }
 
   function mostrarPreviewModelo() {
     const visor = $('#etiq-visor');
     if (!visor || !$('#etiq-form')) return;
     const modelo = modeloDoFormulario();
+    const medida = $('#etiq-medida');
+    if (medida) {
+      medida.textContent = `${textoMedida(modelo.larguraMm, 110)} × ${textoMedida(modelo.alturaMm, 30)} mm. Margens ${mmTexto(modelo.margemTopoMm, 1.4)} / ${mmTexto(modelo.margemDireitaMm, 2.4)} / ${mmTexto(modelo.margemBaixoMm, 1.4)} / ${mmTexto(modelo.margemEsquerdaMm, 2.4)} mm.`;
+    }
     visor.innerHTML = htmlEtiqueta({
       descricao: 'REFRIGERANTE COCA-COLA PET 2L',
       referencia: 'REF-CC2L',
@@ -775,36 +838,55 @@ const Gondola = (() => {
 
   function renderEtiquetas() {
     const host = $('#etiq-host');
-    if (!host || !modelos.length) return;
-    const atual = modelos.find((m) => m.id === (host.dataset.id || modeloId)) || modelos[0];
-    host.dataset.id = atual.id;
+    if (!host) return;
+    const atual = modelos.find((m) => m.id === (host.dataset.id || modeloId)) || modelos[0] || null;
+    if (atual) host.dataset.id = atual.id;
     const check = (campo, rotulo) => `
-      <label class="pref-check"><input type="checkbox" data-campo="${campo}" ${atual[campo] ? 'checked' : ''} /><span>${rotulo}</span></label>`;
+      <label class="pref-check"><input type="checkbox" data-campo="${campo}" ${atual?.[campo] ? 'checked' : ''} /><span>${rotulo}</span></label>`;
+    const campoMm = (campo, rotulo, fallback) => `
+      <label>${rotulo}
+        <input data-campo="${campo}" inputmode="decimal" value="${esc(mmTexto(atual?.[campo], fallback))}" />
+      </label>`;
     host.innerHTML = `
       <div class="etiq-layout">
         <div class="pref-card">
-          <h3>Modelos</h3>
-          <p class="hint">Preço, descrição, código de barras e identificador saem do estoque. Outros tipos de etiqueta entram nesta lista.</p>
+          <h3>Etiquetas</h3>
+          <p class="hint">Crie uma etiqueta nova ou duplique a que está aberta. Preço, descrição, código de barras e identificador saem do estoque na hora de imprimir.</p>
           <div class="etiq-lista">
             ${modelos.map((m) => `
-              <button type="button" class="etiq-modelo${m.id === atual.id ? ' is-on' : ''}" data-modelo="${esc(m.id)}">
+              <button type="button" class="etiq-modelo${atual && m.id === atual.id ? ' is-on' : ''}" data-modelo="${esc(m.id)}">
                 <strong>${esc(m.nome)}</strong>
-                <span>${esc(m.tipo === 'gondola' ? 'Gôndola' : m.tipo)} · ${m.larguraMm}×${m.alturaMm} mm</span>
+                <span>${m.larguraMm}×${m.alturaMm} mm</span>
               </button>
-            `).join('')}
+            `).join('') || '<p class="hint">Nenhuma etiqueta ainda.</p>'}
           </div>
-          <button type="button" class="btn" id="etiq-novo">Novo modelo</button>
+          <div class="etiq-botoes">
+            <button type="button" class="btn primary" id="etiq-novo">Criar</button>
+            <button type="button" class="btn" id="etiq-duplicar" ${atual ? '' : 'disabled'}>Duplicar</button>
+          </div>
         </div>
+        ${atual ? `
         <div class="etiq-editor">
           <form class="pref-card larga" id="etiq-form">
-            <h3>Editar modelo</h3>
+            <h3>Editar etiqueta</h3>
+            <p class="hint">A prévia muda junto. Salvar grava este modelo para a impressão.</p>
             <label>Nome <input data-campo="nome" value="${esc(atual.nome)}" maxlength="60" /></label>
+            <h4 class="etiq-secao">Tamanho</h4>
             <div class="etiq-medidas">
-              <label>Largura (mm) <input data-campo="larguraMm" inputmode="numeric" value="${esc(atual.larguraMm)}" /></label>
-              <label>Altura (mm) <input data-campo="alturaMm" inputmode="numeric" value="${esc(atual.alturaMm)}" /></label>
+              <label>Largura (mm) <input data-campo="larguraMm" inputmode="decimal" value="${esc(atual.larguraMm)}" /></label>
+              <label>Altura (mm) <input data-campo="alturaMm" inputmode="decimal" value="${esc(atual.alturaMm)}" /></label>
               <label>Fundo <input data-campo="fundo" type="color" value="${esc(atual.fundo)}" /></label>
               <label>Texto <input data-campo="tinta" type="color" value="${esc(atual.tinta)}" /></label>
             </div>
+            <h4 class="etiq-secao">Margens</h4>
+            <p class="hint">Espaço entre a borda da etiqueta e o conteúdo, em milímetros. A ordem é superior, direita, inferior e esquerda.</p>
+            <div class="etiq-margens">
+              ${campoMm('margemTopoMm', 'Superior', 1.4)}
+              ${campoMm('margemDireitaMm', 'Direita', 2.4)}
+              ${campoMm('margemBaixoMm', 'Inferior', 1.4)}
+              ${campoMm('margemEsquerdaMm', 'Esquerda', 2.4)}
+            </div>
+            <h4 class="etiq-secao">Conteúdo</h4>
             <div class="etiq-opcoes">
               ${check('mostrarEmpresa', 'Nome da empresa')}
               ${check('mostrarDescricao', 'Descrição')}
@@ -830,16 +912,17 @@ const Gondola = (() => {
             </div>
             <div class="etiq-botoes">
               <button type="button" class="btn" id="etiq-preview">Pré-visualizar</button>
-              <button type="submit" class="btn primary">Salvar modelo</button>
+              <button type="submit" class="btn primary">Salvar etiqueta</button>
               ${modelos.length > 1 ? '<button type="button" class="btn" id="etiq-excluir">Excluir</button>' : ''}
             </div>
           </form>
           <div class="etiq-visor">
             <h3>Prévia</h3>
+            <p class="hint" id="etiq-medida"></p>
             <div id="etiq-visor"></div>
-            <p class="hint">Produto de exemplo. A impressão manda só a etiqueta, no tamanho do modelo, para Elgin, Bematech, Zebra, Argox e as demais.</p>
+            <p class="hint">Produto de exemplo. A impressão manda só a etiqueta, neste tamanho e com estas margens, para Elgin, Bematech, Zebra, Argox e as demais.</p>
           </div>
-        </div>
+        </div>` : ''}
       </div>`;
     mostrarPreviewModelo();
   }
@@ -868,17 +951,23 @@ const Gondola = (() => {
     $('#etiq-host')?.addEventListener('click', (ev) => {
       const modelo = ev.target.closest?.('[data-modelo]');
       if (modelo) {
+        guardarFormulario();
         $('#etiq-host').dataset.id = modelo.dataset.modelo;
         renderEtiquetas();
       }
       if (ev.target.closest?.('#etiq-preview')) mostrarPreviewModelo();
       if (ev.target.closest?.('#etiq-novo')) {
-        const base = modelos.find((m) => m.id === $('#etiq-host').dataset.id) || modelos[0];
-        const novo = {
-          ...base,
-          id: `gondola-${Date.now().toString(36)}`,
-          nome: 'Novo modelo',
-        };
+        guardarFormulario();
+        const novo = modeloEmBranco();
+        modelos = [...modelos, novo];
+        $('#etiq-host').dataset.id = novo.id;
+        renderEtiquetas();
+      }
+      if (ev.target.closest?.('#etiq-duplicar')) {
+        const base = guardarFormulario() || modelos.find((m) => m.id === $('#etiq-host').dataset.id);
+        if (!base) return;
+        const nome = `${String(base.nome || 'Etiqueta').replace(/\s+\(cópia\)$/i, '')} (cópia)`.slice(0, 60);
+        const novo = { ...base, id: `gondola-${Date.now().toString(36)}`, nome };
         modelos = [...modelos, novo];
         $('#etiq-host').dataset.id = novo.id;
         renderEtiquetas();

@@ -3072,7 +3072,8 @@ html[data-theme="escuro"] .compras-row:hover {
   width: min(100%, var(--etiq-w, 110mm)); height: var(--etiq-h, 30mm); box-sizing: border-box;
   background: var(--etiq-fundo, #ffe14a); color: var(--etiq-tinta, #1a1a1a);
   display: grid; grid-template-columns: 1fr auto; gap: 2mm; align-items: center;
-  padding: 1.4mm 2.4mm; border-radius: 1.2mm; position: relative; overflow: hidden;
+  padding: var(--etiq-mt, 1.4mm) var(--etiq-mr, 2.4mm) var(--etiq-mb, 1.4mm) var(--etiq-ml, 2.4mm);
+  border-radius: 1.2mm; position: relative; overflow: hidden;
 }
 .gond-esq { min-width: 0; display: flex; flex-direction: column; justify-content: center; gap: 0.3mm; }
 .gond-empresa, .gond-desc, .gond-meta { margin: 0; }
@@ -3088,7 +3089,7 @@ html[data-theme="escuro"] .compras-row:hover {
 .gond-preco em { display: block; text-decoration: line-through; font-style: normal; opacity: 0.75; margin-bottom: 0.4mm; }
 .gond-preco small { display: block; margin-top: 0.5mm; font-weight: 650; }
 .gond-balao {
-  position: absolute; top: 1mm; left: 1.4mm; background: #d32f2f; color: #fff;
+  position: absolute; top: var(--etiq-mt, 1.4mm); left: var(--etiq-ml, 2.4mm); background: #d32f2f; color: #fff;
   font-size: 2.5mm; line-height: 1; padding: 0.5mm 1.4mm; border-radius: 99px; letter-spacing: 0.04em;
 }
 .gond-etiqueta:has(.gond-balao) .gond-esq { padding-top: 3.2mm; }
@@ -3123,6 +3124,10 @@ html[data-theme="escuro"] .compras-row:hover {
 }
 .etiq-modelo span { display: block; color: var(--muted); font-size: var(--fs-sm); }
 .etiq-modelo.is-on { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.etiq-secao { margin: 0.9rem 0 0.35rem; font-size: 0.95rem; }
+.etiq-margens {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.55rem; align-items: end;
+}
 .etiq-medidas {
   display: grid; grid-template-columns: 1fr 1fr auto auto; gap: 0.55rem; align-items: end;
 }
@@ -3132,8 +3137,9 @@ html[data-theme="escuro"] .compras-row:hover {
 #etiq-form label.pref-check { display: flex; flex-direction: row; align-items: center; gap: 0.45rem; margin: 0; }
 #etiq-form label.pref-check input { width: auto; min-height: 0; }
 .etiq-empresa { display: grid; grid-template-columns: 1fr 1fr; gap: 0.55rem; align-items: end; }
-.etiq-editor { display: grid; grid-template-columns: minmax(0, 1fr) minmax(280px, 460px); gap: 0.8rem; align-items: start; }
-.etiq-visor { min-width: 0; }
+.etiq-editor { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(220px, 340px); gap: 0.8rem; align-items: start; }
+.etiq-empresa label, .etiq-medidas label, .etiq-margens label { min-width: 0; }
+.etiq-visor { min-width: 0; position: sticky; top: 0.6rem; }
 .etiq-visor .gond-etiqueta { margin-top: 0.6rem; }
 .ofer-item {
   display: grid; grid-template-columns: minmax(0, 1fr) 7rem auto; gap: 0.45rem; align-items: center;
@@ -3146,7 +3152,9 @@ html[data-theme="escuro"] .compras-row:hover {
 }
 
 @media (max-width: 980px) {
-  .gond-filtros, .etiq-editor, .etiq-empresa, .etiq-medidas, .ofer-layout, .etiq-layout, .ofer-card, .ofer-item { grid-template-columns: 1fr; }
+  .gond-filtros, .etiq-editor, .etiq-empresa, .etiq-medidas, .etiq-margens, .ofer-layout, .etiq-layout, .ofer-card, .ofer-item { grid-template-columns: 1fr; }
+  .etiq-margens { grid-template-columns: 1fr 1fr; }
+  .etiq-visor { position: static; }
   .gond-campo-busca, .gond-campo-grupo { grid-column: auto; }
   .gond-preco strong { font-size: 1.35rem; }
 }
