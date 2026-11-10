@@ -3192,6 +3192,20 @@ router.get('/importacao/auto-produtos', async (req, res) => {
   }
 });
 
+router.put('/importacao/auto-produtos/:id/dados', async (req, res) => {
+  try {
+    const supervisorLogado = !!req.usuario?.supervisor && !req.body?.autorizacao;
+    if (!supervisorLogado && !(await autorizadoSupervisorOuRevenda(req.body))) {
+      return res.json({ ok: false, error: 'Senha do supervisor ou da revenda inválida.' });
+    }
+    const autoParams = require('./importacao-auto-params');
+    const salvo = await autoParams.salvarDados(req.body?.id_fornec, req.params.id, req.body || {});
+    res.json({ ok: true, ...salvo });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.put('/importacao/auto-produtos/:id', async (req, res) => {
   try {
     const supervisorLogado = !!req.usuario?.supervisor && !req.body?.autorizacao;

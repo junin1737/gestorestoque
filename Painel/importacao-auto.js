@@ -17,28 +17,39 @@
     </label>`;
   }
 
+  function campo(rotulo, nome, valor, largo) {
+    return `<label class="auto-campo${largo ? ' largo' : ''}"><span>${esc(rotulo)}</span><input data-campo="${nome}" value="${esc(valor || '')}" autocomplete="off" /></label>`;
+  }
+
+  function linhaConversao(c) {
+    const item = c || {};
+    const pacote = item.pacote ? ' checked' : '';
+    return `<div class="auto-conv" data-id="${esc(item.id || '')}">
+      ${campo('Unid. nota', 'uni_xml', item.uni_xml)}
+      ${campo('Fator', 'conversor', item.conversor)}
+      ${campo('Unid. estoque', 'uni_estoque', item.uni_estoque, true)}
+      <label class="auto-pacote"><input type="checkbox" data-campo="pacote"${pacote} /><span>Pacote</span></label>
+    </div>`;
+  }
+
   function linhaParam(p) {
-    const itens = [];
-    const por = (rotulo, valor) => {
-      const texto = String(valor == null ? '' : valor).trim();
-      if (texto) itens.push(`<span><b>${esc(rotulo)}</b> ${esc(texto)}</span>`);
-    };
-    por('CFOP', p.cfop);
-    por('CST', p.cst);
-    por('CSOSN', p.csosn);
-    por('ICMS', p.aliq_icms);
-    por('CST IPI', p.cst_ipi);
-    por('IPI', p.ipi);
-    por('CST PIS', p.cst_pis);
-    por('PIS', p.pis);
-    por('CST COFINS', p.cst_cofins);
-    por('COFINS', p.cofins);
-    por('MVA', p.mva);
-    por('Unidade', p.uni_medida);
-    if (p.conversor_clipp && !(p.conversoes || []).length) por('Conversão', p.conversor_clipp);
-    (p.conversoes || []).forEach((c) => por('Conversão', c));
-    if (!itens.length) return '';
-    return `<p class="auto-prod-param">${itens.join('')}</p>`;
+    const conversoes = (p.conversoes || []).length ? p.conversoes : [{}];
+    return `<div class="auto-prod-edit">
+      ${campo('CFOP', 'cfop', p.cfop)}
+      ${campo('CST', 'cst', p.cst)}
+      ${campo('CSOSN', 'csosn', p.csosn)}
+      ${campo('ICMS', 'aliq_icms', p.aliq_icms)}
+      ${campo('CST IPI', 'cst_ipi', p.cst_ipi, true)}
+      ${campo('IPI', 'ipi', p.ipi)}
+      ${campo('CST PIS', 'cst_pis', p.cst_pis, true)}
+      ${campo('PIS', 'pis', p.pis)}
+      ${campo('CST COFINS', 'cst_cofins', p.cst_cofins, true)}
+      ${campo('COFINS', 'cofins', p.cofins)}
+      ${campo('MVA', 'mva', p.mva)}
+      ${campo('Unidade', 'uni_medida', p.uni_medida, true)}
+      ${conversoes.map((c) => linhaConversao(c)).join('')}
+      <button type="button" class="btn small" data-salvar-param>Salvar dados</button>
+    </div>`;
   }
 
   function render(produtos) {
@@ -64,8 +75,11 @@
         </div>
         ${selectImportar(p.importar === true)}
       </article>`).join('');
-    box.querySelectorAll('select').forEach((sel) => {
+    box.querySelectorAll('select[data-campo="importar"]').forEach((sel) => {
       sel.addEventListener('change', () => salvar(sel));
+    });
+    box.querySelectorAll('[data-salvar-param]').forEach((btn) => {
+      btn.addEventListener('click', () => salvarDados(btn));
     });
   }
 
@@ -120,6 +134,54 @@
     if (aviso) aviso.textContent = 'Salvo.';
   }
 
+  function lerCampo(raiz, nome) {
+    return raiz.querySelector(`[data-campo="${nome}"]`)?.value ?? '';
+  }
+
+  async function salvarDados(btn) {
+    const card = btn.closest('.auto-prod');
+    const aviso = $('#cfg-auto-aviso');
+    const edit = card?.querySelector('.auto-prod-edit');
+    if (!card || !edit) return;
+    const extra = await autorizacao();
+    if (!extra) return;
+    const conversoes = [...edit.querySelectorAll('.auto-conv')].map((row) => ({
+      id: Number(row.dataset.id) || undefined,
+      uni_xml: lerCampo(row, 'uni_xml'),
+      conversor: lerCampo(row, 'conversor'),
+      uni_estoque: lerCampo(row, 'uni_estoque'),
+      pacote: !!row.querySelector('[data-campo="pacote"]')?.checked,
+    }));
+    btn.disabled = true;
+    const res = await deps.api(`/importacao/auto-produtos/${card.dataset.id}/dados`, {
+      method: 'PUT',
+      body: {
+        id_fornec: Number(card.dataset.fornec),
+        cfop: lerCampo(edit, 'cfop'),
+        cst: lerCampo(edit, 'cst'),
+        csosn: lerCampo(edit, 'csosn'),
+        aliq_icms: lerCampo(edit, 'aliq_icms'),
+        cst_ipi: lerCampo(edit, 'cst_ipi'),
+        ipi: lerCampo(edit, 'ipi'),
+        cst_pis: lerCampo(edit, 'cst_pis'),
+        pis: lerCampo(edit, 'pis'),
+        cst_cofins: lerCampo(edit, 'cst_cofins'),
+        cofins: lerCampo(edit, 'cofins'),
+        mva: lerCampo(edit, 'mva'),
+        uni_medida: lerCampo(edit, 'uni_medida'),
+        conversoes,
+        ...extra,
+      },
+    });
+    btn.disabled = false;
+    if (!res?.ok) {
+      authz = null;
+      if (aviso) aviso.textContent = res?.error || 'Não foi possível salvar os dados.';
+      return;
+    }
+    if (aviso) aviso.textContent = 'Dados salvos. Valem na próxima importação.';
+  }
+
   async function buscar() {
     const aviso = $('#cfg-auto-aviso');
     const q = String($('#cfg-auto-busca')?.value || '').trim();
@@ -140,7 +202,7 @@
     const lista = res.produtos || [];
     if (aviso) {
       aviso.textContent = lista.length
-        ? `${lista.length} produto(s) parametrizado(s). A alteração grava na hora.`
+        ? `${lista.length} produto(s). Corrija os dados e use Salvar dados. Importar grava na hora.`
         : 'Nenhum produto parametrizado com esse filtro.';
     }
     render(lista);

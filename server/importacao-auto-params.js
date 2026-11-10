@@ -221,14 +221,13 @@ async function buscar(q, grupo) {
         for (const c of fatores || []) {
           const chaveConv = `${Number(c.ID_FORNEC)}:${Number(c.ID_IDENTIFICADOR)}`;
           const lista = conversoes.get(chaveConv) || [];
-          const pacote = String(c.PACOTE || '').trim().toUpperCase() === 'S';
-          const fator = Number(c.CONVERSOR);
-          const uniXml = String(c.UNI_XML || '').trim();
-          const uniEst = String(c.UNI_ESTOQUE || '').trim();
-          const texto = pacote
-            ? `${textoNumero(fator) || '1'} pacote(s)`
-            : [uniXml, fator > 0 ? `× ${textoNumero(fator)}` : '', uniEst].filter(Boolean).join(' ');
-          if (texto && !lista.includes(texto)) lista.push(texto);
+          lista.push({
+            id: Number(c.ID),
+            uni_xml: String(c.UNI_XML || '').trim(),
+            uni_estoque: String(c.UNI_ESTOQUE || '').trim(),
+            conversor: textoNumero(c.CONVERSOR),
+            pacote: String(c.PACOTE || '').trim().toUpperCase() === 'S',
+          });
           conversoes.set(chaveConv, lista);
         }
       }
@@ -242,6 +241,95 @@ async function buscar(q, grupo) {
       };
     });
     return out || { produtos: [], grupos: [], importarTodos: load().importarTodos === true };
+  });
+}
+
+function codigoCampo(v, max) {
+  return String(v == null ? '' : v).trim().toUpperCase().slice(0, max);
+}
+
+function numeroCampo(v, rotulo) {
+  const texto = String(v == null ? '' : v).trim().replace(/\s/g, '').replace(',', '.');
+  if (!texto) return 0;
+  const n = Number(texto);
+  if (!Number.isFinite(n) || n < 0) {
+    throw new Error(`${rotulo} precisa ser um número igual ou maior que zero.`);
+  }
+  return n;
+}
+
+async function gravarConversao(db, idIdent, idFornec, item) {
+  const fator = numeroCampo(item?.conversor, 'O fator da conversão');
+  if (!(fator > 0)) throw new Error('O fator da conversão precisa ser maior que zero.');
+  const uniXml = codigoCampo(item?.uni_xml, 10);
+  const uniEst = codigoCampo(item?.uni_estoque, 10);
+  if (!uniXml || !uniEst) throw new Error('Informe a unidade da nota e a unidade do estoque na conversão.');
+  const pacote = item?.pacote === true || item?.pacote === 'S' ? 'S' : 'N';
+  const id = Number(item?.id);
+  if (Number.isInteger(id) && id > 0) {
+    const rows = await query(db, `
+      SELECT FIRST 1 ID FROM TB_MT_CONVERSAO
+      WHERE ID = ? AND ID_IDENTIFICADOR = ? AND COALESCE(ID_FORNEC, 0) = ?`, [id, idIdent, idFornec]);
+    if (!rows[0]) throw new Error('A conversão deste produto não foi encontrada.');
+    await query(db, `
+      UPDATE TB_MT_CONVERSAO
+      SET UNI_XML = ?, UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = ?, UPDATED_AT = CURRENT_TIMESTAMP
+      WHERE ID = ?`, [uniXml, uniEst, fator, pacote, id]);
+    return;
+  }
+  const next = await query(db, `SELECT COALESCE(MAX(ID), 0) + 1 AS ID FROM TB_MT_CONVERSAO`);
+  const novo = Number(next[0]?.ID || 1);
+  await query(db, `
+    INSERT INTO TB_MT_CONVERSAO (ID, ID_IDENTIFICADOR, ID_FORNEC, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE, UPDATED_AT)
+    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
+    novo, idIdent, idFornec, uniXml, uniEst, fator, pacote,
+  ]);
+}
+
+async function salvarDados(idFornec, idIdent, body = {}) {
+  const forn = Number(idFornec);
+  const id = Number(idIdent);
+  if (!Number.isInteger(forn) || forn <= 0 || !Number.isInteger(id) || id <= 0) {
+    throw new Error('Produto inválido.');
+  }
+  const conversoes = Array.isArray(body.conversoes) ? body.conversoes.slice(0, 8) : [];
+  return withDb(async (db) => {
+    const pronto = await comConversao(db, async () => true);
+    if (pronto !== true) throw new Error('A parametrização do fornecedor não está disponível nesta base.');
+    const rows = await query(db, `
+      SELECT FIRST 1 * FROM TB_ESTOQUE_FORNECEDOR
+      WHERE ID_IDENTIFICADOR = ? AND ID_FORNEC = ?
+        AND TRIM(COALESCE(STATUS, 'A')) = 'A'
+      ORDER BY ID_EST_FORNEC DESC`, [id, forn]);
+    if (!rows[0]) throw new Error('Este produto não está ativo na parametrização do fornecedor.');
+    const atual = require('./importacao-estoque-fornec').mapEstFornec(rows[0]);
+    await require('./importacao-estoque-fornec').upsertEstoqueFornecedor({
+      id_identificador: id,
+      id_fornec: forn,
+      cod_no_fornecedor: atual.cod_no_fornecedor,
+      cod_barras: atual.cod_barras,
+      cfop: String(body.cfop || '').replace(/\D/g, '').slice(0, 4),
+      cst: codigoCampo(body.cst, 3),
+      csosn: codigoCampo(body.csosn, 3),
+      aliq_icms: numeroCampo(body.aliq_icms, 'O ICMS'),
+      cst_ipi: codigoCampo(body.cst_ipi, 2),
+      ipi: numeroCampo(body.ipi, 'O IPI'),
+      cst_pis: codigoCampo(body.cst_pis, 2),
+      pis: numeroCampo(body.pis, 'O PIS'),
+      cst_cofins: codigoCampo(body.cst_cofins, 2),
+      cofins: numeroCampo(body.cofins, 'O COFINS'),
+      mva: String(body.mva == null ? '' : body.mva).trim() === '' ? '' : numeroCampo(body.mva, 'O MVA'),
+      uni_medida: codigoCampo(body.uni_medida, 6),
+    }, { db });
+    for (const item of conversoes) {
+      const vazio = !String(item?.uni_xml || '').trim()
+        && !String(item?.uni_estoque || '').trim()
+        && !String(item?.conversor || '').trim()
+        && !item?.id;
+      if (vazio) continue;
+      await gravarConversao(db, id, forn, item);
+    }
+    return { id_identificador: id, id_fornec: forn };
   });
 }
 
@@ -299,6 +387,7 @@ module.exports = {
   flag,
   definir,
   buscar,
+  salvarDados,
   parametrizado,
   aplicarTodos,
   load,
