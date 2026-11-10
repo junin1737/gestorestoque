@@ -6,12 +6,29 @@ const sefaz = require('./importacao-sefaz');
 const fornecedor = require('./importacao-fornecedor');
 
 const HORA_MS = 60 * 60 * 1000;
+const CINCO_MIN_MS = 5 * 60 * 1000;
 const LOTE = 5;
 let avaliando = false;
 let timer = null;
 
 function daquiUmaHora() {
   return new Date(Date.now() + HORA_MS).toISOString();
+}
+
+function daquiCincoMinutos() {
+  return new Date(Date.now() + CINCO_MIN_MS).toISOString();
+}
+
+function esperaXml(err) {
+  const consumo = err?.code === 'CONSUMO_INDEVIDO' || String(err?.cStat || '') === '656';
+  return consumo ? daquiUmaHora() : daquiCincoMinutos();
+}
+
+function avisoXml(err) {
+  const consumo = err?.code === 'CONSUMO_INDEVIDO' || String(err?.cStat || '') === '656';
+  return consumo
+    ? 'A SEFAZ pediu para aguardar. Nova tentativa em 1 hora. A nota continua em Consultar compras.'
+    : 'A consulta da SEFAZ ainda não está completa. Nova tentativa em 5 minutos. A nota continua em Consultar compras.';
 }
 
 /**
@@ -171,8 +188,8 @@ async function avaliarNota(nota) {
     } catch (err) {
       compras.atualizarNota(nota.chave, {
         autoMotivo: 'xml',
-        autoAviso: 'A consulta da SEFAZ ainda não está completa. Nova tentativa em 1 hora. A nota continua em Consultar compras.',
-        proximaTentativa: daquiUmaHora(),
+        autoAviso: avisoXml(err),
+        proximaTentativa: esperaXml(err),
       });
       return;
     }
@@ -180,8 +197,8 @@ async function avaliarNota(nota) {
   if (!xmlOk) {
     compras.atualizarNota(nota.chave, {
       autoMotivo: 'xml',
-      autoAviso: 'A consulta da SEFAZ ainda não está completa. Nova tentativa em 1 hora. A nota continua em Consultar compras.',
-      proximaTentativa: daquiUmaHora(),
+      autoAviso: avisoXml(),
+      proximaTentativa: daquiCincoMinutos(),
     });
     return;
   }
@@ -217,7 +234,7 @@ function iniciar() {
   if (timer) return;
   timer = setInterval(() => {
     avaliarPendentes().catch((err) => console.warn('Importação automática:', err.message));
-  }, HORA_MS);
+  }, CINCO_MIN_MS);
   if (timer.unref) timer.unref();
 }
 
