@@ -421,19 +421,7 @@ function exigirSessao(req, res, next) {
   }
   if (!viaTunel(req)) {
     req.usuario = u;
-    const deviceId = String(req.headers['x-device-id'] || '').trim();
-    if (deviceId) {
-      const r = require('./dispositivos').registrar(deviceId, {
-        userAgent: req.headers['user-agent'],
-      });
-      if (r.vencido) {
-        return res.status(403).json({
-          ok: false,
-          code: 'DISPOSITIVO',
-          error: 'O prazo deste dispositivo acabou. Renove o tempo na aba Dispositivos do servidor.',
-        });
-      }
-    }
+    if (prazoDispositivoEncerrado(req, res)) return;
     return next();
   }
   bloqueioOnline(u).then((b) => {
@@ -444,6 +432,25 @@ function exigirSessao(req, res, next) {
     req.usuario = u;
     next();
   }, next);
+}
+
+/** Grava o aparelho com o nome digitado na liberação. Sem nome, fica o já gravado. */
+function prazoDispositivoEncerrado(req, res) {
+  const deviceId = String(req.headers['x-device-id'] || '').trim();
+  if (!deviceId) return false;
+  const nomeHeader = String(req.headers['x-device-name'] || '').trim();
+  const nomeAparelho = String(req.aparelho?.nome || '').trim();
+  const r = require('./dispositivos').registrar(deviceId, {
+    userAgent: req.headers['user-agent'],
+    nome: nomeHeader || nomeAparelho,
+  });
+  if (!r.vencido) return false;
+  res.status(403).json({
+    ok: false,
+    code: 'DISPOSITIVO',
+    error: 'O prazo deste dispositivo acabou. Renove o tempo na aba Dispositivos do servidor.',
+  });
+  return true;
 }
 
 function nivel(u, modulo, acao) {

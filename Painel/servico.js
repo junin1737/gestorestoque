@@ -128,22 +128,32 @@ async function loadDispositivos() {
     box.innerHTML = '<p class="hint">Nenhum dispositivo abriu o painel ainda.</p>';
     return;
   }
-  box.innerHTML = itens.map((d) => `
-    <div class="sobre-box" data-disp="${esc(d.id)}">
-      <strong>${esc(d.nome)}</strong>
-      <p class="hint">${d.vencido ? 'Prazo encerrado' : 'Liberado'} · último acesso ${esc(d.ultimo_acesso || '—')}</p>
-      <label>Nome
-        <input class="disp-nome" type="text" value="${esc(d.nome)}" maxlength="60" />
-      </label>
-      <label>Dias de acesso
-        <input class="disp-dias" type="number" min="1" max="3650" value="${Number(d.dias || 30)}" />
-      </label>
-      <div class="banco-actions left">
-        <button type="button" class="btn-outline disp-renomear">Renomear</button>
+  box.innerHTML = itens.map((d) => {
+    const semNome = !d.nome || /^dispositivo$/i.test(d.nome);
+    const titulo = semNome ? (d.origem || 'Aparelho') : d.nome;
+    return `
+    <article class="disp-card${d.vencido ? ' vencido' : ''}" data-disp="${esc(d.id)}">
+      <header class="disp-card-topo">
+        <div>
+          <h3 class="disp-card-nome">${esc(titulo)}</h3>
+          <p class="disp-card-meta">Último acesso ${esc(fmtDataHora(d.ultimo_acesso))} · vence ${esc(fmtDataHora(d.expira_em))}</p>
+        </div>
+        <span class="disp-badge ${d.vencido ? 'disp-badge-off' : 'disp-badge-ok'}">${d.vencido ? 'Prazo encerrado' : 'Liberado'}</span>
+      </header>
+      <div class="disp-card-campos">
+        <label>Nome
+          <input class="disp-nome" type="text" value="${semNome ? '' : esc(d.nome)}" maxlength="60" placeholder="Nome digitado na liberação" />
+        </label>
+        <label>Dias de acesso
+          <input class="disp-dias" type="number" min="1" max="3650" value="${Number(d.dias || 30)}" />
+        </label>
+      </div>
+      <div class="disp-card-acoes">
+        <button type="button" class="btn-outline disp-renomear">Salvar nome</button>
         <button type="button" class="btn-teal disp-dias-btn">Salvar prazo</button>
       </div>
-    </div>
-  `).join('');
+    </article>`;
+  }).join('');
   $$('[data-disp]', box).forEach((card) => {
     const id = card.dataset.disp;
     card.querySelector('.disp-renomear')?.addEventListener('click', async () => {

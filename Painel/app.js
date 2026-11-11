@@ -212,6 +212,14 @@ function deviceId() {
   }
 }
 
+function nomeDispositivoGuardado() {
+  try {
+    return String(localStorage.getItem('gestor-device-nome') || '').trim().slice(0, 60);
+  } catch {
+    return '';
+  }
+}
+
 let stateCfgTab = 'tema';
 let cfgMontada = false;
 
@@ -593,6 +601,8 @@ async function api(path, options = {}) {
   const method = String(options.method || 'GET').toUpperCase();
   const grava = method !== 'GET' && method !== 'HEAD';
   const headers = { 'Content-Type': 'application/json', 'X-Device-Id': deviceId(), ...(options.headers || {}) };
+  const nomeDisp = nomeDispositivoGuardado();
+  if (nomeDisp) headers['X-Device-Name'] = encodeURIComponent(nomeDisp);
   if (state.usuario) headers['X-Gestor-Usuario'] = String(state.usuario.id);
   if (lojaDoPainel) headers['X-Gestor-Loja'] = lojaDoPainel;
   // Mesma chave nas repetições: se a resposta se perdeu na rede, o servidor não grava duas vezes.

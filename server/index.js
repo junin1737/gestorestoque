@@ -75,7 +75,9 @@ const PEDIDO_HTML = `<div class="pedido" id="pedido">
     if(timer){formulario();erro('O pedido expirou. Solicite de novo.');return}
   }).catch(function(){})}
   $('pd-btn').addEventListener('click',function(){erro('');aguardarClique=false;$('pd-btn').disabled=true;
-    fetch('/parear/solicitar',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:$('pd-nome').value})})
+    var nomePedidoTxt=String($('pd-nome').value||'').trim().slice(0,60);
+    try{if(nomePedidoTxt)localStorage.setItem('gestor-device-nome',nomePedidoTxt);}catch(e){}
+    fetch('/parear/solicitar',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({nome:nomePedidoTxt})})
     .then(function(r){return r.json()}).then(function(d){if(d.ok)esperando(d.codigo);else{formulario();erro(d.error||'Não foi possível solicitar.')}})
     .catch(function(){formulario();erro('Sem conexão com a loja. Tente de novo.')})});
   verificar();
