@@ -598,6 +598,156 @@ const nextTableId = nextGenId;
 
 const LER_ESTOQUE = exigirModulo('estoque', 'importacao', 'alteracoes');
 
+const LIMIAR_PARECIDO = 0.8;
+const TAMANHOS_GRADE = new Set(['XXG', 'XGG', 'XXXG', 'EXG', 'EGG', 'GGG', 'XXL', 'XXXL', 'UNICO']);
+
+function semAcento(texto) {
+  return String(texto || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+}
+
+function normalizarDescricao(texto) {
+  return semAcento(texto).toUpperCase().replace(/[^A-Z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function distanciaLevenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  let ant = Array.from({ length: n + 1 }, (_, j) => j);
+  for (let i = 1; i <= m; i += 1) {
+    const atu = [i];
+    for (let j = 1; j <= n; j += 1) {
+      const custo = a[i - 1] === b[j - 1] ? 0 : 1;
+      atu[j] = Math.min(ant[j] + 1, atu[j - 1] + 1, ant[j - 1] + custo);
+    }
+    ant = atu;
+  }
+  return ant[n];
+}
+
+/** 1 = igual. Usado para achar a grade que já vem escrita no nome. */
+function similaridadeDescricao(a, b) {
+  const x = normalizarDescricao(a);
+  const y = normalizarDescricao(b);
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  return 1 - distanciaLevenshtein(x, y) / Math.max(x.length, y.length);
+}
+
+function tokensDaDescricao(descricao) {
+  return String(descricao || '')
+    .toUpperCase()
+    .split(/[^0-9A-ZÁÉÍÓÚÃÕÂÊÔÇ]+/)
+    .filter((t) => t.length >= 3 && !TAMANHOS_GRADE.has(semAcento(t)) && !/^\d+$/.test(t));
+}
+
+/** Primeiras palavras estáveis do nome, sem a cor e o tamanho do fim. */
+function raizDescricao(descricao) {
+  const tokens = tokensDaDescricao(descricao);
+  if (tokens.length < 2) return [];
+  return tokens.slice(0, Math.min(4, tokens.length));
+}
+
+function filtrarParecidos(candidatos, ancoras, ja) {
+  const descricoes = [...new Set(ancoras.map((a) => String(a.DESCRICAO || '').trim()).filter(Boolean))];
+  if (!descricoes.length) return [];
+  const diretos = [];
+  const resto = [];
+  for (const c of candidatos) {
+    if (ja.has(Number(c.ID_IDENTIFICADOR))) continue;
+    let melhor = 0;
+    for (const desc of descricoes) {
+      const nota = similaridadeDescricao(c.DESCRICAO, desc);
+      if (nota > melhor) melhor = nota;
+    }
+    if (melhor >= LIMIAR_PARECIDO) diretos.push(c);
+    else if (melhor >= 0.75) resto.push(c);
+  }
+  const pontes = descricoes.concat(diretos.map((d) => d.DESCRICAO));
+  const viaPonte = resto.filter((c) => pontes.some((p) => similaridadeDescricao(c.DESCRICAO, p) >= LIMIAR_PARECIDO));
+  return diretos.concat(viaPonte).slice(0, 40);
+}
+
+function anexarParecidos(rows, extras, raizPorId) {
+  const extrasPorRaiz = new Map();
+  for (const ex of extras) {
+    let melhorId = null;
+    let melhor = 0;
+    for (const row of rows) {
+      const nota = similaridadeDescricao(row.DESCRICAO, ex.DESCRICAO);
+      if (nota > melhor) {
+        melhor = nota;
+        melhorId = Number(row.ID_IDENTIFICADOR);
+      }
+    }
+    const chave = melhorId == null ? '' : (raizPorId.get(melhorId) || '');
+    if (!chave) continue;
+    if (!extrasPorRaiz.has(chave)) extrasPorRaiz.set(chave, []);
+    extrasPorRaiz.get(chave).push({ ...ex, _similar: true });
+  }
+  const saida = [];
+  const vistosId = new Set();
+  const vistosRaiz = new Set();
+  for (const row of rows) {
+    const id = Number(row.ID_IDENTIFICADOR);
+    if (vistosId.has(id)) continue;
+    const chave = raizPorId.get(id);
+    if (!chave) {
+      vistosId.add(id);
+      saida.push(row);
+      continue;
+    }
+    if (vistosRaiz.has(chave)) continue;
+    vistosRaiz.add(chave);
+    for (const hit of rows) {
+      const hitId = Number(hit.ID_IDENTIFICADOR);
+      if (raizPorId.get(hitId) !== chave || vistosId.has(hitId)) continue;
+      vistosId.add(hitId);
+      saida.push(hit);
+    }
+    for (const ex of extrasPorRaiz.get(chave) || []) {
+      const exId = Number(ex.ID_IDENTIFICADOR);
+      if (vistosId.has(exId)) continue;
+      vistosId.add(exId);
+      saida.push(ex);
+    }
+  }
+  return saida;
+}
+
+async function acrescentarParecidosDescricao(db, gradeSelect, gradeWhere, rows) {
+  const raizPorId = new Map();
+  const porRaiz = new Map();
+  for (const row of rows) {
+    const raiz = raizDescricao(row.DESCRICAO);
+    if (raiz.length < 2) continue;
+    const chave = raiz.join(' ');
+    raizPorId.set(Number(row.ID_IDENTIFICADOR), chave);
+    if (!porRaiz.has(chave)) porRaiz.set(chave, { raiz, ancoras: [] });
+    porRaiz.get(chave).ancoras.push(row);
+  }
+  const grupos = [...porRaiz.values()].slice(0, 8);
+  if (!grupos.length) return rows;
+  const ja = new Set(rows.map((r) => Number(r.ID_IDENTIFICADOR)));
+  const extras = [];
+  const selectLimitado = gradeSelect.replace('SELECT', 'SELECT FIRST 200');
+  for (const grupo of grupos) {
+    if (extras.length >= 80) break;
+    const filtros = grupo.raiz.map(() => 'UPPER(E.DESCRICAO) CONTAINING ?').join(' AND ');
+    const where = [gradeWhere, filtros].filter(Boolean).join(' AND ');
+    const candidatos = await query(db, `
+      ${selectLimitado}
+      WHERE ${where}
+      ORDER BY E.ID_ESTOQUE DESC`, grupo.raiz);
+    const aceitos = filtrarParecidos(candidatos, grupo.ancoras, ja).slice(0, 80 - extras.length);
+    for (const item of aceitos) {
+      ja.add(Number(item.ID_IDENTIFICADOR));
+      extras.push(item);
+    }
+  }
+  if (!extras.length) return rows;
+  return anexarParecidos(rows, extras, raizPorId);
+}
+
 /** Junta as variações do mesmo código (id_estoque) logo depois da peça encontrada. */
 function juntarGrade(rows, gradeRows, destacar) {
   const porEstoque = new Map();
@@ -785,6 +935,7 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
             rows = juntarGrade(rows, grade, rows.length === 1);
           }
         }
+        rows = await acrescentarParecidosDescricao(db, gradeSelect, gradeWhere, rows);
       }
       return rows.map((r) => {
         const item = mapProdutoRow(r);
