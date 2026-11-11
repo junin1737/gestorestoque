@@ -598,6 +598,36 @@ const nextTableId = nextGenId;
 
 const LER_ESTOQUE = exigirModulo('estoque', 'importacao', 'alteracoes');
 
+/** Junta as variações do mesmo código (id_estoque) logo depois da peça encontrada. */
+function juntarGrade(rows, gradeRows, destacar) {
+  const porEstoque = new Map();
+  for (const g of gradeRows) {
+    const id = Number(g.ID_ESTOQUE);
+    if (!porEstoque.has(id)) porEstoque.set(id, []);
+    porEstoque.get(id).push(g);
+  }
+  const saida = [];
+  const vistos = new Set();
+  for (const row of rows) {
+    const idEst = Number(row.ID_ESTOQUE);
+    const familia = porEstoque.get(idEst);
+    if (!familia || familia.length < 2) {
+      saida.push(row);
+      continue;
+    }
+    if (vistos.has(idEst)) continue;
+    vistos.add(idEst);
+    const hits = rows.filter((r) => Number(r.ID_ESTOQUE) === idEst);
+    const hitIds = new Set(hits.map((r) => Number(r.ID_IDENTIFICADOR)));
+    if (destacar && hits.length === 1) saida.push({ ...hits[0], _foco: true });
+    else for (const h of hits) saida.push(h);
+    for (const g of familia) {
+      if (!hitIds.has(Number(g.ID_IDENTIFICADOR))) saida.push({ ...g, _similar: true });
+    }
+  }
+  return saida;
+}
+
 /** Usuário sem preço "Total" não recebe o custo (nem na resposta da API). */
 function ocultarCusto(req, item) {
   if (!item || auth.podeVerCusto(req.usuario)) return item;
@@ -714,13 +744,9 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
         ORDER BY ${orderBy}`;
       let rows = await query(db, sql, params);
       let focoId = null;
-      if (Number(appCfg?.produtos_similares) === 1 && buscaPorBarras && rows.length) {
-        const foco = rows.find((r) => String(r.COD_BARRAS || '').trim() === busca) || rows[0];
-        focoId = Number(foco.ID_IDENTIFICADOR);
-        let gradeWhere = 'E.ID_ESTOQUE = ?';
-        if (statusFiltro === 'I') gradeWhere += ` AND E.STATUS = 'I'`;
-        else if (statusFiltro !== 'ALL' && statusFiltro !== '*') gradeWhere += ` AND (E.STATUS = 'A' OR E.STATUS IS NULL)`;
-        const grade = await query(db, `
+      const querSimilares = Number(appCfg?.produtos_similares) === 1 && !!busca && rows.length;
+      if (querSimilares) {
+        const gradeSelect = `
           SELECT
             E.ID_ESTOQUE, I.ID_IDENTIFICADOR, E.DESCRICAO, E.ID_GRUPO,
             G.DESCRICAO AS GRUPO, E.UNI_MEDIDA, E.PRC_VENDA, E.PRC_CUSTO,
@@ -732,18 +758,38 @@ router.get('/estoque', LER_ESTOQUE, async (req, res) => {
           JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
           LEFT JOIN ${t.grupo} G ON G.ID_GRUPO = E.ID_GRUPO
           LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
-          LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
-          WHERE ${gradeWhere}
-          ORDER BY I.ID_IDENTIFICADOR`, [foco.ID_ESTOQUE]);
-        if (grade.length > 1) {
-          rows = [
-            ...grade.filter((r) => Number(r.ID_IDENTIFICADOR) === focoId),
-            ...grade.filter((r) => Number(r.ID_IDENTIFICADOR) !== focoId),
-          ];
+          LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2`;
+        let gradeWhere = '';
+        if (statusFiltro === 'I') gradeWhere = `E.STATUS = 'I'`;
+        else if (statusFiltro !== 'ALL' && statusFiltro !== '*') gradeWhere = `(E.STATUS = 'A' OR E.STATUS IS NULL)`;
+        if (buscaPorBarras) {
+          const foco = rows.find((r) => String(r.COD_BARRAS || '').trim() === busca) || rows[0];
+          focoId = Number(foco.ID_IDENTIFICADOR);
+          const grade = await query(db, `
+            ${gradeSelect}
+            WHERE E.ID_ESTOQUE = ?${gradeWhere ? ` AND ${gradeWhere}` : ''}
+            ORDER BY I.ID_IDENTIFICADOR`, [foco.ID_ESTOQUE]);
+          if (grade.length > 1) {
+            rows = [
+              ...grade.filter((r) => Number(r.ID_IDENTIFICADOR) === focoId),
+              ...grade.filter((r) => Number(r.ID_IDENTIFICADOR) !== focoId),
+            ];
+          }
+        } else {
+          const ids = [...new Set(rows.map((r) => Number(r.ID_ESTOQUE)).filter((n) => Number.isFinite(n)))];
+          if (ids.length) {
+            const grade = await query(db, `
+              ${gradeSelect}
+              WHERE E.ID_ESTOQUE IN (${ids.map(() => '?').join(', ')})${gradeWhere ? ` AND ${gradeWhere}` : ''}
+              ORDER BY E.ID_ESTOQUE, I.ID_IDENTIFICADOR`, ids);
+            rows = juntarGrade(rows, grade, rows.length === 1);
+          }
         }
       }
       return rows.map((r) => {
         const item = mapProdutoRow(r);
+        if (r._foco) item.foco = true;
+        if (r._similar) item.similar = true;
         if (focoId == null || rows.length < 2) return item;
         item.foco = Number(r.ID_IDENTIFICADOR) === focoId;
         item.similar = !item.foco;
