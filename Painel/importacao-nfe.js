@@ -3283,8 +3283,12 @@ const ImportacaoNfe = (() => {
     }
     state.buscaProduto = patch.id_identificador ? patch.descricao : state.buscaProduto;
     if (patch.criar_novo) await aplicarCclassSeNovo(it.sistema);
+    it.etapas_ok = { ...etapasOkOf(it), vinculo: true };
     state.itemTab = patch.criar_novo ? 'ficha' : 'vinculo';
+    const gravou = await persistirItemNoServidor(it);
+    if (gravou) await persistRegraEFornec(it);
     renderItemScreen();
+    if (gravou) deps.showToast?.(patch.criar_novo ? 'Novo produto gravado' : 'Vínculo gravado');
   }
 
   function syncVendaPorMargem() {
@@ -3720,7 +3724,101 @@ const ImportacaoNfe = (() => {
     return false;
   }
 
-  function setItemTab(tabId) {
+  function aplicarPatchLocal(it, patch) {
+    if (!it || !patch?.sistema) return;
+    it.sistema = { ...it.sistema, ...patch.sistema };
+    if (patch.sistema.tributos) {
+      it.sistema.tributos = { ...(it.sistema.tributos || {}), ...patch.sistema.tributos };
+    }
+    if (patch.sistema.trib_nfe) {
+      it.sistema.trib_nfe = { ...(it.sistema.trib_nfe || {}), ...patch.sistema.trib_nfe };
+    }
+    if (patch.sistema.trib_nfce) {
+      it.sistema.trib_nfce = { ...(it.sistema.trib_nfce || {}), ...patch.sistema.trib_nfce };
+    }
+    it.conferido = patch.conferido;
+    it.observacao = patch.observacao;
+    if (patch.etapas_ok) it.etapas_ok = { ...etapasOkOf(it), ...patch.etapas_ok };
+    if (patch.match !== undefined) it.match = patch.match;
+  }
+
+  /** Grava o que já foi feito neste item, sem exigir as etapas seguintes. */
+  async function persistirItemNoServidor(it) {
+    const s = state.sessao;
+    if (!it || !s || !itemVinculado(it)) return false;
+    const nItem = it.nItem;
+    const outros = (s.itens || []).filter((row) => Number(row.nItem) !== Number(nItem) && itemVinculado(row))
+      .map((row) => ({
+        nItem: row.nItem,
+        sistema: row.sistema,
+        match: row.match,
+        etapas_ok: row.etapas_ok,
+        conferido: row.conferido,
+        observacao: row.observacao,
+        lote_aba_visitada: row.lote_aba_visitada,
+      }));
+    const res = await api(`/importacao/sessoes/${s.id}/itens/${nItem}`, {
+      method: 'PUT',
+      body: {
+        sistema: it.sistema,
+        conferido: !!it.conferido,
+        observacao: it.observacao || '',
+        etapas_ok: { ...etapasOkOf(it) },
+        match: it.match || null,
+        lote_aba_visitada: !!it.lote_aba_visitada,
+      },
+    });
+    if (!res.ok) {
+      gravarRascunhoNota();
+      deps.showMsg?.(res.error || 'Erro ao gravar o vínculo.');
+      return false;
+    }
+    state.sessao = res.sessao;
+    for (const prev of outros) {
+      const row = (state.sessao.itens || []).find((x) => Number(x.nItem) === Number(prev.nItem));
+      if (!row || itemVinculado(row)) continue;
+      row.sistema = prev.sistema;
+      row.match = prev.match;
+      row.etapas_ok = prev.etapas_ok;
+      row.conferido = prev.conferido;
+      row.observacao = prev.observacao;
+      row.lote_aba_visitada = prev.lote_aba_visitada;
+    }
+    return true;
+  }
+
+  async function persistirVinculosLocais() {
+    const copias = (state.sessao?.itens || []).filter((it) => itemVinculado(it)).map((it) => ({
+      nItem: it.nItem,
+      sistema: JSON.parse(JSON.stringify(it.sistema || {})),
+      conferido: !!it.conferido,
+      observacao: it.observacao || '',
+      etapas_ok: { ...etapasOkOf(it) },
+      match: it.match ? JSON.parse(JSON.stringify(it.match)) : null,
+      lote_aba_visitada: !!it.lote_aba_visitada,
+    }));
+    for (const c of copias) {
+      const res = await api(`/importacao/sessoes/${state.sessao.id}/itens/${c.nItem}`, {
+        method: 'PUT',
+        body: {
+          sistema: c.sistema,
+          conferido: c.conferido,
+          observacao: c.observacao,
+          etapas_ok: c.etapas_ok,
+          match: c.match,
+          lote_aba_visitada: c.lote_aba_visitada,
+        },
+      });
+      if (!res.ok) {
+        deps.showMsg?.(res.error || `Não foi possível gravar o item ${c.nItem}.`);
+        return false;
+      }
+      state.sessao = res.sessao;
+    }
+    return true;
+  }
+
+  async function setItemTab(tabId) {
     const it = itemAt(state.itemIndex);
     if (tabId !== 'vinculo' && !exigirProdutoVinculado(it)) return;
     if (!canOpenEtapa(tabId, it)) {
@@ -3728,20 +3826,13 @@ const ImportacaoNfe = (() => {
       return;
     }
     const patch = collectItemPatch();
-    if (it && patch.sistema) {
-      it.sistema = { ...it.sistema, ...patch.sistema };
-      if (patch.sistema.tributos) {
-        it.sistema.tributos = { ...(it.sistema.tributos || {}), ...patch.sistema.tributos };
-      }
-      if (patch.sistema.trib_nfe) {
-        it.sistema.trib_nfe = { ...(it.sistema.trib_nfe || {}), ...patch.sistema.trib_nfe };
-      }
-      if (patch.sistema.trib_nfce) {
-        it.sistema.trib_nfce = { ...(it.sistema.trib_nfce || {}), ...patch.sistema.trib_nfce };
-      }
-      it.conferido = patch.conferido;
-      it.observacao = patch.observacao;
-      if (patch.etapas_ok) it.etapas_ok = { ...etapasOkOf(it), ...patch.etapas_ok };
+    aplicarPatchLocal(it, patch);
+    if (it && state.itemTab && state.itemTab !== tabId && itemVinculado(it)) {
+      const atualIdx = ITEM_TABS_ETAPA.findIndex((t) => t.id === state.itemTab);
+      const destIdx = ITEM_TABS_ETAPA.findIndex((t) => t.id === tabId);
+      if (destIdx > atualIdx) it.etapas_ok = { ...etapasOkOf(it), [state.itemTab]: true };
+      const gravou = await persistirItemNoServidor(it);
+      if (gravou && (state.itemTab === 'vinculo' || state.itemTab === 'conversao')) await persistRegraEFornec(it);
     }
     if (state.itemTab !== tabId) state.rolarTopo = true;
     state.itemTab = tabId;
@@ -4015,7 +4106,14 @@ const ImportacaoNfe = (() => {
   }
 
   function bindItemEvents(it) {
-    $('#imp-item-voltar')?.addEventListener('click', () => {
+    $('#imp-item-voltar')?.addEventListener('click', async () => {
+      const atual = itemAt(state.itemIndex);
+      aplicarPatchLocal(atual, collectItemPatch());
+      if (atual && state.itemTab && itemVinculado(atual)) {
+        atual.etapas_ok = { ...etapasOkOf(atual), [state.itemTab]: true };
+        const gravou = await persistirItemNoServidor(atual);
+        if (gravou && (state.itemTab === 'vinculo' || state.itemTab === 'conversao')) await persistRegraEFornec(atual);
+      }
       renderSessao();
       showView('sessao');
       setTab('itens');
@@ -5153,6 +5251,7 @@ const ImportacaoNfe = (() => {
     $('#imp-btn-conferir-todos')?.addEventListener('click', async () => {
       const s = state.sessao;
       if (!s) return;
+      if (!(await persistirVinculosLocais())) return;
       const res = await api(`/importacao/sessoes/${encodeURIComponent(s.id)}/conferir-todos`, { method: 'POST' });
       if (!res.ok) {
         deps.showMsg?.(res.error || 'Não foi possível conferir os itens.');

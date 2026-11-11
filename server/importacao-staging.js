@@ -1144,7 +1144,8 @@ function conferirTodosItens(sessaoId) {
     if (sys.id_identificador || sys.criar_novo) {
       const xmlItem = it.xml || {};
       const conv = importacaoParams.findConversao(sys.uni_medida_xml || xmlItem.uCom, sys.id_identificador);
-      if (conv && !sys.conversor_manual) {
+      const conversaoJaGravada = !!(it.etapas_ok && it.etapas_ok.conversao);
+      if (conv && !sys.conversor_manual && !conversaoJaGravada) {
         sys.uni_medida = conv.uni_estoque || sys.uni_medida;
         sys.conversor = conv.conversor;
         const qtdXml = Number(sys.qtd_xml ?? xmlItem.qCom ?? 0);
