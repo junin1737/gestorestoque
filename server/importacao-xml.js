@@ -117,6 +117,8 @@ function parseDet(det) {
     CFOP: tag(prod, 'CFOP'),
     uCom: tag(prod, 'uCom'),
     qCom: tagNum(prod, 'qCom'),
+    uTrib: tag(prod, 'uTrib'),
+    qTrib: tagNum(prod, 'qTrib'),
     vUnCom: tagNum(prod, 'vUnCom'),
     vProd: tagNum(prod, 'vProd'),
     vDesc: tagNum(prod, 'vDesc'),

@@ -1196,16 +1196,26 @@ async function gravarNfCompra(sessao, {
       }
       const relatorio = await atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario);
       try {
+        const sets = [];
+        const vals = [];
         const dtEntrada = toDateSql(sessao.dt_entrada);
         if (dtEntrada) {
+          sets.push('DT_ENTRADA = ?');
+          vals.push(dtEntrada);
+        }
+        const idNatope = Number(sessao.id_natope);
+        if (idNatope > 0) {
+          sets.push('ID_NATOPE = ?');
+          vals.push(idNatope);
+        }
+        if (sets.length) {
+          vals.push(idNf);
           await query(db, `
-            UPDATE TB_NFCOMPRA SET DT_ENTRADA = ?
-            WHERE ID_NFCOMPRA = ? AND TRIM(STATUS) <> 'C'`, [
-            dtEntrada, idNf,
-          ]);
+            UPDATE TB_NFCOMPRA SET ${sets.join(', ')}
+            WHERE ID_NFCOMPRA = ? AND TRIM(STATUS) <> 'C'`, vals);
         }
       } catch (e) {
-        console.warn('Atualizar data de entrada (edição):', e.message);
+        console.warn('Atualizar cabeçalho da nota (edição):', e.message);
       }
       return {
         id_nfcompra: idNf,

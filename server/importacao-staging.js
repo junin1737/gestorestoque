@@ -845,6 +845,24 @@ async function createSessao(opts = {}) {
   } catch (e) {
     console.warn('Natureza padrão:', e.message);
   }
+  if (editarId) {
+    try {
+      const { getNaturezaById } = require('./importacao-notas');
+      const { withDb, query } = require('./db');
+      const rows = await withDb((db) => query(db, `
+        SELECT FIRST 1 ID_NATOPE FROM TB_NFCOMPRA WHERE ID_NFCOMPRA = ?`, [Number(editarId)]));
+      const idNota = Number(rows[0]?.ID_NATOPE || 0);
+      if (idNota) {
+        const daNota = await getNaturezaById(idNota);
+        if (daNota) {
+          natureza = daNota;
+          idNatope = daNota.id_natope;
+        }
+      }
+    } catch (e) {
+      console.warn('Natureza da nota em edição:', e.message);
+    }
+  }
 
   const sessao = {
     id: newId(),

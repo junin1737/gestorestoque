@@ -5,6 +5,8 @@ import android.annotation.SuppressLint;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.util.Base64;
 import android.print.PrintAttributes;
 import android.print.PrintManager;
 import android.graphics.Bitmap;
@@ -40,6 +42,7 @@ import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import androidx.core.view.WindowCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
@@ -48,6 +51,9 @@ import com.journeyapps.barcodescanner.ScanContract;
 import com.journeyapps.barcodescanner.ScanOptions;
 
 import org.json.JSONObject;
+
+import java.io.File;
+import java.io.FileOutputStream;
 
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -861,6 +867,51 @@ public class MainActivity extends AppCompatActivity {
             send.putExtra(Intent.EXTRA_SUBJECT, title);
             send.putExtra(Intent.EXTRA_TEXT, text);
             startActivity(Intent.createChooser(send, title));
+        }
+
+        @JavascriptInterface
+        public void sharePdf(String fileName, String base64) {
+            final String nome = (fileName == null || fileName.isEmpty()) ? "relatorio.pdf" : fileName;
+            final String dados = base64 == null ? "" : base64;
+            runOnUiThread(() -> {
+                try {
+                    byte[] bytes = Base64.decode(dados, Base64.DEFAULT);
+                    File dir = new File(getCacheDir(), "share");
+                    if (!dir.exists() && !dir.mkdirs()) {
+                        Toast.makeText(MainActivity.this, "Não foi possível preparar o PDF.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    String seguro = nome.replaceAll("[^A-Za-z0-9._-]", "_");
+                    if (!seguro.toLowerCase().endsWith(".pdf")) seguro = seguro + ".pdf";
+                    File pdf = new File(dir, seguro);
+                    try (FileOutputStream out = new FileOutputStream(pdf)) {
+                        out.write(bytes);
+                    }
+                    Uri uri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", pdf);
+                    String[] pacotes = { "com.whatsapp", "com.whatsapp.w4b" };
+                    Intent enviado = null;
+                    for (String pacote : pacotes) {
+                        Intent tentativa = new Intent(Intent.ACTION_SEND);
+                        tentativa.setType("application/pdf");
+                        tentativa.putExtra(Intent.EXTRA_STREAM, uri);
+                        tentativa.setClipData(android.content.ClipData.newRawUri("pdf", uri));
+                        tentativa.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                        tentativa.setPackage(pacote);
+                        if (tentativa.resolveActivity(getPackageManager()) != null) {
+                            grantUriPermission(pacote, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                            enviado = tentativa;
+                            break;
+                        }
+                    }
+                    if (enviado == null) {
+                        Toast.makeText(MainActivity.this, "WhatsApp não encontrado neste aparelho.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    startActivity(enviado);
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Não foi possível enviar o PDF no WhatsApp.", Toast.LENGTH_LONG).show();
+                }
+            });
         }
     }
 }

@@ -969,45 +969,155 @@ const ImportacaoNfe = (() => {
     return `QTD.ANTERIOR ${fmt(ant)} ENTRADA ${fmt(ent)} QTD ATUAL ${fmt(ant + ent)}`;
   }
 
-  function textoWhatsappRelatorio(gravacao) {
-    const linhas = gravacao?.relatorio || [];
-    const cab = `Entrada NF ${gravacao.nf_numero || '—'}/${gravacao.nf_serie || '—'}`;
-    const corpo = linhas.slice(0, 40).map((r) => `${r.descricao || 'Item'}\n${textoQtdRelatorio(r)}`).join('\n\n');
-    const resto = linhas.length > 40 ? `\n\n… e mais ${linhas.length - 40} produto(s) no relatório.` : '';
-    return `${cab}\n\n${corpo}${resto}`;
+  function appNativo() {
+    try {
+      return !!(window.__GESTOR_APP__ || window.GestorApp?.isNativeApp?.());
+    } catch (_) {
+      return false;
+    }
   }
 
-  function abrirWhatsappTexto(texto) {
-    const q = encodeURIComponent(texto || '');
-    const mobile = /Android|iPhone|iPad|Mobile/i.test(navigator.userAgent || '');
-    const url = mobile
-      ? `https://wa.me/?text=${q}`
-      : `https://web.whatsapp.com/send?text=${q}`;
-    const win = window.open(url, '_blank', 'noopener');
-    if (!win) deps.showMsg?.('Permita pop-ups para abrir o WhatsApp.');
+  function pdfEscape(texto) {
+    const mapa = {
+      á: '\\341', à: '\\340', ã: '\\343', â: '\\342', ä: '\\344',
+      é: '\\351', è: '\\350', ê: '\\352', í: '\\355',
+      ó: '\\363', ò: '\\362', õ: '\\365', ô: '\\364', ú: '\\372', ç: '\\347',
+      Á: '\\301', À: '\\300', Ã: '\\303', Â: '\\302', É: '\\311', Í: '\\315',
+      Ó: '\\323', Õ: '\\325', Ô: '\\324', Ú: '\\332', Ç: '\\307',
+      º: '\\272', ª: '\\252', '°': '\\260',
+    };
+    return String(texto || '')
+      .replace(/[\\()]/g, (c) => `\\${c}`)
+      .replace(/[^\x20-\x7E]/g, (ch) => mapa[ch] || ' ');
+  }
+
+  function quebrarLinhaPdf(texto, max) {
+    const s = String(texto || '').replace(/\s+/g, ' ').trim();
+    if (!s) return [''];
+    const out = [];
+    let rest = s;
+    while (rest.length > max) {
+      let corte = rest.lastIndexOf(' ', max);
+      if (corte < 12) corte = max;
+      out.push(rest.slice(0, corte));
+      rest = rest.slice(corte).trim();
+    }
+    if (rest) out.push(rest);
+    return out;
+  }
+
+  function montarPdf(paginas) {
+    const objs = [];
+    objs.push('<< /Type /Catalog /Pages 2 0 R >>');
+    const kids = paginas.map((_, i) => `${4 + i * 2} 0 R`).join(' ');
+    objs.push(`<< /Type /Pages /Count ${paginas.length} /Kids [${kids}] >>`);
+    objs.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>');
+    paginas.forEach((linhas, i) => {
+      const cmds = ['BT', '/F1 9 Tf', '40 800 Td', '13 TL'];
+      linhas.forEach((linha, li) => {
+        cmds.push(`(${pdfEscape(linha)}) Tj`);
+        if (li < linhas.length - 1) cmds.push('T*');
+      });
+      cmds.push('ET');
+      const stream = cmds.join('\n');
+      const contentNum = 5 + i * 2;
+      objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents ${contentNum} 0 R /Resources << /Font << /F1 3 0 R >> >> >>`);
+      objs.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+    });
+    let out = '%PDF-1.4\n';
+    const offsets = [0];
+    objs.forEach((body, i) => {
+      offsets.push(out.length);
+      out += `${i + 1} 0 obj\n${body}\nendobj\n`;
+    });
+    const xref = out.length;
+    out += `xref\n0 ${objs.length + 1}\n`;
+    out += '0000000000 65535 f \n';
+    for (let i = 1; i <= objs.length; i += 1) {
+      out += `${String(offsets[i]).padStart(10, '0')} 00000 n \n`;
+    }
+    out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+    return out;
+  }
+
+  function pdfRelatorioEntrada(gravacao) {
+    const linhas = gravacao?.relatorio || [];
+    if (!linhas.length) return '';
+    const moneyBr = (v) => (v == null || v === '' ? '-' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
+    const fmt = (n) => Number(n || 0).toLocaleString('pt-BR', { maximumFractionDigits: 4 });
+    const corpo = [
+      `Entrada NF ${gravacao.nf_numero || '-'} / ${gravacao.nf_serie || '-'}`,
+      `Codigo ${gravacao.id_nfcompra || '-'}    ${linhas.length} produto(s)`,
+      '',
+    ];
+    linhas.forEach((r, i) => {
+      const ant = Number(r.qtd_anterior || 0);
+      const ent = r.qtd_entrada != null && r.qtd_entrada !== ''
+        ? Number(r.qtd_entrada || 0)
+        : Number(r.qtd_atual || 0) - ant;
+      corpo.push(...quebrarLinhaPdf(`${i + 1}. ${r.descricao || 'Item'}`, 92));
+      corpo.push(`   ${r.status || ''}   ID ${r.id_identificador ?? '-'}`);
+      corpo.push(`   Anterior ${fmt(ant)}    Entrada ${fmt(ent)}    Atual ${fmt(ant + ent)}`);
+      corpo.push(`   Venda ${moneyBr(r.venda_anterior)} -> ${moneyBr(r.venda_atual)}`);
+      corpo.push(`   Custo ${moneyBr(r.custo_anterior)} -> ${moneyBr(r.custo_atual)}    Medio ${moneyBr(r.custo_medio)}`);
+      corpo.push('');
+    });
+    const paginas = [];
+    for (let i = 0; i < corpo.length; i += 46) paginas.push(corpo.slice(i, i + 46));
+    return montarPdf(paginas.length ? paginas : [['Relatorio vazio']]);
+  }
+
+  function enviarPdfRelatorio(gravacao) {
+    const pdf = pdfRelatorioEntrada(gravacao);
+    if (!pdf) {
+      deps.showMsg?.('Não há relatório para enviar.');
+      return;
+    }
+    const nome = `entrada-nf-${String(gravacao?.nf_numero || 'nota').replace(/\D/g, '') || 'nota'}.pdf`;
+    if (appNativo() && typeof window.GestorApp?.sharePdf === 'function') {
+      window.GestorApp.sharePdf(nome, btoa(pdf));
+      return;
+    }
+    if (appNativo()) {
+      deps.showMsg?.('Atualize o aplicativo para enviar o PDF direto no WhatsApp.');
+      return;
+    }
+    const blob = new Blob([pdf], { type: 'application/pdf' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = nome;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
   }
 
   function syncBotaoWhatsapp(visivel) {
-    let btn = $('#dlg-danfe-wa');
     const barra = document.querySelector('#dlg-danfe .dlg-danfe-actions');
+    let btn = $('#dlg-danfe-wa');
+    if (btn && btn.dataset.pdf !== '1') {
+      btn.remove();
+      btn = null;
+    }
     if (!btn && barra) {
       btn = document.createElement('button');
       btn.type = 'button';
       btn.id = 'dlg-danfe-wa';
       btn.className = 'btn small';
-      btn.textContent = 'Enviar WhatsApp';
+      btn.dataset.pdf = '1';
       barra.prepend(btn);
-      btn.addEventListener('click', () => {
-        if (state.relatorioTexto) abrirWhatsappTexto(state.relatorioTexto);
-      });
+      btn.addEventListener('click', () => enviarPdfRelatorio(state.relatorioGravacao));
     }
-    if (btn) btn.hidden = !visivel;
+    if (btn) {
+      btn.textContent = appNativo() ? 'Enviar PDF no WhatsApp' : 'Baixar PDF';
+      btn.hidden = !visivel;
+    }
   }
 
   function abrirRelatorioEntrada(gravacao) {
     const linhas = gravacao?.relatorio || [];
     if (!linhas.length) return;
-    state.relatorioTexto = textoWhatsappRelatorio(gravacao);
+    state.relatorioGravacao = gravacao;
     const moneyBr = (v) => (v == null || v === '' ? '—' : Number(v).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }));
     const rows = linhas.map((r) => `
       <tr>
@@ -1034,8 +1144,7 @@ const ImportacaoNfe = (() => {
         button, a { margin-bottom: 12px; }
         @media print { button, a { display: none; } body { margin: 0; } }
       </style></head><body>
-      <button onclick="window.print()">Imprimir / Salvar PDF</button>
-      <a id="rel-wa" href="https://wa.me/?text=${encodeURIComponent(state.relatorioTexto || '')}" target="_blank" rel="noopener" style="margin-left:8px">Enviar WhatsApp</a>
+      <button onclick="window.print()">Imprimir</button>
       <h1>Entrada NF ${esc(gravacao.nf_numero || '—')}/${esc(gravacao.nf_serie || '—')}</h1>
       <p>Código ${esc(gravacao.id_nfcompra || '—')} · ${linhas.length} produto(s)</p>
       <table>
@@ -1920,7 +2029,7 @@ const ImportacaoNfe = (() => {
               <div><dt>Cód. fornecedor</dt><dd>${esc(xml.cProd || '—')}</dd></div>
               <div><dt>EAN</dt><dd>${esc(xml.cEAN || '—')}</dd></div>
               <div><dt>NCM</dt><dd>${esc(xml.NCM || '—')}</dd></div>
-              <div><dt>Qtd / unid.</dt><dd>${num(xml.qCom)} ${esc(xml.uCom || '')}</dd></div>
+              <div><dt>Qtd / unid.</dt><dd>${num(qtdDaNota(sys, xml))} ${esc(uniDaNota(sys, xml))}</dd></div>
               <div><dt>Vlr unit.</dt><dd>${money(xml.vUnCom)}</dd></div>
               <div><dt>CFOP nota</dt><dd>${esc(xml.CFOP || '—')}</dd></div>
             </dl>
@@ -2113,8 +2222,23 @@ const ImportacaoNfe = (() => {
     return null;
   }
 
+  function qtdDaNota(sys = {}, xml = {}) {
+    const qCom = Number(xml.qCom);
+    if (qCom > 0) return qCom;
+    const qTrib = Number(xml.qTrib);
+    if (qTrib > 0) return qTrib;
+    const gravada = Number(sys.qtd_xml);
+    return gravada > 0 ? gravada : 0;
+  }
+
+  function uniDaNota(sys = {}, xml = {}) {
+    if (Number(xml.qCom) > 0) return sys.uni_medida_xml || xml.uCom || '';
+    if (Number(xml.qTrib) > 0) return xml.uTrib || sys.uni_medida_xml || xml.uCom || '';
+    return sys.uni_medida_xml || xml.uCom || xml.uTrib || '';
+  }
+
   function qtdEntradaItem(sys = {}, xml = {}) {
-    const qtdXml = Number(sys.qtd_xml) > 0 ? Number(sys.qtd_xml) : (Number(xml.qCom || 0) || 0);
+    const qtdXml = Number(sys.qtd_xml) > 0 ? Number(sys.qtd_xml) : qtdDaNota(sys, xml);
     const conversor = Number(sys.conversor ?? 1) || 1;
     const pacotes = qtdPacotes(sys);
     let qtdEstoque = 0;
@@ -2181,18 +2305,16 @@ const ImportacaoNfe = (() => {
   }
 
   function htmlQtdItem(sys, xml) {
-    const q = qtdEntradaItem(sys, xml);
-    const uniXml = sys.uni_medida_xml || xml.uCom || '';
-    const nota = `${num(q.qtdXml)} ${esc(uniXml)}`.trim();
+    const qtdNota = qtdDaNota(sys, xml);
+    const nota = qtdNota > 0 ? `${num(qtdNota)} ${esc(uniDaNota(sys, xml))}`.trim() : '—';
     const vinculado = !!(sys.id_identificador || sys.criar_novo);
     if (!vinculado) return `<span class="hint">Sem vínculo · Nota ${nota}</span>`;
     const frase = htmlEntraEstoque(sys, xml);
     const entra = frase === 'Não entra'
       ? 'Não entra no estoque'
       : `Entra no estoque ${frase}`;
-    const converteu = Math.abs(Number(q.qtdEstoque) - Number(q.qtdXml)) > 1e-6;
     const id = esc(String(sys.id_identificador || 'novo'));
-    return `<span class="imp-item-qtds"><span class="entra">${entra}</span>${converteu ? `<span class="hint">Nota ${nota}</span>` : ''}<span class="hint">${id}</span></span>`;
+    return `<span class="imp-item-qtds"><span class="entra">${entra}</span><span class="hint">Nota ${nota}</span><span class="hint">${id}</span></span>`;
   }
 
   /** "Vender por pacote": quantidade de pacotes digitada (0 quando o item não usa). */
@@ -2636,6 +2758,7 @@ const ImportacaoNfe = (() => {
     const qtdConv = qtdPacotes(sys) || Number((qtdXml * conversor).toFixed(6));
     const tab = state.itemTab || 'vinculo';
     const isLastTab = tab === 'lote';
+    const etapaIdx = ITEM_TABS_ETAPA.findIndex((t) => t.id === tab);
 
     let panelHtml = '';
     if (tab === 'ficha') {
@@ -2651,17 +2774,12 @@ const ImportacaoNfe = (() => {
     else panelHtml = panelAnp(sys);
 
     const footerHtml = tab === 'ficha'
-      ? `<button type="button" class="btn small primary" id="imp-salvar-ficha">Salvar ficha</button>`
+      ? `<button type="button" class="btn primary" id="imp-salvar-ficha">Salvar ficha</button>`
       : `
-        <button type="button" class="btn small" id="imp-etapa-cancelar">Cancelar</button>
-        ${isLastTab ? `<button type="button" class="btn small outline" id="imp-salvar-item">Salvar item</button>` : ''}
-        ${isLastTab && !conferirEtapasAtivo()
-    ? `<label class="imp-check">
-          <input type="checkbox" id="imp-conferido" ${it.conferido ? 'checked' : ''} />
-          Item verificado
-        </label>`
-    : ''}
-        <button type="button" class="btn small primary" id="${isLastTab ? 'imp-salvar-proximo' : 'imp-proxima-etapa'}">Confirmar</button>`;
+        <button type="button" class="btn primary" id="imp-verificar-item">Verificar este item</button>
+        <button type="button" class="btn" id="${isLastTab ? 'imp-salvar-proximo' : 'imp-proxima-etapa'}">${isLastTab ? 'Concluir e ir ao próximo' : 'Próxima etapa'}</button>
+        <button type="button" class="btn outline" id="imp-etapa-anterior" ${etapaIdx <= 0 ? 'disabled' : ''}>Etapa anterior</button>
+        <button type="button" class="btn" id="imp-voltar-itens">Voltar aos itens</button>`;
 
     host.innerHTML = `
       <div class="imp-item-toolbar">
@@ -2671,7 +2789,6 @@ const ImportacaoNfe = (() => {
           <p class="hint">${vinculado ? `Vinculado · ${esc(sys.id_identificador || 'novo')}` : 'Sem vínculo'} · CFOP ${esc(xml.CFOP || '')}</p>
         </div>
         <div class="imp-item-nav">
-          ${conferirEtapasAtivo() ? '<button type="button" class="btn small" id="imp-verificar-item">Verificar item</button>' : ''}
           <button type="button" class="btn small" id="imp-item-prev" ${state.itemIndex <= 0 ? 'disabled' : ''}>Anterior</button>
           <button type="button" class="btn small" id="imp-item-next" ${state.itemIndex >= total - 1 ? 'disabled' : ''}>Próximo</button>
         </div>
@@ -3839,17 +3956,32 @@ const ImportacaoNfe = (() => {
     renderItemScreen();
   }
 
+  async function voltarParaListaItens() {
+    const atual = itemAt(state.itemIndex);
+    aplicarPatchLocal(atual, collectItemPatch());
+    if (atual && state.itemTab && itemVinculado(atual)) {
+      atual.etapas_ok = { ...etapasOkOf(atual), [state.itemTab]: true };
+      const gravou = await persistirItemNoServidor(atual);
+      if (gravou && (state.itemTab === 'vinculo' || state.itemTab === 'conversao')) await persistRegraEFornec(atual);
+    }
+    renderSessao();
+    showView('sessao');
+    setTab('itens');
+  }
+
   async function verificarItem() {
     const it = itemAt(state.itemIndex);
     if (!it || !exigirProdutoVinculado(it)) return;
+    aplicarPatchLocal(it, collectItemPatch());
     const ok = {};
     ITEM_TABS_ETAPA.forEach((t) => { ok[t.id] = true; });
     it.etapas_ok = ok;
     it.conferido = true;
     state.rolarTopo = true;
-    const saved = await saveItem({ semRender: true });
+    const saved = await persistirItemNoServidor(it);
     if (!saved) return;
-    deps.showToast?.('Item verificado. Todas as etapas foram concluídas.');
+    if (state.itemTab === 'vinculo' || state.itemTab === 'conversao') await persistRegraEFornec(it);
+    deps.showToast?.('Item verificado.');
     const total = state.sessao?.itens?.length || 0;
     if (state.itemIndex < total - 1) openItem(state.itemIndex + 1);
     else renderItemScreen();
@@ -4106,18 +4238,8 @@ const ImportacaoNfe = (() => {
   }
 
   function bindItemEvents(it) {
-    $('#imp-item-voltar')?.addEventListener('click', async () => {
-      const atual = itemAt(state.itemIndex);
-      aplicarPatchLocal(atual, collectItemPatch());
-      if (atual && state.itemTab && itemVinculado(atual)) {
-        atual.etapas_ok = { ...etapasOkOf(atual), [state.itemTab]: true };
-        const gravou = await persistirItemNoServidor(atual);
-        if (gravou && (state.itemTab === 'vinculo' || state.itemTab === 'conversao')) await persistRegraEFornec(atual);
-      }
-      renderSessao();
-      showView('sessao');
-      setTab('itens');
-    });
+    $('#imp-item-voltar')?.addEventListener('click', () => voltarParaListaItens());
+    $('#imp-voltar-itens')?.addEventListener('click', () => voltarParaListaItens());
     $('#imp-item-prev')?.addEventListener('click', () => {
       if (state.itemIndex <= 0) return;
       saveItem({ prev: true });
@@ -5217,6 +5339,14 @@ const ImportacaoNfe = (() => {
     $('#imp-params-salvar')?.addEventListener('click', () => saveParams());
 
     $('#imp-btn-consultar')?.addEventListener('click', consultarChave);
+    $('#imp-limpar-chave')?.addEventListener('click', () => {
+      const field = $('#imp-chave');
+      if (field) {
+        field.value = '';
+        field.focus();
+      }
+      syncChaveCount();
+    });
     $('#imp-chave')?.addEventListener('input', syncChaveCount);
     $('#imp-chave')?.addEventListener('paste', () => setTimeout(syncChaveCount, 0));
     $('#imp-chave')?.addEventListener('keydown', (e) => {
@@ -5386,6 +5516,8 @@ const ImportacaoNfe = (() => {
     el.classList.toggle('is-ok', n === 44);
     el.classList.toggle('is-short', n > 0 && n < 44);
     el.classList.toggle('is-over', n > 44);
+    const limpar = $('#imp-limpar-chave');
+    if (limpar) limpar.hidden = n === 0;
   }
 
   function applyScannedProduto(code) {

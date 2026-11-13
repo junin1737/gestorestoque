@@ -2122,6 +2122,14 @@
 }
 
 @media (max-width: 980px) {
+  .imp-capture-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .imp-capture-row .search-field {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
   .imp-nf-chrome { display: none; }
   .imp-cmp-pair { grid-template-columns: 1fr; }
   .imp-cmp-arrow { display: none; }
@@ -2131,9 +2139,24 @@
   .imp-check, .imp-aplicar-saida { white-space: normal; }
   .imp-item-footer {
     position: static;
-    padding-bottom: 0.2rem;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0.45rem;
+    align-items: stretch;
+    padding-bottom: 0.35rem;
   }
-  .imp-item-footer .btn { flex: 0 0 auto; min-height: 2rem; }
+  .imp-item-footer .btn {
+    width: 100%;
+    min-height: 2.7rem;
+    justify-content: center;
+    text-align: center;
+  }
+  .imp-item-footer #imp-verificar-item,
+  .imp-item-footer #imp-proxima-etapa,
+  .imp-item-footer #imp-salvar-proximo,
+  .imp-item-footer #imp-salvar-ficha {
+    grid-column: 1 / -1;
+  }
   .imp-item-nav { display: none; }
 }
 
