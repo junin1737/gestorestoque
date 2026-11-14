@@ -3227,6 +3227,21 @@ router.post('/importacao/sessoes/:id/confirmar', async (req, res) => {
   }
 });
 
+router.post('/importacao/reajuste-precos', async (req, res) => {
+  if (!guardImportacaoSupervisor(req, res)) return;
+  try {
+    const { reajustarPrecosVenda } = require('./importacao-gravar');
+    const out = await reajustarPrecosVenda(req.body?.itens, {
+      usuario: req.usuario?.nome || 'Supervisor',
+      idFuncionario: req.usuario?.id || 0,
+      nfLabel: String(req.body?.nf_numero || '').trim(),
+    });
+    res.json({ ok: true, ...out });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.get('/database/status', somenteServidorLocal, (_req, res) => {
   const cfg = loadAppConfig();
   res.json({

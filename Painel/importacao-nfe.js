@@ -1114,6 +1114,296 @@ const ImportacaoNfe = (() => {
     }
   }
 
+  function situacaoCusto(ant, atual) {
+    if (ant == null || ant === '' || atual == null || atual === '') return 'igual';
+    const a = Number(ant);
+    const b = Number(atual);
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return 'igual';
+    const diff = b - a;
+    if (Math.abs(diff) < 0.005) return 'igual';
+    return diff > 0 ? 'subiu' : 'desceu';
+  }
+
+  function fmtQtdReaj(n) {
+    const v = Number(n);
+    if (!Number.isFinite(v)) return '—';
+    return v.toLocaleString('pt-BR', { maximumFractionDigits: 3 });
+  }
+
+  function fmtVariacaoReaj(ant, atual) {
+    const a = Number(ant);
+    const b = Number(atual);
+    if (!(a > 0) || !Number.isFinite(b)) return '—';
+    const pct = ((b - a) / a) * 100;
+    if (Math.abs(pct) < 0.05) return '0%';
+    const abs = Math.abs(pct);
+    const num = abs >= 10 ? String(Math.round(abs)) : abs.toFixed(1).replace('.', ',');
+    return `${pct > 0 ? '+' : '-'}${num}%`;
+  }
+
+  function arredondarReajuste(valor, modo, centavos) {
+    if (!Number.isFinite(valor)) return valor;
+    if (modo === 'decimal') return Math.round(valor * 10) / 10;
+    if (modo === 'centavos') {
+      const cents = Math.min(99, Math.max(0, Math.round(Number(centavos) || 0)));
+      const alvo = cents / 100;
+      const inteiro = Math.floor(valor + 1e-9);
+      let candidato = inteiro + alvo;
+      if (candidato + 1e-9 < valor) candidato = inteiro + 1 + alvo;
+      return Math.round(candidato * 100) / 100;
+    }
+    return Math.round(valor * 100) / 100;
+  }
+
+  function reajErro(msg) {
+    const el = $('#reaj-erro');
+    if (!el) return;
+    const texto = String(msg || '').trim();
+    el.hidden = !texto;
+    el.textContent = texto;
+  }
+
+  function syncReajForma() {
+    const porValor = $('#reaj-forma-valor')?.checked;
+    const lab = $('#reaj-ajuste-label');
+    if (lab) lab.textContent = porValor ? 'Valor (R$)' : '% de reajuste';
+  }
+
+  function syncReajCentavos() {
+    const on = !!$('#reaj-arred-centavos')?.checked;
+    const inp = $('#reaj-centavos');
+    if (inp) inp.disabled = !on;
+  }
+
+  function syncReajSelecionarTodos() {
+    const boxes = $$('#reaj-corpo .reaj-check');
+    const marcados = boxes.filter((b) => b.checked).length;
+    const on = boxes.length > 0 && marcados === boxes.length;
+    const mid = marcados > 0 && marcados < boxes.length;
+    for (const el of [$('#reaj-todos'), $('#reaj-todos-head')]) {
+      if (!el) continue;
+      el.checked = on;
+      el.indeterminate = mid;
+    }
+  }
+
+  function renderReajusteTabela(gravacao) {
+    const corpo = $('#reaj-corpo');
+    if (!corpo) return;
+    const linhas = gravacao?.relatorio || [];
+    corpo.innerHTML = linhas.map((r) => {
+      const sit = situacaoCusto(r.custo_anterior, r.custo_atual);
+      const venda = Number(r.venda_atual || 0);
+      const custo = Number(r.custo_atual || 0);
+      const ant = r.custo_anterior == null || r.custo_anterior === '' ? '' : Number(r.custo_anterior);
+      return `<tr class="${sit === 'igual' ? '' : `reaj-${sit}`}" data-id="${esc(r.id_identificador)}" data-venda="${esc(venda)}" data-custo="${esc(custo)}" data-custo-ant="${esc(ant)}">
+        <td><input type="checkbox" class="reaj-check" ${sit === 'igual' ? '' : 'checked'} /></td>
+        <td class="num">${esc(r.id_identificador ?? '')}</td>
+        <td>${esc(r.descricao || '')}</td>
+        <td>${esc(r.uni_medida || '—')}</td>
+        <td class="num">${esc(fmtQtdReaj(r.qtd_entrada))}</td>
+        <td class="num">${ant === '' ? '—' : esc(moneyInput(ant))}</td>
+        <td class="num reaj-destaque">${esc(moneyInput(custo))}</td>
+        <td class="num reaj-destaque">${esc(fmtVariacaoReaj(r.custo_anterior, r.custo_atual))}</td>
+        <td class="num">${esc(moneyInput(venda))}</td>
+        <td><input class="reaj-novo" inputmode="decimal" value="${esc(moneyInput(venda))}" autocomplete="off" /></td>
+      </tr>`;
+    }).join('') || '<tr><td colspan="10">Nenhum item nesta nota.</td></tr>';
+  }
+
+  function calcularReajuste() {
+    const baseCusto = $('#reaj-base-custo')?.checked;
+    const porValor = $('#reaj-forma-valor')?.checked;
+    const ajuste = parseMoney($('#reaj-ajuste')?.value);
+    if (ajuste == null) {
+      reajErro(porValor ? 'Informe o valor do reajuste.' : 'Informe o percentual do reajuste.');
+      return;
+    }
+    const modo = $('#reaj-arred-decimal')?.checked
+      ? 'decimal'
+      : ($('#reaj-arred-centavos')?.checked ? 'centavos' : 'nenhum');
+    let centavos = 0;
+    if (modo === 'centavos') {
+      const digits = String($('#reaj-centavos')?.value || '').replace(/\D/g, '').slice(0, 2);
+      if (!digits) {
+        reajErro('Informe em quantos centavos o preço deve terminar.');
+        return;
+      }
+      centavos = Number(digits);
+    }
+    const marcados = $$('#reaj-corpo tr').filter((tr) => tr.querySelector('.reaj-check')?.checked);
+    if (!marcados.length) {
+      reajErro('Marque os produtos que entram no reajuste.');
+      return;
+    }
+    let aplicados = 0;
+    let pulados = 0;
+    for (const tr of marcados) {
+      const base = Number(baseCusto ? tr.dataset.custo : tr.dataset.venda);
+      if (!(base > 0)) { pulados += 1; continue; }
+      const novo = arredondarReajuste(porValor ? base + ajuste : base * (1 + ajuste / 100), modo, centavos);
+      const inp = tr.querySelector('.reaj-novo');
+      if (!(novo > 0) || !inp) { pulados += 1; continue; }
+      inp.value = moneyInput(novo);
+      aplicados += 1;
+    }
+    if (!aplicados) {
+      reajErro('Nenhum preço foi calculado. Confira a base e o valor do reajuste.');
+      return;
+    }
+    reajErro(pulados ? `${pulados} produto(s) ficaram de fora porque a base ou o resultado não é válido.` : '');
+  }
+
+  function coletarReajuste() {
+    const porId = new Map();
+    for (const tr of $$('#reaj-corpo tr')) {
+      if (!tr.querySelector('.reaj-check')?.checked) continue;
+      const id = Number(tr.dataset.id);
+      if (!id) continue;
+      const bruto = parseMoney(tr.querySelector('.reaj-novo')?.value);
+      if (bruto == null) return { erro: 'Preencha o preço novo dos produtos marcados.', itens: [] };
+      const preco = Math.round(bruto * 100) / 100;
+      if (!(preco > 0)) return { erro: 'O preço novo precisa ser maior que zero.', itens: [] };
+      const atual = Number(tr.dataset.venda || 0);
+      if (Math.abs(atual - preco) < 0.005) continue;
+      if (porId.has(id) && Math.abs(porId.get(id) - preco) >= 0.005) {
+        return { erro: 'O mesmo produto está marcado com preços diferentes. Deixe só uma linha.', itens: [] };
+      }
+      porId.set(id, preco);
+    }
+    return {
+      itens: [...porId.entries()].map(([id_identificador, prc_venda]) => ({ id_identificador, prc_venda })),
+    };
+  }
+
+  function abrirReajustePrecos(gravacao) {
+    const dlg = $('#dlg-reajuste');
+    if (!dlg || typeof dlg.showModal !== 'function') return Promise.resolve();
+    return new Promise((resolve) => {
+      let settled = false;
+      let salvando = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        dlg.oncancel = null;
+        try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
+        resolve();
+      };
+      renderReajusteTabela(gravacao);
+      const sub = $('#reaj-sub');
+      if (sub) {
+        const nf = gravacao?.nf_numero ? `Nota ${gravacao.nf_numero}` : 'Nota gravada';
+        sub.textContent = `${nf} · após gravar a nota de compra`;
+      }
+      reajErro('');
+      const baseVenda = $('#reaj-base-venda');
+      const formaPct = $('#reaj-forma-pct');
+      const arredNenhum = $('#reaj-arred-nenhum');
+      if (baseVenda) baseVenda.checked = true;
+      if (formaPct) formaPct.checked = true;
+      if (arredNenhum) arredNenhum.checked = true;
+      const ajuste = $('#reaj-ajuste');
+      if (ajuste) ajuste.value = '';
+      const cents = $('#reaj-centavos');
+      if (cents) cents.value = '';
+      syncReajForma();
+      syncReajCentavos();
+      syncReajSelecionarTodos();
+
+      const calcular = $('#reaj-calcular');
+      const desmarcar = $('#reaj-desmarcar');
+      const limpar = $('#reaj-limpar');
+      const todos = $('#reaj-todos');
+      const todosHead = $('#reaj-todos-head');
+      const corpo = $('#reaj-corpo');
+      const agora = $('#reaj-agora');
+      const gravar = $('#reaj-gravar');
+      if (calcular) calcular.onclick = () => calcularReajuste();
+      if (desmarcar) desmarcar.onclick = () => {
+        $$('#reaj-corpo .reaj-check').forEach((b) => { b.checked = false; });
+        syncReajSelecionarTodos();
+      };
+      if (limpar) limpar.onclick = () => {
+        $$('#reaj-corpo tr').forEach((tr) => {
+          const inp = tr.querySelector('.reaj-novo');
+          if (inp) inp.value = moneyInput(Number(tr.dataset.venda || 0));
+        });
+        reajErro('');
+      };
+      if (todos) todos.onclick = () => {
+        const on = todos.checked;
+        $$('#reaj-corpo .reaj-check').forEach((b) => { b.checked = on; });
+        if (todosHead) todosHead.checked = on;
+        syncReajSelecionarTodos();
+      };
+      if (todosHead) todosHead.onclick = () => {
+        const on = todosHead.checked;
+        if (todos) todos.checked = on;
+        $$('#reaj-corpo .reaj-check').forEach((b) => { b.checked = on; });
+        syncReajSelecionarTodos();
+      };
+      if (corpo) corpo.onclick = (e) => {
+        if (e.target?.classList?.contains('reaj-check')) syncReajSelecionarTodos();
+      };
+      $$('#dlg-reajuste input[name="reaj-forma"]').forEach((el) => {
+        el.onchange = () => syncReajForma();
+      });
+      $$('#dlg-reajuste input[name="reaj-arred"]').forEach((el) => {
+        el.onchange = () => syncReajCentavos();
+      });
+      if (agora) agora.onclick = () => { if (!salvando) finish(); };
+      if (gravar) gravar.onclick = async () => {
+        if (salvando) return;
+        const payload = coletarReajuste();
+        if (payload.erro) {
+          reajErro(payload.erro);
+          return;
+        }
+        if (!payload.itens.length) {
+          deps.showToast?.('Nenhum preço de venda foi alterado.');
+          finish();
+          return;
+        }
+        salvando = true;
+        gravar.disabled = true;
+        reajErro('');
+        try {
+          const res = await api('/importacao/reajuste-precos', {
+            method: 'POST',
+            body: {
+              itens: payload.itens,
+              nf_numero: gravacao?.nf_numero || '',
+            },
+          });
+          if (!res.ok) {
+            reajErro(res.error || 'Não foi possível gravar os preços.');
+            return;
+          }
+          const mapa = new Map((res.alterados || []).map((a) => [Number(a.id_identificador), Number(a.venda_atual)]));
+          for (const linha of gravacao.relatorio || []) {
+            const novo = mapa.get(Number(linha.id_identificador));
+            if (novo != null && Number.isFinite(novo)) linha.venda_atual = novo;
+          }
+          const n = res.alterados?.length || 0;
+          let msg = n === 1 ? '1 preço de venda atualizado.' : `${n} preços de venda atualizados.`;
+          if (res.nao_encontrados?.length) msg += ` ${res.nao_encontrados.length} não encontrado(s).`;
+          deps.showToast?.(msg);
+          finish();
+        } catch (err) {
+          reajErro(err.message || 'Não foi possível gravar os preços.');
+        } finally {
+          salvando = false;
+          gravar.disabled = false;
+        }
+      };
+      dlg.oncancel = (e) => {
+        e.preventDefault();
+        if (!salvando) finish();
+      };
+      if (!dlg.open) dlg.showModal();
+    });
+  }
+
   function abrirRelatorioEntrada(gravacao) {
     const linhas = gravacao?.relatorio || [];
     if (!linhas.length) return;
@@ -4860,7 +5150,12 @@ const ImportacaoNfe = (() => {
             <input type="checkbox" id="imp-params-conferir-etapas" ${ynChecked(saida.conferir_etapas === 'S') ? 'checked' : ''} />
             <span>Conferir etapa a etapa no item (só avança ao confirmar cada aba)</span>
           </label>
+          <label class="imp-check">
+            <input type="checkbox" id="imp-params-ajustar-precos" ${ynChecked(saida.ajustar_precos_venda === 'S') ? 'checked' : ''} />
+            <span>Ajustar preços de venda ao finalizar nota de compra?</span>
+          </label>
         </div>
+        <p class="hint">Com esta opção marcada, ao gravar a nota abre a tela de reajuste. O relatório da entrada vem depois dessa tela.</p>
       </section>
       <section class="imp-section" id="imp-params-conv-sec">
         <header class="imp-section-head"><h4>Conversões de unidade (último vínculo)</h4></header>
@@ -5275,6 +5570,9 @@ const ImportacaoNfe = (() => {
       zerar_negativo: $('#imp-params-zerar-neg')?.checked ? 'S' : 'N',
       conferir_etapas: $('#imp-params-conferir-etapas')?.checked ? 'S' : 'N',
       cclass_trib_novos: $('#imp-params-cclass-novos')?.checked ? 'S' : 'N',
+      ...($('#imp-params-ajustar-precos')
+        ? { ajustar_precos_venda: $('#imp-params-ajustar-precos').checked ? 'S' : 'N' }
+        : {}),
       id_natope_padrao: Number($('#imp-params-nat-id')?.value || 0) || null,
       nat_padrao_descricao: String($('#imp-params-nat-busca')?.dataset.descricao || $('#imp-params-nat-busca')?.value || '').replace(/\s·\sCFOP\s\d+$/i, '').trim(),
       nat_padrao_cfop: $('#imp-params-nat-busca')?.dataset.cfop || '',
@@ -5457,8 +5755,23 @@ const ImportacaoNfe = (() => {
           body: {},
         });
         if (res.ok) {
-          deps.showMsg?.(res.message || 'Entrada confirmada');
           limparRascunhoNota(state.sessao);
+          let ajustarPrecos = false;
+          try {
+            const paramsPos = await api('/importacao/params/cfop');
+            ajustarPrecos = String(paramsPos?.saida?.ajustar_precos_venda || 'N').toUpperCase() === 'S';
+          } catch { ajustarPrecos = false; }
+          if (ajustarPrecos && res.gravacao?.relatorio?.length) {
+            deps.showToast?.(res.message || 'Entrada confirmada');
+            try { $('#dlg-msg')?.close(); } catch { /* ignore */ }
+            try {
+              await abrirReajustePrecos(res.gravacao);
+            } catch (errReaj) {
+              deps.showMsg?.(errReaj?.message || 'Não foi possível abrir o reajuste de preços.');
+            }
+          } else {
+            deps.showMsg?.(res.message || 'Entrada confirmada');
+          }
           const querRelatorio = await askConfirm(
             'Deseja gerar o relatório com as alterações?',
             { okLabel: 'Gerar relatório', cancelLabel: 'Agora não' }

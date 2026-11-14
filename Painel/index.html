@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="styles.css?v=296" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=254" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=255" />
 </head>
 <body>
   <div id="app">
@@ -1351,6 +1351,81 @@
       </div>
     </dialog>
 
+    <dialog id="dlg-reajuste" class="dlg dlg-reajuste">
+      <div class="dlg-card dlg-reajuste-card">
+        <header class="reaj-head">
+          <h3>Reajuste de preços de venda</h3>
+          <p id="reaj-sub">Após gravar a nota de compra</p>
+        </header>
+        <div class="reaj-cards">
+          <section class="reaj-card">
+            <h4>Preço de venda com base no</h4>
+            <label><input type="radio" name="reaj-base" id="reaj-base-venda" value="venda" checked /> Preço de venda atual</label>
+            <label><input type="radio" name="reaj-base" id="reaj-base-custo" value="custo" /> Custo desta nota</label>
+          </section>
+          <section class="reaj-card">
+            <h4>Forma de reajuste</h4>
+            <div class="reaj-radios">
+              <label><input type="radio" name="reaj-forma" id="reaj-forma-pct" value="pct" checked /> Percentual (%)</label>
+              <label><input type="radio" name="reaj-forma" id="reaj-forma-valor" value="valor" /> Valor (R$)</label>
+            </div>
+            <div class="reaj-ajuste-linha">
+              <label id="reaj-ajuste-label" for="reaj-ajuste">% de reajuste</label>
+              <input id="reaj-ajuste" class="reaj-ajuste" inputmode="decimal" placeholder="0,00" autocomplete="off" />
+              <button type="button" class="btn primary" id="reaj-calcular">Calcular reajuste</button>
+            </div>
+          </section>
+          <section class="reaj-card">
+            <h4>Arredondamento</h4>
+            <label><input type="radio" name="reaj-arred" id="reaj-arred-nenhum" value="nenhum" checked /> Não arredondar</label>
+            <label><input type="radio" name="reaj-arred" id="reaj-arred-decimal" value="decimal" /> 1 casa decimal</label>
+            <label class="reaj-centavos-linha">
+              <input type="radio" name="reaj-arred" id="reaj-arred-centavos" value="centavos" />
+              Centavos terminarem em
+              <input id="reaj-centavos" class="reaj-centavos" inputmode="numeric" maxlength="2" placeholder="90" disabled autocomplete="off" />
+            </label>
+          </section>
+        </div>
+        <div class="reaj-legenda">
+          <span class="reaj-pill subiu">Custo subiu</span>
+          <span class="reaj-pill desceu">Custo desceu</span>
+          <span class="reaj-pill igual">Custo igual</span>
+          <span class="reaj-legenda-txt">Linha em negrito quando o custo mudou.</span>
+        </div>
+        <p id="reaj-erro" class="reaj-erro" hidden></p>
+        <div class="reaj-scroll">
+          <table class="reaj-table">
+            <thead>
+              <tr>
+                <th><input type="checkbox" id="reaj-todos-head" title="Selecionar todos" /></th>
+                <th>Cód.</th>
+                <th>Descrição</th>
+                <th>Und.</th>
+                <th class="num">Qtd.</th>
+                <th class="num">Custo anterior</th>
+                <th class="num">Custo novo</th>
+                <th class="num">Variação</th>
+                <th class="num">R$ Venda</th>
+                <th class="num">R$ Novo</th>
+              </tr>
+            </thead>
+            <tbody id="reaj-corpo"></tbody>
+          </table>
+        </div>
+        <footer class="reaj-foot">
+          <div class="reaj-foot-left">
+            <label class="reaj-todos-label"><input type="checkbox" id="reaj-todos" /> Selecionar todos</label>
+            <button type="button" class="btn small" id="reaj-desmarcar">Desmarcar</button>
+            <button type="button" class="btn small" id="reaj-limpar">Limpar valores</button>
+          </div>
+          <div class="reaj-foot-right">
+            <button type="button" class="btn" id="reaj-agora">Agora não</button>
+            <button type="button" class="btn primary" id="reaj-gravar">Gravar preços</button>
+          </div>
+        </footer>
+      </div>
+    </dialog>
+
     <dialog id="dlg-danfe" class="dlg dlg-danfe">
       <div class="dlg-card dlg-danfe-card">
         <div class="dlg-danfe-bar">
@@ -1389,7 +1464,7 @@
   </div>
   <div id="gond-impressao" aria-hidden="true"></div>
   <script src="vendor/zxing-browser.min.js?v=240"></script>
-  <script src="importacao-nfe.js?v=256"></script>
+  <script src="importacao-nfe.js?v=257"></script>
   <script src="compras.js?v=242"></script>
   <script src="importacao-auto.js?v=6"></script>
   <script src="condicionais.js?v=252"></script>

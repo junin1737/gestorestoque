@@ -126,7 +126,7 @@ async function lerFotoProduto(db, appCfg, idIdent) {
   if (!t || !idIdent) return null;
   try {
     const rows = await query(db, `
-      SELECT FIRST 1 P.QTD_ATUAL, P.PRC_MEDIO, E.DESCRICAO, E.PRC_VENDA, E.PRC_CUSTO
+      SELECT FIRST 1 P.QTD_ATUAL, P.PRC_MEDIO, E.DESCRICAO, E.PRC_VENDA, E.PRC_CUSTO, E.UNI_MEDIDA
       FROM ${t.produto} P
       JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
       JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
@@ -1078,6 +1078,7 @@ async function atualizarItensNotaEditada(db, appCfg, sessao, idNf, usuario) {
       status: 'Alterado',
       id_identificador: idIdent,
       descricao: String(fotoDepois?.DESCRICAO || fotoAntes?.DESCRICAO || it.sistema?.descricao || it.xml?.xProd || '').trim(),
+      uni_medida: String(fotoDepois?.UNI_MEDIDA || fotoAntes?.UNI_MEDIDA || '').trim(),
       qtd_anterior: numFoto(fotoAntes, 'QTD_ATUAL'),
       qtd_entrada: entrou ? delta : 0,
       qtd_atual: numFoto(fotoDepois || fotoAntes, 'QTD_ATUAL'),
@@ -1606,6 +1607,7 @@ async function gravarNfCompra(sessao, {
           status: p.produtoNovo ? 'Novo' : 'Reposição',
           id_identificador: p.idIdent,
           descricao: String(fotoDepois?.DESCRICAO || p.it.sistema?.descricao || p.it.xml?.xProd || '').trim(),
+          uni_medida: String(fotoDepois?.UNI_MEDIDA || fotoAntes?.UNI_MEDIDA || '').trim(),
           qtd_anterior: p.produtoNovo ? 0 : numFoto(fotoAntes, 'QTD_ATUAL'),
           qtd_entrada: Number(p.qtd || 0),
           qtd_atual: numFoto(fotoDepois, 'QTD_ATUAL'),
@@ -1661,6 +1663,110 @@ async function nfFinanceiroBloqueado(db, idNf) {
   return { bloqueado: false, motivo: '' };
 }
 
+function normalizarItensReajuste(itens) {
+  const vistos = new Map();
+  for (const raw of Array.isArray(itens) ? itens : []) {
+    const id = Number(raw?.id_identificador);
+    const preco = Number(raw?.prc_venda);
+    if (!Number.isFinite(id) || id <= 0) continue;
+    if (!Number.isFinite(preco) || preco <= 0 || preco > 999999.99) continue;
+    vistos.set(id, Number(preco.toFixed(4)));
+  }
+  return [...vistos.entries()].map(([id_identificador, prc_venda]) => ({ id_identificador, prc_venda }));
+}
+
+/** Atualiza PRC_VENDA dos produtos marcados no reajuste da nota de compra. */
+async function reajustarPrecosVenda(itens, { usuario = 'Supervisor', idFuncionario = 0, nfLabel = '' } = {}) {
+  const lista = normalizarItensReajuste(itens);
+  if (!lista.length) return { alterados: [], nao_encontrados: [] };
+  if (lista.length > 500) throw new Error('Muitos itens no reajuste.');
+
+  const { logProductChanges } = require('./audit');
+  const resultado = await withDb(async (conn, appCfg) => {
+    const targets = writeTargets(appCfg);
+    if (!targets.length) throw new Error('Tabelas de estoque não encontradas.');
+    return withTransaction(conn, async (db) => {
+      const alterados = [];
+      const naoEncontrados = [];
+      for (const item of lista) {
+        let antes = null;
+        let idEstoque = 0;
+        let achou = false;
+        let mudou = false;
+        for (const target of targets) {
+          const t = target.tables;
+          const cur = await query(db, `
+            SELECT FIRST 1 E.ID_ESTOQUE, E.PRC_VENDA
+            FROM ${t.identificador} I
+            JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+            WHERE I.ID_IDENTIFICADOR = ?`, [item.id_identificador]);
+          if (!cur.length) continue;
+          achou = true;
+          const atual = Number(cur[0].PRC_VENDA || 0);
+          const idEst = Number(cur[0].ID_ESTOQUE || 0);
+          if (antes == null) {
+            antes = atual;
+            idEstoque = idEst;
+          }
+          if (Math.abs(atual - item.prc_venda) < 0.0005) continue;
+          await query(db, `
+            UPDATE ${t.estoque} SET PRC_VENDA = ? WHERE ID_ESTOQUE = ?`, [
+            item.prc_venda, idEst,
+          ]);
+          mudou = true;
+        }
+        if (!achou) {
+          naoEncontrados.push(item.id_identificador);
+          continue;
+        }
+        if (mudou) {
+          alterados.push({
+            id_identificador: item.id_identificador,
+            id_estoque: idEstoque,
+            venda_anterior: antes,
+            venda_atual: item.prc_venda,
+          });
+        }
+      }
+      return { alterados, nao_encontrados: naoEncontrados };
+    });
+  });
+
+  if (resultado.alterados.length) {
+    try {
+      await withDb(async (db) => {
+        for (const a of resultado.alterados) {
+          try {
+            await logProductChanges(db, {
+              antes: { prc_venda: a.venda_anterior },
+              depois: { prc_venda: a.venda_atual },
+              id_identificador: a.id_identificador,
+              id_estoque: a.id_estoque,
+              id_funcionario: idFuncionario,
+              usuario,
+              origem: nfLabel ? `reajuste NF ${nfLabel}` : 'reajuste de preços',
+            });
+          } catch (e) {
+            console.warn('Auditoria reajuste:', e.message);
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('Auditoria reajuste:', e.message);
+    }
+  }
+
+  return {
+    alterados: resultado.alterados.map((a) => ({
+      id_identificador: a.id_identificador,
+      venda_anterior: a.venda_anterior,
+      venda_atual: a.venda_atual,
+    })),
+    nao_encontrados: resultado.nao_encontrados,
+  };
+}
+
 module.exports = {
   gravarNfCompra, upsertEstTributosReforma, nfFinanceiroBloqueado, corrigirTransportadoresNf, ensureIdTransportador,
+  reajustarPrecosVenda,
 };

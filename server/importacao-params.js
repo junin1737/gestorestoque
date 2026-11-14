@@ -319,6 +319,7 @@ function getSaidaPadrao() {
     nat_padrao_descricao: String(s.nat_padrao_descricao || '').trim(),
     nat_padrao_cfop: String(s.nat_padrao_cfop || '').replace(/\D/g, '').slice(0, 4),
     cclass_trib_novos: (s.cclass_trib_novos === true || s.cclass_trib_novos === 'S') ? 'S' : 'N',
+    ajustar_precos_venda: (s.ajustar_precos_venda === true || s.ajustar_precos_venda === 'S') ? 'S' : 'N',
   };
 }
 
@@ -352,6 +353,9 @@ function setSaidaPadrao(saida) {
     cclass_trib_novos: saida && Object.prototype.hasOwnProperty.call(saida, 'cclass_trib_novos')
       ? ((saida.cclass_trib_novos === true || saida.cclass_trib_novos === 'S') ? 'S' : 'N')
       : ((prev.cclass_trib_novos === true || prev.cclass_trib_novos === 'S') ? 'S' : 'N'),
+    ajustar_precos_venda: saida && Object.prototype.hasOwnProperty.call(saida, 'ajustar_precos_venda')
+      ? ((saida.ajustar_precos_venda === true || saida.ajustar_precos_venda === 'S') ? 'S' : 'N')
+      : ((prev.ajustar_precos_venda === true || prev.ajustar_precos_venda === 'S') ? 'S' : 'N'),
   };
   saveLocalParams(local);
   return local.saida;
