@@ -1575,6 +1575,7 @@ async function consultarDashboard(db, opcoes = {}) {
   const abas = [];
   if (usaManage) abas.push('manage');
   if (usaGr || !usaManage) abas.push('vendas');
+  abas.push('despesa');
   abas.push('fiscal');
   abas.push('financeiro');
   const pedida = String(opcoes.aba || '').trim().toLowerCase();
@@ -1591,6 +1592,25 @@ async function consultarDashboard(db, opcoes = {}) {
       fiscal: false,
       periodo: { inicio: filtros.inicio, fim: filtros.fim },
       ...fin,
+      vazio: false,
+      mensagem: '',
+    };
+  }
+  if (aba === 'despesa') {
+    const filtrosIniciais = filtrosDaAba(filtros, usaManage ? 'manage' : 'vendas', usaManage, usaGr);
+    const serieMensal = usaManage
+      ? await porMesFinanceiro(db, filtrosIniciais, ignorarCartao, usaManage)
+      : await porMes(db, usaManage, filtrosIniciais);
+    return {
+      perfil,
+      usaManage,
+      usaGr,
+      aba,
+      abas,
+      fiscal: false,
+      periodo: { inicio: filtros.inicio, fim: filtros.fim },
+      ano: String(filtros.inicio || '').slice(0, 4),
+      porMes: serieMensal,
       vazio: false,
       mensagem: '',
     };
@@ -1616,9 +1636,7 @@ async function consultarDashboard(db, opcoes = {}) {
   const gruposVenda = await porGrupo(db, usaManage, filtrosAba, 'vendas');
   const gruposCompra = await porGrupo(db, usaManage, filtrosAba, 'compras');
   const pagamento = await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
-  const serieMensal = aba === 'manage'
-    ? await porMesFinanceiro(db, filtrosAba, ignorarCartao, usaManage)
-    : await porMes(db, usaManage, filtrosAba);
+  const serieMensal = aba === 'fiscal' ? await porMes(db, usaManage, filtrosAba) : [];
   const vazio = t.totalVendido === 0 && (aba === 'fiscal' || t.totalComprado === 0);
   return {
     perfil,

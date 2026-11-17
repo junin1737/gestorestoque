@@ -214,6 +214,7 @@ function htmlAbas(dados) {
   const rotulo = {
     manage: 'Manage',
     vendas: 'Vendas',
+    despesa: 'Despesa x Receita',
     fiscal: 'NFe+NFCe',
     financeiro: 'Financeiro',
   };
@@ -357,6 +358,7 @@ function htmlConteudo(dados) {
     ${htmlRecortes(dados)}`;
   }
   if (dados.aba === 'financeiro') return htmlFinanceiro(dados);
+  if (dados.aba === 'despesa') return `${htmlAbas(dados)}${htmlMeses(dados)}`;
   if (dados.perfil === 'MT_ENTRADAS') {
     return `<p class="hint">O dia e o mês dos cards seguem a data Até. A lista usa o período De–Até.</p>
     <div class="fin-cards">
@@ -398,7 +400,6 @@ function htmlConteudo(dados) {
     ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`, '', 'entrada')}
     ${card('Ticket médio', brl(dados.ticketMedio), 'total vendido ÷ notas')}
   </div>
-  ${htmlMeses(dados)}
   ${htmlRecortes(dados)}`;
 }
 
