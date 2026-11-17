@@ -1391,9 +1391,11 @@ async function confirmarSessaoInterno(sessaoId, opts = {}) {
   s.updatedAt = new Date().toISOString();
   s._sync = { ...(s._sync || {}), version: (s._sync?.version || 0) + 1, pendingCloud: true };
   commitSessao(s);
+  const ajustarPrecos = String(require('./importacao-params').getSaidaPadrao().ajustar_precos_venda || 'N').toUpperCase() === 'S';
   return {
     ok: true,
     message: `NF ${gravacao.nf_numero}/${gravacao.nf_serie} gravada (cód. ${gravacao.id_nfcompra}) com ${gravacao.itens_gravados} itens e estoque atualizado.`,
+    ajustar_precos: ajustarPrecos,
     gravacao,
     sessao: mapSessaoForClient(s),
   };

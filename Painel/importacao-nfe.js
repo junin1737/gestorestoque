@@ -1278,8 +1278,11 @@ const ImportacaoNfe = (() => {
 
   function abrirReajustePrecos(gravacao) {
     const dlg = $('#dlg-reajuste');
-    if (!dlg || typeof dlg.showModal !== 'function') return Promise.resolve();
-    return new Promise((resolve) => {
+    if (!dlg || typeof dlg.showModal !== 'function') {
+      return Promise.reject(new Error('A tela de reajuste não está nesta versão do painel. Atualize a página.'));
+    }
+    if (dlg.parentElement !== document.body) document.body.appendChild(dlg);
+    return new Promise((resolve, reject) => {
       let settled = false;
       let salvando = false;
       const finish = () => {
@@ -1289,7 +1292,12 @@ const ImportacaoNfe = (() => {
         try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
         resolve();
       };
-      renderReajusteTabela(gravacao);
+      try {
+        renderReajusteTabela(gravacao);
+      } catch (err) {
+        reject(err);
+        return;
+      }
       const sub = $('#reaj-sub');
       if (sub) {
         const nf = gravacao?.nf_numero ? `Nota ${gravacao.nf_numero}` : 'Nota gravada';
@@ -1400,7 +1408,19 @@ const ImportacaoNfe = (() => {
         e.preventDefault();
         if (!salvando) finish();
       };
-      if (!dlg.open) dlg.showModal();
+      document.querySelectorAll('dialog[open]').forEach((outro) => {
+        if (outro !== dlg) {
+          try { outro.close(); } catch { /* ignore */ }
+        }
+      });
+      try {
+        if (!dlg.open) dlg.showModal();
+      } catch (err) {
+        if (!settled) {
+          settled = true;
+          reject(err);
+        }
+      }
     });
   }
 
@@ -2069,11 +2089,34 @@ const ImportacaoNfe = (() => {
     if (state.saidaParams) return state.saidaParams;
     try {
       const res = await api('/importacao/params/cfop');
-      state.saidaParams = res.saida || {};
-    } catch {
-      state.saidaParams = {};
+      if (res?.saida) state.saidaParams = res.saida;
+    } catch { /* tenta de novo na próxima leitura */ }
+    return state.saidaParams || {};
+  }
+
+  function linhasParaReajuste(gravacao, sessao) {
+    const rel = Array.isArray(gravacao?.relatorio)
+      ? gravacao.relatorio.filter((r) => Number(r?.id_identificador) > 0)
+      : [];
+    if (rel.length) return rel;
+    const porId = new Map();
+    for (const it of sessao?.itens || []) {
+      const id = Number(it?.sistema?.id_identificador);
+      if (!id || porId.has(id)) continue;
+      const custo = Number(it.sistema?.prc_custo);
+      const venda = Number(it.sistema?.prc_venda);
+      porId.set(id, {
+        status: it.sistema?.criar_novo ? 'Novo' : 'Reposição',
+        id_identificador: id,
+        descricao: String(it.sistema?.descricao || it.xml?.xProd || '').trim(),
+        uni_medida: String(it.sistema?.uni_medida || 'UN').trim(),
+        qtd_entrada: Number(it.sistema?.qtd || it.xml?.qCom || 0),
+        custo_anterior: null,
+        custo_atual: Number.isFinite(custo) ? custo : 0,
+        venda_atual: Number.isFinite(venda) ? venda : 0,
+      });
     }
-    return state.saidaParams;
+    return [...porId.values()];
   }
 
   async function aplicarCclassSeNovo(sys) {
@@ -5755,17 +5798,26 @@ const ImportacaoNfe = (() => {
           body: {},
         });
         if (res.ok) {
+          const sessaoGravada = state.sessao;
           limparRascunhoNota(state.sessao);
-          let ajustarPrecos = false;
-          try {
-            const paramsPos = await api('/importacao/params/cfop');
-            ajustarPrecos = String(paramsPos?.saida?.ajustar_precos_venda || 'N').toUpperCase() === 'S';
-          } catch { ajustarPrecos = false; }
-          if (ajustarPrecos && res.gravacao?.relatorio?.length) {
+          let ajustarPrecos = res.ajustar_precos === true;
+          if (res.ajustar_precos == null) {
+            try {
+              const paramsPos = await api('/importacao/params/cfop');
+              if (paramsPos?.saida) {
+                state.saidaParams = paramsPos.saida;
+                ajustarPrecos = String(paramsPos.saida.ajustar_precos_venda || 'N').toUpperCase() === 'S';
+              }
+            } catch {
+              ajustarPrecos = String(state.saidaParams?.ajustar_precos_venda || 'N').toUpperCase() === 'S';
+            }
+          }
+          const linhasReaj = linhasParaReajuste(res.gravacao, sessaoGravada);
+          if (ajustarPrecos && linhasReaj.length) {
             deps.showToast?.(res.message || 'Entrada confirmada');
             try { $('#dlg-msg')?.close(); } catch { /* ignore */ }
             try {
-              await abrirReajustePrecos(res.gravacao);
+              await abrirReajustePrecos({ ...(res.gravacao || {}), relatorio: linhasReaj, nf_numero: res.gravacao?.nf_numero || sessaoGravada?.xml?.ide?.nNF || '' });
             } catch (errReaj) {
               deps.showMsg?.(errReaj?.message || 'Não foi possível abrir o reajuste de preços.');
             }
@@ -5885,6 +5937,11 @@ const ImportacaoNfe = (() => {
 
   /** Volta uma tela no fluxo de importação. Retorna true se tratou o back. */
   function handleBack() {
+    const reaj = $('#dlg-reajuste');
+    if (reaj?.open) {
+      try { reaj.close(); } catch { /* ignore */ }
+      return true;
+    }
     if (state.view === 'item') {
       renderSessao();
       showView('sessao');

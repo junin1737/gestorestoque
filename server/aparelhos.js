@@ -216,14 +216,16 @@ function solicitar(req, nome) {
 }
 
 /**
- * Situação do pedido deste aparelho. Se foi autorizado, cria o aparelho e devolve o token do
- * cookie (uma vez só; o pedido é apagado).
+ * Situação do pedido deste aparelho. Com consumir, a aprovação cria o aparelho e devolve o
+ * token do cookie (uma vez só; o pedido é apagado). A consulta da tela não consome: o cookie
+ * precisa sair num redirecionamento, senão o navegador troca de página e descarta o cookie.
  */
-function situacaoPedido(req) {
+function situacaoPedido(req, opcoes = {}) {
   const atual = pedidoDaRequisicao(req);
   if (!atual) return { status: 'nenhum' };
   const { h, p } = atual;
   if (p.status === 'aprovado') {
+    if (opcoes.consumir === false) return { status: 'aprovado', codigo: p.codigo };
     pedidos.delete(h);
     return { status: 'aprovado', token: criarAparelho({ nome: p.nome, ip: ipRemoto(req) || p.ip, navegador: p.navegador }) };
   }

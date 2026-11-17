@@ -65,7 +65,7 @@ const PEDIDO_HTML = `<div class="pedido" id="pedido">
   var pedidoMt=false;
   var aguardarClique=false;
   function verificar(){fetch('/parear/status',{cache:'no-store',credentials:'same-origin'}).then(function(r){return r.json()}).then(function(d){
-    if(d.status==='aprovado'){location.replace(/(?:^|[?&])contador=1(?:&|$)/.test(location.search)?'/?contador=1':'/');return}
+    if(d.status==='aprovado'){location.replace('/parear/entrar'+location.search);return}
     if(!pedidoMt){
       var nomePedido=/(?:^|[?&])mt=1(?:&|$)/.test(location.search)?'MT Entradas':(/(?:^|[?&])contador=1(?:&|$)/.test(location.search)?'Contador':'');
       if(nomePedido){pedidoMt=true;aguardarClique=true;$('pd-nome').value=$('pd-nome').value||nomePedido;$('pd-nome').focus();}
@@ -112,13 +112,20 @@ app.use((req, res, next) => {
   }
   if (req.path === '/parear/status') {
     if (ap) return res.json({ status: 'aprovado' });
-    const s = aparelhos.situacaoPedido(req);
-    if (s.status === 'aprovado') {
-      res.setHeader('Set-Cookie', [aparelhos.cookieAparelho(s.token), aparelhos.cookiePedido('', 0)]);
-      return res.json({ status: 'aprovado' });
-    }
+    const s = aparelhos.situacaoPedido(req, { consumir: false });
     if (s.status === 'recusado') res.setHeader('Set-Cookie', aparelhos.cookiePedido('', 0));
     return res.json({ status: s.status, codigo: s.codigo, expira_em: s.expira_em });
+  }
+  if (req.path === '/parear/entrar') {
+    const destino = String(req.query.contador || '') === '1' ? '/?contador=1' : '/';
+    if (ap) return res.redirect(302, destino);
+    const s = aparelhos.situacaoPedido(req);
+    if (s.status === 'aprovado' && s.token) {
+      res.setHeader('Set-Cookie', aparelhos.cookieAparelho(s.token));
+      return res.redirect(302, destino);
+    }
+    const volta = String(req.query.contador || '') === '1' ? '/?contador=1' : (String(req.query.mt || '') === '1' ? '/?mt=1' : '/');
+    return res.redirect(302, volta);
   }
   if (ap) {
     req.aparelho = ap;
