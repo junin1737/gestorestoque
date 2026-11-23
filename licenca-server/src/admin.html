@@ -67,6 +67,10 @@
   .side-backdrop { display: none; }
   .toolbar { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; margin-bottom: .8rem; }
   .toolbar select { width: auto; }
+  .ficha-tabs { display: flex; gap: .4rem; flex-wrap: wrap; margin: 0 0 .9rem; position: sticky; top: 0; background: #fff; z-index: 2; padding: .15rem 0 .55rem; }
+  .ficha-tab { border: 1px solid #e6ebf2; background: #fff; border-radius: 999px; padding: .4rem .85rem; cursor: pointer; font-weight: 600; color: #5c6b80; }
+  .ficha-tab.active { background: #121a2b; color: #fff; border-color: #121a2b; }
+  .ficha-pane > h3:first-child { margin-top: .2rem; }
   .tabs { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .85rem; }
   .tab { border: 1px solid #e6ebf2; background: #fff; border-radius: 999px; padding: .4rem .85rem; cursor: pointer; font-weight: 600; color: #5c6b80; }
   .tab.active { background: #121a2b; color: #fff; border-color: #121a2b; }
@@ -354,16 +358,12 @@
     <span class="badge" id="d-badge"></span>
   </div>
   <div class="dlg-body">
-    <div id="d-link-box" hidden>
-      <h3>Link da Central de Ofertas</h3>
-      <p class="sub">O cliente abre este endereço no navegador. Não precisa instalar o Gestor. Conecte o Instagram nesta ficha para as postagens saírem.</p>
-      <p class="sub" id="d-oferta-acesso"></p>
-      <div class="linha">
-        <input id="d-link-ofertas" readonly />
-        <button class="btn ghost" id="d-link-copiar" type="button">Copiar</button>
-        <button class="btn ghost" id="d-oferta-senha" type="button">Restaurar senha inicial</button>
-      </div>
+    <div class="ficha-tabs" role="tablist">
+      <button class="ficha-tab active" type="button" data-ficha-tab="geral" role="tab" aria-selected="true">Geral</button>
+      <button class="ficha-tab" type="button" data-ficha-tab="modulos" role="tab" aria-selected="false">Módulos utilizados</button>
+      <button class="ficha-tab" type="button" data-ficha-tab="conexoes" role="tab" aria-selected="false">Conexões</button>
     </div>
+    <div data-ficha-pane="geral">
     <div class="validade-box">
       <div class="grid2">
         <label>Situação
@@ -396,6 +396,27 @@
       <button class="btn ghost" id="d-cont-novo" type="button">+</button>
     </div>
     <p class="sub">Opcional. Cada cliente tem no máximo um contador. O mesmo contador pode atender várias empresas.</p>
+    <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
+    <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
+
+    <h3>Senha do supervisor</h3>
+    <div class="sup-box">
+      <div id="d-sup-info" class="sub"></div>
+      <div class="linha">
+        <label>Nova senha própria deste cliente<input type="password" id="d-sup-1" autocomplete="new-password" /></label>
+        <label>Repita a senha<input type="password" id="d-sup-2" autocomplete="new-password" /></label>
+        <button class="btn ghost" id="d-sup-salvar" type="button">Definir</button>
+        <button class="btn ghost" id="d-sup-padrao" type="button">Usar a padrão</button>
+      </div>
+    </div>
+
+    <h3>Histórico</h3>
+    <div class="mini"><table>
+      <thead><tr><th>Quando</th><th>Evento</th><th>Detalhe</th></tr></thead>
+      <tbody id="d-ev"></tbody>
+    </table></div>
+    </div>
+    <div data-ficha-pane="modulos" hidden>
     <label>Pacote de Entrada
       <select id="d-pacote-entrada">
         <option value="0">Não</option>
@@ -424,10 +445,23 @@
       </select>
     </label>
     <p class="sub">Com Sim, o Gestor mostra Alteração em massa para quem tiver a permissão em Usuários. O contador vinculado também entra quando estiver Sim.</p>
+    </div>
+    <div data-ficha-pane="conexoes" hidden>
+    <div id="d-link-box" hidden>
+      <h3>Link da Central de Ofertas</h3>
+      <p class="sub">O cliente abre este endereço no navegador. Não precisa instalar o Gestor. A publicação sai depois que o Instagram estiver conectado nesta aba.</p>
+      <p class="sub" id="d-oferta-acesso"></p>
+      <div class="linha">
+        <input id="d-link-ofertas" readonly />
+        <button class="btn ghost" id="d-link-copiar" type="button">Copiar</button>
+        <button class="btn ghost" id="d-oferta-senha" type="button">Restaurar senha inicial</button>
+      </div>
+    </div>
     <label class="check"><input id="d-usa-dominio" type="checkbox" /> Usar domínio próprio</label>
     <label>Domínio do site<input id="d-dominio" maxlength="120" placeholder="www.loja.com.br" /></label>
     <p class="sub" id="d-dominio-aviso">Desmarcado, o Gestor continua no link gerado. Marcado, o link passa a ser o domínio sem www, com /mtgestoronline.</p>
     <h3>Instagram</h3>
+    <p class="sub" style="margin-top:0">Para a loja publicar pela Central de Ofertas, clique em Conectar Instagram e autorize com a conta dela. O usuário, o ID e a validade são preenchidos aqui.</p>
     <div class="ig-acoes">
       <button class="btn ghost" id="d-ig-conectar" type="button">Conectar Instagram</button>
     </div>
@@ -452,19 +486,6 @@
     <p class="sub" id="d-ig-resultado"></p>
     <p class="sub" id="d-ig-info">Conectar Instagram pede a autorização da loja e preenche usuário, ID, token e validade. O token não aparece na tela.</p>
     <p class="sub">A renovação só funciona com o token tendo mais de 24 horas.</p>
-    <label>Mensagem exibida no Gestor (opcional — vazio usa a mensagem padrão)<input id="d-mensagem" maxlength="300" /></label>
-    <label>Observação interna<textarea id="d-obs" maxlength="1000"></textarea></label>
-
-    <h3>Senha do supervisor</h3>
-    <div class="sup-box">
-      <div id="d-sup-info" class="sub"></div>
-      <div class="linha">
-        <label>Nova senha própria deste cliente<input type="password" id="d-sup-1" autocomplete="new-password" /></label>
-        <label>Repita a senha<input type="password" id="d-sup-2" autocomplete="new-password" /></label>
-        <button class="btn ghost" id="d-sup-salvar" type="button">Definir</button>
-        <button class="btn ghost" id="d-sup-padrao" type="button">Usar a padrão</button>
-      </div>
-    </div>
 
     <h3>Instalações</h3>
     <div class="linha">
@@ -507,11 +528,7 @@
       <button class="btn sm ghost" id="d-off-copiar" type="button" style="margin-top:.4rem">Copiar código</button>
     </div>
 
-    <h3>Histórico</h3>
-    <div class="mini"><table>
-      <thead><tr><th>Quando</th><th>Evento</th><th>Detalhe</th></tr></thead>
-      <tbody id="d-ev"></tbody>
-    </table></div>
+    </div>
   </div>
   <div class="dlg-foot">
     <button class="btn danger sm" id="d-excluir" type="button" style="margin-right:auto">Excluir</button>
@@ -1349,6 +1366,19 @@ function preencherCliente(r) {
     : '<tr><td colspan="3" class="sub">Sem eventos.</td></tr>';
 }
 
+function abaFicha(nome) {
+  $$('#dlg-cliente [data-ficha-tab]').forEach((b) => {
+    const on = b.dataset.fichaTab === nome;
+    b.classList.toggle('active', on);
+    b.setAttribute('aria-selected', on ? 'true' : 'false');
+  });
+  $$('#dlg-cliente [data-ficha-pane]').forEach((p) => { p.hidden = p.dataset.fichaPane !== nome; });
+}
+$('#dlg-cliente').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-ficha-tab]');
+  if (b) abaFicha(b.dataset.fichaTab);
+});
+
 async function abrirCliente(cli) {
   const r = await api(rotaCliente(cli));
   if (!r.ok) { toast(r.error || 'Falha.', true); return; }
@@ -1357,6 +1387,7 @@ async function abrirCliente(cli) {
   $('#d-vinc-cnpj').value = '';
   $('#d-vinc-erro').textContent = '';
   preencherCliente(r);
+  abaFicha(cli.app === 'CentralOfertas' ? 'conexoes' : 'geral');
   if (!$('#dlg-cliente').open) $('#dlg-cliente').showModal();
 }
 
