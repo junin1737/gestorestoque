@@ -733,7 +733,7 @@ async function detalheCliente(cnpj, app, env) {
   }
   const cliente = clientePublico(cli);
   if (app === APP_OFERTAS) {
-    cliente.acesso_oferta = await resumoAcessoOferta(env, cli, (senha) => hashPbkdf2(senha));
+    cliente.acesso_oferta = await resumoAcessoOferta(env, cli);
   }
   return json({
     ok: true,
@@ -2598,7 +2598,7 @@ async function restaurarAcessoOferta(cnpj, app, env) {
   if (app !== APP_OFERTAS) return json({ ok: false, error: 'Este cliente não é somente Central de Ofertas.' }, 400);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
-  await restaurarUsuarioAdmin(env, cli, (senha) => hashPbkdf2(senha));
+  await restaurarUsuarioAdmin(env, cli);
   await registrarEvento(env, cnpj, app, 'oferta', 'Senha do Administrador da Central de Ofertas restaurada');
   return detalheCliente(cnpj, app, env);
 }
@@ -2625,16 +2625,11 @@ export default {
       if (paginaOferta && request.method === 'GET') return paginaOfertas();
       if (url.pathname === '/api/ofertas/acesso' && request.method === 'POST') {
         return entrarOferta(request, env, {
-          hashSenha: (senha) => hashPbkdf2(senha),
-          conferirHash: (senha, hash) => conferirPbkdf2(senha, hash),
           emitir: (cnpj, uid) => emitirSessaoOferta(env, cnpj, uid),
         });
       }
       if (url.pathname === '/api/ofertas/usuarios' && request.method === 'POST') {
-        return usuariosOferta(request, env, (req) => lerSessaoOferta(env, req), {
-          hashSenha: (senha) => hashPbkdf2(senha),
-          conferirHash: (senha, hash) => conferirPbkdf2(senha, hash),
-        });
+        return usuariosOferta(request, env, (req) => lerSessaoOferta(env, req));
       }
       if (url.pathname === '/api/ofertas/loja' && request.method === 'GET') {
         return lojaOferta(request, env, url, (req) => lerSessaoOferta(env, req));

@@ -115,7 +115,7 @@ async function api(path, body) {
     headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + sessao() },
     body: body ? JSON.stringify(body) : undefined,
   });
-  const data = await res.json().catch(() => ({}));
+  const data = await res.json().catch(() => ({ ok: false, error: 'A nuvem não respondeu. Tente de novo.' }));
   if (res.status === 401 && path !== '/api/ofertas/acesso') {
     sessionStorage.removeItem(chave);
     $('#painel').hidden = true;
@@ -321,6 +321,49 @@ function loginDe(nome) {
   return String(nome || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 }
 
+function b64(bytes) {
+  let s = '';
+  for (const n of bytes) s += String.fromCharCode(n);
+  return btoa(s);
+}
+
+function fromB64(s) {
+  const bin = atob(String(s || ''));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function juntar(a, b) {
+  const out = new Uint8Array(a.length + b.length);
+  out.set(a, 0);
+  out.set(b, a.length);
+  return out;
+}
+
+async function hashOfertaSenha(senha) {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', juntar(salt, new TextEncoder().encode(String(senha)))));
+  return JSON.stringify({ alg: 'sha256', salt: b64(salt), hash: b64(hash) });
+}
+
+async function conferirOfertaSenha(senha, valor) {
+  if (!valor || valor.alg !== 'sha256' || !valor.salt || !valor.hash) return false;
+  let salt;
+  let esperado;
+  try {
+    salt = fromB64(valor.salt);
+    esperado = fromB64(valor.hash);
+  } catch {
+    return false;
+  }
+  const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', juntar(salt, new TextEncoder().encode(String(senha || '')))));
+  if (hash.length !== esperado.length) return false;
+  let diff = 0;
+  for (let i = 0; i < hash.length; i++) diff |= hash[i] ^ esperado[i];
+  return diff === 0;
+}
+
 function senhaIgual(a, b) {
   const x = String(a ?? '');
   const y = String(b ?? '');
@@ -371,7 +414,7 @@ async function listarUsuarios(env, cnpj) {
   return (res.results || []).map(usuarioPublico);
 }
 
-export async function garantirUsuarioAdmin(env, cli, hashSenha) {
+export async function garantirUsuarioAdmin(env, cli) {
   await garantirUsuarios(env);
   const atual = await env.DB.prepare(
     'SELECT * FROM oferta_usuarios WHERE cnpj = ? AND aplicacao = ? AND login = ?'
@@ -383,7 +426,7 @@ export async function garantirUsuarioAdmin(env, cli, hashSenha) {
     await env.DB.prepare(
       `INSERT INTO oferta_usuarios (id, cnpj, aplicacao, nome, login, senha_hash, administrador, senha_inicial, criado_em)
        VALUES (?, ?, ?, 'Administrador', ?, ?, 1, 1, ?)`
-    ).bind(id, cli.cnpj, APP, LOGIN_ADMIN, await hashSenha(SENHA_INICIAL), agora).run();
+    ).bind(id, cli.cnpj, APP, LOGIN_ADMIN, await hashOfertaSenha(SENHA_INICIAL), agora).run();
   } catch (e) {
     const deNovo = await env.DB.prepare(
       'SELECT * FROM oferta_usuarios WHERE cnpj = ? AND aplicacao = ? AND login = ?'
@@ -394,9 +437,9 @@ export async function garantirUsuarioAdmin(env, cli, hashSenha) {
   return env.DB.prepare('SELECT * FROM oferta_usuarios WHERE id = ?').bind(id).first();
 }
 
-export async function resumoAcessoOferta(env, cli, hashSenha) {
+export async function resumoAcessoOferta(env, cli) {
   if (cli?.aplicacao !== APP) return null;
-  const admin = await garantirUsuarioAdmin(env, cli, hashSenha);
+  const admin = await garantirUsuarioAdmin(env, cli);
   const inicial = Number(admin?.senha_inicial) === 1;
   return {
     nome: 'Administrador',
@@ -405,11 +448,11 @@ export async function resumoAcessoOferta(env, cli, hashSenha) {
   };
 }
 
-export async function restaurarUsuarioAdmin(env, cli, hashSenha) {
-  const admin = await garantirUsuarioAdmin(env, cli, hashSenha);
+export async function restaurarUsuarioAdmin(env, cli) {
+  const admin = await garantirUsuarioAdmin(env, cli);
   await env.DB.prepare(
     'UPDATE oferta_usuarios SET senha_hash = ?, senha_inicial = 1 WHERE id = ?'
-  ).bind(await hashSenha(SENHA_INICIAL), admin.id).run();
+  ).bind(await hashOfertaSenha(SENHA_INICIAL), admin.id).run();
   return { nome: 'Administrador', senha: SENHA_INICIAL, senha_inicial: true };
 }
 
@@ -430,7 +473,7 @@ async function respostaLoja(env, cli, usuario) {
   return vista(cli, itens, usuario, usuarios);
 }
 
-export async function entrarOferta(request, env, { hashSenha, conferirHash, emitir }) {
+export async function entrarOferta(request, env, { emitir }) {
   const body = await request.json().catch(() => ({}));
   const cli = await clienteDoToken(env, body.token);
   if (!cli || cli.status !== 'liberado' || Number(cli.central_ofertas) !== 1) {
@@ -446,13 +489,19 @@ export async function entrarOferta(request, env, { hashSenha, conferirHash, emit
       await new Promise((r) => setTimeout(r, 800));
       return json({ ok: false, error: 'Usuário ou senha inválidos.' }, 401);
     }
-    usuario = await garantirUsuarioAdmin(env, cli, hashSenha);
+    usuario = await garantirUsuarioAdmin(env, cli);
   } else {
     let hash = null;
     try { hash = JSON.parse(usuario.senha_hash || ''); } catch { /* hash inválido */ }
-    if (!(await conferirHash(body.senha, hash))) {
+    const inicialAntiga = Number(usuario.senha_inicial) === 1 && hash?.alg !== 'sha256' && senhaIgual(body.senha, SENHA_INICIAL);
+    const confere = inicialAntiga || await conferirOfertaSenha(body.senha, hash);
+    if (!confere) {
       await new Promise((r) => setTimeout(r, 800));
       return json({ ok: false, error: 'Usuário ou senha inválidos.' }, 401);
+    }
+    if (inicialAntiga) {
+      await env.DB.prepare('UPDATE oferta_usuarios SET senha_hash = ? WHERE id = ?')
+        .bind(await hashOfertaSenha(SENHA_INICIAL), usuario.id).run();
     }
   }
   const sessao = await emitir(cli.cnpj, usuario.id);
@@ -481,7 +530,7 @@ export async function lojaOferta(request, env, url, ler) {
   return json(await respostaLoja(env, auth.cli, auth.usuario));
 }
 
-export async function usuariosOferta(request, env, ler, { hashSenha, conferirHash }) {
+export async function usuariosOferta(request, env, ler) {
   const body = await request.json().catch(() => ({}));
   const pedido = new URL(request.url);
   pedido.searchParams.set('token', String(body.token || ''));
@@ -492,13 +541,14 @@ export async function usuariosOferta(request, env, ler, { hashSenha, conferirHas
     const atual = await env.DB.prepare('SELECT * FROM oferta_usuarios WHERE id = ?').bind(auth.usuario.id).first();
     let hash = null;
     try { hash = JSON.parse(atual?.senha_hash || ''); } catch { /* hash inválido */ }
-    if (!(await conferirHash(body.senha_atual, hash))) {
+    const inicialAntiga = Number(atual?.senha_inicial) === 1 && hash?.alg !== 'sha256' && senhaIgual(body.senha_atual, SENHA_INICIAL);
+    if (!inicialAntiga && !(await conferirOfertaSenha(body.senha_atual, hash))) {
       return json({ ok: false, error: 'A senha atual não confere.' }, 400);
     }
     const fraca = senhaFraca(body.senha_nova);
     if (fraca) return json({ ok: false, error: fraca }, 400);
     await env.DB.prepare('UPDATE oferta_usuarios SET senha_hash = ?, senha_inicial = 0 WHERE id = ?')
-      .bind(await hashSenha(String(body.senha_nova)), atual.id).run();
+      .bind(await hashOfertaSenha(String(body.senha_nova)), atual.id).run();
   } else if (acao === 'criar') {
     if (Number(auth.usuario.administrador) !== 1) {
       return json({ ok: false, error: 'Só o Administrador cria usuários.' }, 403);
@@ -515,7 +565,7 @@ export async function usuariosOferta(request, env, ler, { hashSenha, conferirHas
     await env.DB.prepare(
       `INSERT INTO oferta_usuarios (id, cnpj, aplicacao, nome, login, senha_hash, administrador, senha_inicial, criado_em)
        VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?)`
-    ).bind(crypto.randomUUID(), auth.cli.cnpj, APP, nome, login, await hashSenha(String(body.senha)), new Date().toISOString()).run();
+    ).bind(crypto.randomUUID(), auth.cli.cnpj, APP, nome, login, await hashOfertaSenha(String(body.senha)), new Date().toISOString()).run();
   } else if (acao === 'remover') {
     if (Number(auth.usuario.administrador) !== 1) {
       return json({ ok: false, error: 'Só o Administrador remove usuários.' }, 403);
