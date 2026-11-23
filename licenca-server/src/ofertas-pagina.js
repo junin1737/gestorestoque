@@ -47,7 +47,6 @@ const HTML = `<!doctype html>
     <p>Entre com o usuário desta loja para agendar as postagens.</p>
     <label>Usuário<input id="usuario" autocomplete="username" required></label>
     <label>Senha<input id="senha" type="password" autocomplete="current-password" required></label>
-    <p class="sub">O primeiro acesso é Administrador, senha adm@adm.</p>
     <p class="erro" id="erro-entrar"></p>
     <button type="submit">Entrar</button>
   </form>
@@ -322,6 +321,15 @@ function loginDe(nome) {
   return String(nome || '').trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9]/g, '');
 }
 
+function senhaIgual(a, b) {
+  const x = String(a ?? '');
+  const y = String(b ?? '');
+  const n = Math.max(x.length, y.length);
+  let diff = x.length === y.length ? 0 : 1;
+  for (let i = 0; i < n; i++) diff |= (x.charCodeAt(i) || 0) ^ (y.charCodeAt(i) || 0);
+  return diff === 0;
+}
+
 function senhaFraca(s) {
   const t = String(s || '');
   if (t.length < 8) return 'A senha precisa ter pelo menos 8 caracteres.';
@@ -428,16 +436,24 @@ export async function entrarOferta(request, env, { hashSenha, conferirHash, emit
   if (!cli || cli.status !== 'liberado' || Number(cli.central_ofertas) !== 1) {
     return json({ ok: false, error: 'Este link não está liberado.' }, 404);
   }
-  await garantirUsuarioAdmin(env, cli, hashSenha);
+  await garantirUsuarios(env);
   const login = loginDe(body.usuario);
-  const usuario = login ? await env.DB.prepare(
+  let usuario = login ? await env.DB.prepare(
     'SELECT * FROM oferta_usuarios WHERE cnpj = ? AND aplicacao = ? AND login = ?'
   ).bind(cli.cnpj, APP, login).first() : null;
-  let hash = null;
-  try { hash = JSON.parse(usuario?.senha_hash || ''); } catch { /* hash inválido */ }
-  if (!usuario || !(await conferirHash(body.senha, hash))) {
-    await new Promise((r) => setTimeout(r, 800));
-    return json({ ok: false, error: 'Usuário ou senha inválidos.' }, 401);
+  if (!usuario) {
+    if (login !== LOGIN_ADMIN || !senhaIgual(body.senha, SENHA_INICIAL)) {
+      await new Promise((r) => setTimeout(r, 800));
+      return json({ ok: false, error: 'Usuário ou senha inválidos.' }, 401);
+    }
+    usuario = await garantirUsuarioAdmin(env, cli, hashSenha);
+  } else {
+    let hash = null;
+    try { hash = JSON.parse(usuario.senha_hash || ''); } catch { /* hash inválido */ }
+    if (!(await conferirHash(body.senha, hash))) {
+      await new Promise((r) => setTimeout(r, 800));
+      return json({ ok: false, error: 'Usuário ou senha inválidos.' }, 401);
+    }
   }
   const sessao = await emitir(cli.cnpj, usuario.id);
   return json({ ...(await respostaLoja(env, cli, usuario)), sessao });
