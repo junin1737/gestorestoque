@@ -356,10 +356,12 @@
   <div class="dlg-body">
     <div id="d-link-box" hidden>
       <h3>Link da Central de Ofertas</h3>
-      <p class="sub">O cliente abre este endereço no navegador e entra com a senha do supervisor. Não precisa instalar o Gestor. Conecte o Instagram nesta ficha para as postagens saírem.</p>
+      <p class="sub">O cliente abre este endereço no navegador. Não precisa instalar o Gestor. Conecte o Instagram nesta ficha para as postagens saírem.</p>
+      <p class="sub" id="d-oferta-acesso"></p>
       <div class="linha">
         <input id="d-link-ofertas" readonly />
         <button class="btn ghost" id="d-link-copiar" type="button">Copiar</button>
+        <button class="btn ghost" id="d-oferta-senha" type="button">Restaurar senha inicial</button>
       </div>
     </div>
     <div class="validade-box">
@@ -1290,6 +1292,13 @@ function preencherCliente(r) {
   const linkBox = $('#d-link-box');
   if (linkBox) linkBox.hidden = !link;
   if ($('#d-link-ofertas')) $('#d-link-ofertas').value = link;
+  const acesso = c.acesso_oferta;
+  const acessoEl = $('#d-oferta-acesso');
+  if (acessoEl) {
+    acessoEl.textContent = !link ? '' : (acesso?.senha_inicial
+      ? `Usuário ${acesso.nome}, senha ${acesso.senha}. Passe estes dados ao cliente. Dentro do link ele altera a senha e cria outros usuários.`
+      : 'O cliente já alterou a senha do Administrador. Se ele esquecer, restaure a senha inicial.');
+  }
   const sit = c.situacao === 'liberado' && c.em_teste ? 'teste' : c.situacao;
   $('#d-badge').className = `badge b-${sit}`;
   $('#d-badge').textContent = ROTULO[sit] || sit;
@@ -1735,6 +1744,14 @@ $('#btn-novo').addEventListener('click', () => {
   $('#dlg-novo').showModal();
 });
 $('#n-app').addEventListener('change', atualizarInfoNovo);
+$('#d-oferta-senha')?.addEventListener('click', async () => {
+  if (!st.atual) return;
+  if (!window.confirm('A senha do Administrador volta a ser adm@adm. A senha atual deixa de valer.')) return;
+  const r = await api(`${rotaCliente(st.atual)}/oferta-usuario`, { method: 'PUT', body: {} });
+  if (!r.ok) { toast(r.error || 'Falha.', true); return; }
+  preencherCliente(r);
+  toast('Senha inicial restaurada.');
+});
 $('#d-link-copiar')?.addEventListener('click', async () => {
   const link = $('#d-link-ofertas')?.value || '';
   if (!link) return;

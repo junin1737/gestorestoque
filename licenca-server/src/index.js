@@ -1,6 +1,6 @@
 import ADMIN_HTML from './admin.html';
 import { rotaOfertas, publicarAgenda, garantirAgenda, idAgenda } from './ofertas-nuvem.js';
-import { paginaOfertas, entrarOferta, lojaOferta, agendarOferta, sessaoOferta } from './ofertas-pagina.js';
+import { paginaOfertas, entrarOferta, lojaOferta, agendarOferta, sessaoOferta, usuariosOferta, resumoAcessoOferta, restaurarUsuarioAdmin } from './ofertas-pagina.js';
 
 const TOLERANCIA_OFFLINE_DIAS = 7;
 const SESSAO_HORAS = 12;
@@ -731,9 +731,13 @@ async function detalheCliente(cnpj, app, env) {
       'SELECT id, nome, tipo_doc, documento, email, ativo FROM contadores WHERE id = ?'
     ).bind(cli.contador_id).first();
   }
+  const cliente = clientePublico(cli);
+  if (app === APP_OFERTAS) {
+    cliente.acesso_oferta = await resumoAcessoOferta(env, cli, (senha) => hashPbkdf2(senha));
+  }
   return json({
     ok: true,
-    cliente: clientePublico(cli),
+    cliente,
     contador: contador ? contadorPublico(contador) : null,
     instalacoes: inst.results,
     eventos: ev.results,
@@ -2384,7 +2388,7 @@ async function vinculoDoContador(sess, url, env) {
 }
 
 const ROTA_CONTADOR = /^\/api\/admin\/contadores\/(\d+)$/;
-const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/instagram/conectar|/instagram/testar|/instagram/renovar|/instagram/post-teste)?$`);
+const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/oferta-usuario|/instagram/conectar|/instagram/testar|/instagram/renovar|/instagram/post-teste)?$`);
 const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
 async function rotaAdmin(request, env, url) {
@@ -2446,6 +2450,7 @@ async function rotaAdmin(request, env, url) {
     const [, app, cnpj, sub] = m;
     if (sub === '/licenca-offline' && request.method === 'POST') return licencaOffline(cnpj, app, request, env);
     if (sub === '/supervisor' && request.method === 'PUT') return definirSupCliente(cnpj, app, request, env);
+    if (sub === '/oferta-usuario' && request.method === 'PUT') return restaurarAcessoOferta(cnpj, app, env);
     if (sub === '/instalacao' && request.method === 'DELETE') return liberarTrocaInstalacao(cnpj, app, env);
     if (sub === '/instagram/conectar' && request.method === 'POST') return iniciarConexaoInstagram(cnpj, app, env);
     if (sub === '/instagram/testar' && request.method === 'POST') return testarInstagram(cnpj, app, request, env);
@@ -2578,24 +2583,28 @@ async function assinarTexto(env, texto) {
   return b64url(sig);
 }
 
-async function emitirSessaoOferta(env, cnpj) {
+async function emitirSessaoOferta(env, cnpj, uid) {
   const corpo = b64url(enc.encode(JSON.stringify({
     exp: Date.now() + SESSAO_HORAS * 3600000,
     tipo: 'oferta',
     cnpj,
+    uid: String(uid || ''),
     app: APP_OFERTAS,
   })));
   return `${corpo}.${await assinarTexto(env, `oferta.${corpo}`)}`;
 }
 
-function lerSessaoOferta(env, request) {
-  return sessaoOferta(env, request, (texto) => assinarTexto(env, texto));
+async function restaurarAcessoOferta(cnpj, app, env) {
+  if (app !== APP_OFERTAS) return json({ ok: false, error: 'Este cliente não é somente Central de Ofertas.' }, 400);
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  await restaurarUsuarioAdmin(env, cli, (senha) => hashPbkdf2(senha));
+  await registrarEvento(env, cnpj, app, 'oferta', 'Senha do Administrador da Central de Ofertas restaurada');
+  return detalheCliente(cnpj, app, env);
 }
 
-async function conferirSenhaSupervisorCliente(env, cli, senha) {
-  const sup = await supDoCliente(env, cli);
-  if (!sup) return 'indefinida';
-  return (await conferirPbkdf2(String(senha || ''), sup)) ? 'ok' : 'invalida';
+function lerSessaoOferta(env, request) {
+  return sessaoOferta(env, request, (texto) => assinarTexto(env, texto));
 }
 
 export default {
@@ -2616,8 +2625,15 @@ export default {
       if (paginaOferta && request.method === 'GET') return paginaOfertas();
       if (url.pathname === '/api/ofertas/acesso' && request.method === 'POST') {
         return entrarOferta(request, env, {
-          conferirSenha: (cli, senha) => conferirSenhaSupervisorCliente(env, cli, senha),
-          emitir: (cnpj) => emitirSessaoOferta(env, cnpj),
+          hashSenha: (senha) => hashPbkdf2(senha),
+          conferirHash: (senha, hash) => conferirPbkdf2(senha, hash),
+          emitir: (cnpj, uid) => emitirSessaoOferta(env, cnpj, uid),
+        });
+      }
+      if (url.pathname === '/api/ofertas/usuarios' && request.method === 'POST') {
+        return usuariosOferta(request, env, (req) => lerSessaoOferta(env, req), {
+          hashSenha: (senha) => hashPbkdf2(senha),
+          conferirHash: (senha, hash) => conferirPbkdf2(senha, hash),
         });
       }
       if (url.pathname === '/api/ofertas/loja' && request.method === 'GET') {
