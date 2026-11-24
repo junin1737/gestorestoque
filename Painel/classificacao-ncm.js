@@ -2,7 +2,6 @@
 
 (function initClassificacaoNcm(global) {
   const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, (c) => ({
@@ -11,21 +10,31 @@
   }
 
   let deps = { api() { return Promise.resolve({ ok: false }); }, showMsg() {}, showToast() {}, showConfirm() { return Promise.resolve(false); } };
-  let contexto = {};
-  let ultima = null;
+  let resultado = null;
 
   function api(path, options) {
     return deps.api(path, options);
   }
 
-  const ROTULO = {
-    aplicar: 'Vai gravar',
-    preenchido: 'Já preenchido',
-    revisar: 'Revisar',
-    ausente: 'Código ausente na base',
-    sem_ncm: 'Sem NCM',
-    erro: 'Erro na consulta',
-  };
+  function rotuloOpcao(o) {
+    const cst = o.cst ? `CST ${o.cst} · ` : '';
+    const marca = o.sugerida ? ' · sugestão da Receita' : '';
+    return `${o.codigo} — ${cst}${o.descricao || 'Sem descrição'}${marca}`;
+  }
+
+  function selectOpcoes(id, opcoes, titulo) {
+    const escolhida = (opcoes || []).find((o) => o.sugerida)?.codigo || '';
+    const itens = (opcoes || []).map((o) => (
+      `<option value="${esc(o.codigo)}"${o.codigo === escolhida ? ' selected' : ''}>${esc(rotuloOpcao(o))}</option>`
+    )).join('');
+    return `
+      <label class="imp-field">${titulo}
+        <select id="${id}">
+          <option value="">Não alterar</option>
+          ${itens || '<option value="" disabled>Nenhuma opção da Receita</option>'}
+        </select>
+      </label>`;
+  }
 
   async function carregar() {
     const host = $('#classificacao-host');
@@ -35,158 +44,116 @@
       host.innerHTML = `<p class="erro">${esc(ctx.error || 'Não foi possível abrir a classificação por NCM.')}</p>`;
       return;
     }
-    contexto = ctx;
-    const grupos = ctx.grupos || [];
+    const base = ctx.consultaOnline
+      ? `Consulta da Receita no ar${ctx.versaoBase ? `, base ${esc(ctx.versaoBase)}` : ''}.`
+      : 'A consulta da Receita não respondeu. O serviço da consulta precisa estar no ar nesta máquina.';
     host.innerHTML = `
       <section class="imp-section">
         <header class="imp-section-head"><h4>Classificação por NCM</h4></header>
-        <p class="hint">A consulta da Receita sugere o cClassTrib da NF-e e da NFC-e pelo NCM do estoque. Para consultar e gravar, informe a senha de acesso do Gestor. Regime: ${esc(ctx.regime || '—')}.</p>
-        ${ctx.consultaConfigurada ? '' : '<p class="erro">A consulta ainda não está configurada neste servidor. O endereço e a chave ficam na Configuração do serviço.</p>'}
+        <p class="hint">${base} Digite o NCM, busque e escolha a classificação. Atribuir preenche todos os produtos desse NCM. Regime: ${esc(ctx.regime || '—')}.</p>
         <div class="imp-fields massa-fields">
-          <label class="imp-field">Busca<input id="cn-q" placeholder="Descrição" autocomplete="off" /></label>
-          <label class="imp-field">NCM<input id="cn-ncm" placeholder="1905" autocomplete="off" /></label>
-          <label class="imp-field">Grupo
-            <select id="cn-grupo"><option value="">Todos</option>${grupos.map((g) => `<option value="${g.id}">${esc(g.descricao)}</option>`).join('')}</select>
-          </label>
+          <label class="imp-field">NCM<input id="cn-ncm" inputmode="numeric" placeholder="19059090" autocomplete="off" /></label>
           <label class="imp-field">Senha de acesso
             <input id="cn-senha" type="password" autocomplete="current-password" />
           </label>
         </div>
-        <div class="massa-checks">
-          <label><input type="checkbox" id="cn-substituir" /> Substituir a classificação que já está preenchida</label>
-        </div>
         <div class="imp-vinc-btns">
-          <button type="button" class="btn small primary" id="cn-consultar">Consultar</button>
-          <button type="button" class="btn small" id="cn-aplicar" disabled>Aplicar</button>
+          <button type="button" class="btn small primary" id="cn-buscar">Buscar</button>
         </div>
-        <div id="cn-resumo"></div>
-        <div id="cn-lista" class="massa-lista"></div>
-      </section>
-      <p class="hint">NCM ambíguo não grava sozinho: escolha o código na linha e aplique. Cada mudança fica no relatório de Alterações.</p>`;
-    ultima = null;
-    $('#cn-consultar')?.addEventListener('click', consultar);
-    $('#cn-aplicar')?.addEventListener('click', aplicar);
-    ['cn-q', 'cn-ncm', 'cn-grupo', 'cn-substituir'].forEach((id) => {
-      $(`#${id}`)?.addEventListener('change', invalidar);
-      $(`#${id}`)?.addEventListener('input', invalidar);
+        <div id="cn-resultado"></div>
+      </section>`;
+    resultado = null;
+    $('#cn-buscar')?.addEventListener('click', buscar);
+    $('#cn-ncm')?.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') buscar();
     });
   }
 
-  function pedido() {
-    return {
-      senha: $('#cn-senha')?.value || '',
-      substituir: !!$('#cn-substituir')?.checked,
-      filtro: {
-        q: $('#cn-q')?.value || '',
-        ncm: $('#cn-ncm')?.value || '',
-        grupo: $('#cn-grupo')?.value || '',
-      },
-      escolhas: escolhas(),
-    };
-  }
-
-  function escolhas() {
-    const mapa = new Map();
-    $$('#cn-lista select[data-ncm]').forEach((sel) => {
-      const ncm = sel.dataset.ncm;
-      if (!mapa.has(ncm)) mapa.set(ncm, { ncm });
-      mapa.get(ncm)[sel.dataset.doc] = sel.value;
-    });
-    return [...mapa.values()];
-  }
-
-  function invalidar() {
-    ultima = null;
-    const btn = $('#cn-aplicar');
-    if (btn) btn.disabled = true;
-  }
-
-  function textoCodigo(lado) {
-    if (!lado) return '—';
-    if (lado.acao === 'erro') return esc(lado.descricao || 'Erro');
-    if (lado.acao === 'sem_ncm') return '—';
-    if (lado.motivo === 'conflito') return 'O mesmo cadastro tem NCMs diferentes';
-    if (lado.acao === 'revisar') return (lado.candidatos || []).length ? '' : 'Mais de um código possível';
-    if (lado.acao === 'ausente') return `${esc(lado.codigo)} não está em TB_CLASS_TRIB`;
-    if (!lado.gravar) return 'Já preenchido';
-    const nome = `${lado.codigo}${lado.descricao ? ` — ${lado.descricao}` : ''}`;
-    return `${esc(nome)} · ${esc(lado.gravar)} produto(s)`;
-  }
-
-  function selectLado(ncm, doc, lado) {
-    if (lado?.acao !== 'revisar' || !(lado.candidatos || []).length) return `<span>${textoCodigo(lado)}</span>`;
-    const opts = (lado.candidatos || []).map((c) => (
-      `<option value="${esc(c.codigo)}">${esc(c.codigo)}${c.descricao ? ` — ${esc(c.descricao)}` : ''}</option>`
-    )).join('');
-    return `<select data-ncm="${esc(ncm)}" data-doc="${doc}"><option value="">Escolher…</option>${opts}</select>`;
-  }
-
-  function pintar(res) {
-    const resumo = $('#cn-resumo');
-    const lista = $('#cn-lista');
-    const r = res.resumo || {};
-    if (resumo) {
-      resumo.innerHTML = `<p class="hint">${res.produtos || 0} produto(s) em ${res.ncms || 0} NCM(s). ${r.aplicar || 0} vão mudar · ${r.revisar || 0} para revisar · ${r.preenchido || 0} já preenchidos · ${r.sem_ncm || 0} sem NCM.</p>`;
-    }
-    if (!lista) return;
-    const linhas = res.linhas || [];
-    if (!linhas.length) {
-      lista.innerHTML = '<p class="hint">Nenhum produto neste filtro.</p>';
+  async function buscar() {
+    const senha = $('#cn-senha')?.value || '';
+    const ncm = ($('#cn-ncm')?.value || '').replace(/\D/g, '');
+    const box = $('#cn-resultado');
+    if (!box) return;
+    if (ncm.length !== 8) {
+      deps.showMsg('Informe o NCM com 8 dígitos.');
       return;
     }
-    lista.innerHTML = `<table class="class-ncm-table"><thead><tr><th>NCM</th><th>Produtos</th><th>NF-e</th><th>NFC-e</th><th>Situação</th></tr></thead><tbody>
-      ${linhas.map((l) => {
-        const ncm = l.conflito ? 'NCMs diferentes no mesmo cadastro' : (l.ncm || 'Sem NCM');
-        return `<tr>
-          <td><strong>${esc(ncm)}</strong>${l.exemplos?.length ? `<div class="hint">${esc(l.exemplos.join(' · '))}</div>` : ''}</td>
-          <td>${esc(l.produtos)}</td>
-          <td>${selectLado(l.ncm_chave, 'nfe', l.nfe)}</td>
-          <td>${selectLado(l.ncm_chave, 'nfce', l.nfce)}</td>
-          <td>${esc(ROTULO[l.situacao] || l.situacao)}</td>
-        </tr>`;
-      }).join('')}
-    </tbody></table>`;
-  }
-
-  async function consultar() {
-    const body = pedido();
-    if (!body.senha.trim()) return deps.showMsg?.('Informe a senha de acesso do Gestor.');
-    const btn = $('#cn-consultar');
-    if (btn) btn.disabled = true;
-    const res = await api('/classificacao-ncm/previa', { method: 'POST', body });
-    if (btn) btn.disabled = false;
+    box.innerHTML = '<p class="hint">Consultando a Receita e o estoque…</p>';
+    const res = await api('/classificacao-ncm/buscar', { method: 'POST', body: { senha, ncm } });
     if (!res.ok) {
-      ultima = null;
-      if ($('#cn-aplicar')) $('#cn-aplicar').disabled = true;
-      return deps.showMsg?.(res.error || 'Não foi possível consultar.');
+      resultado = null;
+      box.innerHTML = `<p class="erro">${esc(res.error || 'Falha na consulta.')}</p>`;
+      return;
     }
-    ultima = body;
-    pintar(res);
-    const tem = (res.linhas || []).some((l) => l.situacao === 'aplicar' || l.situacao === 'revisar');
-    if ($('#cn-aplicar')) $('#cn-aplicar').disabled = !tem;
+    resultado = res;
+    desenhar(res);
   }
 
-  async function aplicar() {
-    const body = pedido();
-    if (!body.senha.trim()) return deps.showMsg?.('Informe a senha de acesso do Gestor.');
-    const ok = await deps.showConfirm?.(
-      'Gravar a classificação tributária nos produtos desta consulta? O que estiver ambíguo e sem escolha fica de fora.',
-      { okLabel: 'Aplicar', cancelLabel: 'Cancelar' },
-    );
+  function desenhar(res) {
+    const box = $('#cn-resultado');
+    if (!box) return;
+    const produtos = res.produtos || [];
+    const linhas = produtos.map((p) => `
+      <tr>
+        <td>${esc(p.id_identificador)}</td>
+        <td>${esc(p.descricao)}</td>
+        <td>${esc(p.nfe || '—')}</td>
+        <td>${esc(p.nfce || '—')}</td>
+      </tr>`).join('');
+    const avisoConflito = res.conflito
+      ? `<p class="hint">${res.conflito} item(ns) ficaram de fora porque o mesmo cadastro tem outro NCM.</p>`
+      : '';
+    box.innerHTML = `
+      <p class="hint">NCM ${esc(res.ncm || res.ncm_chave)}${res.descricaoNcm ? ` · ${esc(res.descricaoNcm)}` : ''}${res.versaoBase ? ` · base ${esc(res.versaoBase)}` : ''}. ${produtos.length} produto(s).</p>
+      ${avisoConflito}
+      <div class="imp-fields massa-fields">
+        ${selectOpcoes('cn-nfe', res.nfe, 'Classificação NF-e')}
+        ${selectOpcoes('cn-nfce', res.nfce, 'Classificação NFC-e')}
+      </div>
+      <div class="imp-vinc-btns">
+        <button type="button" class="btn small primary" id="cn-atribuir" ${produtos.length ? '' : 'disabled'}>Atribuir</button>
+      </div>
+      <div class="class-ncm-lista">
+        <table class="class-ncm-table">
+          <thead><tr><th>Código</th><th>Descrição</th><th>NF-e</th><th>NFC-e</th></tr></thead>
+          <tbody>${linhas || '<tr><td colspan="4">Nenhum produto com esse NCM.</td></tr>'}</tbody>
+        </table>
+      </div>`;
+    $('#cn-atribuir')?.addEventListener('click', atribuir);
+  }
+
+  async function atribuir() {
+    if (!resultado?.ncm_chave) return;
+    const nfe = $('#cn-nfe')?.value || '';
+    const nfce = $('#cn-nfce')?.value || '';
+    if (!nfe && !nfce) {
+      deps.showMsg('Escolha a classificação da NF-e, da NFC-e ou as duas.');
+      return;
+    }
+    const total = (resultado.produtos || []).length;
+    const ok = await deps.showConfirm(`Atribuir a classificação escolhida aos ${total} produtos do NCM ${resultado.ncm || resultado.ncm_chave}?`);
     if (!ok) return;
-    const btn = $('#cn-aplicar');
-    if (btn) btn.disabled = true;
-    const res = await api('/classificacao-ncm/aplicar', { method: 'POST', body });
+    const res = await api('/classificacao-ncm/atribuir', {
+      method: 'POST',
+      body: {
+        senha: $('#cn-senha')?.value || '',
+        ncm: resultado.ncm_chave,
+        nfe,
+        nfce,
+      },
+    });
     if (!res.ok) {
-      if (btn) btn.disabled = false;
-      return deps.showMsg?.(res.error || 'Não foi possível aplicar.');
+      deps.showMsg(res.error || 'Não foi possível atribuir.');
+      return;
     }
-    deps.showToast?.(res.mensagem || `${res.alterados || 0} produto(s) atualizados.${res.revisar ? ` ${res.revisar} continuam para revisão.` : ''}`);
-    await consultar();
+    const partes = [`${res.alterados || 0} produto(s) atualizados`];
+    if (res.jaIguais) partes.push(`${res.jaIguais} já estavam com essa classificação`);
+    deps.showToast(partes.join('. ') + '.');
+    await buscar();
   }
 
   global.ClassificacaoNcm = {
-    init(next) { deps = { ...deps, ...next }; },
-    onPageEnter() { carregar(); },
+    init(next) { deps = { ...deps, ...(next || {}) }; },
+    carregar,
   };
 }(window));

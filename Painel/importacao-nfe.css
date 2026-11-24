@@ -934,6 +934,7 @@
 .massa-row strong { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .massa-row .hint { margin: 0; font-size: 0.76rem; white-space: nowrap; }
 .massa-lista > .hint { margin: 0; padding: 0.6rem 0.7rem; }
+.class-ncm-lista { max-height: 28rem; overflow: auto; margin-top: 0.75rem; }
 .class-ncm-table { width: 100%; border-collapse: collapse; font-size: 0.84rem; }
 .class-ncm-table th, .class-ncm-table td { text-align: left; padding: 0.45rem 0.55rem; border-bottom: 1px solid var(--border); vertical-align: top; }
 .class-ncm-table th { color: var(--muted); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }

@@ -221,8 +221,6 @@ function fillBanco(cfg) {
   $('#cfg-sistema').value = cfg.sistema || 'clipp';
   const usaManage = $('#cfg-usa-manage');
   if (usaManage) usaManage.checked = Number(cfg.usa_manage) === 1;
-  const rtcUrl = $('#cfg-rtc-url');
-  if (rtcUrl) rtcUrl.value = cfg.rtcUrl || '';
 }
 
 async function loadBanco() {
@@ -299,8 +297,6 @@ function readBanco() {
     password: 'masterkey',
     sistema: $('#cfg-sistema').value,
     usa_manage: $('#cfg-usa-manage')?.checked ? 1 : 0,
-    rtcUrl: $('#cfg-rtc-url')?.value || '',
-    rtcApiKey: $('#cfg-rtc-chave')?.value || '',
   };
 }
 

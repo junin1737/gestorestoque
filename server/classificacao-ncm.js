@@ -2,7 +2,6 @@
 
 const { withDb, withTransaction, query, writeTargets } = require('./db');
 const { insertAudit } = require('./audit');
-const { loadAppConfig } = require('./config');
 const { classTribPorCodigoDb } = require('./importacao-notas');
 
 const LOTE = 500;
@@ -21,11 +20,18 @@ function codigoClass(v) {
   return d.padStart(6, '0').slice(-6);
 }
 
+const URL_CONSULTA = 'http://127.0.0.1:3210';
+
 function rtcConfig() {
-  const cfg = loadAppConfig();
-  const url = String(process.env.RTC_URL || cfg.rtc?.url || 'http://127.0.0.1:3210').trim().replace(/\/+$/, '');
-  const apiKey = String(process.env.RTC_API_KEY || cfg.rtc?.apiKey || '').trim();
-  return { url, apiKey, configurado: !!apiKey };
+  const url = String(process.env.RTC_URL || URL_CONSULTA).trim().replace(/\/+$/, '') || URL_CONSULTA;
+  const apiKey = String(process.env.RTC_API_KEY || '').trim();
+  return { url, apiKey, configurado: true };
+}
+
+function cabecalhos(rtc) {
+  const headers = { Accept: 'application/json' };
+  if (rtc.apiKey) headers['X-Api-Key'] = rtc.apiKey;
+  return headers;
 }
 
 function filtroDe(body) {
@@ -38,7 +44,7 @@ function filtroDe(body) {
 }
 
 async function contexto() {
-  const rtc = rtcConfig();
+  const consulta = await situacaoConsulta();
   return withDb(async (db, appCfg) => {
     const alvo = writeTargets(appCfg)[0];
     if (!alvo) return { ok: false, error: 'Base de estoque indisponível.' };
@@ -57,7 +63,9 @@ async function contexto() {
       crt: simples ? 1 : 3,
       nome: txt(r.NOME_FANTA || r.NOME),
       grupos,
-      consultaConfigurada: rtc.configurado,
+      consultaConfigurada: true,
+      consultaOnline: consulta.online,
+      versaoBase: consulta.versaoBase,
     };
   });
 }
@@ -66,7 +74,9 @@ function whereProdutos(filtro) {
   const where = [`(E.STATUS = 'A' OR E.STATUS IS NULL OR E.STATUS = 'I')`];
   const params = [];
   if (filtro.ncm) {
-    where.push(`REPLACE(COALESCE(P.COD_NCM, ''), '.', '') STARTING WITH ?`);
+    where.push(filtro.exato
+      ? `REPLACE(COALESCE(P.COD_NCM, ''), '.', '') = ?`
+      : `REPLACE(COALESCE(P.COD_NCM, ''), '.', '') STARTING WITH ?`);
     params.push(filtro.ncm);
   }
   if (filtro.grupo) {
@@ -148,9 +158,6 @@ async function lerClassAtual(db, ids) {
 
 async function consultarLote(crt, ncms) {
   const rtc = rtcConfig();
-  if (!rtc.configurado) {
-    throw new Error('A consulta cClassTrib não está configurada neste servidor. Informe o endereço e a chave na Configuração do serviço.');
-  }
   const resultados = [];
   for (let i = 0; i < ncms.length; i += LOTE) {
     const lote = ncms.slice(i, i + LOTE).map((ncm) => ({ id: ncm, ncm }));
@@ -158,7 +165,7 @@ async function consultarLote(crt, ncms) {
     try {
       res = await fetch(`${rtc.url}/api/v1/integracao/consulta-lote`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Api-Key': rtc.apiKey },
+        headers: { ...cabecalhos(rtc), 'Content-Type': 'application/json' },
         body: JSON.stringify({ crt, itens: lote }),
         signal: AbortSignal.timeout(30000),
       });
@@ -481,9 +488,201 @@ async function aplicar(body, autor) {
   });
 }
 
+function opcoesDe(lista, sugestao) {
+  const sugerida = codigoClass(sugestao?.cClassTrib);
+  const vistos = new Set();
+  const out = [];
+  for (const c of lista || []) {
+    const codigo = codigoClass(c?.cClassTrib);
+    if (!codigo || vistos.has(codigo)) continue;
+    vistos.add(codigo);
+    const cst = c?.cst;
+    out.push({
+      codigo,
+      descricao: txt(c?.descricao),
+      cst: txt(cst && typeof cst === 'object' ? cst.codigo : cst),
+      sugerida: codigo === sugerida,
+    });
+  }
+  return out;
+}
+
+async function situacaoConsulta() {
+  const rtc = rtcConfig();
+  try {
+    const res = await fetch(`${rtc.url}/api/v1/health`, { signal: AbortSignal.timeout(4000) });
+    const data = await res.json().catch(() => ({}));
+    return { online: res.ok && data.status === 'ok', versaoBase: txt(data.versaoBase) };
+  } catch {
+    return { online: false, versaoBase: '' };
+  }
+}
+
+async function regimeDaBase(db) {
+  const emit = await query(db, `SELECT FIRST 1 SIMPLES FROM TB_EMITENTE`).catch(() => []);
+  const simples = txt(emit[0]?.SIMPLES).toUpperCase() === 'S';
+  return { simples, crt: simples ? 1 : 3, regime: simples ? 'Simples Nacional' : 'Regime normal' };
+}
+
+async function consultarUm(crt, ncm) {
+  const rtc = rtcConfig();
+  let res;
+  try {
+    res = await fetch(`${rtc.url}/api/v1/integracao/consulta?ncm=${encodeURIComponent(ncm)}&crt=${crt}`, {
+      headers: cabecalhos(rtc),
+      signal: AbortSignal.timeout(30000),
+    });
+  } catch (e) {
+    throw new Error(`A consulta da Receita não respondeu. ${e.name === 'TimeoutError' ? 'A resposta demorou demais.' : 'O serviço da consulta precisa estar no ar nesta máquina.'}`);
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.erro?.mensagem || data?.message || `A consulta da Receita respondeu ${res.status}.`);
+  }
+  return data;
+}
+
+function produtosDoNcm(grupos, ncm) {
+  const lista = [];
+  let conflito = 0;
+  for (const grupo of grupos) {
+    if (grupo.conflito || grupo.ncm !== ncm) {
+      conflito += grupo.itens.length;
+      continue;
+    }
+    lista.push(grupo);
+  }
+  return { lista, conflito };
+}
+
+async function buscar(body) {
+  const ncm = digitos(body?.ncm || body?.filtro?.ncm);
+  if (ncm.length !== 8) return { ok: false, error: 'Informe o NCM com 8 dígitos.' };
+  return withDb(async (db, appCfg) => {
+    const alvo = writeTargets(appCfg)[0];
+    if (!alvo) return { ok: false, error: 'Base de estoque indisponível.' };
+    const regime = await regimeDaBase(db);
+    const consulta = await consultarUm(regime.crt, ncm);
+    const grupos = await lerProdutos(db, alvo.tables, { ncm, q: '', grupo: 0, exato: true });
+    const { lista, conflito } = produtosDoNcm(grupos, ncm);
+    const atual = await lerClassAtual(db, lista.map((p) => p.id_estoque));
+    const produtos = [];
+    for (const grupo of lista) {
+      const idNfe = atual.nfe.get(grupo.id_estoque);
+      const idNfce = atual.nfce.get(grupo.id_estoque);
+      for (const item of grupo.itens) {
+        produtos.push({
+          id_identificador: item.id_identificador,
+          id_estoque: grupo.id_estoque,
+          descricao: item.descricao,
+          nfe: idNfe ? (atual.codigos.get(idNfe) || '') : '',
+          nfce: idNfce ? (atual.codigos.get(idNfce) || '') : '',
+        });
+      }
+    }
+    produtos.sort((a, b) => a.descricao.localeCompare(b.descricao, 'pt-BR') || a.id_identificador - b.id_identificador);
+    return {
+      ok: true,
+      ncm: consulta.ncm?.codigoFormatado || ncm,
+      ncm_chave: ncm,
+      descricaoNcm: txt(consulta.ncm?.descricao),
+      regime: regime.regime,
+      versaoBase: txt(consulta.base?.versao),
+      produtos,
+      conflito,
+      nfe: opcoesDe(consulta.nfe, consulta.sugestao?.nfe),
+      nfce: opcoesDe(consulta.nfce, consulta.sugestao?.nfce),
+    };
+  });
+}
+
+async function atribuir(body, autor) {
+  const ncm = digitos(body?.ncm);
+  const nfeCod = codigoClass(body?.nfe);
+  const nfceCod = codigoClass(body?.nfce);
+  if (ncm.length !== 8) return { ok: false, error: 'Informe o NCM com 8 dígitos.' };
+  if (!nfeCod && !nfceCod) return { ok: false, error: 'Escolha a classificação da NF-e, da NFC-e ou as duas.' };
+  return withDb(async (db, appCfg) => {
+    const alvo = writeTargets(appCfg)[0];
+    if (!alvo) return { ok: false, error: 'Base de estoque indisponível.' };
+    const regime = await regimeDaBase(db);
+    const consulta = await consultarUm(regime.crt, ncm);
+    const permitidasNfe = new Set(opcoesDe(consulta.nfe, consulta.sugestao?.nfe).map((o) => o.codigo));
+    const permitidasNfce = new Set(opcoesDe(consulta.nfce, consulta.sugestao?.nfce).map((o) => o.codigo));
+    if (nfeCod && !permitidasNfe.has(nfeCod)) {
+      return { ok: false, error: 'A classificação de NF-e escolhida não está entre as opções da Receita para este NCM.' };
+    }
+    if (nfceCod && !permitidasNfce.has(nfceCod)) {
+      return { ok: false, error: 'A classificação de NFC-e escolhida não está entre as opções da Receita para este NCM.' };
+    }
+    const cache = new Map();
+    const classeNfe = nfeCod ? await classeDe(db, cache, nfeCod) : null;
+    const classeNfce = nfceCod ? await classeDe(db, cache, nfceCod) : null;
+    if (nfeCod && !classeNfe) {
+      return { ok: false, error: `O código ${nfeCod} da NF-e não está cadastrado na tabela de classificação tributária.` };
+    }
+    if (nfceCod && !classeNfce) {
+      return { ok: false, error: `O código ${nfceCod} da NFC-e não está cadastrado na tabela de classificação tributária.` };
+    }
+    const grupos = await lerProdutos(db, alvo.tables, { ncm, q: '', grupo: 0, exato: true });
+    const { lista, conflito } = produtosDoNcm(grupos, ncm);
+    if (!lista.length) return { ok: false, error: 'Nenhum produto com esse NCM para preencher.' };
+    const atual = await lerClassAtual(db, lista.map((p) => p.id_estoque));
+    const auditoria = [];
+    let alterados = 0;
+    let jaIguais = 0;
+    await withTransaction(db, async (tx) => {
+      for (const grupo of lista) {
+        let mudou = false;
+        if (classeNfe && atual.nfe.get(grupo.id_estoque) !== classeNfe.id) {
+          await gravarClass(tx, 'TB_EST_TRIBUTOS', grupo.id_estoque, classeNfe.id);
+          mudou = true;
+          const de = atual.codigos.get(atual.nfe.get(grupo.id_estoque)) || '—';
+          for (const item of grupo.itens) {
+            auditoria.push({
+              id_identificador: item.id_identificador,
+              id_estoque: grupo.id_estoque,
+              tipo: 'ficha',
+              resumo: `Class. trib. NF-e: ${de} → ${classeNfe.codigo}`,
+              detalhe: `Classificação por NCM ${ncm} · NF-e: ${de} → ${classeNfe.codigo} ${classeNfe.descricao || ''}`.trim(),
+              id_funcionario: autor.id || 0,
+              usuario: autor.nome || 'Classificação por NCM',
+              observacao: 'Classificação por NCM',
+            });
+          }
+        }
+        if (classeNfce && atual.nfce.get(grupo.id_estoque) !== classeNfce.id) {
+          await gravarClass(tx, 'TB_EST_TRIBUTOS_NFCE', grupo.id_estoque, classeNfce.id);
+          mudou = true;
+          const de = atual.codigos.get(atual.nfce.get(grupo.id_estoque)) || '—';
+          for (const item of grupo.itens) {
+            auditoria.push({
+              id_identificador: item.id_identificador,
+              id_estoque: grupo.id_estoque,
+              tipo: 'ficha',
+              resumo: `Class. trib. NFC-e: ${de} → ${classeNfce.codigo}`,
+              detalhe: `Classificação por NCM ${ncm} · NFC-e: ${de} → ${classeNfce.codigo} ${classeNfce.descricao || ''}`.trim(),
+              id_funcionario: autor.id || 0,
+              usuario: autor.nome || 'Classificação por NCM',
+              observacao: 'Classificação por NCM',
+            });
+          }
+        }
+        if (mudou) alterados += grupo.itens.length;
+        else jaIguais += grupo.itens.length;
+      }
+    });
+    for (const entrada of auditoria) await insertAudit(db, entrada);
+    return { ok: true, alterados, jaIguais, conflito };
+  });
+}
+
 module.exports = {
   contexto,
   previa,
   aplicar,
+  buscar,
+  atribuir,
   rtcConfig,
+  situacaoConsulta,
 };

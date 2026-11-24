@@ -3830,6 +3830,35 @@ router.get('/classificacao-ncm/contexto', async (req, res) => {
   }
 });
 
+router.post('/classificacao-ncm/buscar', async (req, res) => {
+  if (!podeClassificacao(req, res)) return;
+  try {
+    const erroSenha = await senhaDoGestor(req);
+    if (erroSenha) return res.json({ ok: false, error: erroSenha });
+    const body = { ...(req.body || {}) };
+    delete body.senha;
+    res.json(await classificacaoNcm.buscar(body));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/classificacao-ncm/atribuir', async (req, res) => {
+  if (!podeClassificacao(req, res)) return;
+  try {
+    const erroSenha = await senhaDoGestor(req);
+    if (erroSenha) return res.json({ ok: false, error: erroSenha });
+    const body = { ...(req.body || {}) };
+    delete body.senha;
+    const autor = req.usuario?.supervisor
+      ? { id: 0, nome: req.usuario?.nome || 'Supervisor' }
+      : { id: req.usuario?.id || 0, nome: req.usuario?.nome || 'Painel' };
+    res.json(await classificacaoNcm.atribuir(body, autor));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.post('/classificacao-ncm/previa', async (req, res) => {
   if (!podeClassificacao(req, res)) return;
   try {
