@@ -1,5 +1,8 @@
 'use strict';
 
+const fs = require('fs');
+const path = require('path');
+const { spawn } = require('child_process');
 const { withDb, withTransaction, query, writeTargets } = require('./db');
 const { insertAudit } = require('./audit');
 const { classTribPorCodigoDb } = require('./importacao-notas');
@@ -507,39 +510,101 @@ function opcoesDe(lista, sugestao) {
   return out;
 }
 
+function binarioNode() {
+  const candidatos = [
+    process.env.GESTOR_NODE,
+    'C:\\Program Files\\nodejs\\node.exe',
+    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'nodejs', 'node.exe'),
+  ].filter(Boolean);
+  return candidatos.find((c) => fs.existsSync(c)) || 'node';
+}
+
+function caminhoConsultaOficial() {
+  const nome = 'consultar-receita-oficial.mjs';
+  const unpacked = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'server', nome);
+  if (process.resourcesPath && fs.existsSync(unpacked)) return unpacked;
+  return path.join(__dirname, nome);
+}
+
+function executarConsultaOficial(ncm, crt) {
+  return new Promise((resolve) => {
+    let child;
+    try {
+      child = spawn(binarioNode(), [caminhoConsultaOficial(), ncm || '--info', String(crt || 3)], {
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+    } catch {
+      resolve(null);
+      return;
+    }
+    let out = '';
+    const timer = setTimeout(() => {
+      child.kill();
+      resolve(null);
+    }, 20000);
+    child.stdout.on('data', (c) => {
+      out += c;
+      if (out.length > 2_000_000) child.kill();
+    });
+    child.on('error', () => {
+      clearTimeout(timer);
+      resolve(null);
+    });
+    child.on('close', () => {
+      clearTimeout(timer);
+      try {
+        const data = JSON.parse(out);
+        resolve(data && data.ok ? data : null);
+      } catch {
+        resolve(null);
+      }
+    });
+  });
+}
+
+async function consultarHttp(crt, ncm) {
+  const rtc = rtcConfig();
+  const res = await fetch(`${rtc.url}/api/v1/integracao/consulta?ncm=${encodeURIComponent(ncm)}&crt=${crt}`, {
+    headers: cabecalhos(rtc),
+    signal: AbortSignal.timeout(15000),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data?.erro?.mensagem || data?.message || `A consulta da Receita respondeu ${res.status}.`);
+  }
+  return data;
+}
+
+async function consultarUm(crt, ncm) {
+  const local = await executarConsultaOficial(ncm, crt);
+  if (local?.nfe || local?.nfce) return local;
+  try {
+    return await consultarHttp(crt, ncm);
+  } catch (e) {
+    if (local?.error) throw new Error(local.error);
+    throw new Error(`A consulta da Receita não respondeu. ${e.name === 'TimeoutError' ? 'A resposta demorou demais.' : 'A base oficial não pôde ser lida nesta máquina.'}`);
+  }
+}
+
 async function situacaoConsulta() {
+  const local = await executarConsultaOficial('--info', 3);
+  if (local?.base?.versao || local?.ok) {
+    return { online: true, versaoBase: txt(local.base?.versao || local.versaoBase) };
+  }
   const rtc = rtcConfig();
   try {
     const res = await fetch(`${rtc.url}/api/v1/health`, { signal: AbortSignal.timeout(4000) });
     const data = await res.json().catch(() => ({}));
-    return { online: res.ok && data.status === 'ok', versaoBase: txt(data.versaoBase) };
-  } catch {
-    return { online: false, versaoBase: '' };
-  }
+    if (res.ok && data.status === 'ok') return { online: true, versaoBase: txt(data.versaoBase) };
+  } catch { /* a base local também não abriu */ }
+  return { online: false, versaoBase: '' };
 }
 
 async function regimeDaBase(db) {
   const emit = await query(db, `SELECT FIRST 1 SIMPLES FROM TB_EMITENTE`).catch(() => []);
   const simples = txt(emit[0]?.SIMPLES).toUpperCase() === 'S';
   return { simples, crt: simples ? 1 : 3, regime: simples ? 'Simples Nacional' : 'Regime normal' };
-}
-
-async function consultarUm(crt, ncm) {
-  const rtc = rtcConfig();
-  let res;
-  try {
-    res = await fetch(`${rtc.url}/api/v1/integracao/consulta?ncm=${encodeURIComponent(ncm)}&crt=${crt}`, {
-      headers: cabecalhos(rtc),
-      signal: AbortSignal.timeout(30000),
-    });
-  } catch (e) {
-    throw new Error(`A consulta da Receita não respondeu. ${e.name === 'TimeoutError' ? 'A resposta demorou demais.' : 'O serviço da consulta precisa estar no ar nesta máquina.'}`);
-  }
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.erro?.mensagem || data?.message || `A consulta da Receita respondeu ${res.status}.`);
-  }
-  return data;
 }
 
 function produtosDoNcm(grupos, ncm) {

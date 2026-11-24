@@ -53,7 +53,7 @@
     }
     const base = ctx.consultaOnline
       ? `Consulta da Receita no ar${ctx.versaoBase ? `, base ${esc(ctx.versaoBase)}` : ''}.`
-      : 'A consulta da Receita não respondeu. O serviço da consulta precisa estar no ar nesta máquina.';
+      : 'A base oficial da Receita ainda não abriu. A busca tenta de novo ao consultar o NCM.';
     host.innerHTML = `
       <section class="imp-section">
         <header class="imp-section-head"><h4>Classificação por NCM</h4></header>
