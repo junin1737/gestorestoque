@@ -39,7 +39,14 @@
   async function carregar() {
     const host = $('#classificacao-host');
     if (!host) return;
-    const ctx = await api('/classificacao-ncm/contexto');
+    host.innerHTML = '<p class="hint">Abrindo a classificação por NCM…</p>';
+    let ctx;
+    try {
+      ctx = await api('/classificacao-ncm/contexto');
+    } catch (err) {
+      host.innerHTML = `<p class="erro">${esc(err?.message || 'Não foi possível abrir a classificação por NCM.')}</p>`;
+      return;
+    }
     if (!ctx.ok) {
       host.innerHTML = `<p class="erro">${esc(ctx.error || 'Não foi possível abrir a classificação por NCM.')}</p>`;
       return;
@@ -150,5 +157,6 @@
   global.ClassificacaoNcm = {
     init(next) { deps = { ...deps, ...(next || {}) }; },
     carregar,
+    onPageEnter() { carregar(); },
   };
 }(window));
