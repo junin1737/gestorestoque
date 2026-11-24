@@ -169,6 +169,13 @@
               <span>Usa Manage?</span>
             </label>
             <p class="hint">Inclui vendas e serviços do Manage nos dashboards. O padrão é desligado.</p>
+            <label>Endereço da consulta cClassTrib
+              <input id="cfg-rtc-url" type="text" placeholder="http://127.0.0.1:3210" autocomplete="off" />
+            </label>
+            <label>Chave da consulta
+              <input id="cfg-rtc-chave" type="password" placeholder="Em branco mantém a atual" autocomplete="new-password" />
+            </label>
+            <p class="hint">A pessoa que usa o módulo entra com a senha do Gestor. Esta chave só liga o servidor à consulta e não aparece no painel.</p>
             <p id="banco-msg" class="hint msg-line" hidden></p>
             <div class="banco-actions">
               <button type="button" id="cfg-testar" class="btn-outline">Testar conexão</button>
@@ -356,6 +363,6 @@
       </div>
     </div>
   </div>
-  <script src="servico.js?v=245"></script>
+  <script src="servico.js?v=246"></script>
 </body>
 </html>

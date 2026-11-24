@@ -209,6 +209,9 @@ router.get('/config', (req, res) => {
       sistema: cfg.sistema,
       tema: cfg.tema,
       usa_manage: lerUsaManage(cfg),
+      ...(isServidorLocal(req) ? {
+        rtcUrl: cfg.rtc?.url || '',
+      } : {}),
       ignorarReceberCartao: lerIgnorarReceberCartao(cfg),
       somenteComEstoque: lerSomenteComEstoque(cfg),
       produtosSimilares: lerProdutosSimilares(cfg),
@@ -277,9 +280,14 @@ router.post('/config', somenteServidorLocal, (req, res) => {
     sistema: body.sistema || current.sistema,
     tema: body.tema || current.tema,
     usa_manage: usaManageDoPedido(current, body),
+    rtc: {
+      url: body.rtcUrl !== undefined ? String(body.rtcUrl || '').trim() : (current.rtc?.url || ''),
+      apiKey: String(body.rtcApiKey || '').trim() || current.rtc?.apiKey || '',
+    },
   };
   saveAppConfig(next);
-  res.json({ ok: true, config: { ...next, password: undefined } });
+  const { rtc, password, ...publico } = next;
+  res.json({ ok: true, config: { ...publico, rtcUrl: rtc?.url || '' } });
 });
 
 router.post('/connect', somenteServidorLocal, async (req, res) => {
@@ -3794,6 +3802,62 @@ router.put('/contador/itens/:id', async (req, res) => {
 });
 
 const massa = require('./massa');
+const classificacaoNcm = require('./classificacao-ncm');
+
+function podeClassificacao(req, res) {
+  if (require('./licenca').situacao().classificacao_ncm !== true) {
+    res.status(403).json({ ok: false, error: 'Classificação por NCM não está liberada para esta loja.' });
+    return false;
+  }
+  if (req.usuario?.supervisor || req.usuario?.permissoes?.classificacao_ncm?.acesso === true) return true;
+  res.status(403).json({ ok: false, error: 'Sem permissão para classificação por NCM.' });
+  return false;
+}
+
+async function senhaDoGestor(req) {
+  const senha = String(req.body?.senha || '');
+  if (!senha.trim()) return 'Informe a senha de acesso do Gestor.';
+  const ok = await auth.conferirSenhaUsuario(req.usuario, senha);
+  return ok ? '' : 'Senha de acesso do Gestor incorreta.';
+}
+
+router.get('/classificacao-ncm/contexto', async (req, res) => {
+  if (!podeClassificacao(req, res)) return;
+  try {
+    res.json(await classificacaoNcm.contexto());
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/classificacao-ncm/previa', async (req, res) => {
+  if (!podeClassificacao(req, res)) return;
+  try {
+    const erroSenha = await senhaDoGestor(req);
+    if (erroSenha) return res.json({ ok: false, error: erroSenha });
+    const body = { ...(req.body || {}) };
+    delete body.senha;
+    res.json(await classificacaoNcm.previa(body));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/classificacao-ncm/aplicar', async (req, res) => {
+  if (!podeClassificacao(req, res)) return;
+  try {
+    const erroSenha = await senhaDoGestor(req);
+    if (erroSenha) return res.json({ ok: false, error: erroSenha });
+    const body = { ...(req.body || {}) };
+    delete body.senha;
+    const autor = req.usuario?.supervisor
+      ? { id: 0, nome: req.usuario?.nome || 'Supervisor' }
+      : { id: req.usuario?.id || 0, nome: req.usuario?.nome || 'Painel' };
+    res.json(await classificacaoNcm.aplicar(body, autor));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
 
 function modoMassa(req, res) {
   if (require('./licenca').situacao().alteracao_massa !== true) {

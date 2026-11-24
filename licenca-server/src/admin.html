@@ -445,6 +445,13 @@
       </select>
     </label>
     <p class="sub">Com Sim, o Gestor mostra Alteração em massa para quem tiver a permissão em Usuários. O contador vinculado também entra quando estiver Sim.</p>
+    <label>Classificação por NCM
+      <select id="d-classificacao-ncm">
+        <option value="0">Não</option>
+        <option value="1">Sim</option>
+      </select>
+    </label>
+    <p class="sub">Com Sim, o Gestor mostra Classificação por NCM para quem tiver a permissão em Usuários. Pode ficar ligado sozinho, sem os outros módulos.</p>
     </div>
     <div data-ficha-pane="conexoes" hidden>
     <div id="d-link-box" hidden>
@@ -1332,6 +1339,7 @@ function preencherCliente(r) {
   $('#d-central-ofertas').value = Number(c.central_ofertas) === 1 ? '1' : '0';
   $('#d-consultar-compras').value = Number(c.consultar_compras) === 1 ? '1' : '0';
   $('#d-alteracao-massa').value = Number(c.alteracao_massa) === 1 ? '1' : '0';
+  $('#d-classificacao-ncm').value = Number(c.classificacao_ncm) === 1 ? '1' : '0';
   $('#d-usa-dominio').checked = Number(c.usa_dominio) === 1;
   $('#d-dominio').value = c.dominio_proprio || '';
   atualizarAvisoDominio();
@@ -1519,6 +1527,7 @@ $('#d-salvar').addEventListener('click', async () => {
       central_ofertas: $('#d-central-ofertas').value === '1' ? 1 : 0,
       consultar_compras: $('#d-consultar-compras').value === '1' ? 1 : 0,
       alteracao_massa: $('#d-alteracao-massa').value === '1' ? 1 : 0,
+      classificacao_ncm: $('#d-classificacao-ncm').value === '1' ? 1 : 0,
       usa_dominio: $('#d-usa-dominio').checked ? 1 : 0,
       dominio_proprio: $('#d-dominio').value,
       ig_usuario: $('#d-ig-usuario').value,

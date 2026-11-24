@@ -1263,6 +1263,7 @@ function guardarVinculos(licenca) {
   state.centralOfertas = licenca?.central_ofertas === true;
   state.consultarCompras = licenca?.consultar_compras === true;
   state.alteracaoMassa = licenca?.alteracao_massa === true;
+  state.classificacaoNcm = licenca?.classificacao_ncm === true;
   const btn = $('#login-modo-contador');
   if (btn) btn.hidden = !state.contadorVinculado && !loginModoContador;
 }
@@ -1322,6 +1323,10 @@ async function enterApp() {
   const showContador = !!state.alteracaoMassa && (!!state.usuario?.contador || can('massa', 'acesso'));
   if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
   if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
+  const showClassificacao = !!state.classificacaoNcm && can('classificacao_ncm', 'acesso');
+  if ($('#nav-classificacao')) $('#nav-classificacao').hidden = !showClassificacao;
+  if ($('#nav-classificacao-mobile')) $('#nav-classificacao-mobile').hidden = !showClassificacao;
+  if ($('#dash-classificacao')) $('#dash-classificacao').hidden = !showClassificacao;
   if ($('#nav-empresas')) $('#nav-empresas').hidden = true;
   if ($('#nav-empresas-mobile')) $('#nav-empresas-mobile').hidden = true;
   if (window.Dashboard) Dashboard.mostrarMenuDash();
@@ -1624,6 +1629,7 @@ $('#dash-importacao')?.addEventListener('click', () => showPage('importacao'));
 $('#dash-clientes')?.addEventListener('click', () => showPage('clientes'));
 $('#dash-compras')?.addEventListener('click', () => showPage('compras'));
 $('#dash-alteracoes')?.addEventListener('click', () => showPage('alteracoes'));
+$('#dash-classificacao')?.addEventListener('click', () => showPage('classificacao'));
 $('#dash-central-ofertas')?.addEventListener('click', () => showPage('central-ofertas'));
 
 function scrollAppTop() {
@@ -1693,6 +1699,10 @@ async function showPage(page) {
     showMsg('Sem permissão para alteração em massa.');
     page = 'dashboard';
   }
+  if (page === 'classificacao' && !(state.classificacaoNcm && can('classificacao_ncm', 'acesso'))) {
+    showMsg('Sem permissão para classificação por NCM.');
+    page = 'dashboard';
+  }
   if (state.usuario?.contador && page !== 'contador' && page !== 'dashboard') page = 'dashboard';
 
   if (page === 'dashboard' && state.dashInicio) {
@@ -1729,6 +1739,7 @@ async function showPage(page) {
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
   if ($('#page-contador')) $('#page-contador').hidden = page !== 'contador';
+  if ($('#page-classificacao')) $('#page-classificacao').hidden = page !== 'classificacao';
   if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
   if ($('#page-empresas')) $('#page-empresas').hidden = page !== 'empresas';
   if ($('#page-gondola')) $('#page-gondola').hidden = page !== 'gondola';
@@ -1751,6 +1762,10 @@ async function showPage(page) {
       ? 'Só a tributação de saída dos produtos desta loja'
       : 'Regra: se a condição for verdadeira, o campo preenchido muda';
     window.Contador?.onPageEnter();
+  } else if (page === 'classificacao') {
+    $('#page-title').textContent = 'Classificação por NCM';
+    $('#page-sub').textContent = 'cClassTrib da NF-e e da NFC-e a partir do NCM do estoque';
+    window.ClassificacaoNcm?.onPageEnter();
   } else if (page === 'usuarios') {
     $('#page-title').textContent = 'Usuários';
     $('#page-sub').textContent = 'Permissões por módulo';
@@ -3095,6 +3110,12 @@ function htmlFormUsuario(u) {
             <option value="false" ${!u.permissoes?.massa?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        <label>Classificação por NCM
+          <select data-perm="classificacao_ncm.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.classificacao_ncm?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.permissoes?.classificacao_ncm?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
         <label>Dashboard
           <select data-perm="dashboard_padrao.acesso" ${u.supervisor ? 'disabled' : ''}>
             <option value="true" ${u.supervisor || u.permissoes?.dashboard_padrao?.acesso ? 'selected' : ''}>Sim</option>
@@ -3220,6 +3241,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         massa: {
           acesso: $('[data-perm="massa.acesso"]', card)?.value === 'true',
         },
+        classificacao_ncm: {
+          acesso: $('[data-perm="classificacao_ncm.acesso"]', card)?.value === 'true',
+        },
         dashboard_padrao: {
           acesso: $('[data-perm="dashboard_padrao.acesso"]', card)?.value === 'true',
         },
@@ -3274,6 +3298,10 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     const showMassa = !!state.alteracaoMassa && can('massa', 'acesso');
     if ($('#nav-contador')) $('#nav-contador').hidden = !showMassa;
     if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showMassa;
+    const showClassificacao = !!state.classificacaoNcm && can('classificacao_ncm', 'acesso');
+    if ($('#nav-classificacao')) $('#nav-classificacao').hidden = !showClassificacao;
+    if ($('#nav-classificacao-mobile')) $('#nav-classificacao-mobile').hidden = !showClassificacao;
+    if ($('#dash-classificacao')) $('#dash-classificacao').hidden = !showClassificacao;
   }
   renderUsuarios();
   showToast('Usuários atualizados.');
@@ -4322,6 +4350,13 @@ window.Contador?.init({
   usuario: () => state.usuario,
   supervisor: () => !!state.usuario?.supervisor,
   contador: () => !!state.usuario?.contador,
+});
+
+window.ClassificacaoNcm?.init({
+  api,
+  showMsg,
+  showConfirm,
+  showToast,
 });
 
 window.ImportacaoNfe?.init({

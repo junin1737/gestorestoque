@@ -13,7 +13,7 @@
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
   <link rel="stylesheet" href="styles.css?v=296" />
-  <link rel="stylesheet" href="importacao-nfe.css?v=255" />
+  <link rel="stylesheet" href="importacao-nfe.css?v=256" />
 </head>
 <body>
   <div id="app">
@@ -181,6 +181,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10A1.5 1.5 0 0 1 18.5 6v13l-6.5-3.2L5.5 19V6A1.5 1.5 0 0 1 7 4.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
             Alteração em massa
           </button>
+          <button class="nav-btn" data-page="classificacao" id="nav-classificacao" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 5.5h14v13H5z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M8 9.5h8M8 13h5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Classificação por NCM
+          </button>
           <button class="nav-btn" data-page="usuarios" id="nav-usuarios">
             <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M4 19c.4-3 2.4-5 5-5s4.6 2 5 5M16.5 8.5a2.5 2.5 0 1 1 0 5 2.5 2.5 0 0 1 0-5zM20 19c-.3-2.2-1.6-3.7-3.5-3.7" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Usuários
@@ -281,6 +285,13 @@
               </span>
               <strong>Central de Ofertas</strong>
               <span>Ofertas liberadas para esta loja</span>
+            </button>
+            <button type="button" id="dash-classificacao" class="dash-card" hidden>
+              <span class="dash-ico" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path d="M5 5.5h14v13H5z" fill="none" stroke="currentColor" stroke-width="1.75"/><path d="M8 9.5h8M8 13h5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+              </span>
+              <strong>Classificação por NCM</strong>
+              <span>cClassTrib da NF-e e da NFC-e</span>
             </button>
             <button type="button" id="dash-alteracoes" class="dash-card" hidden>
               <span class="dash-ico" aria-hidden="true">
@@ -948,6 +959,10 @@
           <div id="contador-host"></div>
         </div>
 
+        <div id="page-classificacao" class="page" hidden>
+          <div id="classificacao-host"></div>
+        </div>
+
         <div id="page-usuarios" class="page" hidden>
           <div class="toolbar">
             <p class="hint">Só o supervisor cadastra os usuários do painel. Supervisor e MT Entradas já entram com a senha pré-cadastrada.</p>
@@ -1162,6 +1177,7 @@
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
             <button type="button" data-page="contador" id="nav-contador-mobile" hidden>Alteração em massa</button>
+            <button type="button" data-page="classificacao" id="nav-classificacao-mobile" hidden>Classificação por NCM</button>
             <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
             <button type="button" data-page="empresas" id="nav-empresas-mobile" hidden>Empresas</button>
             <button type="button" data-page="preferencias">Configurações</button>
@@ -1470,9 +1486,10 @@
   <script src="condicionais.js?v=252"></script>
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
+  <script src="classificacao-ncm.js?v=1"></script>
   <script src="dashboard.js?v=263"></script>
   <script src="gondola.js?v=4"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=283"></script>
+  <script src="app.js?v=284"></script>
 </body>
 </html>

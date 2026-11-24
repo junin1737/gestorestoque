@@ -122,6 +122,7 @@ async function garantirAdicionais(env) {
   const colunas = [
     'consultar_compras INTEGER NOT NULL DEFAULT 0',
     'alteracao_massa INTEGER NOT NULL DEFAULT 0',
+    'classificacao_ncm INTEGER NOT NULL DEFAULT 0',
   ];
   for (const coluna of colunas) {
     try {
@@ -159,6 +160,10 @@ function consultarComprasAtiva(cli) {
 
 function alteracaoMassaAtiva(cli) {
   return Number(cli?.alteracao_massa) === 1;
+}
+
+function classificacaoNcmAtiva(cli) {
+  return Number(cli?.classificacao_ncm) === 1;
 }
 
 let colunasDominioProntas = false;
@@ -508,6 +513,7 @@ async function check(request, env) {
     central_ofertas: centralOfertasAtiva(cli),
     consultar_compras: consultarComprasAtiva(cli),
     alteracao_massa: alteracaoMassaAtiva(cli),
+    classificacao_ncm: classificacaoNcmAtiva(cli),
     url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });
@@ -835,6 +841,9 @@ function camposEditaveis(body) {
   }
   if (body.alteracao_massa !== undefined) {
     out.alteracao_massa = body.alteracao_massa === true || body.alteracao_massa === 1 || body.alteracao_massa === '1' ? 1 : 0;
+  }
+  if (body.classificacao_ncm !== undefined) {
+    out.classificacao_ncm = body.classificacao_ncm === true || body.classificacao_ncm === 1 || body.classificacao_ncm === '1' ? 1 : 0;
   }
   if (body.usa_dominio !== undefined) {
     out.usa_dominio = body.usa_dominio === true || body.usa_dominio === 1 || body.usa_dominio === '1' ? 1 : 0;
@@ -1594,6 +1603,7 @@ async function atualizarCliente(cnpj, app, request, env) {
       central_ofertas: 'central de ofertas',
       consultar_compras: 'consultar compras',
       alteracao_massa: 'alteração em massa',
+      classificacao_ncm: 'classificação por NCM',
       usa_dominio: 'domínio próprio',
       dominio_proprio: 'domínio',
       ig_usuario: 'instagram',
@@ -1605,7 +1615,7 @@ async function atualizarCliente(cnpj, app, request, env) {
     const valor = (k) => {
       if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
       if (k === 'ig_token') return 'atualizado';
-      if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas' || k === 'consultar_compras' || k === 'alteracao_massa' || k === 'usa_dominio') return campos[k] ? 'sim' : 'não';
+      if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas' || k === 'consultar_compras' || k === 'alteracao_massa' || k === 'classificacao_ncm' || k === 'usa_dominio') return campos[k] ? 'sim' : 'não';
       if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
       return campos[k] ?? '—';
     };
@@ -1650,6 +1660,7 @@ async function licencaOffline(cnpj, app, request, env) {
     central_ofertas: centralOfertasAtiva(cli),
     consultar_compras: consultarComprasAtiva(cli),
     alteracao_massa: alteracaoMassaAtiva(cli),
+    classificacao_ncm: classificacaoNcmAtiva(cli),
     url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });

@@ -51,6 +51,10 @@ const MODULOS = {
     label: 'Alteração em massa',
     default: { acesso: false },
   },
+  classificacao_ncm: {
+    label: 'Classificação por NCM',
+    default: { acesso: false },
+  },
   dashboard_padrao: {
     label: 'Dashboard padrão',
     default: { acesso: false },
@@ -168,6 +172,7 @@ function fullPermissoes() {
     if (key === 'condicionais') out[key] = { acesso: true };
     if (key === 'clientes') out[key] = { acesso: true };
     if (key === 'massa') out[key] = { acesso: true };
+    if (key === 'classificacao_ncm') out[key] = { acesso: true };
     if (key === 'online') out[key] = { acesso: true };
     if (key === 'dashboard_padrao') out[key] = { acesso: true };
     else if (CHAVES_DASHBOARD.includes(key)) out[key] = { acesso: false };
