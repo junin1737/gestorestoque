@@ -3814,13 +3814,6 @@ function podeClassificacao(req, res) {
   return false;
 }
 
-async function senhaDoGestor(req) {
-  const senha = String(req.body?.senha || '');
-  if (!senha.trim()) return 'Informe a senha de acesso do Gestor.';
-  const ok = await auth.conferirSenhaUsuario(req.usuario, senha);
-  return ok ? '' : 'Senha de acesso do Gestor incorreta.';
-}
-
 router.get('/classificacao-ncm/contexto', async (req, res) => {
   if (!podeClassificacao(req, res)) return;
   try {
@@ -3833,11 +3826,7 @@ router.get('/classificacao-ncm/contexto', async (req, res) => {
 router.post('/classificacao-ncm/buscar', async (req, res) => {
   if (!podeClassificacao(req, res)) return;
   try {
-    const erroSenha = await senhaDoGestor(req);
-    if (erroSenha) return res.json({ ok: false, error: erroSenha });
-    const body = { ...(req.body || {}) };
-    delete body.senha;
-    res.json(await classificacaoNcm.buscar(body));
+    res.json(await classificacaoNcm.buscar(req.body || {}));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -3846,14 +3835,10 @@ router.post('/classificacao-ncm/buscar', async (req, res) => {
 router.post('/classificacao-ncm/atribuir', async (req, res) => {
   if (!podeClassificacao(req, res)) return;
   try {
-    const erroSenha = await senhaDoGestor(req);
-    if (erroSenha) return res.json({ ok: false, error: erroSenha });
-    const body = { ...(req.body || {}) };
-    delete body.senha;
     const autor = req.usuario?.supervisor
       ? { id: 0, nome: req.usuario?.nome || 'Supervisor' }
       : { id: req.usuario?.id || 0, nome: req.usuario?.nome || 'Painel' };
-    res.json(await classificacaoNcm.atribuir(body, autor));
+    res.json(await classificacaoNcm.atribuir(req.body || {}, autor));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -3862,11 +3847,7 @@ router.post('/classificacao-ncm/atribuir', async (req, res) => {
 router.post('/classificacao-ncm/previa', async (req, res) => {
   if (!podeClassificacao(req, res)) return;
   try {
-    const erroSenha = await senhaDoGestor(req);
-    if (erroSenha) return res.json({ ok: false, error: erroSenha });
-    const body = { ...(req.body || {}) };
-    delete body.senha;
-    res.json(await classificacaoNcm.previa(body));
+    res.json(await classificacaoNcm.previa(req.body || {}));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }
@@ -3875,14 +3856,10 @@ router.post('/classificacao-ncm/previa', async (req, res) => {
 router.post('/classificacao-ncm/aplicar', async (req, res) => {
   if (!podeClassificacao(req, res)) return;
   try {
-    const erroSenha = await senhaDoGestor(req);
-    if (erroSenha) return res.json({ ok: false, error: erroSenha });
-    const body = { ...(req.body || {}) };
-    delete body.senha;
     const autor = req.usuario?.supervisor
       ? { id: 0, nome: req.usuario?.nome || 'Supervisor' }
       : { id: req.usuario?.id || 0, nome: req.usuario?.nome || 'Painel' };
-    res.json(await classificacaoNcm.aplicar(body, autor));
+    res.json(await classificacaoNcm.aplicar(req.body || {}, autor));
   } catch (err) {
     res.json({ ok: false, error: err.message });
   }

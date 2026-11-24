@@ -53,9 +53,6 @@
         <p class="hint">${base} Digite o NCM, busque e escolha a classificação. Atribuir preenche todos os produtos desse NCM. Regime: ${esc(ctx.regime || '—')}.</p>
         <div class="imp-fields massa-fields">
           <label class="imp-field">NCM<input id="cn-ncm" inputmode="numeric" placeholder="19059090" autocomplete="off" /></label>
-          <label class="imp-field">Senha de acesso
-            <input id="cn-senha" type="password" autocomplete="current-password" />
-          </label>
         </div>
         <div class="imp-vinc-btns">
           <button type="button" class="btn small primary" id="cn-buscar">Buscar</button>
@@ -70,7 +67,6 @@
   }
 
   async function buscar() {
-    const senha = $('#cn-senha')?.value || '';
     const ncm = ($('#cn-ncm')?.value || '').replace(/\D/g, '');
     const box = $('#cn-resultado');
     if (!box) return;
@@ -79,7 +75,7 @@
       return;
     }
     box.innerHTML = '<p class="hint">Consultando a Receita e o estoque…</p>';
-    const res = await api('/classificacao-ncm/buscar', { method: 'POST', body: { senha, ncm } });
+    const res = await api('/classificacao-ncm/buscar', { method: 'POST', body: { ncm } });
     if (!res.ok) {
       resultado = null;
       box.innerHTML = `<p class="erro">${esc(res.error || 'Falha na consulta.')}</p>`;
@@ -136,7 +132,6 @@
     const res = await api('/classificacao-ncm/atribuir', {
       method: 'POST',
       body: {
-        senha: $('#cn-senha')?.value || '',
         ncm: resultado.ncm_chave,
         nfe,
         nfce,
