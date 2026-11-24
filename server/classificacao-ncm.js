@@ -1,11 +1,9 @@
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const { spawn } = require('child_process');
 const { withDb, withTransaction, query, writeTargets } = require('./db');
 const { insertAudit } = require('./audit');
 const { classTribPorCodigoDb } = require('./importacao-notas');
+const receitaBase = require('./receita-base');
 
 const LOTE = 500;
 
@@ -21,20 +19,6 @@ function codigoClass(v) {
   const d = digitos(v);
   if (!d) return '';
   return d.padStart(6, '0').slice(-6);
-}
-
-const URL_CONSULTA = 'http://127.0.0.1:3210';
-
-function rtcConfig() {
-  const url = String(process.env.RTC_URL || URL_CONSULTA).trim().replace(/\/+$/, '') || URL_CONSULTA;
-  const apiKey = String(process.env.RTC_API_KEY || '').trim();
-  return { url, apiKey, configurado: true };
-}
-
-function cabecalhos(rtc) {
-  const headers = { Accept: 'application/json' };
-  if (rtc.apiKey) headers['X-Api-Key'] = rtc.apiKey;
-  return headers;
 }
 
 function filtroDe(body) {
@@ -159,27 +143,15 @@ async function lerClassAtual(db, ids) {
   return { nfe, nfce, codigos };
 }
 
-async function consultarLote(crt, ncms) {
-  const rtc = rtcConfig();
+async function consultarLote(_crt, ncms) {
   const resultados = [];
-  for (let i = 0; i < ncms.length; i += LOTE) {
-    const lote = ncms.slice(i, i + LOTE).map((ncm) => ({ id: ncm, ncm }));
-    let res;
+  for (const ncm of ncms) {
     try {
-      res = await fetch(`${rtc.url}/api/v1/integracao/consulta-lote`, {
-        method: 'POST',
-        headers: { ...cabecalhos(rtc), 'Content-Type': 'application/json' },
-        body: JSON.stringify({ crt, itens: lote }),
-        signal: AbortSignal.timeout(30000),
-      });
+      const resultado = await receitaBase.consultar(ncm);
+      resultados.push({ id: ncm, ncm, ok: true, resultado });
     } catch (e) {
-      throw new Error(`Não foi possível falar com a consulta cClassTrib (${rtc.url}). ${e.name === 'TimeoutError' ? 'A resposta demorou demais.' : 'Confira se o serviço está no ar.'}`);
+      resultados.push({ id: ncm, ncm, ok: false, erro: { mensagem: e.message } });
     }
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(data?.erro?.mensagem || data?.message || `A consulta cClassTrib respondeu ${res.status}.`);
-    }
-    resultados.push(...(data.resultados || []));
   }
   return resultados;
 }
@@ -510,95 +482,17 @@ function opcoesDe(lista, sugestao) {
   return out;
 }
 
-function binarioNode() {
-  const candidatos = [
-    process.env.GESTOR_NODE,
-    'C:\\Program Files\\nodejs\\node.exe',
-    path.join(process.env.LOCALAPPDATA || '', 'Programs', 'nodejs', 'node.exe'),
-  ].filter(Boolean);
-  return candidatos.find((c) => fs.existsSync(c)) || 'node';
-}
-
-function caminhoConsultaOficial() {
-  const nome = 'consultar-receita-oficial.mjs';
-  const unpacked = path.join(process.resourcesPath || '', 'app.asar.unpacked', 'server', nome);
-  if (process.resourcesPath && fs.existsSync(unpacked)) return unpacked;
-  return path.join(__dirname, nome);
-}
-
-function executarConsultaOficial(ncm, crt) {
-  return new Promise((resolve) => {
-    let child;
-    try {
-      child = spawn(binarioNode(), [caminhoConsultaOficial(), ncm || '--info', String(crt || 3)], {
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch {
-      resolve(null);
-      return;
-    }
-    let out = '';
-    const timer = setTimeout(() => {
-      child.kill();
-      resolve(null);
-    }, 20000);
-    child.stdout.on('data', (c) => {
-      out += c;
-      if (out.length > 2_000_000) child.kill();
-    });
-    child.on('error', () => {
-      clearTimeout(timer);
-      resolve(null);
-    });
-    child.on('close', () => {
-      clearTimeout(timer);
-      try {
-        const data = JSON.parse(out);
-        resolve(data && data.ok ? data : null);
-      } catch {
-        resolve(null);
-      }
-    });
-  });
-}
-
-async function consultarHttp(crt, ncm) {
-  const rtc = rtcConfig();
-  const res = await fetch(`${rtc.url}/api/v1/integracao/consulta?ncm=${encodeURIComponent(ncm)}&crt=${crt}`, {
-    headers: cabecalhos(rtc),
-    signal: AbortSignal.timeout(15000),
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    throw new Error(data?.erro?.mensagem || data?.message || `A consulta da Receita respondeu ${res.status}.`);
-  }
-  return data;
-}
-
-async function consultarUm(crt, ncm) {
-  const local = await executarConsultaOficial(ncm, crt);
-  if (local?.nfe || local?.nfce) return local;
-  try {
-    return await consultarHttp(crt, ncm);
-  } catch (e) {
-    if (local?.error) throw new Error(local.error);
-    throw new Error(`A consulta da Receita não respondeu. ${e.name === 'TimeoutError' ? 'A resposta demorou demais.' : 'A base oficial não pôde ser lida nesta máquina.'}`);
-  }
+async function consultarUm(_crt, ncm) {
+  return receitaBase.consultar(ncm);
 }
 
 async function situacaoConsulta() {
-  const local = await executarConsultaOficial('--info', 3);
-  if (local?.base?.versao || local?.ok) {
-    return { online: true, versaoBase: txt(local.base?.versao || local.versaoBase) };
-  }
-  const rtc = rtcConfig();
   try {
-    const res = await fetch(`${rtc.url}/api/v1/health`, { signal: AbortSignal.timeout(4000) });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok && data.status === 'ok') return { online: true, versaoBase: txt(data.versaoBase) };
-  } catch { /* a base local também não abriu */ }
-  return { online: false, versaoBase: '' };
+    const base = await receitaBase.situacao();
+    return { online: true, versaoBase: base.versaoBase, repositorio: base.repositorio };
+  } catch {
+    return { online: false, versaoBase: '', repositorio: receitaBase.REPOSITORIO };
+  }
 }
 
 async function regimeDaBase(db) {
@@ -748,6 +642,5 @@ module.exports = {
   aplicar,
   buscar,
   atribuir,
-  rtcConfig,
   situacaoConsulta,
 };

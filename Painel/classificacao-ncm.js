@@ -52,8 +52,8 @@
       return;
     }
     const base = ctx.consultaOnline
-      ? `Consulta da Receita no ar${ctx.versaoBase ? `, base ${esc(ctx.versaoBase)}` : ''}.`
-      : 'A base oficial da Receita ainda não abriu. A busca tenta de novo ao consultar o NCM.';
+      ? `Base oficial da Receita Federal${ctx.versaoBase ? ` ${esc(ctx.versaoBase)}` : ''}, repositório calculadora-rtc-regime-regular.`
+      : 'A base oficial da Receita Federal não abriu neste aplicativo.';
     host.innerHTML = `
       <section class="imp-section">
         <header class="imp-section-head"><h4>Classificação por NCM</h4></header>
