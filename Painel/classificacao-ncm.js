@@ -59,7 +59,7 @@
     host.innerHTML = `
       <section class="imp-section">
         <header class="imp-section-head"><h4>Classificação por NCM</h4></header>
-        <p class="hint">${base} Digite o NCM, busque e escolha a classificação. Atribuir preenche todos os produtos desse NCM. Regime: ${esc(ctx.regime || '—')}.</p>
+        <p class="hint">${base} Digite o NCM, busque e escolha a classificação. A prévia abre em PDF e a gravação só ocorre depois do aceite do termo. Regime: ${esc(ctx.regime || '—')}.</p>
         <div class="imp-fields massa-fields">
           <label class="imp-field">NCM<input id="cn-ncm" inputmode="numeric" placeholder="19059090" autocomplete="off" /></label>
         </div>
@@ -70,7 +70,7 @@
       </section>
       <section class="imp-section">
         <header class="imp-section-head"><h4>Replicador Geral</h4></header>
-        <p class="hint">Lê um NCM válido de cada, sem nulos, sem 00000000 e sem código curto. A opção da Receita aparece antes de gravar. Desmarque o que não deve ser aplicado.</p>
+        <p class="hint">Lê um NCM válido de cada, sem nulos, sem 00000000 e sem código curto. A opção da Receita aparece antes de gravar. Desmarque o que não deve ser aplicado. A gravação só ocorre depois da prévia em PDF e do aceite do termo.</p>
         <div class="imp-vinc-btns">
           <button type="button" class="btn small primary" id="cn-ler">Ler NCMs</button>
         </div>
@@ -120,7 +120,7 @@
     box.innerHTML = `
       <p class="hint">${itens.length} NCM(s) válidos${res.regime ? ` · ${esc(res.regime)}` : ''}.</p>
       <div class="imp-vinc-btns">
-        <button type="button" class="btn small primary" id="cn-replicar">Aplicar nos marcados</button>
+        <button type="button" class="btn small primary" id="cn-replicar">Prévia dos marcados</button>
       </div>
       <div class="rep-lista">
         <table class="rep-table">
@@ -142,19 +142,18 @@
       const item = itens[Number(el.getAttribute('data-rep-marca'))];
       const tr = el.closest('tr');
       if (!item || !tr) return;
-      escolhidos.push({
-        ncm: item.ncm,
-        nfe: tr.querySelector('[data-rep="nfe"]')?.value || '',
-        nfce: tr.querySelector('[data-rep="nfce"]')?.value || '',
-      });
+      const nfe = tr.querySelector('[data-rep="nfe"]')?.value || '';
+      const nfce = tr.querySelector('[data-rep="nfce"]')?.value || '';
+      if (!nfe && !nfce) return;
+      escolhidos.push({ ncm: item.ncm, nfe, nfce });
     });
     if (!escolhidos.length) {
-      deps.showMsg('Marque ao menos um NCM.');
+      deps.showMsg('Marque ao menos um NCM e escolha a classificação.');
       return;
     }
-    const ok = await deps.showConfirm(`Aplicar a classificação escolhida em todos os produtos dos ${escolhidos.length} NCMs marcados?`);
-    if (!ok) return;
-    const res = await api('/classificacao-ncm/replicar', { method: 'POST', body: { itens: escolhidos } });
+    const aceite = await prepararAlteracao({ itens: escolhidos });
+    if (!aceite) return;
+    const res = await api('/classificacao-ncm/replicar', { method: 'POST', body: { itens: escolhidos, aceite } });
     if (!res?.ok) {
       deps.showMsg(res?.error || 'Não foi possível aplicar.');
       return;
@@ -166,6 +165,137 @@
     if (res.falhas?.length) deps.showMsg(res.falhas.map((f) => `${f.ncm}: ${f.error}`).join('\n'));
     await oferecerImpressao(res);
     await lerReplicador();
+  }
+
+  function cpfValido(valor) {
+    const d = String(valor || '').replace(/\D/g, '');
+    if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
+    const dv = (tamanho) => {
+      let soma = 0;
+      for (let i = 0; i < tamanho; i++) soma += Number(d[i]) * ((tamanho + 1) - i);
+      const resto = (soma * 10) % 11;
+      return resto === 10 ? 0 : resto;
+    };
+    return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+  }
+
+  function formatarCpf(valor) {
+    const d = String(valor || '').replace(/\D/g, '').slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
+    if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  }
+
+  function linhasDaPrevia(res) {
+    return (res?.linhas || []).map((linha) => ({
+      ncm: linha.ncm,
+      documento: linha.documento,
+      anterior: classeTexto(linha.anterior, linha.anterior_descricao),
+      atual: classeTexto(linha.atual, linha.atual_descricao),
+      produtos: linha.produtos,
+    }));
+  }
+
+  function abrirPrevia(res, linhas) {
+    const termo = res.termo || {};
+    const abriu = window.ExportarTabela?.abrirPdf({
+      titulo: 'Prévia da atualização de NCM',
+      subtitulo: 'Nenhuma alteração foi gravada',
+      aviso: 'PRÉVIA PARA VALIDAÇÃO — revise com o contador antes de aceitar o termo.',
+      paragrafos: [termo.titulo, ...(termo.paragrafos || [])].filter(Boolean),
+      empresa: empresaNome || (typeof deps.empresa === 'function' ? deps.empresa() : ''),
+      usuario: typeof deps.usuario === 'function' ? deps.usuario() : '',
+      colunas: [
+        { id: 'ncm', titulo: 'NCM', largura: '12%' },
+        { id: 'documento', titulo: 'Documento', largura: '10%' },
+        { id: 'anterior', titulo: 'cClassTrib anterior', largura: '34%' },
+        { id: 'atual', titulo: 'cClassTrib atual', largura: '34%' },
+        { id: 'produtos', titulo: 'Produtos', numero: true, largura: '10%' },
+      ],
+      linhas,
+    });
+    if (!abriu) deps.showMsg('Permita pop-ups para abrir o PDF da prévia.');
+    return abriu;
+  }
+
+  function pedirTermo(termo) {
+    const dlg = document.getElementById('dlg-termo');
+    const texto = document.getElementById('dlg-termo-texto');
+    const check = document.getElementById('dlg-termo-aceite');
+    const assina = document.getElementById('dlg-termo-assina');
+    const nome = document.getElementById('dlg-termo-nome');
+    const cpf = document.getElementById('dlg-termo-cpf');
+    const erro = document.getElementById('dlg-termo-erro');
+    const sim = document.getElementById('dlg-termo-sim');
+    const nao = document.getElementById('dlg-termo-nao');
+    if (!dlg || !texto || !check || !assina || !nome || !cpf || !sim || !nao) {
+      deps.showMsg('Não foi possível abrir o termo de aceite.');
+      return Promise.resolve(null);
+    }
+    texto.textContent = [termo?.titulo, ...(termo?.paragrafos || [])].filter(Boolean).join('\n\n');
+    check.checked = false;
+    assina.hidden = true;
+    nome.value = '';
+    cpf.value = '';
+    erro.hidden = true;
+    erro.textContent = '';
+    sim.disabled = true;
+    const atualizar = () => {
+      assina.hidden = !check.checked;
+      const nomeOk = nome.value.trim().split(/\s+/).filter((p) => p.length >= 2).length >= 2;
+      sim.disabled = !check.checked || !nomeOk || !cpfValido(cpf.value);
+    };
+    check.onchange = atualizar;
+    nome.oninput = atualizar;
+    cpf.oninput = () => {
+      cpf.value = formatarCpf(cpf.value);
+      atualizar();
+    };
+    return new Promise((resolve) => {
+      const finish = (valor) => {
+        sim.onclick = null;
+        nao.onclick = null;
+        dlg.onclose = null;
+        try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
+        resolve(valor);
+      };
+      sim.onclick = () => {
+        atualizar();
+        if (sim.disabled) {
+          erro.hidden = false;
+          erro.textContent = !check.checked
+            ? 'Marque o aceite para assinar o termo.'
+            : 'Informe o nome completo e um CPF válido.';
+          return;
+        }
+        finish({ nome: nome.value.trim().replace(/\s+/g, ' '), cpf: cpf.value });
+      };
+      nao.onclick = () => finish(null);
+      dlg.onclose = () => resolve(null);
+      if (!dlg.open) dlg.showModal();
+      check.focus();
+    });
+  }
+
+  async function prepararAlteracao(body) {
+    const previa = await api('/classificacao-ncm/previa-alteracao', { method: 'POST', body });
+    if (!previa?.ok) {
+      deps.showMsg(previa?.error || 'Não foi possível montar a prévia.');
+      return null;
+    }
+    const linhas = linhasDaPrevia(previa);
+    if (!linhas.length) {
+      deps.showMsg(previa.mensagem || 'Nenhuma classificação mudaria. Nada foi gravado.');
+      return null;
+    }
+    if (previa.falhas?.length) {
+      const aviso = previa.falhas.map((f) => `${f.ncm}: ${f.error}`).join('\n');
+      if (deps.showToast) deps.showToast(`${previa.falhas.length} NCM(s) ficaram de fora da prévia.`);
+      else deps.showMsg(aviso);
+    }
+    abrirPrevia(previa, linhas);
+    return pedirTermo(previa.termo);
   }
 
   function classeTexto(codigo, descricao) {
@@ -186,9 +316,9 @@
     if (!imprimir) return;
     const abriu = window.ExportarTabela?.abrirPdf({
       titulo: 'Alterações de classificação tributária',
-      subtitulo: 'NCM, cClassTrib anterior e atual',
+      subtitulo: res.aceite?.nome ? `Assinado por ${res.aceite.nome} · CPF ${res.aceite.cpf}` : 'NCM, cClassTrib anterior e atual',
       empresa: empresaNome || (typeof deps.empresa === 'function' ? deps.empresa() : ''),
-      usuario: typeof deps.usuario === 'function' ? deps.usuario() : '',
+      usuario: res.aceite?.nome || (typeof deps.usuario === 'function' ? deps.usuario() : ''),
       colunas: [
         { id: 'ncm', titulo: 'NCM', largura: '12%' },
         { id: 'documento', titulo: 'Documento', largura: '10%' },
@@ -242,7 +372,7 @@
         ${selectOpcoes('cn-nfce', res.nfce, 'Classificação NFC-e')}
       </div>
       <div class="imp-vinc-btns">
-        <button type="button" class="btn small primary" id="cn-atribuir" ${produtos.length ? '' : 'disabled'}>Atribuir</button>
+        <button type="button" class="btn small primary" id="cn-atribuir" ${produtos.length ? '' : 'disabled'}>Prévia da atribuição</button>
       </div>
       <div class="class-ncm-lista">
         <table class="class-ncm-table">
@@ -261,15 +391,15 @@
       deps.showMsg('Escolha a classificação da NF-e, da NFC-e ou as duas.');
       return;
     }
-    const total = (resultado.produtos || []).length;
-    const ok = await deps.showConfirm(`Atribuir a classificação escolhida aos ${total} produtos do NCM ${resultado.ncm || resultado.ncm_chave}?`);
-    if (!ok) return;
+    const aceite = await prepararAlteracao({ ncm: resultado.ncm_chave, nfe, nfce });
+    if (!aceite) return;
     const res = await api('/classificacao-ncm/atribuir', {
       method: 'POST',
       body: {
         ncm: resultado.ncm_chave,
         nfe,
         nfce,
+        aceite,
       },
     });
     if (!res.ok) {

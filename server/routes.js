@@ -3854,6 +3854,15 @@ router.get('/classificacao-ncm/replicador', async (req, res) => {
   }
 });
 
+router.post('/classificacao-ncm/previa-alteracao', async (req, res) => {
+  if (!podeClassificacao(req, res)) return;
+  try {
+    res.json(await classificacaoNcm.previaAlteracao(req.body || {}));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.post('/classificacao-ncm/replicar', async (req, res) => {
   if (!podeClassificacao(req, res)) return;
   try {

@@ -309,8 +309,34 @@ async function supDoCliente(env, cli) {
 
 async function registrarEvento(env, cnpj, app, tipo, detalhe) {
   await env.DB.prepare('INSERT INTO eventos (cnpj, aplicacao, tipo, detalhe, criado_em) VALUES (?, ?, ?, ?, ?)')
-    .bind(cnpj, app, tipo, detalhe ? String(detalhe).slice(0, 500) : null, agoraIso())
+    .bind(cnpj, app, tipo, detalhe ? String(detalhe).slice(0, 4000) : null, agoraIso())
     .run();
+}
+
+async function aceiteNcm(request, env) {
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ ok: false, error: 'JSON inválido.' }, 400);
+  }
+  const app = body.aplicacao === undefined ? APP_PADRAO : nomeApp(body.aplicacao);
+  if (!app) return json({ ok: false, error: 'Nome da aplicação inválido.' }, 400);
+  const cnpj = await instalacaoDaRequisicao(request, env, app);
+  if (!cnpj) return json({ ok: false, error: 'Esta instalação não está confirmada no cadastro do cliente.' }, 403);
+  const nome = texto(body.nome, 120);
+  const partes = String(nome || '').split(/\s+/).filter((p) => p.length >= 2);
+  if (partes.length < 2) return json({ ok: false, error: 'Informe o nome completo de quem assina o termo.' }, 400);
+  const cpf = soDigitos(body.cpf);
+  if (!cpfValido(cpf)) return json({ ok: false, error: 'Informe um CPF válido.' }, 400);
+  const cpfFmt = `${cpf.slice(0, 3)}.${cpf.slice(3, 6)}.${cpf.slice(6, 9)}-${cpf.slice(9)}`;
+  const detalhe = [
+    `Assinado por ${nome}. CPF ${cpfFmt}.`,
+    `${texto(body.origem, 40) || 'Classificação por NCM'} · ${texto(body.resumo, 180) || ''}`,
+    texto(body.termo, 3500) || '',
+  ].filter(Boolean).join('\n');
+  await registrarEvento(env, cnpj, app, 'aceite_ncm', detalhe);
+  return json({ ok: true });
 }
 
 function buscarCliente(env, cnpj, app) {
@@ -2631,6 +2657,7 @@ export default {
         return await atualizacaoArquivo(request, env, decodeURIComponent(arquivo[1]));
       }
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
+      if (url.pathname === '/api/aceite-ncm' && request.method === 'POST') return await aceiteNcm(request, env);
       if (url.pathname === '/api/revenda/autorizar' && request.method === 'POST') return await autorizarSenhaRevenda(request, env);
       const paginaOferta = url.pathname.match(/^\/ofertas\/([A-Za-z0-9_-]{20,80})$/);
       if (paginaOferta && request.method === 'GET') return paginaOfertas();

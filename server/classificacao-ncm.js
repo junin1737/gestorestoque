@@ -4,6 +4,45 @@ const { withDb, withTransaction, query, writeTargets } = require('./db');
 const { insertAudit } = require('./audit');
 const { classTribPorCodigoDb } = require('./importacao-notas');
 const receitaBase = require('./receita-base');
+const licenca = require('./licenca');
+
+const TERMO = {
+  titulo: 'TERMO DE CIÊNCIA E RESPONSABILIDADE — ATUALIZAÇÃO DE NCM',
+  paragrafos: [
+    'A consulta automática utiliza como parâmetro o NCM informado no cadastro de cada produto. SE O NCM CADASTRADO ESTIVER INCORRETO, A CONSULTA PODERÁ LOCALIZAR E APRESENTAR UM RESULTADO INCORRETO.',
+    'Antes da atualização, o sistema disponibiliza uma prévia dos NCMs que serão alterados. O usuário que realizar a operação deverá revisar integralmente essa prévia e submetê-la à análise do contador responsável. A atualização de toda a base de produtos só deve ser confirmada após a aprovação expressa do contador.',
+    'Ao confirmar a atualização, o usuário declara que revisou a prévia, obteve a aprovação do contador e autoriza a aplicação dos NCMs apresentados na base de produtos. A responsabilidade pela conferência e pela atualização realizada é do usuário que a confirmou, inclusive quanto a inconsistências decorrentes de dados incorretos no cadastro de origem ou da aplicação sem a devida aprovação contábil.',
+  ],
+};
+
+function termoTexto() {
+  return [TERMO.titulo, ...TERMO.paragrafos].join('\n\n');
+}
+
+function cpfValido(valor) {
+  const d = digitos(valor);
+  if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
+  const dv = (tamanho) => {
+    let soma = 0;
+    for (let i = 0; i < tamanho; i++) soma += Number(d[i]) * ((tamanho + 1) - i);
+    const resto = (soma * 10) % 11;
+    return resto === 10 ? 0 : resto;
+  };
+  return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+}
+
+function formatarCpf(valor) {
+  const d = digitos(valor);
+  return d.length === 11 ? `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}` : d;
+}
+
+function validarAceite(aceite) {
+  const nome = txt(aceite?.nome).replace(/\s+/g, ' ');
+  const partes = nome.split(' ').filter((p) => p.length >= 2);
+  if (partes.length < 2) return { ok: false, error: 'Informe o nome completo de quem assina o termo.' };
+  if (!cpfValido(aceite?.cpf)) return { ok: false, error: 'Informe um CPF válido.' };
+  return { ok: true, nome: nome.slice(0, 120), cpf: digitos(aceite.cpf), cpfFormatado: formatarCpf(aceite.cpf) };
+}
 
 const LOTE = 500;
 
@@ -572,7 +611,15 @@ function formatarNcm(codigo) {
   return s.length === 8 ? `${s.slice(0, 4)}.${s.slice(4, 6)}.${s.slice(6)}` : s;
 }
 
-async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInformado, origem) {
+function observacaoDe(origem, aceite) {
+  const base = origem || 'Classificação por NCM';
+  if (!aceite?.nome) return base;
+  return `${base} · ${aceite.nome} · CPF ${aceite.cpfFormatado}`.slice(0, 200);
+}
+
+async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInformado, origem, opcoes = {}) {
+  const somentePrevia = opcoes.previa === true;
+  const aceite = opcoes.aceite || null;
   const ncm = digitos(ncmInformado);
   const nfeCod = codigoClass(nfeInformado);
   const nfceCod = codigoClass(nfceInformado);
@@ -607,11 +654,11 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
   const linhas = [];
   let alterados = 0;
   let jaIguais = 0;
-  await withTransaction(db, async (tx) => {
+  const executar = async (tx) => {
     for (const grupo of lista) {
       let mudou = false;
       if (classeNfe && atual.nfe.get(grupo.id_estoque) !== classeNfe.id) {
-        await gravarClass(tx, 'TB_EST_TRIBUTOS', grupo.id_estoque, classeNfe.id);
+        if (!somentePrevia) await gravarClass(tx, 'TB_EST_TRIBUTOS', grupo.id_estoque, classeNfe.id);
         mudou = true;
         const deId = atual.nfe.get(grupo.id_estoque);
         const de = atual.codigos.get(deId) || '—';
@@ -624,7 +671,7 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
           atual_descricao: classeNfe.descricao || '',
           produtos: grupo.itens.length,
         });
-        for (const item of grupo.itens) {
+        if (!somentePrevia) for (const item of grupo.itens) {
           auditoria.push({
             id_identificador: item.id_identificador,
             id_estoque: grupo.id_estoque,
@@ -632,13 +679,13 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
             resumo: `Class. trib. NF-e: ${de} → ${classeNfe.codigo}`,
             detalhe: `Classificação por NCM ${ncm} · NF-e: ${de} → ${classeNfe.codigo} ${classeNfe.descricao || ''}`.trim(),
             id_funcionario: autor.id || 0,
-            usuario: autor.nome || 'Classificação por NCM',
-            observacao: origem || 'Classificação por NCM',
+            usuario: (aceite?.nome || autor.nome || 'Classificação por NCM').slice(0, 80),
+            observacao: observacaoDe(origem, aceite),
           });
         }
       }
       if (classeNfce && atual.nfce.get(grupo.id_estoque) !== classeNfce.id) {
-        await gravarClass(tx, 'TB_EST_TRIBUTOS_NFCE', grupo.id_estoque, classeNfce.id);
+        if (!somentePrevia) await gravarClass(tx, 'TB_EST_TRIBUTOS_NFCE', grupo.id_estoque, classeNfce.id);
         mudou = true;
         const deId = atual.nfce.get(grupo.id_estoque);
         const de = atual.codigos.get(deId) || '—';
@@ -651,7 +698,7 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
           atual_descricao: classeNfce.descricao || '',
           produtos: grupo.itens.length,
         });
-        for (const item of grupo.itens) {
+        if (!somentePrevia) for (const item of grupo.itens) {
           auditoria.push({
             id_identificador: item.id_identificador,
             id_estoque: grupo.id_estoque,
@@ -659,17 +706,21 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
             resumo: `Class. trib. NFC-e: ${de} → ${classeNfce.codigo}`,
             detalhe: `Classificação por NCM ${ncm} · NFC-e: ${de} → ${classeNfce.codigo} ${classeNfce.descricao || ''}`.trim(),
             id_funcionario: autor.id || 0,
-            usuario: autor.nome || 'Classificação por NCM',
-            observacao: origem || 'Classificação por NCM',
+            usuario: (aceite?.nome || autor.nome || 'Classificação por NCM').slice(0, 80),
+            observacao: observacaoDe(origem, aceite),
           });
         }
       }
       if (mudou) alterados += grupo.itens.length;
       else jaIguais += grupo.itens.length;
     }
-  });
-  for (const entrada of auditoria) await insertAudit(db, entrada);
-  return { ok: true, alterados, jaIguais, conflito, linhas: juntarLinhas(linhas) };
+  };
+  if (somentePrevia) await executar(db);
+  else await withTransaction(db, executar);
+  if (!somentePrevia) {
+    for (const entrada of auditoria) await insertAudit(db, entrada);
+  }
+  return { ok: true, previa: somentePrevia, alterados, jaIguais, conflito, linhas: juntarLinhas(linhas) };
 }
 
 function juntarLinhas(lista) {
@@ -683,8 +734,94 @@ function juntarLinhas(lista) {
   return [...mapa.values()].sort((a, b) => a.ncm.localeCompare(b.ncm, 'pt-BR') || a.documento.localeCompare(b.documento, 'pt-BR'));
 }
 
+async function executarLista(db, appCfg, itens, autor, origem, opcoes) {
+  let alterados = 0;
+  let jaIguais = 0;
+  let conflito = 0;
+  const falhas = [];
+  const linhas = [];
+  for (const item of itens) {
+    try {
+      const res = await aplicarNcm(db, appCfg, autor, item.ncm, item.nfe, item.nfce, origem, opcoes);
+      if (!res.ok) falhas.push({ ncm: formatarNcm(item.ncm), error: res.error });
+      else {
+        alterados += res.alterados || 0;
+        jaIguais += res.jaIguais || 0;
+        conflito += res.conflito || 0;
+        linhas.push(...(res.linhas || []));
+      }
+    } catch (err) {
+      falhas.push({ ncm: formatarNcm(item.ncm), error: err.message });
+    }
+  }
+  if (!alterados && !jaIguais && falhas.length) {
+    return { ok: false, error: falhas[0].error, falhas, termo: TERMO };
+  }
+  return { ok: true, alterados, jaIguais, conflito, falhas, linhas: juntarLinhas(linhas), termo: TERMO };
+}
+
+async function simular(db, appCfg, body) {
+  const autor = { id: 0, nome: '' };
+  if (Array.isArray(body?.itens)) {
+    const itens = body.itens.filter((item) => ncmValido(item?.ncm));
+    if (!itens.length) return { ok: false, error: 'Marque ao menos um NCM válido.' };
+    return executarLista(db, appCfg, itens, autor, 'Replicador Geral', { previa: true });
+  }
+  const res = await aplicarNcm(db, appCfg, autor, body?.ncm, body?.nfe, body?.nfce, 'Classificação por NCM', { previa: true });
+  return { ...res, termo: TERMO };
+}
+
+async function previaAlteracao(body) {
+  return withDb((db, appCfg) => simular(db, appCfg, body || {}));
+}
+
+async function gravarAceiteLocal(db, aceite, origem, res, autor) {
+  await insertAudit(db, {
+    id_identificador: 0,
+    id_estoque: 0,
+    tipo: 'cadastro',
+    resumo: 'Aceite do termo de atualização de NCM',
+    detalhe: `${aceite.nome} · CPF ${aceite.cpfFormatado} · ${origem} · ${res.alterados || 0} produto(s). ${TERMO.titulo}`,
+    id_funcionario: autor.id || 0,
+    usuario: aceite.nome.slice(0, 80),
+    observacao: `CPF ${aceite.cpfFormatado}`,
+  });
+}
+
+async function aplicarComAceite(body, autor, origem) {
+  const plano = await previaAlteracao(body);
+  if (!plano.ok) return plano;
+  const produtos = (plano.linhas || []).reduce((n, linha) => n + (Number(linha.produtos) || 0), 0);
+  if (!produtos) {
+    return { ...plano, mensagem: 'Nenhuma classificação mudaria. Nada foi gravado.' };
+  }
+  const aceite = validarAceite(body?.aceite);
+  if (!aceite.ok) return aceite;
+  const registro = await licenca.registrarAceiteNcm({
+    nome: aceite.nome,
+    cpf: aceite.cpfFormatado,
+    origem,
+    resumo: `${plano.linhas.length} alteração(ões), ${produtos} produto(s)`,
+    termo: termoTexto(),
+  });
+  if (!registro.ok) {
+    return { ok: false, error: registro.error || 'Não foi possível registrar o aceite no cadastro do cliente, no painel.' };
+  }
+  try {
+    return await withDb(async (db, appCfg) => {
+      const res = Array.isArray(body?.itens)
+        ? await executarLista(db, appCfg, body.itens.filter((item) => ncmValido(item?.ncm)), autor, origem, { aceite })
+        : await aplicarNcm(db, appCfg, autor, body?.ncm, body?.nfe, body?.nfce, origem, { aceite });
+      if (res.ok && (res.alterados || 0) > 0) await gravarAceiteLocal(db, aceite, origem, res, autor);
+      return { ...res, termo: TERMO, aceite: { nome: aceite.nome, cpf: aceite.cpfFormatado } };
+    });
+  } catch (err) {
+    return { ok: false, error: `O aceite foi registrado no cadastro do cliente, no painel, mas a gravação não concluiu: ${err.message}` };
+  }
+}
+
 async function atribuir(body, autor) {
-  return withDb((db, appCfg) => aplicarNcm(db, appCfg, autor, body?.ncm, body?.nfe, body?.nfce, 'Classificação por NCM'));
+  return aplicarComAceite(body, autor, 'Classificação por NCM');
 }
 
 async function replicador() {
@@ -733,31 +870,7 @@ async function replicador() {
 async function replicar(body, autor) {
   const itens = (Array.isArray(body?.itens) ? body.itens : []).filter((item) => ncmValido(item?.ncm));
   if (!itens.length) return { ok: false, error: 'Marque ao menos um NCM válido.' };
-  return withDb(async (db, appCfg) => {
-    let alterados = 0;
-    let jaIguais = 0;
-    let conflito = 0;
-    const falhas = [];
-    const linhas = [];
-    for (const item of itens) {
-      try {
-        const res = await aplicarNcm(db, appCfg, autor, item.ncm, item.nfe, item.nfce, 'Replicador Geral');
-        if (!res.ok) falhas.push({ ncm: formatarNcm(item.ncm), error: res.error });
-        else {
-          alterados += res.alterados || 0;
-          jaIguais += res.jaIguais || 0;
-          conflito += res.conflito || 0;
-          linhas.push(...(res.linhas || []));
-        }
-      } catch (err) {
-        falhas.push({ ncm: formatarNcm(item.ncm), error: err.message });
-      }
-    }
-    if (!alterados && !jaIguais && falhas.length) {
-      return { ok: false, error: falhas[0].error, falhas };
-    }
-    return { ok: true, alterados, jaIguais, conflito, falhas, linhas: juntarLinhas(linhas) };
-  });
+  return aplicarComAceite({ ...body, itens }, autor, 'Replicador Geral');
 }
 
 module.exports = {
@@ -768,5 +881,7 @@ module.exports = {
   atribuir,
   replicador,
   replicar,
+  previaAlteracao,
+  cpfValido,
   situacaoConsulta,
 };

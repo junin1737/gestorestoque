@@ -489,6 +489,41 @@ function iniciar() {
   agendar(3000);
 }
 
+/** Grava o aceite do termo de NCM no log do cadastro do cliente, no painel de licenças. */
+async function registrarAceiteNcm({ nome, cpf, origem, resumo, termo }) {
+  if (!ATIVO) return { ok: false, error: 'O cadastro do cliente no painel não está ativo nesta instalação.' };
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), TIMEOUT_MS);
+  try {
+    const headers = await cabecalhosInstalacao();
+    const res = await fetch(`${LICENCA_URL}/api/aceite-ncm`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify({
+        nome,
+        cpf,
+        origem,
+        resumo,
+        termo,
+        aplicacao: APLICACAO,
+      }),
+      signal: ctrl.signal,
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || data.ok === false) {
+      return { ok: false, error: data.error || 'O painel não registrou o aceite no cadastro do cliente.' };
+    }
+    return { ok: true };
+  } catch (err) {
+    const mensagem = err.name === 'AbortError'
+      ? 'O painel de licenças não respondeu. A alteração não foi gravada.'
+      : err.message;
+    return { ok: false, error: mensagem };
+  } finally {
+    clearTimeout(t);
+  }
+}
+
 module.exports = {
   LICENCA_URL,
   APLICACAO,
@@ -505,4 +540,5 @@ module.exports = {
   versaoSupervisor,
   conferirSenhaSupervisor,
   autorizarRevenda,
+  registrarAceiteNcm,
 };

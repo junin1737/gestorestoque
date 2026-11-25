@@ -59,6 +59,8 @@ th { background: #1f4e79; color: #fff; text-align: left; padding: 6px 8px; font-
 td { border-bottom: 1px solid #d5dde8; padding: 5px 8px; vertical-align: top; overflow-wrap: anywhere; }
 tr:nth-child(even) td { background: #f4f7fb; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
+.aviso { background: #fff4e5; border: 1px solid #e6b15c; padding: 8px 10px; font-weight: 700; margin: 0 0 10px; }
+.termo { font-size: 10px; line-height: 1.45; margin: 0 0 8px; white-space: pre-wrap; }
 .rodape { margin-top: 14px; color: #5c6b7a; font-size: 10px; }
 @media print { body { padding: 0; } .no-print { display: none; } }
 </style></head><body>
@@ -67,6 +69,8 @@ tr:nth-child(even) td { background: #f4f7fb; }
   <h1>${xml(opcoes.titulo || 'Relatório')}</h1>
   <p class="meta">${xml(opcoes.subtitulo || '')}${opcoes.subtitulo ? ' · ' : ''}${linhas.length.toLocaleString('pt-BR')} registro(s) · ${xml(opcoes.usuario ? `Usuário ${opcoes.usuario} · ` : '')}Gerado em ${xml(opcoes.geradoEm || agora())}</p>
 </header>
+${opcoes.aviso ? `<p class="aviso">${xml(opcoes.aviso)}</p>` : ''}
+${(opcoes.paragrafos || []).map((p) => `<p class="termo">${xml(p)}</p>`).join('')}
 <table><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
 <p class="rodape">Documento para conferência do usuário e do contador. Gestor de Estoque · MT Automações</p>
 <p class="no-print"><button type="button" onclick="window.print()">Imprimir / Salvar PDF</button></p>

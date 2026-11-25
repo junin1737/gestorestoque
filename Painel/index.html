@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=299" />
+  <link rel="stylesheet" href="styles.css?v=300" />
   <link rel="stylesheet" href="importacao-nfe.css?v=257" />
 </head>
 <body>
@@ -1356,6 +1356,27 @@
         </div>
       </div>
     </dialog>
+    <dialog id="dlg-termo" class="dlg">
+      <div class="dlg-card">
+        <h3>Termo de ciência e responsabilidade</h3>
+        <p class="hint">A prévia abriu em PDF para validação com o contador. A alteração só é gravada depois do aceite.</p>
+        <div id="dlg-termo-texto" class="termo-texto"></div>
+        <label class="termo-check"><input type="checkbox" id="dlg-termo-aceite" /> Assinar o termo e autorizar a atualização</label>
+        <div id="dlg-termo-assina" hidden>
+          <label>Nome completo
+            <input id="dlg-termo-nome" autocomplete="name" />
+          </label>
+          <label>CPF
+            <input id="dlg-termo-cpf" inputmode="numeric" maxlength="14" placeholder="000.000.000-00" autocomplete="off" />
+          </label>
+        </div>
+        <p id="dlg-termo-erro" class="termo-erro" hidden></p>
+        <div class="dlg-actions">
+          <button type="button" id="dlg-termo-nao" class="btn">Cancelar</button>
+          <button type="button" id="dlg-termo-sim" class="btn primary" disabled>Aceitar termos</button>
+        </div>
+      </div>
+    </dialog>
     <dialog id="dlg-prompt" class="dlg">
       <div class="dlg-card msg-card">
         <p id="dlg-prompt-text"></p>
@@ -1517,12 +1538,12 @@
   <script src="condicionais.js?v=252"></script>
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
-  <script src="exportar-tabela.js?v=1"></script>
-  <script src="classificacao-ncm.js?v=8"></script>
+  <script src="exportar-tabela.js?v=2"></script>
+  <script src="classificacao-ncm.js?v=9"></script>
   <script src="relatorios.js?v=3"></script>
   <script src="dashboard.js?v=263"></script>
   <script src="gondola.js?v=4"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=287"></script>
+  <script src="app.js?v=288"></script>
 </body>
 </html>
