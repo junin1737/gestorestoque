@@ -514,11 +514,18 @@ input, select, textarea {
   border-radius: var(--radius); padding: 1.25rem; border: 1px solid var(--border);
 }
 .dlg-actions { display: flex; gap: 0.5rem; justify-content: flex-end; flex-wrap: wrap; }
+#dlg-previa .previa-card { width: min(1100px, 96vw); height: min(92vh, 920px); display: flex; flex-direction: column; gap: 0.65rem; padding: 0.8rem; }
+#dlg-previa .previa-barra { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+#dlg-previa iframe { flex: 1 1 auto; width: 100%; min-height: 220px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+#dlg-previa .previa-aceite { display: grid; gap: 0.55rem; }
+#dlg-previa .previa-aceite[hidden] { display: none; }
+#dlg-previa .previa-aceite label:not(.termo-check) { display: grid; gap: 0.25rem; font-size: 0.86rem; }
+#dlg-previa .previa-aceite input:not([type="checkbox"]) { width: 100%; }
 #dlg-termo .dlg-card { width: min(680px, 96vw); display: grid; gap: 0.75rem; }
 #dlg-termo h3 { margin: 0; font-size: 1.05rem; }
 #dlg-termo .hint { margin: 0; }
 .termo-texto { max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 0.84rem; line-height: 1.45; border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem; background: var(--bg); }
-.termo-check { display: flex; gap: 0.5rem; align-items: flex-start; font-weight: 650; }
+.termo-check { display: flex; gap: 0.5rem; align-items: center; font-weight: 700; color: var(--text); }
 .termo-check input { margin-top: 0.2rem; flex: 0 0 auto; }
 #dlg-termo-assina { display: grid; gap: 0.55rem; }
 #dlg-termo-assina[hidden] { display: none; }

@@ -13,6 +13,9 @@ let dashCacheChave = '';
 let dashCacheHtml = '';
 let dashFiltros = {};
 let dashAba = '';
+let dashUltimo = null;
+let dashCartao = null;
+let dashRedesenho = 0;
 
 function dashPerfis() {
   const p = state.usuario?.permissoes || {};
@@ -115,46 +118,15 @@ function queryDash(extra) {
   return params;
 }
 
+/* ---------- Peças comuns (contador e entradas usam o visual antigo) ---------- */
+
 function card(titulo, valor, detalhe, extra, tom) {
   const cls = tom === 'saida' || tom === 'entrada' ? ` fin-${tom}` : '';
   return `<article class="fin-card${cls}"><span>${esc(titulo)}</span><strong>${esc(valor)}</strong><small>${esc(detalhe || '')}</small>${extra ? `<small class="fin-extra">${esc(extra)}</small>` : ''}</article>`;
 }
 
-function linhaFrete() {
-  return '';
-}
-
-function htmlMeses(dados) {
-  return `<section id="secao-resumo" class="fin-box"><h2>Entradas x saídas <span>${esc(dados.ano || '')}</span></h2>${barras(dados.porMes || [])}</section>`;
-}
-
 function pct(valor) {
   return `${Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}%`;
-}
-
-function htmlRecortes(dados) {
-  return `<section id="secao-grupo" class="fin-box"><h2>Vendas por grupo</h2>${tabelaGrupo(dados.porGrupoVenda, 'das vendas')}</section>
-  ${htmlPagamento(dados)}
-  <section id="secao-compras" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupoCompra, 'das compras')}</section>`;
-}
-
-function htmlPagamento(dados) {
-  const pags = (dados.porPagamento || []).map((r) => `
-    <div class="fin-pag"><span>${esc(r.forma)}</span><strong>${brl(r.valor)}</strong><span class="fin-meter"><span style="width:${Math.min(100, r.participacao || 0)}%"></span></span></div>`).join('');
-  return `<section id="secao-pagto" class="fin-box"><h2>Vendas por forma de pagamento</h2>${pags || '<p class="hint">Nenhuma movimentação no período</p>'}</section>`;
-}
-
-function barras(serie) {
-  const lista = serie && serie.length ? serie : [];
-  const max = Math.max(1, ...lista.map((d) => Math.max(d.vendido, d.comprado, 0)));
-  const cols = lista.map((d) => {
-    const altV = d.vendido > 0 ? Math.max(6, Math.round((d.vendido / max) * 100)) : 0;
-    const altC = d.comprado > 0 ? Math.max(6, Math.round((d.comprado / max) * 100)) : 0;
-    const nome = d.nome || '';
-    return `<div class="fin-col" title="${esc(nome)} · recebido ${brl(d.vendido)} · pago ${brl(d.comprado)}"><span class="fin-bars"><span class="fin-bar pago" style="height:${altC}%"></span><span class="fin-bar rec" style="height:${altV}%"></span></span><em>${esc(nome)}</em></div>`;
-  }).join('');
-  return `<div class="fin-chart">${cols}</div>
-    <p class="fin-legenda"><i class="rec"></i> Recebido <i class="pago"></i> Pago</p>`;
 }
 
 function tabelaGrupo(linhas, lado) {
@@ -208,157 +180,451 @@ function htmlFiltros(perfil) {
   </form>`;
 }
 
-function htmlAbas(dados) {
-  const abas = dados?.abas || [];
-  if (abas.length < 2) return '';
-  const rotulo = {
-    manage: 'Manage',
-    vendas: 'Vendas',
-    despesa: 'Despesa x Receita',
-    fiscal: 'NFe+NFCe',
-    financeiro: 'Financeiro',
-  };
-  return `<div class="fin-abas" role="tablist">${abas.map((aba) => `
-    <button type="button" class="tab ${dados.aba === aba ? 'active' : ''}" data-aba="${aba}">${rotulo[aba] || aba}</button>`).join('')}</div>`;
+/* ---------- Dashboard padrão: Resumo, Vendas e Financeiro ---------- */
+
+const ROTULO_ABA = { manage: 'Manage', resumo: 'Resumo', vendas: 'Vendas', financeiro: 'Financeiro' };
+/* Primeira cor é a do tema (logo); as demais são fixas e validadas para daltonismo. */
+const CORES_SERIE = ['var(--d-acc)', '#eb6834', '#1baf7a', '#eda100', '#6250d6', '#e87ba4'];
+const LINHAS_VISIVEIS = 8;
+
+function num(valor, casas = 0) {
+  return Number(valor || 0).toLocaleString('pt-BR', { minimumFractionDigits: casas, maximumFractionDigits: casas });
 }
 
-const CORES_PIZZA = ['#1f9d55', '#2f6fed', '#e23d3d', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d', '#4f46e5', '#ea580c', '#0f766e', '#9333ea'];
-
-function itensPizza(lista, nomeDe) {
-  return (lista || [])
-    .map((item) => ({ nome: nomeDe(item), total: Number(item.total) || 0 }))
-    .filter((item) => item.total !== 0);
+function pct1(valor) {
+  return `${num(valor, 1)}%`;
 }
 
-function planosDaPizza(grupos) {
-  const map = new Map();
-  (grupos || []).forEach((g) => {
-    (g.planos || []).forEach((p) => {
-      const nome = [p.codigo, p.plano].filter(Boolean).join(' · ') || 'Sem plano de contas';
-      map.set(nome, (map.get(nome) || 0) + (Number(p.total) || 0));
-    });
-  });
-  return [...map.entries()]
-    .map(([nome, total]) => ({ nome, total }))
-    .sort((a, b) => Math.abs(b.total) - Math.abs(a.total));
+function dataBr(iso) {
+  return iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '';
 }
 
-function htmlPizza(id, itens) {
-  const lista = itens || [];
-  const total = lista.reduce((s, item) => s + Math.abs(item.total), 0);
-  if (!total) return '<p class="fin-vazio">Sem valores para o gráfico</p>';
-  let ang = -Math.PI / 2;
-  const fatias = lista.map((item, i) => {
-    const frac = Math.abs(item.total) / total;
-    const fim = ang + frac * Math.PI * 2;
-    const cor = CORES_PIZZA[i % CORES_PIZZA.length];
-    let path = '';
-    if (frac >= 0.999) {
-      path = '<circle cx="0" cy="0" r="1"></circle>';
-    } else {
-      const x1 = Math.cos(ang).toFixed(4);
-      const y1 = Math.sin(ang).toFixed(4);
-      const x2 = Math.cos(fim).toFixed(4);
-      const y2 = Math.sin(fim).toFixed(4);
-      const grande = frac > 0.5 ? 1 : 0;
-      path = `<path d="M 0 0 L ${x1} ${y1} A 1 1 0 ${grande} 1 ${x2} ${y2} Z"></path>`;
-    }
-    ang = fim;
-    const pct = (frac * 100).toLocaleString('pt-BR', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
-    return { path, cor, nome: item.nome, pct, total: item.total };
-  });
-  const desenhos = fatias.map((f) => f.path.replace('<path ', `<path fill="${f.cor}" `).replace('<circle ', `<circle fill="${f.cor}" `)).join('');
-  const legenda = fatias.map((f) => `
-    <li><i style="background:${f.cor}"></i><span>${esc(f.nome)}</span><strong>${brl(f.total)}</strong><em>${f.pct}%</em></li>`).join('');
-  return `<figure class="dre-pizza" id="${id}">
-    <svg viewBox="-1.05 -1.05 2.1 2.1" role="img" aria-label="Gráfico de pizza">${desenhos}</svg>
-    <ul class="dre-legenda">${legenda}</ul>
-  </figure>`;
+function milhar(valor) {
+  const v = Number(valor) || 0;
+  return Math.abs(v) >= 1000 ? `${num(v / 1000, 1)} mil` : num(v, 2);
 }
 
-function htmlLadoDre(prefixo, titulo, total, grupos, tom) {
-  const cls = tom === 'saida' ? 'fin-valor-saida' : 'fin-valor-entrada';
-  const centros = (grupos || []).map((g, i) => {
-    const planos = (g.planos || []).map((p, j) => {
-      const nome = [p.codigo, p.plano].filter(Boolean).join(' · ');
-      const linhas = (p.linhas || []).map((l) => `
-        <tr>
-          <td>${esc(l.data ? l.data.split('-').reverse().join('/') : '')}</td>
-          <td>${esc(l.historico || '')}</td>
-          <td class="${cls}">${brl(l.valor)}</td>
-        </tr>`).join('');
-      const idPlano = `${prefixo}-p-${i}-${j}`;
-      return `<div class="dre-plano">
-        <div class="dre-nivel">
-          <button type="button" class="dre-mais" data-dre-abre="${idPlano}" aria-expanded="false">+</button>
-          <span>${esc(nome)}</span>
-          <strong class="${cls}">${brl(p.total)}</strong>
-        </div>
-        <div id="${idPlano}" hidden>
-          <table class="fin-table dre-linhas"><tbody>${linhas}</tbody></table>
-        </div>
-      </div>`;
-    }).join('');
-    const idCentro = `${prefixo}-c-${i}`;
-    return `<article class="dre-centro">
-      <div class="dre-nivel">
-        <button type="button" class="dre-mais" data-dre-abre="${idCentro}" aria-expanded="false">+</button>
-        <h3>${esc(g.centro)}</h3>
-        <strong class="${cls}">${brl(g.total)}</strong>
-      </div>
-      <div id="${idCentro}" hidden>${planos}</div>
-    </article>`;
-  }).join('');
-  const idLista = `${prefixo}-lista`;
-  const idCentroPizza = `${prefixo}-pizza-centro`;
-  const idPlanoPizza = `${prefixo}-pizza-plano`;
-  return `<section class="fin-box dre-lado">
-    <div class="dre-nivel dre-topo">
-      <button type="button" class="dre-mais" data-dre-abre="${idLista}" aria-expanded="false">+</button>
-      <h2>${esc(titulo)} <span class="${cls}">${brl(total)}</span></h2>
-    </div>
-    <div id="${idLista}" hidden>
-      ${centros || '<p class="fin-vazio">Nenhuma movimentação no período</p>'}
-    </div>
-    ${htmlPizza(idCentroPizza, itensPizza(grupos, (g) => g.centro))}
-    <div id="${idPlanoPizza}" hidden>${htmlPizza(`${idPlanoPizza}-g`, planosDaPizza(grupos))}</div>
-    <button type="button" class="btn dre-troca" data-dre-pizza="${prefixo}" data-modo="centro">Mostrar por plano de contas</button>
+function kpi(titulo, valor, detalhe, opc = {}) {
+  return `<article class="dash-kpi${opc.destaque ? ' destaque' : ''}">
+    <span>${esc(titulo)}</span>
+    <strong class="${opc.tom || ''}">${esc(valor)}</strong>
+    <small>${esc(detalhe || '')}</small>
+  </article>`;
+}
+
+function caixa(titulo, sub, corpo, cls = '') {
+  return `<section class="dash-box ${cls}">
+    <header><h2>${esc(titulo)}</h2>${sub ? `<p>${esc(sub)}</p>` : ''}</header>
+    ${corpo}
   </section>`;
 }
 
-function htmlFinanceiro(dados) {
-  if (dados.erro) return `${htmlAbas(dados)}<p class="fin-vazio">${esc(dados.erro)}</p>`;
-  const resultado = Number(dados.resultado) || 0;
-  return `${htmlAbas(dados)}
-  <p class="hint">Valores pela data do pagamento. Mercadorias para Revenda entra nas entradas, porque é a receita. Nas saídas esse custo fica de fora, porque já está no CMV.</p>
-  <div class="fin-cards">
-    ${card('Entradas', brl(dados.totalEntradas), 'recebido no período', '', 'saida')}
-    ${card('Saídas', brl(dados.totalSaidas), 'pago no período', '', 'entrada')}
-    ${card('Entradas − saídas', brl(resultado), 'no período', '', resultado < 0 ? 'entrada' : 'saida')}
+function barra(parte, maximo, tom = '') {
+  const w = maximo > 0 ? Math.max(0, Math.min(100, (Number(parte) / maximo) * 100)) : 0;
+  return `<span class="dash-barra"><i class="${tom}" style="width:${w.toFixed(1)}%"></i></span>`;
+}
+
+function verTodos(total) {
+  return total > LINHAS_VISIVEIS
+    ? `<button type="button" class="dash-ver" data-ver-todos data-qtd="${total}">Ver todos (${total})</button>`
+    : '';
+}
+
+function quantidade(qtd, unidade) {
+  const un = String(unidade || '').trim().toLowerCase();
+  const casas = Number(qtd) % 1 ? (un === 'kg' ? 2 : 3) : 0;
+  return `${num(qtd, casas)}${un ? ` ${un}` : ''}`;
+}
+
+function htmlAbas(dados) {
+  const abas = dados?.abas || [];
+  if (abas.length < 2) return '';
+  return `<div class="dash-abas" role="tablist">${abas.map((aba) => `
+    <button type="button" role="tab" aria-selected="${dados.aba === aba}" class="${dados.aba === aba ? 'ativa' : ''}" data-aba="${aba}">${esc(ROTULO_ABA[aba] || aba)}</button>`).join('')}</div>`;
+}
+
+/* ----- Resumo ----- */
+
+function cardsResumo(d) {
+  const base = [
+    kpi('Vendido hoje', brl(d.vendidoDia), 'dia atual', { destaque: true }),
+    kpi('Vendido no mês', brl(d.vendidoMes), 'mês atual', { destaque: true }),
+  ];
+  if (d.aba === 'manage') {
+    base.push(kpi('Total Manage', brl(d.totalVendido), `${num(d.notasVenda)} notas`));
+  } else if (d.usaGr) {
+    base.push(
+      kpi('Total vendido', brl(d.totalVendido), `${num(d.notasVenda)} notas no período`),
+      kpi('Vendas fiscais', brl(d.vendasFiscais), 'NFC-e e NF-e'),
+      kpi('Vendas GR', brl(d.vendasGerenciais), 'não convertidas'),
+    );
+  } else {
+    base.push(
+      kpi('Total vendido', brl(d.totalVendido), `${num(d.notasVenda)} notas no período`),
+      kpi('Vendas fiscais', brl(d.vendasFiscais), 'modelos 55 e 65'),
+      kpi('Vendas gerenciais', brl(d.vendasGerenciais), 'modelo GR'),
+    );
+  }
+  base.push(
+    kpi('Total comprado', brl(d.totalComprado), `${num(d.notasEntrada)} notas de entrada`),
+    kpi('Ticket médio', brl(d.ticketMedio), 'total vendido ÷ notas'),
+  );
+  return `<div class="dash-kpis">${base.join('')}</div>`;
+}
+
+function htmlGruposVenda(linhas) {
+  const lista = linhas || [];
+  const max = Math.max(0, ...lista.map((r) => Number(r.valor) || 0));
+  const corpo = lista.map((r, i) => {
+    const margem = Number(r.margem) || 0;
+    return `<tr class="${i >= LINHAS_VISIVEIS ? 'dash-extra' : ''}">
+      <td><div class="nome">${esc(r.grupo)}</div>${barra(r.valor, max)}</td>
+      <td class="num">${brl(r.valor)}</td>
+      <td class="num some-mobile">${num(r.quantidade, Number(r.quantidade) % 1 ? 2 : 0)}</td>
+      <td class="num"><strong class="${margem < 0 ? 'neg' : 'pos'}">${brl(margem)}</strong><small>${pct1(r.margemPct)}</small></td>
+    </tr>`;
+  }).join('');
+  if (!corpo) return '<p class="dash-vazio">Nenhuma venda no período</p>';
+  return `<table class="dash-tabela"><thead><tr><th>Grupo</th><th class="num">Vendido</th><th class="num some-mobile">Qtd</th><th class="num">Margem</th></tr></thead><tbody>${corpo}</tbody></table>${verTodos(lista.length)}`;
+}
+
+function htmlGruposCompra(linhas) {
+  const lista = linhas || [];
+  const max = Math.max(0, ...lista.map((r) => Number(r.valor) || 0));
+  const corpo = lista.map((r, i) => `<tr class="${i >= LINHAS_VISIVEIS ? 'dash-extra' : ''}">
+      <td><div class="nome">${esc(r.grupo)}</div>${barra(r.valor, max, 'neutro')}</td>
+      <td class="num">${brl(r.valor)}</td>
+      <td class="num some-mobile">${num(r.notas)}</td>
+      <td class="num">${pct(r.participacao)}</td>
+    </tr>`).join('');
+  if (!corpo) return '<p class="dash-vazio">Nenhuma compra no período</p>';
+  return `<table class="dash-tabela"><thead><tr><th>Grupo</th><th class="num">Comprado</th><th class="num some-mobile">Notas</th><th class="num">% das compras</th></tr></thead><tbody>${corpo}</tbody></table>${verTodos(lista.length)}`;
+}
+
+function htmlPagamentos(linhas) {
+  const lista = linhas || [];
+  if (!lista.length) return '<p class="dash-vazio">Nenhuma movimentação no período</p>';
+  return `<ul class="dash-rank">${lista.map((r) => `
+    <li style="grid-template-columns:minmax(0,1fr) auto">
+      <span class="n"><b>${esc(r.forma)}</b><small>${pct1(r.participacao)} do vendido</small>${barra(r.participacao, 100)}</span>
+      <span class="v">${brl(r.valor)}</span>
+    </li>`).join('')}</ul>`;
+}
+
+function htmlResumo(d) {
+  return `${cardsResumo(d)}
+  <div class="dash-grade">
+    ${caixa('Vendas por grupo', 'Valor vendido e margem em R$ e %', htmlGruposVenda(d.porGrupoVenda))}
+    ${caixa('Formas de pagamento', 'Participação no total vendido', htmlPagamentos(d.porPagamento))}
   </div>
-  <div class="dre-split">
-    ${htmlLadoDre('ent', 'Entradas', dados.totalEntradas, dados.entradas, 'saida')}
-    ${htmlLadoDre('sai', 'Saídas', dados.totalSaidas, dados.saidas, 'entrada')}
+  ${caixa('Compras por grupo', 'Notas de entrada no período', htmlGruposCompra(d.porGrupoCompra))}`;
+}
+
+/* ----- Vendas ----- */
+
+function htmlRankVendedores(lista) {
+  if (!lista.length) return '<p class="dash-vazio">Nenhuma venda no período</p>';
+  const max = Number(lista[0].valor) || 0;
+  return `<ul class="dash-rank">${lista.map((v, i) => `
+    <li class="${i >= LINHAS_VISIVEIS ? 'dash-extra' : ''}">
+      <span class="pos-rank">${i + 1}º</span>
+      <span class="n"><b title="${esc(v.nome)}">${esc(v.nome)}</b><small>${num(v.notas)} ${v.notas === 1 ? 'nota' : 'notas'} · ticket ${brl(v.ticket)}</small>${barra(v.valor, max)}</span>
+      <span class="v">${brl(v.valor)}<small>${pct1(v.participacao)}</small></span>
+    </li>`).join('')}</ul>${verTodos(lista.length)}`;
+}
+
+function htmlRankProdutos(lista, campo) {
+  if (!lista.length) return '<p class="dash-vazio">Nenhuma venda no período</p>';
+  const max = Math.max(0, ...lista.map((p) => Number(p[campo]) || 0));
+  const lucro = campo === 'lucro';
+  return `<ul class="dash-rank">${lista.map((p, i) => `
+    <li>
+      <span class="pos-rank">${i + 1}º</span>
+      <span class="n"><b title="${esc(p.nome)}">${esc(p.nome)}</b><small>${lucro ? `vendido ${brl(p.valor)}` : quantidade(p.quantidade, p.unidade)}</small>${barra(p[campo], max, lucro ? 'pos' : '')}</span>
+      <span class="v ${lucro ? (p.lucro < 0 ? 'neg' : 'pos') : ''}">${brl(p[campo])}</span>
+    </li>`).join('')}</ul>`;
+}
+
+function htmlVendas(d) {
+  const canc = d.cancelamentos || {};
+  const inut = d.inutilizacoes || {};
+  const lucro = Number(d.lucroBruto) || 0;
+  return `<div class="dash-kpis">
+    ${kpi('Valor vendido', brl(d.valorVendido), `fiscal + gerencial · ${num(d.notasVenda)} notas`, { destaque: true })}
+    ${kpi('Custo das vendas', brl(d.custo), 'custo da nota ou do cadastro')}
+    ${kpi('Lucro bruto', brl(lucro), `margem de ${pct1(d.margemPct)}`, { destaque: true, tom: lucro < 0 ? 'neg' : 'pos' })}
+    ${kpi('Cancelamentos', brl(canc.valor), `${num(canc.notas)} ${canc.notas === 1 ? 'nota cancelada' : 'notas canceladas'}`)}
+    ${kpi('Inutilizações', `${num(inut.notas)} ${inut.notas === 1 ? 'nota' : 'notas'}`, `${brl(inut.valor)} em itens`)}
+  </div>
+  <div class="dash-grade">
+    ${caixa('Vendas por vendedor', 'Valor vendido no período', '<div class="dash-grafico" data-grafico="vendedores"></div>')}
+    ${caixa('Ranking de vendedores', 'Valor, notas e ticket médio', htmlRankVendedores(d.vendedores || []))}
+  </div>
+  <div class="dash-grade meio">
+    ${caixa('Produtos mais vendidos', 'Por valor vendido no período', htmlRankProdutos(d.maisVendidos || [], 'valor'))}
+    ${caixa('Produtos que mais deram lucro', 'Lucro bruto em R$ (venda − custo)', htmlRankProdutos(d.maisLucro || [], 'lucro'))}
   </div>`;
 }
 
+/* ----- Financeiro ----- */
+
+function nomePlano(p) {
+  return [p.codigo, p.plano].filter(Boolean).join(' · ') || 'Sem plano de contas';
+}
+
+function htmlRosca(itens) {
+  const lista = (itens || []).filter((i) => Number(i.valor) > 0);
+  const total = lista.reduce((s, i) => s + Number(i.valor), 0);
+  if (!total) return '';
+  const visiveis = lista.slice(0, CORES_SERIE.length);
+  const resto = lista.slice(CORES_SERIE.length).reduce((s, i) => s + Number(i.valor), 0);
+  const fatias = visiveis.map((i, n) => ({ nome: i.nome, valor: Number(i.valor), cor: CORES_SERIE[n] }));
+  if (resto > 0) fatias.push({ nome: 'Outros', valor: resto, cor: 'var(--d-neutro)' });
+  let ang = -Math.PI / 2;
+  const r = 1;
+  const ri = 0.62;
+  const ponto = (a, raio) => `${(Math.cos(a) * raio).toFixed(4)} ${(Math.sin(a) * raio).toFixed(4)}`;
+  const paths = fatias.map((f) => {
+    const frac = f.valor / total;
+    if (frac >= 0.999) {
+      return `<path style="fill:${f.cor}" fill-rule="evenodd" d="M 1 0 A 1 1 0 1 1 -1 0 A 1 1 0 1 1 1 0 Z M ${ri} 0 A ${ri} ${ri} 0 1 0 -${ri} 0 A ${ri} ${ri} 0 1 0 ${ri} 0 Z"><title>${esc(f.nome)}: ${brl(f.valor)}</title></path>`;
+    }
+    const fim = ang + frac * Math.PI * 2;
+    const vao = Math.min(0.02, (fim - ang) / 4);
+    const grande = frac > 0.5 ? 1 : 0;
+    const d = `M ${ponto(ang, r)} A ${r} ${r} 0 ${grande} 1 ${ponto(fim - vao, r)} L ${ponto(fim - vao, ri)} A ${ri} ${ri} 0 ${grande} 0 ${ponto(ang, ri)} Z`;
+    ang = fim;
+    return `<path style="fill:${f.cor}" d="${d}"><title>${esc(f.nome)}: ${brl(f.valor)}</title></path>`;
+  }).join('');
+  return `<div class="dash-rosca">
+    <svg viewBox="-1.05 -1.05 2.1 2.1" role="img" aria-label="Distribuição">${paths}
+      <text x="0" y="0.08" text-anchor="middle" font-size="0.22" font-weight="700" style="fill:var(--text)">${esc(milhar(total))}</text></svg>
+    <ul>${fatias.map((f) => `<li><i style="background:${f.cor}"></i><span>${esc(f.nome)}</span><b>${pct1((f.valor / total) * 100)}</b></li>`).join('')}</ul>
+  </div>`;
+}
+
+function htmlLinhasLanc(linhas, rotulo) {
+  return `<div class="dash-lanc">${(linhas || []).map((l) => `
+    <div><span>${esc(rotulo(l))}</span><b>${brl(l.valor)}</b></div>`).join('')}</div>`;
+}
+
+function htmlPlanoDetalhe(p, linhas, rotulo, extra) {
+  return `<details>
+    <summary><span>${esc(nomePlano(p))}</span><b>${brl(p.valorVisivel ?? p.total)}</b></summary>
+    ${htmlLinhasLanc(linhas, rotulo)}${extra || ''}
+  </details>`;
+}
+
+const rotuloPago = (l) => `${dataBr(l.data)} · ${l.historico || 'sem histórico'}`;
+const rotuloTitulo = (t) => `vence ${dataBr(t.vencimento)} · doc. ${t.documento || '—'}${t.historico ? ` · ${t.historico}` : ''}`;
+
+function htmlRealizado(d) {
+  const receitas = d.receitas || [];
+  const saidas = d.saidas || [];
+  const resultado = Number(d.resultado) || 0;
+  const fora = (d.planosFora || []).length
+    ? `<p class="dash-vazio">Despesas pagas não incluem ${esc(d.planosFora.join(', '))}: esse custo já está nas vendas.</p>`
+    : '';
+  const listaReceitas = receitas.length
+    ? `<div class="dash-arvore">${receitas.map((p) => htmlPlanoDetalhe(p, p.linhas, rotuloPago)).join('')}</div>`
+    : '<p class="dash-vazio">Nenhum recebimento no período</p>';
+  const listaDespesas = saidas.length
+    ? `<div class="dash-arvore">${saidas.map((g) => `<details>
+        <summary><span>${esc(g.centro)}</span><b>${brl(g.total)}</b></summary>
+        ${(g.planos || []).map((p) => htmlPlanoDetalhe(p, p.linhas, rotuloPago)).join('')}
+      </details>`).join('')}</div>`
+    : '<p class="dash-vazio">Nenhum pagamento no período</p>';
+  return `<h3 class="dash-bloco">Realizado <small>recebido e pago no período</small></h3>
+  <div class="dash-kpis">
+    ${kpi('Receitas recebidas', brl(d.totalEntradas), 'pela data do recebimento', { destaque: true })}
+    ${kpi('Despesas pagas', brl(d.totalSaidas), 'pela data do pagamento')}
+    ${kpi('Resultado realizado', brl(resultado), 'receitas − despesas', { destaque: true, tom: resultado < 0 ? 'neg' : 'pos' })}
+  </div>
+  <div class="dash-grade meio">
+    ${caixa('Receitas por plano de contas', 'Toque no plano para ver os lançamentos', `${htmlRosca(receitas.map((p) => ({ nome: nomePlano(p), valor: p.total })))}${listaReceitas}`)}
+    ${caixa('Despesas por centro de custo', 'Centro de custo › plano de contas › lançamentos', `${htmlRosca(saidas.map((g) => ({ nome: g.centro, valor: g.total })))}${listaDespesas}${fora}`)}
+  </div>`;
+}
+
+function valorComCartao(item, comCartao) {
+  return comCartao ? Number(item.total) || 0 : (Number(item.total) || 0) - (Number(item.cartao) || 0);
+}
+
+function htmlPlanosAbertos(planos, comCartao) {
+  return planos.map((p) => {
+    const valor = valorComCartao(p, comCartao);
+    if (valor <= 0.004) return '';
+    const titulos = (p.titulos || []).filter((t) => comCartao || !t.cartao);
+    const qtd = comCartao ? p.quantidade : p.quantidade - (p.quantidadeCartao || 0);
+    const faltam = qtd - titulos.length;
+    const extra = faltam > 0 ? `<p class="dash-vazio" style="margin-left:2rem">+ ${num(faltam)} títulos não listados</p>` : '';
+    return htmlPlanoDetalhe({ ...p, valorVisivel: valor }, titulos, rotuloTitulo, extra);
+  }).join('');
+}
+
+function htmlRealizar(d, comCartao) {
+  const a = d.aRealizar;
+  if (!a) return `<h3 class="dash-bloco">A realizar</h3><p class="dash-vazio">${esc(d.erroRealizar || 'Contas em aberto indisponíveis.')}</p>`;
+  const receber = valorComCartao(a.receber, comCartao);
+  const pagar = Number(a.pagar.total) || 0;
+  const saldo = receber - pagar;
+  const vr = a.vencidosReceber || {};
+  const vp = a.vencidosPagar || {};
+  const vencRec = valorComCartao(vr, comCartao);
+  const qtdVencRec = comCartao ? vr.quantidade : (vr.quantidade || 0) - (vr.quantidadeCartao || 0);
+  const subReceber = Number(a.receber.cartao) > 0
+    ? (comCartao ? `inclui ${brl(a.receber.cartao)} de cartão` : `sem cartão · ${brl(a.receber.cartao)} fora`)
+    : 'títulos em aberto';
+  const listaReceber = htmlPlanosAbertos(a.receber.planos || [], comCartao);
+  const cartaoFora = !comCartao && Number(a.receber.cartao) > 0
+    ? `<div class="dash-linha-extra"><span>Cartão fora da soma (histórico contém “cartão”)</span><b>${brl(a.receber.cartao)}</b></div>`
+    : '';
+  const vencidoRecHtml = vencRec > 0
+    ? `<div class="dash-linha-extra"><span>Vencidos antes do período · ${num(qtdVencRec)} títulos</span><b>${brl(vencRec)}</b></div>`
+    : '';
+  const listaPagar = (a.pagar.centros || []).map((g) => `<details>
+      <summary><span>${esc(g.centro)}</span><b>${brl(g.total)}</b></summary>
+      ${htmlPlanosAbertos(g.planos || [], true)}
+    </details>`).join('');
+  const vencidoPagHtml = Number(vp.total) > 0
+    ? `<div class="dash-linha-extra"><span>Vencidos antes do período · ${num(vp.quantidade)} títulos</span><b>${brl(vp.total)}</b></div>`
+    : '';
+  return `<h3 class="dash-bloco">A realizar <small>títulos em aberto com vencimento no período</small></h3>
+  <div class="dash-kpis">
+    ${kpi('A receber', brl(receber), subReceber, { destaque: true })}
+    ${kpi('A pagar', brl(pagar), 'contas a pagar em aberto')}
+    ${kpi('Saldo previsto', brl(saldo), 'a receber − a pagar', { destaque: true, tom: saldo < 0 ? 'neg' : 'pos' })}
+  </div>
+  <div class="dash-grade meio">
+    ${caixa('Contas a receber por plano de contas', 'Saldo em aberto por plano', `<div class="dash-arvore">${listaReceber || '<p class="dash-vazio">Nada a receber no período</p>'}</div>${cartaoFora}${vencidoRecHtml}`)}
+    ${caixa('Contas a pagar por centro de custo', 'Centro de custo › plano de contas › títulos', `<div class="dash-arvore">${listaPagar || '<p class="dash-vazio">Nada a pagar no período</p>'}</div>${vencidoPagHtml}`)}
+  </div>`;
+}
+
+function htmlFinanceiro(d) {
+  if (dashCartao === null) dashCartao = d.considerarCartao !== false;
+  const erro = d.erro ? `<p class="dash-aviso">${esc(d.erro)}</p>` : '';
+  return `<div class="dash-topo">
+    <label class="dash-switch"><input type="checkbox" data-cartao ${dashCartao ? 'checked' : ''} /><span class="trilho"></span>Considerar cartão no contas a receber</label>
+  </div>
+  ${erro}
+  ${d.erro ? '' : htmlRealizado(d)}
+  <div id="dash-realizar">${htmlRealizar(d, dashCartao)}</div>
+  ${caixa(`Receitas x Despesas · ${d.ano || ''}`, 'Vendas e compras por mês', `<div class="dash-grafico" data-grafico="mensal"></div>
+    <div class="dash-legenda"><span><i style="background:var(--d-acc)"></i>Receitas (vendas)</span><span><i style="background:var(--d-neutro)"></i>Despesas (compras)</span></div>`)}`;
+}
+
+function htmlPadrao(d) {
+  if (d.vazio && d.aba !== 'financeiro') return `${htmlAbas(d)}<p class="dash-vazio">${esc(d.mensagem || 'Nenhuma movimentação no período')}</p>`;
+  if (d.aba === 'financeiro') return `${htmlAbas(d)}${htmlFinanceiro(d)}`;
+  if (d.aba === 'vendas') return `${htmlAbas(d)}${htmlVendas(d)}`;
+  return `${htmlAbas(d)}${htmlResumo(d)}`;
+}
+
+/* ----- Gráficos (desenhados na largura real, para o texto não encolher no celular) ----- */
+
+function grafico3d(el, lista) {
+  const largura = el.clientWidth;
+  if (!largura) return;
+  const mostrar = (lista || []).slice(0, LINHAS_VISIVEIS);
+  if (!mostrar.length) {
+    el.innerHTML = '<p class="dash-vazio">Nenhuma venda no período</p>';
+    return;
+  }
+  const estreito = largura < 480;
+  const dx = estreito ? 9 : 14;
+  const dy = estreito ? 6 : 9;
+  const esq = estreito ? 4 : 12;
+  const W = Math.max(280, largura - dx);
+  const H = estreito ? 300 : 400;
+  const base = H - 50;
+  const topo = 48;
+  const fs = estreito ? 10.5 : 12.5;
+  const max = Math.max(1, ...mostrar.map((v) => Number(v.valor) || 0));
+  const passo = (W - esq * 2) / mostrar.length;
+  const larg = Math.min(56, passo * 0.56);
+  let g = '';
+  for (let k = 0; k <= 4; k += 1) {
+    const y = base - ((base - topo) * k) / 4;
+    g += `<line x1="${esq}" x2="${W - esq}" y1="${y}" y2="${y}" style="stroke:var(--d-linha)" stroke-width="1"/>`;
+  }
+  g += `<polygon points="${esq},${base} ${W - esq},${base} ${W - esq + dx},${base - dy} ${esq + dx},${base - dy}" style="fill:var(--d-suave)"/>`;
+  mostrar.forEach((v, i) => {
+    const valor = Number(v.valor) || 0;
+    const h = Math.max(3, ((base - topo) * valor) / max);
+    const x = esq + passo * i + (passo - larg) / 2;
+    const y = base - h;
+    const primeiro = String(v.nome || '').trim().split(/\s+/)[0] || '—';
+    const nome = primeiro.charAt(0).toUpperCase() + primeiro.slice(1).toLowerCase();
+    g += `<g><title>${esc(v.nome)}: ${brl(valor)}</title>
+      <polygon points="${x + larg},${y} ${x + larg + dx},${y - dy} ${x + larg + dx},${base - dy} ${x + larg},${base}" style="fill:var(--d-acc-esc)"/>
+      <rect x="${x}" y="${y}" width="${larg}" height="${h}" rx="2" style="fill:var(--d-acc)"/>
+      <polygon points="${x},${y} ${x + dx},${y - dy} ${x + larg + dx},${y - dy} ${x + larg},${y}" style="fill:var(--d-acc-cl)"/>
+      <text x="${x + larg / 2 + dx / 2}" y="${y - dy - 6}" text-anchor="middle" font-size="${fs}" font-weight="700" style="fill:var(--text)">${esc(milhar(valor))}</text>
+      <text x="${x + larg / 2}" y="${base + 20}" text-anchor="middle" font-size="${fs}" style="fill:var(--muted)">${esc(nome)}</text>
+    </g>`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W + dx} ${H}" role="img" aria-label="Vendas por vendedor">${g}</svg>`;
+}
+
+function graficoMensal(el, serie) {
+  const largura = el.clientWidth;
+  if (!largura) return;
+  const meses = serie || [];
+  const W = Math.max(280, largura);
+  const H = W < 480 ? 220 : 260;
+  const base = H - 36;
+  const topo = 16;
+  const esq = 58;
+  const maior = Math.max(1, ...meses.map((m) => Math.max(Number(m.vendido) || 0, Number(m.comprado) || 0)));
+  const passoEixo = 10 ** Math.floor(Math.log10(maior));
+  const max = Math.ceil(maior / passoEixo) * passoEixo;
+  const passo = (W - esq - 8) / Math.max(1, meses.length);
+  const bw = Math.min(22, passo * 0.34);
+  let g = '';
+  for (let k = 0; k <= 4; k += 1) {
+    const v = (max * k) / 4;
+    const y = base - ((base - topo) * k) / 4;
+    g += `<line x1="${esq}" x2="${W - 8}" y1="${y}" y2="${y}" style="stroke:var(--d-linha)"/>
+      <text x="${esq - 8}" y="${y + 4}" text-anchor="end" font-size="11" style="fill:var(--muted)">${esc(v >= 1000 ? `${num(v / 1000)} mil` : num(v))}</text>`;
+  }
+  meses.forEach((m, i) => {
+    const cx = esq + passo * i + passo / 2;
+    const hr = ((base - topo) * (Number(m.vendido) || 0)) / max;
+    const hd = ((base - topo) * (Number(m.comprado) || 0)) / max;
+    g += `<g><title>${esc(m.nome)}: receitas ${brl(m.vendido)} · despesas ${brl(m.comprado)}</title>
+      <rect x="${cx - bw - 1}" y="${base - hr}" width="${bw}" height="${hr}" rx="3" style="fill:var(--d-acc)"/>
+      <rect x="${cx + 1}" y="${base - hd}" width="${bw}" height="${hd}" rx="3" style="fill:var(--d-neutro)"/>
+      <text x="${cx}" y="${base + 18}" text-anchor="middle" font-size="11.5" style="fill:var(--muted)">${esc(m.nome)}</text>
+    </g>`;
+  });
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Receitas e despesas por mês">${g}</svg>`;
+}
+
+function desenharGraficos() {
+  const d = dashUltimo;
+  if (!d) return;
+  document.querySelectorAll('#dash-financeiro [data-grafico]').forEach((el) => {
+    if (el.dataset.grafico === 'vendedores') grafico3d(el, d.vendedores);
+    if (el.dataset.grafico === 'mensal') graficoMensal(el, d.porMes);
+  });
+}
+
+window.addEventListener('resize', () => {
+  clearTimeout(dashRedesenho);
+  dashRedesenho = setTimeout(() => {
+    if (!document.querySelector('#dash-financeiro [data-grafico]')) return;
+    desenharGraficos();
+    const corpo = document.getElementById('dash-corpo');
+    if (corpo && dashCacheChave) dashCacheHtml = corpo.innerHTML;
+  }, 200);
+});
+
+/* ---------- Contador e entradas ---------- */
+
 function htmlConteudo(dados) {
   if (!dados) return '<p class="hint">Carregando…</p>';
-  if (dados.aba === 'fiscal') {
-    return `${htmlAbas(dados)}
-    <div class="fin-cards">
-      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, linhaFrete(dados.comFrete), 'saida')}
-      ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`, '', 'entrada')}
-      ${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', linhaFrete(dados.vendidoDiaComFrete), 'saida')}
-      ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', linhaFrete(dados.vendidoMesComFrete), 'saida')}
-      ${card('NFC-e', brl(dados.vendasNfce), 'modelo 65', linhaFrete(dados.comFreteNfce), 'saida')}
-      ${card('NF-e', brl(dados.vendasNfe), 'modelo 55', linhaFrete(dados.comFreteNfe), 'saida')}
-    </div>
-    ${htmlMeses(dados)}
-    ${htmlRecortes(dados)}`;
-  }
-  if (dados.aba === 'financeiro') return htmlFinanceiro(dados);
-  if (dados.aba === 'despesa') return `${htmlAbas(dados)}${htmlMeses(dados)}`;
+  if (dados.perfil === 'PADRAO') return htmlPadrao(dados);
   if (dados.perfil === 'MT_ENTRADAS') {
     return `<p class="hint">O dia e o mês dos cards seguem a data Até. A lista usa o período De–Até.</p>
     <div class="fin-cards">
@@ -367,40 +633,17 @@ function htmlConteudo(dados) {
     </div>
     <section id="secao-resumo" class="fin-box"><h2>Compras por grupo</h2>${tabelaGrupo(dados.porGrupo, 'do período')}</section>`;
   }
-  if (dados.vazio) return `${htmlAbas(dados)}<p class="fin-vazio">Nenhuma movimentação no período</p>`;
-  if (dados.perfil === 'CONTADOR_ACESSA') {
-    const ncm = (dados.porNcm || []).map((r) => `<tr><td>${esc(r.ncm)}</td><td>${brl(r.totalVendido)}</td></tr>`).join('');
-    const sinal = Number(dados.diferenca) < 0 ? 'entrada' : 'saida';
-    return `<div class="fin-cards">
-      ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`, '', 'entrada')}
-      ${card('Total vendido', brl(dados.totalVendido), `${dados.notasSaida || 0} notas`, '', 'saida')}
-      ${card('Saída - Entrada', brl(dados.diferenca), '', '', sinal)}
-    </div>
-    <section id="secao-ncm" class="fin-box"><h2>Totalizador por NCM</h2>
-      <table class="fin-table"><thead><tr><th>NCM</th><th>Total vendido</th></tr></thead><tbody>${ncm || '<tr><td colspan="2">Nenhuma movimentação no período</td></tr>'}</tbody></table>
-    </section>`;
-  }
-  const diaMes = `${card('Vendido no dia', brl(dados.vendidoDia), 'hoje', '', 'saida')}
-       ${card('Vendido no mês', brl(dados.vendidoMes), 'mês atual', '', 'saida')}`;
-  const separados = dados.aba === 'manage'
-    ? `${diaMes}
-       ${card('Total Manage', brl(dados.totalVendido), `${dados.notasVenda || 0} notas`, '', 'saida')}`
-    : dados.usaGr
-      ? `${diaMes}
-         ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas no período`, '', 'saida')}
-         ${card('Vendas GR', brl(dados.vendasGerenciais), 'não convertidas', '', 'saida')}
-         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'NFC-e e NF-e', '', 'saida')}`
-      : `${diaMes}
-         ${card('Total vendido', brl(dados.totalVendido), `${dados.notasVenda || 0} notas no período`, '', 'saida')}
-         ${card('Vendas fiscais', brl(dados.vendasFiscais), 'modelos 55 e 65', '', 'saida')}
-         ${card('Vendas gerenciais', brl(dados.vendasGerenciais), 'modelo GR', '', 'saida')}`;
-  return `${htmlAbas(dados)}
-  <div class="fin-cards">
-    ${separados}
+  if (dados.vazio) return '<p class="fin-vazio">Nenhuma movimentação no período</p>';
+  const ncm = (dados.porNcm || []).map((r) => `<tr><td>${esc(r.ncm)}</td><td>${brl(r.totalVendido)}</td></tr>`).join('');
+  const sinal = Number(dados.diferenca) < 0 ? 'entrada' : 'saida';
+  return `<div class="fin-cards">
     ${card('Total comprado', brl(dados.totalComprado), `${dados.notasEntrada || 0} notas`, '', 'entrada')}
-    ${card('Ticket médio', brl(dados.ticketMedio), 'total vendido ÷ notas')}
+    ${card('Total vendido', brl(dados.totalVendido), `${dados.notasSaida || 0} notas`, '', 'saida')}
+    ${card('Saída - Entrada', brl(dados.diferenca), '', '', sinal)}
   </div>
-  ${htmlRecortes(dados)}`;
+  <section id="secao-ncm" class="fin-box"><h2>Totalizador por NCM</h2>
+    <table class="fin-table"><thead><tr><th>NCM</th><th>Total vendido</th></tr></thead><tbody>${ncm || '<tr><td colspan="2">Nenhuma movimentação no período</td></tr>'}</tbody></table>
+  </section>`;
 }
 
 function preencherGrupos(dados) {
@@ -447,12 +690,20 @@ async function carregarDash() {
     return;
   }
   if (res.aba) dashAba = res.aba;
-  corpo.innerHTML = htmlFiltros(dashPerfil) + htmlConteudo(res);
+  dashUltimo = res;
+  const conteudo = htmlFiltros(dashPerfil) + htmlConteudo(res);
+  corpo.innerHTML = res.perfil === 'PADRAO' ? `<div class="dash">${conteudo}</div>` : conteudo;
   preencherGrupos(res);
+  desenharGraficos();
   ligarFiltros();
   dashCacheChave = chave;
   dashCacheHtml = corpo.innerHTML;
   rolarSecao();
+}
+
+function guardarCache() {
+  const corpo = document.getElementById('dash-corpo');
+  if (corpo && dashCacheChave) dashCacheHtml = corpo.innerHTML;
 }
 
 function ligarFiltros() {
@@ -475,36 +726,22 @@ function ligarFiltros() {
       carregarDash();
     });
   });
-  document.querySelectorAll('#dash-financeiro [data-dre-abre]').forEach((btn) => {
+  document.querySelectorAll('#dash-financeiro [data-ver-todos]').forEach((btn) => {
     btn.addEventListener('click', () => {
-      const alvo = document.getElementById(btn.dataset.dreAbre);
-      if (!alvo) return;
-      alvo.hidden = !alvo.hidden;
-      const aberto = !alvo.hidden;
-      btn.textContent = aberto ? '−' : '+';
-      btn.setAttribute('aria-expanded', aberto ? 'true' : 'false');
+      const box = btn.closest('.dash-box');
+      if (!box) return;
+      const aberto = box.classList.toggle('aberto');
+      btn.textContent = aberto ? 'Mostrar menos' : `Ver todos (${btn.dataset.qtd})`;
+      guardarCache();
     });
   });
-  document.querySelectorAll('#dash-financeiro [data-dre-pizza]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const prefixo = btn.dataset.drePizza;
-      const porPlano = btn.dataset.modo !== 'plano';
-      const centro = document.getElementById(`${prefixo}-pizza-centro`);
-      const plano = document.getElementById(`${prefixo}-pizza-plano`);
-      if (centro) centro.hidden = porPlano;
-      if (plano) plano.hidden = !porPlano;
-      btn.dataset.modo = porPlano ? 'plano' : 'centro';
-      btn.textContent = porPlano ? 'Mostrar por centro de custo' : 'Mostrar por plano de contas';
-    });
-  });
-  document.querySelectorAll('#dash-financeiro [data-fin-painel]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const alvo = document.getElementById(btn.dataset.finPainel);
-      if (!alvo) return;
-      alvo.hidden = !alvo.hidden;
-      const aberto = !alvo.hidden;
-      btn.setAttribute('aria-expanded', aberto ? 'true' : 'false');
-      btn.textContent = aberto ? btn.dataset.finOcultar : btn.dataset.finMostrar;
+  document.querySelectorAll('#dash-financeiro [data-cartao]').forEach((chk) => {
+    chk.addEventListener('change', () => {
+      dashCartao = chk.checked;
+      chk.toggleAttribute('checked', dashCartao);
+      const alvo = document.getElementById('dash-realizar');
+      if (alvo && dashUltimo) alvo.innerHTML = htmlRealizar(dashUltimo, dashCartao);
+      guardarCache();
     });
   });
 }

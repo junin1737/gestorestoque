@@ -38,8 +38,7 @@
 
   function exportarPdf() {
     if (!atual) return;
-    const abriu = window.ExportarTabela?.abrirPdf(pacote());
-    if (!abriu) deps.showMsg('Permita pop-ups para abrir o PDF.');
+    window.ExportarTabela?.abrirPdf(pacote());
   }
 
   function exportarExcel() {

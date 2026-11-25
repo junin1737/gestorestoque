@@ -3576,19 +3576,33 @@ function exportarAlteracoesPdf() {
     <body><h1>${escapeHtml(titulo)}</h1><p>${list.length} registro(s)</p>
     <table><thead><tr><th>Data</th><th>Tipo</th><th>Produto / NF</th><th>Detalhe</th><th>Usuário</th></tr></thead>
     <tbody>${rows}</tbody></table></body></html>`;
+  if (window.ExportarTabela?.abrirPdf) {
+    window.ExportarTabela.abrirPdf({
+      titulo,
+      empresa: state.emitente?.nome_fanta || '',
+      usuario: state.usuario?.nome || '',
+      colunas: [
+        { id: 'quando', titulo: 'Data', largura: '16%' },
+        { id: 'tipo', titulo: 'Tipo', largura: '12%' },
+        { id: 'descricao', titulo: 'Produto / NF', largura: '24%' },
+        { id: 'detalhe', titulo: 'Detalhe', largura: '34%' },
+        { id: 'usuario', titulo: 'Usuário', largura: '14%' },
+      ],
+      linhas: list.map((it) => ({
+        quando: fmtDataHora(it.data, it.hora, it.data_hora),
+        tipo: tipoAlteracaoLabel(it.tipo),
+        descricao: it.descricao || '',
+        detalhe: it.detalhe || it.resumo || '',
+        usuario: it.funcionario || '',
+      })),
+    });
+    return;
+  }
   if (window.GestorApp && typeof window.GestorApp.printHtml === 'function') {
     window.GestorApp.printHtml(titulo, html);
     return;
   }
-  const w = window.open('', '_blank');
-  if (!w) {
-    showMsg('Permita pop-ups para exportar o PDF.');
-    return;
-  }
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  w.print();
+  showMsg('Não foi possível abrir a prévia do PDF.');
 }
 
 function stopScanner() {

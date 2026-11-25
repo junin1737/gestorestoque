@@ -73,21 +73,284 @@ ${opcoes.aviso ? `<p class="aviso">${xml(opcoes.aviso)}</p>` : ''}
 ${(opcoes.paragrafos || []).map((p) => `<p class="termo">${xml(p)}</p>`).join('')}
 <table><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
 <p class="rodape">Documento para conferência do usuário e do contador. Gestor de Estoque · MT Automações</p>
-<p class="no-print"><button type="button" onclick="window.print()">Imprimir / Salvar PDF</button></p>
+${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="window.print()">Imprimir / Salvar PDF</button></p>'}
 </body></html>`;
   }
 
-  function abrirPdf(opcoes) {
-    const html = htmlPdf(opcoes);
-    const janela = window.open('', '_blank', 'noopener,width=1200,height=800');
-    if (!janela) return false;
-    janela.document.open();
-    janela.document.write(html);
-    janela.document.close();
-    janela.onload = () => {
-      janela.focus();
-      janela.print();
+  const WIN = {
+    '—': 0x97, '–': 0x96, '•': 0x95, '“': 0x93, '”': 0x94, '‘': 0x91, '’': 0x92,
+    'á': 0xE1, 'à': 0xE0, 'â': 0xE2, 'ã': 0xE3, 'ä': 0xE4,
+    'é': 0xE9, 'ê': 0xEA, 'í': 0xED, 'ó': 0xF3, 'ô': 0xF4, 'õ': 0xF5, 'ö': 0xF6,
+    'ú': 0xFA, 'ü': 0xFC, 'ç': 0xE7, 'ñ': 0xF1,
+    'Á': 0xC1, 'À': 0xC0, 'Â': 0xC2, 'Ã': 0xC3, 'Ä': 0xC4,
+    'É': 0xC9, 'Ê': 0xCA, 'Í': 0xCD, 'Ó': 0xD3, 'Ô': 0xD4, 'Õ': 0xD5, 'Ö': 0xD6,
+    'Ú': 0xDA, 'Ü': 0xDC, 'Ç': 0xC7, 'Ñ': 0xD1,
+  };
+
+  function pdfLiteral(valor) {
+    let out = '(';
+    for (const ch of String(valor ?? '')) {
+      const code = ch.codePointAt(0);
+      const b = code < 128 ? code : (WIN[ch] || 0x3F);
+      if (b === 40 || b === 41 || b === 92) out += `\\${String.fromCharCode(b)}`;
+      else if (b < 32 || b > 126) out += `\\${b.toString(8).padStart(3, '0')}`;
+      else out += String.fromCharCode(b);
+    }
+    return `${out})`;
+  }
+
+  function quebrar(valor, largura, tamanho) {
+    const max = Math.max(8, Math.floor(largura / (tamanho * 0.5)));
+    const palavras = String(valor ?? '').split(/\s+/).filter(Boolean);
+    const linhas = [];
+    let atual = '';
+    palavras.forEach((palavra) => {
+      const partes = palavra.length > max ? palavra.match(new RegExp(`.{1,${max}}`, 'g')) : [palavra];
+      partes.forEach((parte) => {
+        const proxima = atual ? `${atual} ${parte}` : parte;
+        if (proxima.length > max && atual) {
+          linhas.push(atual);
+          atual = parte;
+        } else atual = proxima;
+      });
+    });
+    if (atual) linhas.push(atual);
+    return linhas.length ? linhas : ['—'];
+  }
+
+  function pdfBytes(opcoes) {
+    const paisagem = opcoes.paisagem !== false;
+    const W = paisagem ? 841.89 : 595.28;
+    const H = paisagem ? 595.28 : 841.89;
+    const M = 32;
+    const L = W - M * 2;
+    const paginas = [];
+    let cmds = '';
+    let y = H - M;
+    const guardar = () => { if (cmds) paginas.push(cmds); cmds = ''; y = H - M; };
+    const cabe = (h) => { if (y - h < M) guardar(); };
+    const escrever = (s, tamanho, fonte, cor) => {
+      const partes = quebrar(s, L, tamanho);
+      cabe(partes.length * (tamanho + 3));
+      partes.forEach((parte) => {
+        y -= tamanho;
+        cmds += `${cor} rg\nBT /${fonte} ${tamanho} Tf 1 0 0 1 ${M.toFixed(1)} ${y.toFixed(1)} Tm ${pdfLiteral(parte)} Tj ET\n`;
+        y -= 3;
+      });
     };
+    escrever(opcoes.empresa || 'Gestor de Estoque', 11, 'F2', '0.12 0.31 0.47');
+    escrever(opcoes.titulo || 'Relatório', 16, 'F2', '0.12 0.31 0.47');
+    const meta = `${opcoes.subtitulo ? `${opcoes.subtitulo} · ` : ''}${(opcoes.linhas || []).length} registro(s)${opcoes.usuario ? ` · ${opcoes.usuario}` : ''} · ${opcoes.geradoEm || agora()}`;
+    escrever(meta, 9, 'F1', '0.27 0.31 0.40');
+    if (opcoes.aviso) escrever(opcoes.aviso, 9, 'F2', '0.55 0.27 0.05');
+    (opcoes.paragrafos || []).filter(Boolean).forEach((p) => escrever(p, 8, 'F1', '0.15 0.18 0.22'));
+    y -= 6;
+    const colunas = opcoes.colunas || [];
+    const linhas = opcoes.linhas?.length ? opcoes.linhas : [{}];
+    const larguras = colunas.map((c) => {
+      const n = parseFloat(c.largura);
+      return ((Number.isFinite(n) ? n : (100 / (colunas.length || 1))) / 100) * L;
+    });
+    const ft = 8;
+    const cabeca = () => {
+      const alt = ft + 10;
+      cabe(alt);
+      y -= alt;
+      cmds += `0.12 0.31 0.47 rg ${M.toFixed(1)} ${y.toFixed(1)} ${L.toFixed(1)} ${alt.toFixed(1)} re f\n`;
+      let x = M;
+      colunas.forEach((c, i) => {
+        cmds += `1 1 1 rg\nBT /F2 ${ft} Tf 1 0 0 1 ${(x + 3).toFixed(1)} ${(y + 3).toFixed(1)} Tm ${pdfLiteral(c.titulo)} Tj ET\n`;
+        x += larguras[i];
+      });
+    };
+    if (colunas.length) cabeca();
+    linhas.forEach((linha, idx) => {
+      const celulas = colunas.map((c, i) => quebrar(texto(linha[c.id]), larguras[i] - 6, ft));
+      const n = Math.max(1, ...celulas.map((c) => c.length));
+      const alt = n * (ft + 2) + 6;
+      if (y - alt < M) { guardar(); cabeca(); }
+      y -= alt;
+      if (idx % 2 === 1) cmds += `0.956 0.969 0.984 rg ${M.toFixed(1)} ${y.toFixed(1)} ${L.toFixed(1)} ${alt.toFixed(1)} re f\n`;
+      let x = M;
+      celulas.forEach((ls, i) => {
+        ls.forEach((t, k) => {
+          const ty = y + alt - 4 - ft - k * (ft + 2);
+          cmds += `0.11 0.14 0.19 rg\nBT /F1 ${ft} Tf 1 0 0 1 ${(x + 3).toFixed(1)} ${ty.toFixed(1)} Tm ${pdfLiteral(t)} Tj ET\n`;
+        });
+        x += larguras[i];
+      });
+      cmds += `0.83 0.87 0.91 RG 0.4 w ${M.toFixed(1)} ${y.toFixed(1)} m ${(M + L).toFixed(1)} ${y.toFixed(1)} l S\n`;
+    });
+    y -= 14;
+    escrever('Documento para conferência do usuário e do contador. Gestor de Estoque · MT Automações', 8, 'F1', '0.36 0.42 0.48');
+    if (cmds) paginas.push(cmds);
+    const objs = [
+      '<< /Type /Catalog /Pages 2 0 R >>',
+      '',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>',
+      '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold /Encoding /WinAnsiEncoding >>',
+    ];
+    const kids = [];
+    paginas.forEach((stream) => {
+      const cid = objs.push(`<< /Length ${stream.length} >>\nstream\n${stream}endstream`) ;
+      const pid = objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Contents ${cid} 0 R /Resources << /Font << /F1 3 0 R /F2 4 0 R >> >> >>`);
+      kids.push(`${pid} 0 R`);
+    });
+    objs[1] = `<< /Type /Pages /Count ${kids.length} /Kids [${kids.join(' ')}] >>`;
+    let pdf = '%PDF-1.4\n';
+    const offsets = [0];
+    objs.forEach((body, i) => {
+      offsets.push(pdf.length);
+      pdf += `${i + 1} 0 obj\n${body}\nendobj\n`;
+    });
+    const xref = pdf.length;
+    pdf += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+    offsets.slice(1).forEach((o) => { pdf += `${String(o).padStart(10, '0')} 00000 n \n`; });
+    pdf += `trailer << /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+    return pdf;
+  }
+
+  let previaAtual = null;
+  let resolverAceite = null;
+
+  function fecharPrevia(valor) {
+    const resolver = resolverAceite;
+    resolverAceite = null;
+    const dlg = typeof document !== 'undefined' ? document.getElementById('dlg-previa') : null;
+    try { if (dlg?.open) dlg.close(); } catch { /* ignore */ }
+    if (resolver) resolver(valor);
+  }
+
+  function baixarAtual() {
+    if (!previaAtual) return;
+    const pdf = pdfBytes(previaAtual);
+    const blob = new Blob([pdf], { type: 'application/pdf' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${nomeArquivo(previaAtual.titulo)}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    setTimeout(() => URL.revokeObjectURL(link.href), 1500);
+  }
+
+  function garantirDialog() {
+    let dlg = document.getElementById('dlg-previa');
+    if (dlg) return dlg;
+    dlg = document.createElement('dialog');
+    dlg.id = 'dlg-previa';
+    dlg.className = 'dlg';
+    dlg.innerHTML = `
+      <div class="dlg-card previa-card">
+        <div class="previa-barra">
+          <strong data-previa-titulo>Prévia</strong>
+          <div class="dlg-actions">
+            <button type="button" class="btn" data-previa-fechar>Fechar</button>
+            <button type="button" class="btn primary" data-previa-baixar disabled>Baixar PDF</button>
+          </div>
+        </div>
+        <iframe title="Prévia do relatório" data-previa-frame></iframe>
+        <div class="previa-aceite" data-previa-aceite hidden>
+          <label class="termo-check"><input type="checkbox" data-previa-check /> Assinar o termo e autorizar a atualização</label>
+          <div data-previa-assina hidden>
+            <label>Nome completo <input data-previa-nome autocomplete="name" /></label>
+            <label>CPF <input data-previa-cpf inputmode="numeric" maxlength="14" placeholder="000.000.000-00" autocomplete="off" /></label>
+          </div>
+          <p class="termo-erro" data-previa-erro hidden></p>
+          <div class="dlg-actions">
+            <button type="button" class="btn primary" data-previa-sim disabled>Aceitar termos</button>
+          </div>
+        </div>
+      </div>`;
+    document.body.appendChild(dlg);
+    dlg.querySelector('[data-previa-fechar]').addEventListener('click', () => fecharPrevia(null));
+    dlg.querySelector('[data-previa-baixar]').addEventListener('click', baixarAtual);
+    dlg.addEventListener('close', () => {
+      if (!resolverAceite) return;
+      const resolver = resolverAceite;
+      resolverAceite = null;
+      resolver(null);
+    });
+    return dlg;
+  }
+
+  function iniciarPrevia(opcoes = {}) {
+    const dlg = garantirDialog();
+    previaAtual = null;
+    dlg.querySelector('[data-previa-titulo]').textContent = opcoes.titulo || 'Prévia';
+    dlg.querySelector('[data-previa-baixar]').disabled = true;
+    dlg.querySelector('[data-previa-aceite]').hidden = true;
+    dlg.querySelector('[data-previa-frame]').srcdoc = `<!DOCTYPE html><html><body style="font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#1c2430"><h1 style="color:#1f4e79;font-size:18px">${xml(opcoes.titulo || 'Prévia')}</h1><p>${xml(opcoes.carregando || 'Gerando a prévia…')}</p></body></html>`;
+    if (!dlg.open) dlg.showModal();
+    return {
+      preencher(dados) {
+        previaAtual = { ...dados, geradoEm: dados.geradoEm || agora() };
+        dlg.querySelector('[data-previa-titulo]').textContent = previaAtual.titulo || 'Prévia';
+        dlg.querySelector('[data-previa-frame]').srcdoc = htmlPdf({ ...previaAtual, embutido: true });
+        dlg.querySelector('[data-previa-baixar]').disabled = false;
+      },
+      aguardarAceite(termo) {
+        const box = dlg.querySelector('[data-previa-aceite]');
+        const check = dlg.querySelector('[data-previa-check]');
+        const assina = dlg.querySelector('[data-previa-assina]');
+        const nome = dlg.querySelector('[data-previa-nome]');
+        const cpf = dlg.querySelector('[data-previa-cpf]');
+        const erro = dlg.querySelector('[data-previa-erro]');
+        const sim = dlg.querySelector('[data-previa-sim]');
+        box.hidden = false;
+        check.checked = false;
+        assina.hidden = true;
+        nome.value = '';
+        cpf.value = '';
+        erro.hidden = true;
+        sim.disabled = true;
+        const atualizar = () => {
+          assina.hidden = !check.checked;
+          const nomeOk = nome.value.trim().split(/\s+/).filter((p) => p.length >= 2).length >= 2;
+          sim.disabled = !check.checked || !nomeOk || !cpfValido(cpf.value);
+        };
+        check.onchange = atualizar;
+        nome.oninput = atualizar;
+        cpf.oninput = () => { cpf.value = formatarCpf(cpf.value); atualizar(); };
+        sim.onclick = () => {
+          atualizar();
+          if (sim.disabled) {
+            erro.hidden = false;
+            erro.textContent = check.checked ? 'Informe o nome completo e um CPF válido.' : 'Marque o aceite para assinar o termo.';
+            return;
+          }
+          fecharPrevia({ nome: nome.value.trim().replace(/\s+/g, ' '), cpf: cpf.value });
+        };
+        if (termo) dlg.dataset.termo = termo.titulo || '';
+        return new Promise((resolve) => { resolverAceite = resolve; });
+      },
+      fechar() { fecharPrevia(null); },
+    };
+  }
+
+  function cpfValido(valor) {
+    const d = String(valor || '').replace(/\D/g, '');
+    if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
+    const dv = (tamanho) => {
+      let soma = 0;
+      for (let i = 0; i < tamanho; i++) soma += Number(d[i]) * ((tamanho + 1) - i);
+      const resto = (soma * 10) % 11;
+      return resto === 10 ? 0 : resto;
+    };
+    return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
+  }
+
+  function formatarCpf(valor) {
+    const d = String(valor || '').replace(/\D/g, '').slice(0, 11);
+    if (d.length <= 3) return d;
+    if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
+    if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  }
+
+  function abrirPdf(opcoes) {
+    const ui = iniciarPrevia({ titulo: opcoes.titulo || 'Relatório' });
+    ui.preencher(opcoes);
     return true;
   }
 
@@ -127,5 +390,5 @@ ${corpo}
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   }
 
-  return { htmlPdf, abrirPdf, excel, nomeArquivo };
+  return { htmlPdf, abrirPdf, excel, nomeArquivo, pdfBytes, iniciarPrevia };
 }));

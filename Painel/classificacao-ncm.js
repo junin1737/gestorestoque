@@ -167,26 +167,6 @@
     await lerReplicador();
   }
 
-  function cpfValido(valor) {
-    const d = String(valor || '').replace(/\D/g, '');
-    if (d.length !== 11 || /^(\d)\1+$/.test(d)) return false;
-    const dv = (tamanho) => {
-      let soma = 0;
-      for (let i = 0; i < tamanho; i++) soma += Number(d[i]) * ((tamanho + 1) - i);
-      const resto = (soma * 10) % 11;
-      return resto === 10 ? 0 : resto;
-    };
-    return dv(9) === Number(d[9]) && dv(10) === Number(d[10]);
-  }
-
-  function formatarCpf(valor) {
-    const d = String(valor || '').replace(/\D/g, '').slice(0, 11);
-    if (d.length <= 3) return d;
-    if (d.length <= 6) return `${d.slice(0, 3)}.${d.slice(3)}`;
-    if (d.length <= 9) return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6)}`;
-    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
-  }
-
   function linhasDaPrevia(res) {
     return (res?.linhas || []).map((linha) => ({
       ncm: linha.ncm,
@@ -197,9 +177,9 @@
     }));
   }
 
-  function abrirPrevia(res, linhas) {
+  function opcoesPrevia(res, linhas) {
     const termo = res.termo || {};
-    const abriu = window.ExportarTabela?.abrirPdf({
+    return {
       titulo: 'Prévia da atualização de NCM',
       subtitulo: 'Nenhuma alteração foi gravada',
       aviso: 'PRÉVIA PARA VALIDAÇÃO — revise com o contador antes de aceitar o termo.',
@@ -214,88 +194,35 @@
         { id: 'produtos', titulo: 'Produtos', numero: true, largura: '10%' },
       ],
       linhas,
-    });
-    if (!abriu) deps.showMsg('Permita pop-ups para abrir o PDF da prévia.');
-    return abriu;
-  }
-
-  function pedirTermo(termo) {
-    const dlg = document.getElementById('dlg-termo');
-    const texto = document.getElementById('dlg-termo-texto');
-    const check = document.getElementById('dlg-termo-aceite');
-    const assina = document.getElementById('dlg-termo-assina');
-    const nome = document.getElementById('dlg-termo-nome');
-    const cpf = document.getElementById('dlg-termo-cpf');
-    const erro = document.getElementById('dlg-termo-erro');
-    const sim = document.getElementById('dlg-termo-sim');
-    const nao = document.getElementById('dlg-termo-nao');
-    if (!dlg || !texto || !check || !assina || !nome || !cpf || !sim || !nao) {
-      deps.showMsg('Não foi possível abrir o termo de aceite.');
-      return Promise.resolve(null);
-    }
-    texto.textContent = [termo?.titulo, ...(termo?.paragrafos || [])].filter(Boolean).join('\n\n');
-    check.checked = false;
-    assina.hidden = true;
-    nome.value = '';
-    cpf.value = '';
-    erro.hidden = true;
-    erro.textContent = '';
-    sim.disabled = true;
-    const atualizar = () => {
-      assina.hidden = !check.checked;
-      const nomeOk = nome.value.trim().split(/\s+/).filter((p) => p.length >= 2).length >= 2;
-      sim.disabled = !check.checked || !nomeOk || !cpfValido(cpf.value);
     };
-    check.onchange = atualizar;
-    nome.oninput = atualizar;
-    cpf.oninput = () => {
-      cpf.value = formatarCpf(cpf.value);
-      atualizar();
-    };
-    return new Promise((resolve) => {
-      const finish = (valor) => {
-        sim.onclick = null;
-        nao.onclick = null;
-        dlg.onclose = null;
-        try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
-        resolve(valor);
-      };
-      sim.onclick = () => {
-        atualizar();
-        if (sim.disabled) {
-          erro.hidden = false;
-          erro.textContent = !check.checked
-            ? 'Marque o aceite para assinar o termo.'
-            : 'Informe o nome completo e um CPF válido.';
-          return;
-        }
-        finish({ nome: nome.value.trim().replace(/\s+/g, ' '), cpf: cpf.value });
-      };
-      nao.onclick = () => finish(null);
-      dlg.onclose = () => resolve(null);
-      if (!dlg.open) dlg.showModal();
-      check.focus();
-    });
   }
 
   async function prepararAlteracao(body) {
+    const ui = window.ExportarTabela?.iniciarPrevia({
+      titulo: 'Prévia da atualização de NCM',
+      carregando: 'Lendo o que vai mudar. A prévia abre aqui, sem janela extra.',
+    });
+    if (!ui) {
+      deps.showMsg('Não foi possível abrir a prévia.');
+      return null;
+    }
     const previa = await api('/classificacao-ncm/previa-alteracao', { method: 'POST', body });
     if (!previa?.ok) {
+      ui.fechar();
       deps.showMsg(previa?.error || 'Não foi possível montar a prévia.');
       return null;
     }
     const linhas = linhasDaPrevia(previa);
     if (!linhas.length) {
+      ui.fechar();
       deps.showMsg(previa.mensagem || 'Nenhuma classificação mudaria. Nada foi gravado.');
       return null;
     }
-    if (previa.falhas?.length) {
-      const aviso = previa.falhas.map((f) => `${f.ncm}: ${f.error}`).join('\n');
-      if (deps.showToast) deps.showToast(`${previa.falhas.length} NCM(s) ficaram de fora da prévia.`);
-      else deps.showMsg(aviso);
+    if (previa.falhas?.length && deps.showToast) {
+      deps.showToast(`${previa.falhas.length} NCM(s) ficaram de fora da prévia.`);
     }
-    abrirPrevia(previa, linhas);
-    return pedirTermo(previa.termo);
+    ui.preencher(opcoesPrevia(previa, linhas));
+    return ui.aguardarAceite(previa.termo);
   }
 
   function classeTexto(codigo, descricao) {
@@ -312,9 +239,7 @@
       produtos: linha.produtos,
     }));
     if (!linhas.length) return;
-    const imprimir = await deps.showConfirm('Deseja imprimir o relatório das alterações?', { okLabel: 'Imprimir', cancelLabel: 'Agora não' });
-    if (!imprimir) return;
-    const abriu = window.ExportarTabela?.abrirPdf({
+    window.ExportarTabela?.abrirPdf({
       titulo: 'Alterações de classificação tributária',
       subtitulo: res.aceite?.nome ? `Assinado por ${res.aceite.nome} · CPF ${res.aceite.cpf}` : 'NCM, cClassTrib anterior e atual',
       empresa: empresaNome || (typeof deps.empresa === 'function' ? deps.empresa() : ''),
@@ -328,7 +253,6 @@
       ],
       linhas,
     });
-    if (!abriu) deps.showMsg('Permita pop-ups para abrir o PDF.');
   }
 
   async function buscar() {

@@ -1,0 +1,225 @@
+/* Dashboard padrão (Resumo, Vendas, Financeiro).
+   Cores saem do tema do app: --primary-2 é a cor de destaque (no tema "empresa", a cor da logo),
+   --ok é o lucro, --bg-elev/--text/--muted/--border acompanham o tema claro e o escuro. */
+
+.dash {
+  --d-acc: var(--primary-2, #2563eb);
+  --d-acc-esc: #1d4fb0;
+  --d-acc-cl: #8db3f0;
+  --d-acc-esc: color-mix(in srgb, var(--d-acc) 68%, #000);
+  --d-acc-cl: color-mix(in srgb, var(--d-acc) 50%, #fff);
+  --d-neutro: #8b98ad;
+  --d-pos: var(--ok, #1b7f4a);
+  --d-neg: var(--danger, #dc2626);
+  --d-card: var(--bg-elev, #fff);
+  --d-linha: var(--border, #dde3ee);
+  --d-trilho: #edf1f7;
+  --d-suave: #f6f8fc;
+  --d-sombra: 0 1px 2px rgba(15, 30, 55, 0.04), 0 6px 18px rgba(15, 30, 55, 0.06);
+  --d-raio: 14px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+html[data-theme="escuro"] .dash {
+  --d-neutro: #6f7d94;
+  --d-trilho: #22314a;
+  --d-suave: #1d2a40;
+  --d-acc-cl: color-mix(in srgb, var(--d-acc) 60%, #fff);
+  --d-sombra: 0 8px 22px rgba(0, 0, 0, 0.3);
+}
+
+/* Filtros */
+.dash .fin-filtros {
+  background: var(--d-card);
+  border: 0;
+  border-radius: 12px;
+  box-shadow: var(--d-sombra);
+  padding: 0.55rem 0.7rem;
+  margin-bottom: 0.85rem;
+}
+.dash .fin-filtros label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.03em; color: var(--muted); font-weight: 650; }
+.dash .fin-filtros .btn { background: var(--primary); color: var(--bg-elev, #fff); border-color: var(--primary); }
+
+/* Abas em segmento */
+.dash-abas {
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  margin: 0 0 1rem;
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--d-linha) 70%, transparent);
+  background: var(--d-linha);
+}
+.dash-abas button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-weight: 650;
+  font-size: 0.92rem;
+  padding: 0.5rem 1.25rem;
+  border-radius: 9px;
+  cursor: pointer;
+}
+.dash-abas button.ativa {
+  background: var(--d-card);
+  color: var(--text);
+  box-shadow: 0 1px 4px rgba(15, 30, 55, 0.12);
+}
+
+/* Cards */
+.dash-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 0.75rem; margin-bottom: 1rem; }
+.dash-kpi {
+  background: var(--d-card);
+  border-radius: var(--d-raio);
+  padding: 0.85rem 1rem;
+  box-shadow: var(--d-sombra);
+  border-top: 3px solid transparent;
+  min-width: 0;
+}
+.dash-kpi.destaque { border-top-color: var(--d-acc); }
+.dash-kpi span { display: block; color: var(--muted); font-size: 0.78rem; font-weight: 600; }
+.dash-kpi strong { display: block; font-size: 1.35rem; letter-spacing: -0.02em; margin: 0.25rem 0 0.1rem; white-space: nowrap; }
+.dash-kpi small { color: var(--muted); font-size: 0.74rem; }
+.dash .pos { color: var(--d-pos); }
+.dash .neg { color: var(--d-neg); }
+
+/* Caixas */
+.dash-grade { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 1rem; margin-bottom: 1rem; }
+.dash-grade.meio { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.dash-box {
+  background: var(--d-card);
+  border-radius: var(--d-raio);
+  padding: 1rem 1.1rem;
+  box-shadow: var(--d-sombra);
+  margin-bottom: 1rem;
+  min-width: 0;
+}
+.dash-grade > .dash-box { margin-bottom: 0; }
+.dash-box > header h2 { margin: 0; font-size: 1rem; }
+.dash-box > header p { margin: 0.1rem 0 0.75rem; color: var(--muted); font-size: 0.78rem; }
+.dash-bloco { margin: 0.4rem 0 0.65rem; font-size: 1.05rem; display: flex; align-items: baseline; gap: 0.5rem; flex-wrap: wrap; }
+.dash-bloco small { color: var(--muted); font-weight: 500; font-size: 0.8rem; }
+.dash-vazio { color: var(--muted); font-size: 0.86rem; margin: 0.5rem 0; }
+.dash-aviso {
+  background: color-mix(in srgb, var(--warn, #ea580c) 10%, var(--d-card));
+  border: 1px solid color-mix(in srgb, var(--warn, #ea580c) 30%, transparent);
+  border-radius: 10px;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.8rem;
+  margin: 0 0 0.85rem;
+}
+
+/* Tabela */
+.dash-tabela { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.dash-tabela th { text-align: left; color: var(--muted); font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; font-weight: 700; padding: 0 0.5rem 0.5rem; border-bottom: 1px solid var(--d-linha); }
+.dash-tabela td { padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--d-linha); vertical-align: middle; }
+.dash-tabela tr:last-child td { border-bottom: 0; }
+.dash-tabela .num { text-align: right; white-space: nowrap; }
+.dash-tabela .nome { font-weight: 600; }
+.dash-tabela small { display: block; color: var(--muted); font-size: 0.74rem; }
+.dash-box:not(.aberto) .dash-extra { display: none; }
+.dash-ver {
+  margin-top: 0.6rem;
+  background: none;
+  border: 1px solid var(--d-linha);
+  color: var(--text);
+  border-radius: 8px;
+  padding: 0.35rem 0.8rem;
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+/* Barras de participação */
+.dash-barra { display: block; height: 6px; background: var(--d-trilho); border-radius: 3px; margin-top: 0.3rem; overflow: hidden; }
+.dash-barra i { display: block; height: 100%; background: var(--d-acc); border-radius: 3px; }
+.dash-barra i.pos { background: var(--d-pos); }
+.dash-barra i.neutro { background: var(--d-neutro); }
+
+/* Listas de ranking e pagamento */
+.dash-rank { list-style: none; margin: 0; padding: 0; }
+.dash-rank li { display: grid; grid-template-columns: 1.7rem minmax(0, 1fr) auto; gap: 0.6rem; align-items: center; padding: 0.55rem 0; border-bottom: 1px solid var(--d-linha); }
+.dash-rank li:last-child { border-bottom: 0; }
+.dash-rank .pos-rank { font-size: 0.72rem; font-weight: 700; text-align: center; padding: 0.12rem 0; border-radius: 999px; background: var(--d-suave); color: var(--d-acc); }
+.dash-rank li:first-child .pos-rank { background: #fdf3d7; color: #8a6100; }
+.dash-rank .n { font-size: 0.86rem; font-weight: 600; min-width: 0; }
+.dash-rank .n b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dash-rank .n small { display: block; font-weight: 500; color: var(--muted); font-size: 0.72rem; }
+.dash-rank .v { text-align: right; font-weight: 700; font-size: 0.88rem; white-space: nowrap; }
+.dash-rank .v small { display: block; font-weight: 500; color: var(--muted); font-size: 0.72rem; }
+
+/* Gráficos */
+.dash-grafico svg { display: block; width: 100%; height: auto; }
+.dash-grafico text { font-family: inherit; }
+.dash-legenda { display: flex; flex-wrap: wrap; gap: 0.9rem; color: var(--muted); font-size: 0.78rem; margin-top: 0.4rem; }
+.dash-legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 0.3rem; vertical-align: -1px; }
+.dash-rosca { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 1rem; align-items: center; margin-bottom: 0.6rem; }
+.dash-rosca svg { width: 150px; height: 150px; }
+.dash-rosca ul { list-style: none; margin: 0; padding: 0; font-size: 0.84rem; }
+.dash-rosca li { display: grid; grid-template-columns: 12px minmax(0, 1fr) auto; gap: 0.5rem; align-items: center; padding: 0.35rem 0; border-bottom: 1px solid var(--d-linha); }
+.dash-rosca li:last-child { border-bottom: 0; }
+.dash-rosca li i { width: 12px; height: 12px; border-radius: 3px; }
+
+/* Árvore centro › plano › lançamento */
+.dash-arvore details { border-radius: 10px; }
+.dash-arvore summary {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.6rem 0.75rem;
+  border-radius: 10px;
+  background: var(--d-suave);
+  margin-top: 0.45rem;
+  cursor: pointer;
+  font-size: 0.86rem;
+}
+.dash-arvore summary::-webkit-details-marker { display: none; }
+.dash-arvore summary span::before { content: "›"; display: inline-block; width: 1rem; color: var(--muted); font-weight: 700; transition: transform 0.15s; }
+.dash-arvore details[open] > summary span::before { transform: rotate(90deg); }
+.dash-arvore summary b { white-space: nowrap; }
+.dash-arvore details details { margin-left: 1rem; }
+.dash-arvore details details summary { background: transparent; border-left: 2px solid var(--d-linha); border-radius: 0; margin-top: 0.15rem; }
+.dash-lanc { margin: 0.15rem 0 0.3rem 2rem; border-left: 2px solid var(--d-linha); }
+.dash-lanc div { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.35rem 0.75rem; font-size: 0.8rem; color: var(--muted); }
+.dash-lanc div b { white-space: nowrap; color: var(--text); font-weight: 600; }
+.dash-linha-extra { display: flex; justify-content: space-between; gap: 0.6rem; padding: 0.55rem 0.75rem; font-size: 0.82rem; color: var(--muted); font-style: italic; }
+.dash-linha-extra b { white-space: nowrap; font-style: normal; }
+
+/* Chave "Considerar cartão" */
+.dash-topo { display: flex; justify-content: flex-end; margin: 0 0 0.75rem; }
+.dash-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  background: var(--d-card);
+  padding: 0.45rem 0.9rem;
+  border-radius: 999px;
+  box-shadow: var(--d-sombra);
+  font-size: 0.86rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin: 0;
+}
+.dash-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.dash-switch .trilho { width: 36px; height: 20px; border-radius: 999px; background: var(--d-neutro); position: relative; flex: none; transition: background 0.15s; }
+.dash-switch .trilho::after { content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2); transition: left 0.15s; }
+.dash-switch input:checked + .trilho { background: var(--d-acc); }
+.dash-switch input:checked + .trilho::after { left: 18px; }
+.dash-switch input:focus-visible + .trilho { outline: 2px solid var(--d-acc); outline-offset: 2px; }
+
+@media (max-width: 720px) {
+  .dash-abas { display: flex; width: 100%; }
+  .dash-abas button { flex: 1; padding: 0.5rem 0.3rem; }
+  .dash-kpis { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 0.5rem; }
+  .dash-kpi { padding: 0.7rem 0.75rem; }
+  .dash-kpi strong { font-size: 1.05rem; white-space: normal; }
+  .dash-grade, .dash-grade.meio { grid-template-columns: minmax(0, 1fr); }
+  .dash-box { padding: 0.85rem; }
+  .dash-tabela .some-mobile { display: none; }
+  .dash-rosca { grid-template-columns: 110px minmax(0, 1fr); }
+  .dash-rosca svg { width: 110px; height: 110px; }
+  .dash-topo { justify-content: stretch; }
+  .dash-switch { width: 100%; }
+}

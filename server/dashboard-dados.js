@@ -12,6 +12,8 @@ const { lerUsaManage, loadAppConfig } = require('./config');
  * - Valor do item: VLR_TOTAL - VLR_DESC + frete + seguro + despesa + ST + IPI + FCP ST.
  *   ST, IPI e FCP ST vêm das filhas (TB_NFV_ITEM_ST/IPI/FCP e TB_NFC_ITEM_*). No Manage, a filha
  *   prevalece e, se não houver linha, usa VLR_ST/VLR_IPI do próprio item.
+ *   Na venda Clipp, ST e FCP ST só somam em NF-e com CFOP de ST cobrado (CFOP_ST_COBRADO);
+ *   na NFC-e e no 5405 a filha traz ST informativo, fora do total da nota.
  * - Venda Manage: TB_NFVENDA_2 + TB_NFV_ITEM_2. Serviço: TB_NFVENDA_3 + TB_NFV_ITEM_3.
  * - Compra: TB_NFCOMPRA + TB_NFC_ITEM. Manage: TB_NFCOMPRA_2 + TB_NFC_ITEM_2. Data: DT_ENTRADA.
  * - Nota válida: STATUS = 'E'. Cancelada = 'C'. Demais status (A, X) ficam de fora.
@@ -24,6 +26,9 @@ const { lerUsaManage, loadAppConfig } = require('./config');
 
 const CFOP_EXCLUIR = ['910', '529', '929'];
 const CFOP_DEVOLUCAO = ['201', '202', '411'];
+/* CFOPs em que o emitente cobra o ICMS-ST como substituto e o valor entra no total da NF-e.
+   x404/x405 (ST retido anteriormente) e toda NFC-e só trazem o ST informativo. */
+const CFOP_ST_COBRADO = ['401', '402', '403', '408', '409', '410', '411', '412', '413', '414', '415'];
 const CFOP_COMPRA = ['101', '102', '111', '113', '116', '117', '118', '120', '121', '122', '124', '125', '401', '403', '406', '407', '551', '556'];
 const MODELOS_FISCAIS = ['55', '65'];
 const MODELOS_VENDA = ['55', '65', 'GR'];
@@ -46,7 +51,7 @@ const INDICES_SUGERIDOS = [
 ];
 
 const FONTES_VENDA = [
-  { manage: false, nota: 'TB_NFVENDA', item: 'TB_NFV_ITEM', id: 'ID_NFVENDA', idItem: 'ID_NFVITEM', ident: 'TB_EST_IDENTIFICADOR', estoque: 'TB_ESTOQUE', produto: 'TB_EST_PRODUTO', pagamentoDetalhe: true, st: 'TB_NFV_ITEM_ST', ipi: 'TB_NFV_ITEM_IPI', fcp: 'TB_NFV_ITEM_FCP' },
+  { manage: false, nota: 'TB_NFVENDA', item: 'TB_NFV_ITEM', id: 'ID_NFVENDA', idItem: 'ID_NFVITEM', ident: 'TB_EST_IDENTIFICADOR', estoque: 'TB_ESTOQUE', produto: 'TB_EST_PRODUTO', pagamentoDetalhe: true, stSoCobrado: true, st: 'TB_NFV_ITEM_ST', ipi: 'TB_NFV_ITEM_IPI', fcp: 'TB_NFV_ITEM_FCP' },
   { manage: true, nota: 'TB_NFVENDA_2', item: 'TB_NFV_ITEM_2', id: 'ID_NFVENDA', idItem: 'ID_NFVITEM', ident: 'TB_EST_IDENTIFICADOR_2', estoque: 'TB_ESTOQUE_2', produto: 'TB_EST_PRODUTO_2', pagamentoDetalhe: false, st: 'TB_NFV_ITEM_ST_2', ipi: 'TB_NFV_ITEM_IPI_2', stNoItem: true, ipiNoItem: true },
   { manage: true, nota: 'TB_NFVENDA_3', item: 'TB_NFV_ITEM_3', id: 'ID_NFVENDA', idItem: 'ID_NFVITEM', ident: 'TB_EST_IDENTIFICADOR_2', estoque: 'TB_ESTOQUE_2', produto: 'TB_EST_PRODUTO_2', pagamentoDetalhe: false, st: 'TB_NFV_ITEM_ST_3', ipi: 'TB_NFV_ITEM_IPI_3', stNoItem: true, ipiNoItem: true },
 ];
@@ -87,7 +92,14 @@ function sqlValor(fonte) {
   if (fonte.ipi && fonte.ipiNoItem) ipi = `COALESCE(${somaFilha(fonte.ipi, 'X.VLR_IPI', fonte.idItem)}, I.VLR_IPI, 0)`;
   else if (fonte.ipi) ipi = `COALESCE(${somaFilha(fonte.ipi, 'X.VLR_IPI', fonte.idItem)}, 0)`;
   else if (fonte.ipiNoItem) ipi = 'COALESCE(I.VLR_IPI, 0)';
-  const fcp = fonte.fcp ? `COALESCE(${somaFilha(fonte.fcp, 'X.VLR_FCP_ST', fonte.idItem)}, 0)` : '0';
+  let fcp = fonte.fcp ? `COALESCE(${somaFilha(fonte.fcp, 'X.VLR_FCP_ST', fonte.idItem)}, 0)` : '0';
+  if (fonte.stSoCobrado) {
+    /* Na venda Clipp a filha de ST é preenchida também quando o ST é só informativo
+       (NFC-e, 5405, 5102); somá-lo inflava o vendido em relação ao total das notas. */
+    const cobrado = `UPPER(TRIM(N.NF_MODELO)) = '55' AND ${sufixoCfop('I.CFOP')} IN (${listaSql(CFOP_ST_COBRADO)})`;
+    if (st !== '0') st = `CASE WHEN ${cobrado} THEN ${st} ELSE 0 END`;
+    if (fcp !== '0') fcp = `CASE WHEN ${cobrado} THEN ${fcp} ELSE 0 END`;
+  }
   return `(COALESCE(I.VLR_TOTAL, 0) - COALESCE(I.VLR_DESC, 0) + COALESCE(I.VLR_FRETE, 0) + COALESCE(I.VLR_SEGURO, 0) + COALESCE(I.VLR_DESPESA, 0) + ${st} + ${ipi} + ${fcp})`;
 }
 
@@ -104,7 +116,7 @@ function sqlCustoLinha(fonte) {
 
 function filtroCartao(coluna, ignorar) {
   if (!ignorar) return '';
-  return ` AND NOT (UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTAO' OR UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTÃO' OR UPPER(COALESCE(${coluna}, '')) CONTAINING 'CARTÕES')`;
+  return ` AND NOT ${exprCartao(coluna)}`;
 }
 
 function fonteSemFilhas(fonte) {
@@ -1233,7 +1245,13 @@ function somarLado(grupos) {
 }
 
 async function nomesPlanosFora(db) {
-  if (!(await relacaoExiste(db, 'XX_TB_PL_SERV')) || !(await relacaoExiste(db, 'TB_PLANO_CONTAS'))) return [];
+  if (!(await relacaoExiste(db, 'TB_PLANO_CONTAS'))) return [];
+  if (!(await temPlanosIgnorados(db))) {
+    const reserva = await ler(db, `
+      SELECT DISTINCT ${sqlOctets('DESCRICAO', 120)} AS NOME FROM TB_PLANO_CONTAS
+      WHERE UPPER(DESCRICAO) CONTAINING 'MERCADORIAS PARA REVENDA'`);
+    return (reserva || []).map((r) => texto(r.NOME)).filter(Boolean);
+  }
   const rows = await ler(db, `
     SELECT DISTINCT CAST(P.DESCRICAO AS VARCHAR(120) CHARACTER SET OCTETS) AS NOME
     FROM XX_TB_PL_SERV S
@@ -1279,16 +1297,31 @@ async function lerMovimentoDre(db, filtros, usaManage, appCfg) {
   const inicio = parseIso(filtros.inicio);
   const fim = parseIso(filtros.fimExclusivo);
   const leitura = usaManage ? 'manage' : 'clipp';
-  const temIgnorados = await relacaoExiste(db, 'XX_TB_PL_SERV');
-  const fora = temIgnorados
+  /* Sem linha em XX_TB_PL_SERV, NOT IN numa lista vazia deixava passar tudo e
+     Mercadorias para Revenda entrava nas despesas pagas (já está no custo das vendas). */
+  const fora = await temPlanosIgnorados(db)
     ? 'NOT IN (SELECT ID_CTAPLA FROM XX_TB_PL_SERV)'
     : `NOT IN (SELECT ID_CTAPLA FROM TB_PLANO_CONTAS WHERE UPPER(DESCRICAO) CONTAINING 'MERCADORIAS PARA REVENDA')`;
   const temCentroPag = await colunaExiste(db, 'TB_CONTA_PAGAR', 'CC_CUSTO');
-  const temCentroRec = await colunaExiste(db, 'TB_CONTA_RECEBER', 'CC_CUSTO');
   const temTabelaBanco = await relacaoExiste(db, 'TB_BANCO_CTA_MOVTO');
   const temCentroBanco = temTabelaBanco && await colunaExiste(db, 'TB_BANCO_CTA_MOVTO', 'ID_CCUSTO');
   const colRec = await colunaPlanoTitulo(db, 'TB_CONTA_RECEBER');
   const colPag = await colunaPlanoTitulo(db, 'TB_CONTA_PAGAR');
+  /* O Clipp grava o centro escolhido na conta a pagar no rateio TB_CTAPAG_CENTROCUSTOS
+     (cadastro TB_CENTRO_CUSTOS), com percentual por centro. CC_CUSTO fica com o padrão
+     de TB_CENTRO_CUSTO e só vale quando a conta não tem rateio. */
+  const temRateioPag = await relacaoExiste(db, 'TB_CTAPAG_CENTROCUSTOS')
+    && await relacaoExiste(db, 'TB_CENTRO_CUSTOS');
+  const centroPag = temRateioPag
+    ? `COALESCE(${sqlOctets('CCR.DESCRICAO', 80)}, ${temCentroPag ? sqlOctets('CC.NOME', 80) : 'NULL'})`
+    : null;
+  const valorPag = temRateioPag
+    ? 'CASE WHEN R.ID_CTAPAG IS NULL THEN B.VLR_PAGO ELSE CAST(B.VLR_PAGO * COALESCE(R.PERCENTUAL, 0) / 100 AS NUMERIC(18, 2)) END'
+    : 'B.VLR_PAGO';
+  const joinRateioPag = temRateioPag
+    ? `LEFT JOIN TB_CTAPAG_CENTROCUSTOS R ON R.ID_CTAPAG = C.ID_CTAPAG
+    LEFT JOIN TB_CENTRO_CUSTOS CCR ON CCR.ID_CC = R.ID_CC`
+    : '';
   const centro = (tem, coluna) => (tem
     ? sqlOctets(coluna, 80)
     : 'CAST(NULL AS VARCHAR(80) CHARACTER SET OCTETS)');
@@ -1304,16 +1337,21 @@ async function lerMovimentoDre(db, filtros, usaManage, appCfg) {
   let sqlBanco = '';
   if (temTabelaBanco) {
     const colsBanco = await colunasTabela(db, 'TB_BANCO_CTA_MOVTO');
-    const temPlanoMov = colsBanco.has('ID_CTAPLA');
-    const temConta = colsBanco.has('ID_CONTA')
-      && await relacaoExiste(db, 'TB_BANCO_CTA')
-      && await colunaExiste(db, 'TB_BANCO_CTA', 'ID_CTAPLA');
-    if ((temPlanoMov || temConta) && colsBanco.has('VALOR') && colsBanco.has('DT_MOVTO')) {
-      const exprBanco = temPlanoMov && temConta
-        ? 'COALESCE(B.ID_CTAPLA, CTA.ID_CTAPLA)'
-        : (temPlanoMov ? 'B.ID_CTAPLA' : 'CTA.ID_CTAPLA');
-      const joinConta = temConta ? 'LEFT JOIN TB_BANCO_CTA CTA ON CTA.ID_CONTA = B.ID_CONTA' : '';
-      const destino = colsBanco.has('ID_CTA_DEST') ? 'AND COALESCE(B.ID_CTA_DEST, 0) <> 5' : '';
+    /* Só entra o movimento com plano próprio. Sem plano, o movimento é espelho de outro
+       lançamento (baixa de título, PIX da venda, sangria, abertura/fechamento de caixa) e
+       o plano da conta bancária é o próprio caixa, não uma receita ou despesa. Contá-lo
+       duplicava o PIX nas entradas e a baixa em lote de 09/11/2026 nas saídas. */
+    if (colsBanco.has('ID_CTAPLA') && colsBanco.has('VALOR') && colsBanco.has('DT_MOVTO')) {
+      const exprBanco = 'B.ID_CTAPLA';
+      const joinConta = '';
+      const temContaPlano = await relacaoExiste(db, 'TB_BANCO_CTA') && await colunaExiste(db, 'TB_BANCO_CTA', 'ID_CTAPLA');
+      const ligados = [
+        colsBanco.has('ID_CONTAS_RECEBER') ? 'AND B.ID_CONTAS_RECEBER IS NULL' : '',
+        colsBanco.has('ID_CONTAS_PAGAR') ? 'AND B.ID_CONTAS_PAGAR IS NULL' : '',
+        temContaPlano ? 'AND B.ID_CTAPLA NOT IN (SELECT ID_CTAPLA FROM TB_BANCO_CTA WHERE ID_CTAPLA IS NOT NULL)' : '',
+      ].join('\n      ');
+      const destino = `${colsBanco.has('ID_CTA_DEST') ? 'AND COALESCE(B.ID_CTA_DEST, 0) <> 5' : ''}
+      ${ligados}`;
       const historico = colsBanco.has('HISTORICO') ? sqlOctets('B.HISTORICO', 250) : sqlOctets(`''`, 250);
       const semTransf = colsBanco.has('HISTORICO')
         ? `AND COALESCE(B.HISTORICO, '') NOT LIKE 'Transferencia.%'
@@ -1344,47 +1382,329 @@ async function lerMovimentoDre(db, filtros, usaManage, appCfg) {
   const sql = `
     SELECT ${sqlOctets(`'ENTRADAS'`, 20)} AS TIPO, ${exprRec} AS ID,
            ${planoDe(colRec)},
-           ${centro(temCentroRec, 'CC.NOME')} AS CENTRO,
+           ${centro(false, '')} AS CENTRO,
            ${sqlOctets('C.HISTORICO', 250)} AS HISTORICO,
            B.VLR_RECEB AS VALOR, B.DT_BAIXA AS DATA
     FROM TB_CTAREC_BAIXA B
     JOIN TB_CONTA_RECEBER C ON C.ID_CTAREC = B.ID_CTAREC
     ${joinPlano(exprRec)}
-    ${joinCentro(temCentroRec, 'C.CC_CUSTO')}
     WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
       AND TRIM(COALESCE(B.TIP_RECBTO, '')) NOT IN ('C', 'B')
       AND TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'E'
     UNION ALL
     SELECT ${sqlOctets(`'SAIDAS'`, 20)}, ${exprPag},
            ${planoDe(colPag)},
-           ${centro(temCentroPag, 'CC.NOME')},
+           ${centroPag || centro(temCentroPag, 'CC.NOME')},
            ${sqlOctets('C.HISTORICO', 250)},
-           B.VLR_PAGO, B.DT_BAIXA
+           ${valorPag}, B.DT_BAIXA
     FROM TB_CTAPAG_BAIXA B
     JOIN TB_CONTA_PAGAR C ON C.ID_CTAPAG = B.ID_CTAPAG
     ${joinPlano(exprPag)}
     ${joinCentro(temCentroPag, 'C.CC_CUSTO')}
+    ${joinRateioPag}
     WHERE B.DT_BAIXA >= '${inicio}' AND B.DT_BAIXA < '${fim}'
       AND TRIM(COALESCE(B.TIP_PAGTO, '')) NOT IN ('C', 'B')
       AND TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'E'
       ${colPag ? `AND C.${colPag} ${fora}` : ''}
     ${sqlBanco}`;
   const rows = await lerRelatorio(db, sql, appCfg);
-  const entradas = ladoDre((rows || []).filter((r) => texto(r.TIPO).toUpperCase() === 'ENTRADAS'));
+  /* Receita não tem centro de custo no Clipp: as entradas saem só por plano de contas. */
+  const entradas = ladoDre((rows || [])
+    .filter((r) => texto(r.TIPO).toUpperCase() === 'ENTRADAS')
+    .map((r) => ({ ...r, CENTRO: null })));
   const saidas = ladoDre((rows || []).filter((r) => texto(r.TIPO).toUpperCase() === 'SAIDAS'));
   const totalEntradas = somarLado(entradas);
   const totalSaidas = somarLado(saidas);
-  const porCentro = [...entradas, ...saidas].some((g) => g.centro !== 'Sem centro de custo');
+  const porCentro = saidas.some((g) => g.centro !== 'Sem centro de custo');
   return {
     leitura,
     totalEntradas: reais(totalEntradas),
     totalSaidas: reais(totalSaidas),
     resultado: reais(totalEntradas - totalSaidas),
     entradas,
+    receitas: entradas[0]?.planos || [],
     saidas,
     porCentro,
     planosFora: await nomesPlanosFora(db),
     erro: '',
+  };
+}
+
+async function temPlanosIgnorados(db) {
+  if (!(await relacaoExiste(db, 'XX_TB_PL_SERV'))) return false;
+  const rows = await ler(db, 'SELECT FIRST 1 1 AS OK FROM XX_TB_PL_SERV');
+  return !!(rows && rows.length);
+}
+
+const TITULOS_POR_PLANO = 40;
+
+function exprCartao(coluna) {
+  const c = `UPPER(COALESCE(${coluna}, ''))`;
+  return `(${c} CONTAINING 'CARTAO' OR ${c} CONTAINING 'CARTÃO' OR ${c} CONTAINING 'CARTÕES')`;
+}
+
+/* Títulos em aberto agrupados em centro › plano › título. Cada valor guarda a parte de
+   cartão à parte, para a tela ligar e desligar "Considerar cartão" sem nova consulta. */
+function agruparTitulos(rows, comCentro) {
+  const centros = new Map();
+  for (const r of rows || []) {
+    const cents = centavos(r.VALOR);
+    if (cents <= 0) continue;
+    const centro = comCentro ? (texto(r.CENTRO) || 'Sem centro de custo') : '';
+    const codigo = texto(r.CODIGO);
+    const plano = texto(r.PLANO) || 'Sem plano de contas';
+    const cartao = Number(r.CARTAO) === 1;
+    if (!centros.has(centro)) centros.set(centro, { centro, total: 0, cartao: 0, planos: new Map() });
+    const g = centros.get(centro);
+    g.total += cents;
+    if (cartao) g.cartao += cents;
+    const chave = `${codigo}|${plano}`;
+    if (!g.planos.has(chave)) {
+      g.planos.set(chave, { codigo: codigo === '0' ? '' : codigo, plano, total: 0, cartao: 0, quantidade: 0, quantidadeCartao: 0, titulos: [] });
+    }
+    const p = g.planos.get(chave);
+    p.total += cents;
+    p.quantidade += 1;
+    if (cartao) {
+      p.cartao += cents;
+      p.quantidadeCartao += 1;
+    }
+    p.titulos.push({
+      documento: texto(r.DOCUMENTO),
+      historico: texto(r.HISTORICO),
+      vencimento: diaMovimento(r.VENC),
+      valor: cents,
+      cartao,
+    });
+  }
+  const ordem = (a, b) => a.vencimento.localeCompare(b.vencimento) || b.valor - a.valor;
+  const fechaPlano = (p) => {
+    const sem = p.titulos.filter((t) => !t.cartao).sort(ordem).slice(0, TITULOS_POR_PLANO);
+    const com = p.titulos.filter((t) => t.cartao).sort(ordem).slice(0, TITULOS_POR_PLANO);
+    return {
+      codigo: p.codigo,
+      plano: p.plano,
+      total: reais(p.total),
+      cartao: reais(p.cartao),
+      quantidade: p.quantidade,
+      quantidadeCartao: p.quantidadeCartao,
+      titulos: [...sem, ...com].sort(ordem).map((t) => ({ ...t, valor: reais(t.valor) })),
+    };
+  };
+  return [...centros.values()]
+    .map((g) => ({
+      centro: g.centro,
+      total: reais(g.total),
+      cartao: reais(g.cartao),
+      planos: [...g.planos.values()].map(fechaPlano).sort((a, b) => b.total - a.total),
+    }))
+    .sort((a, b) => b.total - a.total);
+}
+
+async function aRealizar(db, filtros, appCfg) {
+  const inicio = parseIso(filtros.inicio);
+  const fim = parseIso(filtros.fimExclusivo);
+  const vazio = { total: 0, cartao: 0, quantidade: 0, quantidadeCartao: 0 };
+  const resultado = {
+    receber: { total: 0, cartao: 0, planos: [] },
+    vencidosReceber: { ...vazio },
+    pagar: { total: 0, centros: [] },
+    vencidosPagar: { ...vazio },
+  };
+  const planoDe = (col) => (col
+    ? `${sqlOctets('P.COD_CONTA', 40)} AS CODIGO, ${sqlOctets('P.DESCRICAO', 120)} AS PLANO`
+    : 'CAST(NULL AS VARCHAR(40) CHARACTER SET OCTETS) AS CODIGO, CAST(NULL AS VARCHAR(120) CHARACTER SET OCTETS) AS PLANO');
+  const joinPlano = (col) => (col ? `LEFT JOIN TB_PLANO_CONTAS P ON P.ID_CTAPLA = C.${col}` : '');
+
+  const [fonteRec] = await fontesContaReceber(db, 0);
+  if (fonteRec) {
+    const col = await colunaPlanoTitulo(db, fonteRec.conta);
+    const saldo = sqlRestante('C', fonteRec);
+    const cartao = exprCartao('C.HISTORICO');
+    const base = `FROM ${fonteRec.conta} C
+      ${joinPlano(col)}
+      WHERE TRIM(COALESCE(C.TIP_CTAREC, '')) <> 'C'
+        AND ${saldo} > 0.009`;
+    const rows = await lerRelatorio(db, `
+      SELECT ${planoDe(col)},
+             ${sqlOctets('C.DOCUMENTO', 40)} AS DOCUMENTO,
+             ${sqlOctets('C.HISTORICO', 250)} AS HISTORICO,
+             C.DT_VENCTO AS VENC, ${saldo} AS VALOR,
+             CASE WHEN ${cartao} THEN 1 ELSE 0 END AS CARTAO
+      ${base}
+        AND C.DT_VENCTO >= '${inicio}' AND C.DT_VENCTO < '${fim}'`, appCfg);
+    const [grupo] = agruparTitulos(rows, false);
+    if (grupo) resultado.receber = { total: grupo.total, cartao: grupo.cartao, planos: grupo.planos };
+    const venc = await lerRelatorio(db, `
+      SELECT COUNT(*) AS QTD, SUM(${saldo}) AS VALOR,
+             SUM(CASE WHEN ${cartao} THEN 1 ELSE 0 END) AS QTD_CARTAO,
+             SUM(CASE WHEN ${cartao} THEN ${saldo} ELSE 0 END) AS VALOR_CARTAO
+      ${base}
+        AND C.DT_VENCTO < '${inicio}'`, appCfg);
+    const v = venc && venc[0];
+    if (v) {
+      resultado.vencidosReceber = {
+        total: reais(centavos(v.VALOR)),
+        cartao: reais(centavos(v.VALOR_CARTAO)),
+        quantidade: inteiro(v.QTD),
+        quantidadeCartao: inteiro(v.QTD_CARTAO),
+      };
+    }
+  }
+
+  if (await relacaoExiste(db, 'TB_CONTA_PAGAR') && await relacaoExiste(db, 'TB_CTAPAG_BAIXA')) {
+    const col = await colunaPlanoTitulo(db, 'TB_CONTA_PAGAR');
+    const colsBaixa = await colunasTabela(db, 'TB_CTAPAG_BAIXA');
+    const pago = `COALESCE((SELECT SUM(${exprValorBaixa(colsBaixa, 'VLR_PAGO')}) FROM TB_CTAPAG_BAIXA B
+        WHERE B.ID_CTAPAG = C.ID_CTAPAG AND TRIM(COALESCE(B.TIP_PAGTO, '')) = 'T'), 0)`;
+    const saldoCheio = `(COALESCE(C.VLR_CTAPAG, 0) - ${pago})`;
+    const temRateio = await relacaoExiste(db, 'TB_CTAPAG_CENTROCUSTOS') && await relacaoExiste(db, 'TB_CENTRO_CUSTOS');
+    const temCentro = await colunaExiste(db, 'TB_CONTA_PAGAR', 'CC_CUSTO') && await relacaoExiste(db, 'TB_CENTRO_CUSTO');
+    const centroExpr = temRateio
+      ? `COALESCE(${sqlOctets('CCR.DESCRICAO', 80)}, ${temCentro ? sqlOctets('CC.NOME', 80) : 'NULL'})`
+      : (temCentro ? sqlOctets('CC.NOME', 80) : 'CAST(NULL AS VARCHAR(80) CHARACTER SET OCTETS)');
+    const saldo = temRateio
+      ? `CASE WHEN R.ID_CTAPAG IS NULL THEN ${saldoCheio} ELSE ${saldoCheio} * COALESCE(R.PERCENTUAL, 0) / 100 END`
+      : saldoCheio;
+    const joins = `
+      ${joinPlano(col)}
+      ${temCentro ? 'LEFT JOIN TB_CENTRO_CUSTO CC ON CC.ID = C.CC_CUSTO' : ''}
+      ${temRateio ? `LEFT JOIN TB_CTAPAG_CENTROCUSTOS R ON R.ID_CTAPAG = C.ID_CTAPAG
+      LEFT JOIN TB_CENTRO_CUSTOS CCR ON CCR.ID_CC = R.ID_CC` : ''}`;
+    const base = `FROM TB_CONTA_PAGAR C
+      ${joins}
+      WHERE TRIM(COALESCE(C.TIP_CTAPAG, '')) <> 'C'
+        AND ${saldoCheio} > 0.009`;
+    const rows = await lerRelatorio(db, `
+      SELECT ${centroExpr} AS CENTRO, ${planoDe(col)},
+             ${sqlOctets('C.DOCUMENTO', 40)} AS DOCUMENTO,
+             ${sqlOctets('C.HISTORICO', 250)} AS HISTORICO,
+             C.DT_VENCTO AS VENC, ${saldo} AS VALOR, 0 AS CARTAO
+      ${base}
+        AND C.DT_VENCTO >= '${inicio}' AND C.DT_VENCTO < '${fim}'`, appCfg);
+    const centros = agruparTitulos(rows, true);
+    resultado.pagar = { total: reais(centros.reduce((s, g) => s + centavos(g.total), 0)), centros };
+    const venc = await lerRelatorio(db, `
+      SELECT COUNT(DISTINCT C.ID_CTAPAG) AS QTD, SUM(${saldo}) AS VALOR
+      ${base}
+        AND C.DT_VENCTO < '${inicio}'`, appCfg);
+    const v = venc && venc[0];
+    if (v) resultado.vencidosPagar = { ...vazio, total: reais(centavos(v.VALOR)), quantidade: inteiro(v.QTD) };
+  }
+  return resultado;
+}
+
+const TOP_PRODUTOS = 10;
+
+async function nomesVendedores(db) {
+  const mapa = new Map();
+  if (!(await relacaoExiste(db, 'TB_FUNCIONARIO'))) return mapa;
+  const rows = await ler(db, `SELECT ID_FUNCIONARIO AS ID, ${sqlOctets('NOME', 80)} AS NOME FROM TB_FUNCIONARIO`);
+  for (const r of rows || []) mapa.set(String(r.ID), texto(r.NOME));
+  return mapa;
+}
+
+/* Aba Vendas: fiscal + gerencial do Clipp, com custo e lucro bruto, vendedor e produto. */
+async function vendasDetalhe(db, usaManage, filtros) {
+  const vendedores = new Map();
+  const produtos = new Map();
+  for (const fonte of fontesVendaEscopo(usaManage, filtros).filter((f) => !f.manage)) {
+    const classif = sqlClassificacao(fonte, filtros, true);
+    const de = `FROM ${fonte.item} I
+      JOIN ${fonte.nota} N ON N.${fonte.id} = I.${fonte.id}
+      ${classif.join}
+      WHERE ${predNota('venda', filtros, fonte)}
+        AND ${predItem('venda')}
+        ${classif.where}`;
+    const porVendedor = await lerFonte(db, fonte, (f) => `
+      SELECT N.ID_VENDEDOR AS ID, COUNT(DISTINCT N.${f.id}) AS NOTAS,
+             SUM(${sqlValor(f)}) AS VALOR, SUM(${sqlCustoLinha(f)}) AS CUSTO
+      ${de}
+      GROUP BY N.ID_VENDEDOR`);
+    for (const r of porVendedor || []) {
+      const id = r.ID == null ? '' : String(r.ID);
+      const v = vendedores.get(id) || { id, notas: 0, valor: 0, custo: 0 };
+      v.notas += inteiro(r.NOTAS);
+      v.valor += centavos(r.VALOR);
+      v.custo += centavos(r.CUSTO);
+      vendedores.set(id, v);
+    }
+    const porProduto = await lerFonte(db, fonte, (f) => `
+      SELECT COALESCE(IDF.ID_ESTOQUE, 0) AS ID,
+             ${sqlOctets('MAX(EST.DESCRICAO)', 120)} AS NOME,
+             MAX(TRIM(I.UNI_MEDIDA)) AS UN,
+             SUM(COALESCE(I.QTD_ITEM, 0)) AS QTD,
+             SUM(${sqlValor(f)}) AS VALOR, SUM(${sqlCustoLinha(f)}) AS CUSTO
+      ${de}
+      GROUP BY COALESCE(IDF.ID_ESTOQUE, 0)`);
+    for (const r of porProduto || []) {
+      const id = String(r.ID);
+      const p = produtos.get(id) || { nome: texto(r.NOME) || 'Sem cadastro', un: String(r.UN || '').trim(), qtd: 0, valor: 0, custo: 0 };
+      p.qtd += Number(r.QTD) || 0;
+      p.valor += centavos(r.VALOR);
+      p.custo += centavos(r.CUSTO);
+      produtos.set(id, p);
+    }
+  }
+
+  const nomes = await nomesVendedores(db);
+  const lista = [...vendedores.values()];
+  const valor = lista.reduce((s, v) => s + v.valor, 0);
+  const custo = lista.reduce((s, v) => s + v.custo, 0);
+  const notas = lista.reduce((s, v) => s + v.notas, 0);
+  const pctDe = (parte, todo) => (todo ? Math.round((10000 * parte) / todo) / 100 : 0);
+  const rankVend = lista
+    .map((v) => ({
+      nome: nomes.get(v.id) || (v.id ? `Vendedor ${v.id}` : 'Sem vendedor'),
+      notas: v.notas,
+      valor: reais(v.valor),
+      custo: reais(v.custo),
+      lucro: reais(v.valor - v.custo),
+      ticket: v.notas ? reais(Math.round(v.valor / v.notas)) : 0,
+      participacao: pctDe(v.valor, valor),
+    }))
+    .sort((a, b) => b.valor - a.valor);
+  const prods = [...produtos.values()].map((p) => ({
+    nome: p.nome,
+    unidade: p.un,
+    quantidade: Math.round(p.qtd * 1000) / 1000,
+    valor: reais(p.valor),
+    lucro: reais(p.valor - p.custo),
+  }));
+
+  const situacao = { C: { notas: 0, valor: 0 }, X: { notas: 0, valor: 0 } };
+  const modelos = filtros.modelosVenda && filtros.modelosVenda.length
+    ? `AND UPPER(TRIM(N.NF_MODELO)) IN (${listaSql(filtros.modelosVenda)})`
+    : '';
+  const fora = await ler(db, `
+    SELECT TRIM(N.STATUS) AS STATUS, COUNT(DISTINCT N.ID_NFVENDA) AS NOTAS,
+           SUM(COALESCE(I.VLR_TOTAL, 0) - COALESCE(I.VLR_DESC, 0)) AS VALOR
+    FROM TB_NFVENDA N
+    LEFT JOIN TB_NFV_ITEM I ON I.ID_NFVENDA = N.ID_NFVENDA
+    WHERE N.STATUS IN ('C', 'X')
+      AND N.DT_EMISSAO >= '${filtros.inicio}' AND N.DT_EMISSAO < '${filtros.fimExclusivo}'
+      ${modelos}
+    GROUP BY TRIM(N.STATUS)`);
+  for (const r of fora || []) {
+    const s = situacao[String(r.STATUS || '').trim()];
+    if (s) {
+      s.notas = inteiro(r.NOTAS);
+      s.valor = reais(centavos(r.VALOR));
+    }
+  }
+
+  return {
+    valorVendido: reais(valor),
+    custo: reais(custo),
+    lucroBruto: reais(valor - custo),
+    margemPct: pctDe(valor - custo, valor),
+    notasVenda: notas,
+    ticketMedio: notas ? reais(Math.round(valor / notas)) : 0,
+    cancelamentos: situacao.C,
+    inutilizacoes: situacao.X,
+    vendedores: rankVend,
+    maisVendidos: [...prods].sort((a, b) => b.valor - a.valor).slice(0, TOP_PRODUTOS),
+    maisLucro: [...prods].sort((a, b) => b.lucro - a.lucro).slice(0, TOP_PRODUTOS),
   };
 }
 
@@ -1572,47 +1892,59 @@ async function consultarDashboard(db, opcoes = {}) {
   }
 
   const usaGr = await empresaUsaGr(db);
+  /* Resumo (cards e recortes), Vendas (fiscal + gerencial com custo, vendedor e produto)
+     e Financeiro (realizado, a realizar e receitas x despesas). NFe+NFCe saiu da tela e
+     Despesa x Receita foi para dentro do Financeiro. */
   const abas = [];
   if (usaManage) abas.push('manage');
-  if (usaGr || !usaManage) abas.push('vendas');
-  abas.push('despesa');
-  abas.push('fiscal');
+  if (usaGr || !usaManage) abas.push('resumo', 'vendas');
   abas.push('financeiro');
   const pedida = String(opcoes.aba || '').trim().toLowerCase();
-  const aba = abas.includes(pedida) ? pedida : (usaManage ? 'manage' : 'vendas');
-  const ignorarCartao = Number((opcoes.appCfg || loadAppConfig()).ignorar_receber_cartao) === 1;
+  const aba = abas.includes(pedida) ? pedida : abas[0];
+  const appCfg = opcoes.appCfg || loadAppConfig();
+  const ignorarCartao = Number(appCfg.ignorar_receber_cartao) === 1;
+  const cabecalho = {
+    perfil,
+    usaManage,
+    usaGr,
+    aba,
+    abas,
+    fiscal: false,
+    periodo: { inicio: filtros.inicio, fim: filtros.fim },
+    ano: String(filtros.inicio || '').slice(0, 4),
+    vazio: false,
+    mensagem: '',
+  };
   if (aba === 'financeiro') {
-    const fin = await consultarFinanceiro(db, filtros, ignorarCartao, usaManage, opcoes.appCfg || loadAppConfig());
-    return {
-      perfil,
-      usaManage,
-      usaGr,
-      aba,
-      abas,
-      fiscal: false,
-      periodo: { inicio: filtros.inicio, fim: filtros.fim },
-      ...fin,
-      vazio: false,
-      mensagem: '',
-    };
-  }
-  if (aba === 'despesa') {
-    const filtrosIniciais = filtrosDaAba(filtros, usaManage ? 'manage' : 'vendas', usaManage, usaGr);
+    const fin = await consultarFinanceiro(db, filtros, ignorarCartao, usaManage, appCfg);
+    let realizar = null;
+    let erroRealizar = '';
+    try {
+      realizar = await aRealizar(db, filtros, appCfg);
+    } catch (err) {
+      erroRealizar = err.message || 'Falha ao ler as contas em aberto';
+    }
+    const filtrosIniciais = filtrosDaAba(filtros, usaManage ? 'manage' : 'resumo', usaManage, usaGr);
     const serieMensal = usaManage
       ? await porMesFinanceiro(db, filtrosIniciais, ignorarCartao, usaManage)
       : await porMes(db, usaManage, filtrosIniciais);
     return {
-      perfil,
-      usaManage,
-      usaGr,
-      aba,
-      abas,
-      fiscal: false,
-      periodo: { inicio: filtros.inicio, fim: filtros.fim },
-      ano: String(filtros.inicio || '').slice(0, 4),
+      ...cabecalho,
+      ...fin,
+      aRealizar: realizar,
+      erroRealizar,
+      considerarCartao: !ignorarCartao,
       porMes: serieMensal,
-      vazio: false,
-      mensagem: '',
+    };
+  }
+  if (aba === 'vendas') {
+    const filtrosVendas = filtrosDaAba(filtros, aba, usaManage, usaGr);
+    const detalhe = await vendasDetalhe(db, usaManage, filtrosVendas);
+    return {
+      ...cabecalho,
+      ...detalhe,
+      vazio: detalhe.valorVendido === 0 && !detalhe.cancelamentos.notas,
+      mensagem: detalhe.valorVendido === 0 ? 'Nenhuma venda no período' : '',
     };
   }
   const filtrosAba = filtrosDaAba(filtros, aba, usaManage, usaGr);
