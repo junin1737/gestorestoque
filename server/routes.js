@@ -3845,6 +3845,27 @@ router.post('/classificacao-ncm/buscar', async (req, res) => {
   }
 });
 
+router.get('/classificacao-ncm/replicador', async (req, res) => {
+  if (!podeClassificacao(req, res)) return;
+  try {
+    res.json(await classificacaoNcm.replicador());
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
+router.post('/classificacao-ncm/replicar', async (req, res) => {
+  if (!podeClassificacao(req, res)) return;
+  try {
+    const autor = req.usuario?.supervisor
+      ? { id: 0, nome: req.usuario?.nome || 'Supervisor' }
+      : { id: req.usuario?.id || 0, nome: req.usuario?.nome || 'Painel' };
+    res.json(await classificacaoNcm.replicar(req.body || {}, autor));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
+
 router.post('/classificacao-ncm/atribuir', async (req, res) => {
   if (!podeClassificacao(req, res)) return;
   try {

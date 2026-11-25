@@ -1324,8 +1324,10 @@ async function enterApp() {
   if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
   if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
   const showRel = can('relatorios', 'acesso');
-  if ($('#nav-relatorios')) $('#nav-relatorios').hidden = !showRel;
-  if ($('#nav-relatorios-mobile')) $('#nav-relatorios-mobile').hidden = !showRel;
+  ['nav-secao-relatorios', 'nav-relatorios', 'nav-relatorios-mobile'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !showRel;
+  });
   const showClassificacao = !!state.classificacaoNcm && can('classificacao_ncm', 'acesso');
   if ($('#nav-classificacao')) $('#nav-classificacao').hidden = !showClassificacao;
   if ($('#nav-classificacao-mobile')) $('#nav-classificacao-mobile').hidden = !showClassificacao;
@@ -1343,6 +1345,10 @@ async function enterApp() {
       const inicio = pagina === 'dashboard' && !perfil;
       const dashContador = pagina === 'dashboard' && perfil === 'CONTADOR_ACESSA';
       btn.hidden = !(inicio || dashContador || (pagina === 'contador' && state.alteracaoMassa));
+    });
+    ['nav-secao-relatorios', 'nav-relatorios', 'nav-relatorios-mobile'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.hidden = true;
     });
   }
   const paginaInicial = state.usuario?.contador && guardada?.page !== 'contador'
@@ -1427,9 +1433,32 @@ $('#mais-sheet')?.querySelectorAll('[data-page]').forEach((btn) => {
   btn.addEventListener('click', async () => {
     setMaisOpen(false);
     if (btn.dataset.perfil) state.dashAbertura = { perfil: btn.dataset.perfil, secao: btn.dataset.secao || 'resumo' };
+    if (btn.dataset.relatorio) {
+      window.Relatorios?.definir(btn.dataset.relatorio);
+      revelarRelatorio();
+    }
     await showPage(btn.dataset.page);
   });
 });
+document.querySelectorAll('[data-alvo]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const box = document.getElementById(btn.dataset.alvo);
+    if (!box) return;
+    const abrir = box.hidden;
+    box.hidden = !abrir;
+    btn.setAttribute('aria-expanded', abrir ? 'true' : 'false');
+  });
+});
+function revelarRelatorio() {
+  ['nav-ramo-produtos', 'nav-ramo-ncms', 'mais-ramo-produtos', 'mais-ramo-ncms'].forEach((id) => {
+    const box = document.getElementById(id);
+    if (box) box.hidden = false;
+  });
+  document.querySelectorAll('[data-alvo]').forEach((btn) => {
+    const box = document.getElementById(btn.dataset.alvo);
+    if (box && !box.hidden) btn.setAttribute('aria-expanded', 'true');
+  });
+}
 $('#btn-config-servidor-mais')?.addEventListener('click', () => {
   setMaisOpen(false);
   $('#btn-config-servidor')?.click();
@@ -1594,7 +1623,8 @@ function setNavActive(page) {
   const atual = state.dashAtual;
   const pagina = page === 'gondola' || page === 'ofertas' ? 'estoque' : page;
   $$('.nav-btn').forEach((b) => {
-    let on = b.dataset.page === pagina;
+    let on = b.dataset.page === pagina && !b.dataset.relatorio;
+    if (b.dataset.relatorio) on = pagina === 'relatorios' && b.dataset.relatorio === window.Relatorios?.atual?.();
     if (page === 'dashboard') {
       if (b.dataset.perfil) {
         on = !!atual && b.dataset.perfil === atual.perfil && (b.dataset.secao || 'resumo') === (atual.secao || 'resumo');
@@ -1616,6 +1646,10 @@ function setNavActive(page) {
 $$('.nav-btn').forEach((btn) => {
   btn.addEventListener('click', async () => {
     document.body.classList.remove('sidebar-open');
+    if (btn.dataset.relatorio) {
+      window.Relatorios?.definir(btn.dataset.relatorio);
+      revelarRelatorio();
+    }
     if (btn.dataset.perfil) state.dashAbertura = { perfil: btn.dataset.perfil, secao: btn.dataset.secao || 'resumo' };
     else if (btn.dataset.page === 'dashboard') {
       if (state.usuario?.contador) state.dashAbertura = { perfil: 'CONTADOR_ACESSA', secao: 'resumo' };
@@ -1775,8 +1809,8 @@ async function showPage(page) {
     $('#page-sub').textContent = 'cClassTrib da NF-e e da NFC-e a partir do NCM do estoque';
     window.ClassificacaoNcm?.onPageEnter();
   } else if (page === 'relatorios') {
-    $('#page-title').textContent = 'Relatórios';
-    $('#page-sub').textContent = 'Produtos e NCMs';
+    $('#page-title').textContent = window.Relatorios?.titulo?.() || 'Relatórios';
+    $('#page-sub').textContent = 'Produtos · NCMs';
     window.Relatorios?.onPageEnter();
   } else if (page === 'usuarios') {
     $('#page-title').textContent = 'Usuários';
@@ -3320,8 +3354,10 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     if ($('#nav-contador')) $('#nav-contador').hidden = !showMassa;
     if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showMassa;
     const showRel = can('relatorios', 'acesso');
-    if ($('#nav-relatorios')) $('#nav-relatorios').hidden = !showRel;
-    if ($('#nav-relatorios-mobile')) $('#nav-relatorios-mobile').hidden = !showRel;
+    ['nav-secao-relatorios', 'nav-relatorios', 'nav-relatorios-mobile'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.hidden = !showRel;
+    });
     const showClassificacao = !!state.classificacaoNcm && can('classificacao_ncm', 'acesso');
     if ($('#nav-classificacao')) $('#nav-classificacao').hidden = !showClassificacao;
     if ($('#nav-classificacao-mobile')) $('#nav-classificacao-mobile').hidden = !showClassificacao;

@@ -65,12 +65,104 @@
           <button type="button" class="btn small primary" id="cn-buscar">Buscar</button>
         </div>
         <div id="cn-resultado"></div>
+      </section>
+      <section class="imp-section">
+        <header class="imp-section-head"><h4>Replicador Geral</h4></header>
+        <p class="hint">Lê um NCM válido de cada, sem nulos, sem 00000000 e sem código curto. A opção da Receita aparece antes de gravar. Desmarque o que não deve ser aplicado.</p>
+        <div class="imp-vinc-btns">
+          <button type="button" class="btn small primary" id="cn-ler">Ler NCMs</button>
+        </div>
+        <div id="cn-replicador"></div>
       </section>`;
     resultado = null;
     $('#cn-buscar')?.addEventListener('click', buscar);
     $('#cn-ncm')?.addEventListener('keydown', (ev) => {
       if (ev.key === 'Enter') buscar();
     });
+    $('#cn-ler')?.addEventListener('click', lerReplicador);
+  }
+
+  function selectLinha(nome, opcoes) {
+    const escolhida = (opcoes || []).find((o) => o.sugerida)?.codigo || '';
+    const itens = (opcoes || []).map((o) => (
+      `<option value="${esc(o.codigo)}"${o.codigo === escolhida ? ' selected' : ''}>${esc(rotuloOpcao(o))}</option>`
+    )).join('');
+    return `<select data-rep="${nome}"><option value="">Não alterar</option>${itens}</select>`;
+  }
+
+  async function lerReplicador() {
+    const box = $('#cn-replicador');
+    if (!box) return;
+    box.innerHTML = '<p class="hint">Lendo um NCM de cada na Receita…</p>';
+    const res = await api('/classificacao-ncm/replicador');
+    if (!res?.ok) {
+      box.innerHTML = `<p class="erro">${esc(res?.error || 'Não foi possível ler os NCMs.')}</p>`;
+      return;
+    }
+    const itens = res.itens || [];
+    if (!itens.length) {
+      box.innerHTML = '<p class="hint">Nenhum NCM válido no estoque.</p>';
+      return;
+    }
+    const linhas = itens.map((item, idx) => {
+      const travado = !!item.erro || (!item.nfe?.length && !item.nfce?.length);
+      return `
+        <tr>
+          <td class="rep-check"><input type="checkbox" data-rep-marca="${idx}" ${travado ? 'disabled' : 'checked'} /></td>
+          <td><span class="rep-ncm">${esc(item.ncm_formatado || item.ncm)}</span><span class="rep-exemplo">${esc(item.exemplo || item.descricao || '')}</span></td>
+          <td>${item.quantidade || 0}</td>
+          <td>${travado ? `<span class="hint">${esc(item.erro || 'Sem opção da Receita')}</span>` : selectLinha('nfe', item.nfe)}</td>
+          <td>${travado ? '—' : selectLinha('nfce', item.nfce)}</td>
+        </tr>`;
+    }).join('');
+    box.innerHTML = `
+      <p class="hint">${itens.length} NCM(s) válidos${res.regime ? ` · ${esc(res.regime)}` : ''}.</p>
+      <div class="imp-vinc-btns">
+        <button type="button" class="btn small primary" id="cn-replicar">Aplicar nos marcados</button>
+      </div>
+      <div class="rep-lista">
+        <table class="rep-table">
+          <thead><tr><th class="rep-check"><input type="checkbox" id="cn-rep-todos" checked /></th><th>NCM</th><th>Produtos</th><th>NF-e</th><th>NFC-e</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>
+      </div>`;
+    box._itens = itens;
+    $('#cn-rep-todos')?.addEventListener('change', (ev) => {
+      box.querySelectorAll('[data-rep-marca]:not(:disabled)').forEach((el) => { el.checked = ev.target.checked; });
+    });
+    $('#cn-replicar')?.addEventListener('click', () => aplicarReplicador(box));
+  }
+
+  async function aplicarReplicador(box) {
+    const itens = box?._itens || [];
+    const escolhidos = [];
+    box.querySelectorAll('[data-rep-marca]:checked').forEach((el) => {
+      const item = itens[Number(el.getAttribute('data-rep-marca'))];
+      const tr = el.closest('tr');
+      if (!item || !tr) return;
+      escolhidos.push({
+        ncm: item.ncm,
+        nfe: tr.querySelector('[data-rep="nfe"]')?.value || '',
+        nfce: tr.querySelector('[data-rep="nfce"]')?.value || '',
+      });
+    });
+    if (!escolhidos.length) {
+      deps.showMsg('Marque ao menos um NCM.');
+      return;
+    }
+    const ok = await deps.showConfirm(`Aplicar a classificação escolhida em todos os produtos dos ${escolhidos.length} NCMs marcados?`);
+    if (!ok) return;
+    const res = await api('/classificacao-ncm/replicar', { method: 'POST', body: { itens: escolhidos } });
+    if (!res?.ok) {
+      deps.showMsg(res?.error || 'Não foi possível aplicar.');
+      return;
+    }
+    const partes = [`${res.alterados || 0} produto(s) atualizados`];
+    if (res.jaIguais) partes.push(`${res.jaIguais} já estavam iguais`);
+    if (res.falhas?.length) partes.push(`${res.falhas.length} NCM(s) não aplicados`);
+    deps.showToast(partes.join('. ') + '.');
+    if (res.falhas?.length) deps.showMsg(res.falhas.map((f) => `${f.ncm}: ${f.error}`).join('\n'));
+    await lerReplicador();
   }
 
   async function buscar() {

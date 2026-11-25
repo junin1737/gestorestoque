@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=297" />
+  <link rel="stylesheet" href="styles.css?v=298" />
   <link rel="stylesheet" href="importacao-nfe.css?v=257" />
 </head>
 <body>
@@ -176,11 +176,23 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15v4M12 11v8M16 8v11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Alterações
           </button>
-          <p class="nav-section">Relatórios</p>
-          <button class="nav-btn" data-page="relatorios" id="nav-relatorios">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h8l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M15 3.5V8h4.5M8.5 12h7M8.5 16h5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
-            Relatórios
-          </button>
+          <p class="nav-section" id="nav-secao-relatorios">Relatórios</p>
+          <div class="nav-cascata" id="nav-relatorios">
+            <button type="button" class="nav-ramo" data-alvo="nav-ramo-produtos" aria-expanded="false" aria-controls="nav-ramo-produtos">
+              <span class="nav-seta" aria-hidden="true"></span>
+              Produtos
+            </button>
+            <div class="nav-filhos" id="nav-ramo-produtos" hidden>
+              <button type="button" class="nav-ramo nav-ramo-2" data-alvo="nav-ramo-ncms" aria-expanded="false" aria-controls="nav-ramo-ncms">
+                <span class="nav-seta" aria-hidden="true"></span>
+                NCMs
+              </button>
+              <div class="nav-filhos" id="nav-ramo-ncms" hidden>
+                <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="ncm-branco">NCM em branco ou inválido</button>
+                <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="ncm-distintos">NCMs distintos</button>
+              </div>
+            </div>
+          </div>
           <p class="nav-section">Administração</p>
           <button class="nav-btn" data-page="contador" id="nav-contador" hidden>
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4.5h10A1.5 1.5 0 0 1 18.5 6v13l-6.5-3.2L5.5 19V6A1.5 1.5 0 0 1 7 4.5z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
@@ -1185,7 +1197,16 @@
             <button type="button" data-page="central-ofertas" id="nav-central-ofertas-mobile" hidden>Central de Ofertas</button>
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
-            <button type="button" data-page="relatorios" id="nav-relatorios-mobile">Relatórios</button>
+            <div class="mais-cascata" id="nav-relatorios-mobile">
+              <button type="button" class="mais-ramo" data-alvo="mais-ramo-produtos" aria-expanded="false">Produtos</button>
+              <div class="mais-filhos" id="mais-ramo-produtos" hidden>
+                <button type="button" class="mais-ramo" data-alvo="mais-ramo-ncms" aria-expanded="false">NCMs</button>
+                <div class="mais-filhos" id="mais-ramo-ncms" hidden>
+                  <button type="button" data-page="relatorios" data-relatorio="ncm-branco">NCM em branco ou inválido</button>
+                  <button type="button" data-page="relatorios" data-relatorio="ncm-distintos">NCMs distintos</button>
+                </div>
+              </div>
+            </div>
             <button type="button" data-page="contador" id="nav-contador-mobile" hidden>Alteração em massa</button>
             <button type="button" data-page="classificacao" id="nav-classificacao-mobile" hidden>Classificação por NCM</button>
             <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
@@ -1496,11 +1517,11 @@
   <script src="condicionais.js?v=252"></script>
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
-  <script src="classificacao-ncm.js?v=6"></script>
-  <script src="relatorios.js?v=1"></script>
+  <script src="classificacao-ncm.js?v=7"></script>
+  <script src="relatorios.js?v=2"></script>
   <script src="dashboard.js?v=263"></script>
   <script src="gondola.js?v=4"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=285"></script>
+  <script src="app.js?v=286"></script>
 </body>
 </html>

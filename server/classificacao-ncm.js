@@ -555,84 +555,168 @@ async function buscar(body) {
   });
 }
 
-async function atribuir(body, autor) {
-  const ncm = digitos(body?.ncm);
-  const nfeCod = codigoClass(body?.nfe);
-  const nfceCod = codigoClass(body?.nfce);
-  if (ncm.length !== 8) return { ok: false, error: 'Informe o NCM com 8 dígitos.' };
+function ncmValido(codigo) {
+  const ncm = digitos(codigo);
+  return ncm.length === 8 && ncm !== '00000000';
+}
+
+function formatarNcm(codigo) {
+  const s = digitos(codigo);
+  return s.length === 8 ? `${s.slice(0, 4)}.${s.slice(4, 6)}.${s.slice(6)}` : s;
+}
+
+async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInformado, origem) {
+  const ncm = digitos(ncmInformado);
+  const nfeCod = codigoClass(nfeInformado);
+  const nfceCod = codigoClass(nfceInformado);
+  if (!ncmValido(ncm)) return { ok: false, error: 'NCM inválido.' };
   if (!nfeCod && !nfceCod) return { ok: false, error: 'Escolha a classificação da NF-e, da NFC-e ou as duas.' };
+  const alvo = writeTargets(appCfg)[0];
+  if (!alvo) return { ok: false, error: 'Base de estoque indisponível.' };
+  const regime = await regimeDaBase(db);
+  const consulta = await consultarUm(regime.crt, ncm);
+  const permitidasNfe = new Set(opcoesDe(consulta.nfe, consulta.sugestao?.nfe).map((o) => o.codigo));
+  const permitidasNfce = new Set(opcoesDe(consulta.nfce, consulta.sugestao?.nfce).map((o) => o.codigo));
+  if (nfeCod && !permitidasNfe.has(nfeCod)) {
+    return { ok: false, error: 'A classificação de NF-e escolhida não está entre as opções da Receita para este NCM.' };
+  }
+  if (nfceCod && !permitidasNfce.has(nfceCod)) {
+    return { ok: false, error: 'A classificação de NFC-e escolhida não está entre as opções da Receita para este NCM.' };
+  }
+  const cache = new Map();
+  const classeNfe = nfeCod ? await classeDe(db, cache, nfeCod) : null;
+  const classeNfce = nfceCod ? await classeDe(db, cache, nfceCod) : null;
+  if (nfeCod && !classeNfe) {
+    return { ok: false, error: `O código ${nfeCod} da NF-e não está cadastrado na tabela de classificação tributária.` };
+  }
+  if (nfceCod && !classeNfce) {
+    return { ok: false, error: `O código ${nfceCod} da NFC-e não está cadastrado na tabela de classificação tributária.` };
+  }
+  const grupos = await lerProdutos(db, alvo.tables, { ncm, q: '', grupo: 0, exato: true });
+  const { lista, conflito } = produtosDoNcm(grupos, ncm);
+  if (!lista.length) return { ok: false, error: 'Nenhum produto com esse NCM para preencher.' };
+  const atual = await lerClassAtual(db, lista.map((p) => p.id_estoque));
+  const auditoria = [];
+  let alterados = 0;
+  let jaIguais = 0;
+  await withTransaction(db, async (tx) => {
+    for (const grupo of lista) {
+      let mudou = false;
+      if (classeNfe && atual.nfe.get(grupo.id_estoque) !== classeNfe.id) {
+        await gravarClass(tx, 'TB_EST_TRIBUTOS', grupo.id_estoque, classeNfe.id);
+        mudou = true;
+        const de = atual.codigos.get(atual.nfe.get(grupo.id_estoque)) || '—';
+        for (const item of grupo.itens) {
+          auditoria.push({
+            id_identificador: item.id_identificador,
+            id_estoque: grupo.id_estoque,
+            tipo: 'ficha',
+            resumo: `Class. trib. NF-e: ${de} → ${classeNfe.codigo}`,
+            detalhe: `Classificação por NCM ${ncm} · NF-e: ${de} → ${classeNfe.codigo} ${classeNfe.descricao || ''}`.trim(),
+            id_funcionario: autor.id || 0,
+            usuario: autor.nome || 'Classificação por NCM',
+            observacao: origem || 'Classificação por NCM',
+          });
+        }
+      }
+      if (classeNfce && atual.nfce.get(grupo.id_estoque) !== classeNfce.id) {
+        await gravarClass(tx, 'TB_EST_TRIBUTOS_NFCE', grupo.id_estoque, classeNfce.id);
+        mudou = true;
+        const de = atual.codigos.get(atual.nfce.get(grupo.id_estoque)) || '—';
+        for (const item of grupo.itens) {
+          auditoria.push({
+            id_identificador: item.id_identificador,
+            id_estoque: grupo.id_estoque,
+            tipo: 'ficha',
+            resumo: `Class. trib. NFC-e: ${de} → ${classeNfce.codigo}`,
+            detalhe: `Classificação por NCM ${ncm} · NFC-e: ${de} → ${classeNfce.codigo} ${classeNfce.descricao || ''}`.trim(),
+            id_funcionario: autor.id || 0,
+            usuario: autor.nome || 'Classificação por NCM',
+            observacao: origem || 'Classificação por NCM',
+          });
+        }
+      }
+      if (mudou) alterados += grupo.itens.length;
+      else jaIguais += grupo.itens.length;
+    }
+  });
+  for (const entrada of auditoria) await insertAudit(db, entrada);
+  return { ok: true, alterados, jaIguais, conflito };
+}
+
+async function atribuir(body, autor) {
+  return withDb((db, appCfg) => aplicarNcm(db, appCfg, autor, body?.ncm, body?.nfe, body?.nfce, 'Classificação por NCM'));
+}
+
+async function replicador() {
   return withDb(async (db, appCfg) => {
     const alvo = writeTargets(appCfg)[0];
     if (!alvo) return { ok: false, error: 'Base de estoque indisponível.' };
     const regime = await regimeDaBase(db);
-    const consulta = await consultarUm(regime.crt, ncm);
-    const permitidasNfe = new Set(opcoesDe(consulta.nfe, consulta.sugestao?.nfe).map((o) => o.codigo));
-    const permitidasNfce = new Set(opcoesDe(consulta.nfce, consulta.sugestao?.nfce).map((o) => o.codigo));
-    if (nfeCod && !permitidasNfe.has(nfeCod)) {
-      return { ok: false, error: 'A classificação de NF-e escolhida não está entre as opções da Receita para este NCM.' };
+    const chave = `REPLACE(COALESCE(P.COD_NCM, ''), '.', '')`;
+    const rows = await query(db, `
+      SELECT ${chave} AS NCM, COUNT(*) AS QTD, MIN(E.DESCRICAO) AS EXEMPLO
+        FROM ${alvo.tables.estoque} E
+        JOIN ${alvo.tables.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
+        JOIN ${alvo.tables.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+       WHERE (E.STATUS = 'A' OR E.STATUS IS NULL OR E.STATUS = 'I')
+         AND P.COD_NCM IS NOT NULL
+         AND CHAR_LENGTH(${chave}) >= 8
+         AND ${chave} <> '00000000'
+       GROUP BY ${chave}
+       ORDER BY 1`);
+    const itens = [];
+    for (const row of rows) {
+      const ncm = digitos(row.NCM);
+      if (!ncmValido(ncm)) continue;
+      const item = {
+        ncm,
+        ncm_formatado: formatarNcm(ncm),
+        quantidade: Number(row.QTD) || 0,
+        exemplo: txt(row.EXEMPLO),
+        nfe: [],
+        nfce: [],
+      };
+      try {
+        const consulta = await consultarUm(regime.crt, ncm);
+        item.descricao = txt(consulta.ncm?.descricao);
+        item.nfe = opcoesDe(consulta.nfe, consulta.sugestao?.nfe);
+        item.nfce = opcoesDe(consulta.nfce, consulta.sugestao?.nfce);
+      } catch (err) {
+        item.erro = err.message || 'A Receita não devolveu opção para este NCM.';
+      }
+      itens.push(item);
     }
-    if (nfceCod && !permitidasNfce.has(nfceCod)) {
-      return { ok: false, error: 'A classificação de NFC-e escolhida não está entre as opções da Receita para este NCM.' };
-    }
-    const cache = new Map();
-    const classeNfe = nfeCod ? await classeDe(db, cache, nfeCod) : null;
-    const classeNfce = nfceCod ? await classeDe(db, cache, nfceCod) : null;
-    if (nfeCod && !classeNfe) {
-      return { ok: false, error: `O código ${nfeCod} da NF-e não está cadastrado na tabela de classificação tributária.` };
-    }
-    if (nfceCod && !classeNfce) {
-      return { ok: false, error: `O código ${nfceCod} da NFC-e não está cadastrado na tabela de classificação tributária.` };
-    }
-    const grupos = await lerProdutos(db, alvo.tables, { ncm, q: '', grupo: 0, exato: true });
-    const { lista, conflito } = produtosDoNcm(grupos, ncm);
-    if (!lista.length) return { ok: false, error: 'Nenhum produto com esse NCM para preencher.' };
-    const atual = await lerClassAtual(db, lista.map((p) => p.id_estoque));
-    const auditoria = [];
+    itens.sort((a, b) => a.ncm.localeCompare(b.ncm, 'pt-BR'));
+    return { ok: true, regime: regime.regime, itens };
+  });
+}
+
+async function replicar(body, autor) {
+  const itens = (Array.isArray(body?.itens) ? body.itens : []).filter((item) => ncmValido(item?.ncm));
+  if (!itens.length) return { ok: false, error: 'Marque ao menos um NCM válido.' };
+  return withDb(async (db, appCfg) => {
     let alterados = 0;
     let jaIguais = 0;
-    await withTransaction(db, async (tx) => {
-      for (const grupo of lista) {
-        let mudou = false;
-        if (classeNfe && atual.nfe.get(grupo.id_estoque) !== classeNfe.id) {
-          await gravarClass(tx, 'TB_EST_TRIBUTOS', grupo.id_estoque, classeNfe.id);
-          mudou = true;
-          const de = atual.codigos.get(atual.nfe.get(grupo.id_estoque)) || '—';
-          for (const item of grupo.itens) {
-            auditoria.push({
-              id_identificador: item.id_identificador,
-              id_estoque: grupo.id_estoque,
-              tipo: 'ficha',
-              resumo: `Class. trib. NF-e: ${de} → ${classeNfe.codigo}`,
-              detalhe: `Classificação por NCM ${ncm} · NF-e: ${de} → ${classeNfe.codigo} ${classeNfe.descricao || ''}`.trim(),
-              id_funcionario: autor.id || 0,
-              usuario: autor.nome || 'Classificação por NCM',
-              observacao: 'Classificação por NCM',
-            });
-          }
+    let conflito = 0;
+    const falhas = [];
+    for (const item of itens) {
+      try {
+        const res = await aplicarNcm(db, appCfg, autor, item.ncm, item.nfe, item.nfce, 'Replicador Geral');
+        if (!res.ok) falhas.push({ ncm: formatarNcm(item.ncm), error: res.error });
+        else {
+          alterados += res.alterados || 0;
+          jaIguais += res.jaIguais || 0;
+          conflito += res.conflito || 0;
         }
-        if (classeNfce && atual.nfce.get(grupo.id_estoque) !== classeNfce.id) {
-          await gravarClass(tx, 'TB_EST_TRIBUTOS_NFCE', grupo.id_estoque, classeNfce.id);
-          mudou = true;
-          const de = atual.codigos.get(atual.nfce.get(grupo.id_estoque)) || '—';
-          for (const item of grupo.itens) {
-            auditoria.push({
-              id_identificador: item.id_identificador,
-              id_estoque: grupo.id_estoque,
-              tipo: 'ficha',
-              resumo: `Class. trib. NFC-e: ${de} → ${classeNfce.codigo}`,
-              detalhe: `Classificação por NCM ${ncm} · NFC-e: ${de} → ${classeNfce.codigo} ${classeNfce.descricao || ''}`.trim(),
-              id_funcionario: autor.id || 0,
-              usuario: autor.nome || 'Classificação por NCM',
-              observacao: 'Classificação por NCM',
-            });
-          }
-        }
-        if (mudou) alterados += grupo.itens.length;
-        else jaIguais += grupo.itens.length;
+      } catch (err) {
+        falhas.push({ ncm: formatarNcm(item.ncm), error: err.message });
       }
-    });
-    for (const entrada of auditoria) await insertAudit(db, entrada);
-    return { ok: true, alterados, jaIguais, conflito };
+    }
+    if (!alterados && !jaIguais && falhas.length) {
+      return { ok: false, error: falhas[0].error, falhas };
+    }
+    return { ok: true, alterados, jaIguais, conflito, falhas };
   });
 }
 
@@ -642,5 +726,7 @@ module.exports = {
   aplicar,
   buscar,
   atribuir,
+  replicador,
+  replicar,
   situacaoConsulta,
 };
