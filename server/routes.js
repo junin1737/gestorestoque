@@ -3803,6 +3803,19 @@ router.put('/contador/itens/:id', async (req, res) => {
 
 const massa = require('./massa');
 const classificacaoNcm = require('./classificacao-ncm');
+const relatorios = require('./relatorios');
+
+router.get('/relatorios', exigirModulo('relatorios'), (_req, res) => {
+  res.json(relatorios.catalogo());
+});
+
+router.get('/relatorios/:id', exigirModulo('relatorios'), async (req, res) => {
+  try {
+    res.json(await relatorios.executar(req.params.id));
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
 
 function podeClassificacao(req, res) {
   if (require('./licenca').situacao().classificacao_ncm !== true) {

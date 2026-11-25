@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=296" />
+  <link rel="stylesheet" href="styles.css?v=297" />
   <link rel="stylesheet" href="importacao-nfe.css?v=257" />
 </head>
 <body>
@@ -175,6 +175,11 @@
           <button class="nav-btn" data-page="alteracoes" id="nav-alteracoes">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15v4M12 11v8M16 8v11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Alterações
+          </button>
+          <p class="nav-section">Relatórios</p>
+          <button class="nav-btn" data-page="relatorios" id="nav-relatorios">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3.5h8l4 4V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/><path d="M15 3.5V8h4.5M8.5 12h7M8.5 16h5" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
+            Relatórios
           </button>
           <p class="nav-section">Administração</p>
           <button class="nav-btn" data-page="contador" id="nav-contador" hidden>
@@ -963,6 +968,10 @@
           <div id="classificacao-host"></div>
         </div>
 
+        <div id="page-relatorios" class="page" hidden>
+          <div id="relatorios-host"></div>
+        </div>
+
         <div id="page-usuarios" class="page" hidden>
           <div class="toolbar">
             <p class="hint">Só o supervisor cadastra os usuários do painel. Supervisor e MT Entradas já entram com a senha pré-cadastrada.</p>
@@ -1176,6 +1185,7 @@
             <button type="button" data-page="central-ofertas" id="nav-central-ofertas-mobile" hidden>Central de Ofertas</button>
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
+            <button type="button" data-page="relatorios" id="nav-relatorios-mobile">Relatórios</button>
             <button type="button" data-page="contador" id="nav-contador-mobile" hidden>Alteração em massa</button>
             <button type="button" data-page="classificacao" id="nav-classificacao-mobile" hidden>Classificação por NCM</button>
             <button type="button" data-page="usuarios" id="nav-usuarios-mobile">Usuários</button>
@@ -1487,9 +1497,10 @@
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
   <script src="classificacao-ncm.js?v=6"></script>
+  <script src="relatorios.js?v=1"></script>
   <script src="dashboard.js?v=263"></script>
   <script src="gondola.js?v=4"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=284"></script>
+  <script src="app.js?v=285"></script>
 </body>
 </html>

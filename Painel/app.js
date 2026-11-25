@@ -1323,6 +1323,9 @@ async function enterApp() {
   const showContador = !!state.alteracaoMassa && (!!state.usuario?.contador || can('massa', 'acesso'));
   if ($('#nav-contador')) $('#nav-contador').hidden = !showContador;
   if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showContador;
+  const showRel = can('relatorios', 'acesso');
+  if ($('#nav-relatorios')) $('#nav-relatorios').hidden = !showRel;
+  if ($('#nav-relatorios-mobile')) $('#nav-relatorios-mobile').hidden = !showRel;
   const showClassificacao = !!state.classificacaoNcm && can('classificacao_ncm', 'acesso');
   if ($('#nav-classificacao')) $('#nav-classificacao').hidden = !showClassificacao;
   if ($('#nav-classificacao-mobile')) $('#nav-classificacao-mobile').hidden = !showClassificacao;
@@ -1606,7 +1609,7 @@ function setNavActive(page) {
   $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === pagina && !atual));
   const mais = $('#btn-mais-mobile');
   if (mais) {
-    mais.classList.toggle('active', ['clientes', 'compras', 'condicionais', 'central-ofertas', 'alteracoes', 'usuarios', 'preferencias'].includes(page));
+    mais.classList.toggle('active', ['clientes', 'compras', 'condicionais', 'central-ofertas', 'alteracoes', 'relatorios', 'usuarios', 'preferencias'].includes(page));
   }
 }
 
@@ -1699,6 +1702,10 @@ async function showPage(page) {
     showMsg('Sem permissão para alteração em massa.');
     page = 'dashboard';
   }
+  if (page === 'relatorios' && !can('relatorios', 'acesso')) {
+    showMsg('Sem permissão para relatórios.');
+    page = 'dashboard';
+  }
   if (page === 'classificacao' && !(state.classificacaoNcm && can('classificacao_ncm', 'acesso'))) {
     showMsg('Sem permissão para classificação por NCM.');
     page = 'dashboard';
@@ -1740,6 +1747,7 @@ async function showPage(page) {
   $('#page-usuarios').hidden = page !== 'usuarios';
   if ($('#page-contador')) $('#page-contador').hidden = page !== 'contador';
   if ($('#page-classificacao')) $('#page-classificacao').hidden = page !== 'classificacao';
+  if ($('#page-relatorios')) $('#page-relatorios').hidden = page !== 'relatorios';
   if ($('#page-preferencias')) $('#page-preferencias').hidden = page !== 'preferencias';
   if ($('#page-empresas')) $('#page-empresas').hidden = page !== 'empresas';
   if ($('#page-gondola')) $('#page-gondola').hidden = page !== 'gondola';
@@ -1766,6 +1774,10 @@ async function showPage(page) {
     $('#page-title').textContent = 'Classificação por NCM';
     $('#page-sub').textContent = 'cClassTrib da NF-e e da NFC-e a partir do NCM do estoque';
     window.ClassificacaoNcm?.onPageEnter();
+  } else if (page === 'relatorios') {
+    $('#page-title').textContent = 'Relatórios';
+    $('#page-sub').textContent = 'Produtos e NCMs';
+    window.Relatorios?.onPageEnter();
   } else if (page === 'usuarios') {
     $('#page-title').textContent = 'Usuários';
     $('#page-sub').textContent = 'Permissões por módulo';
@@ -3056,6 +3068,12 @@ function htmlFormUsuario(u) {
             <option value="false" ${!u.permissoes?.alteracoes?.acesso ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        <label>Relatórios
+          <select data-perm="relatorios.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
+            <option value="true" ${u.permissoes?.relatorios?.acesso !== false ? 'selected' : ''}>Sim</option>
+            <option value="false" ${u.permissoes?.relatorios?.acesso === false ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
         <label>Usuários
           <select data-perm="usuarios.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.permissoes?.usuarios?.acesso ? 'selected' : ''}>Sim</option>
@@ -3219,6 +3237,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
         alteracoes: {
           acesso: $('[data-perm="alteracoes.acesso"]', card).value === 'true',
         },
+        relatorios: {
+          acesso: $('[data-perm="relatorios.acesso"]', card)?.value !== 'false',
+        },
         usuarios: {
           acesso: $('[data-perm="usuarios.acesso"]', card).value === 'true',
         },
@@ -3298,6 +3319,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     const showMassa = !!state.alteracaoMassa && can('massa', 'acesso');
     if ($('#nav-contador')) $('#nav-contador').hidden = !showMassa;
     if ($('#nav-contador-mobile')) $('#nav-contador-mobile').hidden = !showMassa;
+    const showRel = can('relatorios', 'acesso');
+    if ($('#nav-relatorios')) $('#nav-relatorios').hidden = !showRel;
+    if ($('#nav-relatorios-mobile')) $('#nav-relatorios-mobile').hidden = !showRel;
     const showClassificacao = !!state.classificacaoNcm && can('classificacao_ncm', 'acesso');
     if ($('#nav-classificacao')) $('#nav-classificacao').hidden = !showClassificacao;
     if ($('#nav-classificacao-mobile')) $('#nav-classificacao-mobile').hidden = !showClassificacao;
@@ -4358,6 +4382,8 @@ window.ClassificacaoNcm?.init({
   showConfirm,
   showToast,
 });
+
+window.Relatorios?.init({ api, showMsg });
 
 window.ImportacaoNfe?.init({
   api,

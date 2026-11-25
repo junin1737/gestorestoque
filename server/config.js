@@ -27,6 +27,10 @@ const MODULOS = {
     label: 'Alterações',
     default: { acesso: false },
   },
+  relatorios: {
+    label: 'Relatórios',
+    default: { acesso: true },
+  },
   usuarios: {
     label: 'Usuários',
     default: { acesso: false },
@@ -166,6 +170,7 @@ function fullPermissoes() {
       out[key] = { acesso: true, ficha: 'editar', precos: 'total', quantidades: 'editar' };
     }
     if (key === 'alteracoes') out[key] = { acesso: true };
+    if (key === 'relatorios') out[key] = { acesso: true };
     if (key === 'usuarios') out[key] = { acesso: true };
     if (key === 'importacao') out[key] = { acesso: true };
     if (key === 'compras') out[key] = { acesso: true };
