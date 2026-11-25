@@ -21,6 +21,24 @@
     return `<label class="auto-campo${largo ? ' largo' : ''}"><span>${esc(rotulo)}</span><input data-campo="${nome}" value="${esc(valor || '')}" autocomplete="off" /></label>`;
   }
 
+  function textoEntrada(row) {
+    const nota = String(lerCampo(row, 'uni_xml') || '').trim().toUpperCase();
+    const est = String(lerCampo(row, 'uni_estoque') || '').trim().toUpperCase();
+    const fatorTxt = String(lerCampo(row, 'conversor') || '').trim().replace(/\s/g, '').replace(',', '.');
+    const fator = Number(fatorTxt);
+    const pacote = !!row.querySelector('[data-campo="pacote"]')?.checked;
+    if (!nota || !est || !(fator > 0)) return '1 da nota × fator = quantidade no estoque';
+    const qtd = String(Number((fator).toFixed(4))).replace(/\.?0+$/, '').replace('.', ',');
+    const fatorShow = String(fator).replace('.', ',');
+    if (pacote) return `1 ${nota} da nota entra como ${fatorShow} pacote(s)`;
+    return `1 ${nota} da nota × ${fatorShow} = ${qtd} ${est} no estoque`;
+  }
+
+  function pintarEntrada(row) {
+    const alvo = row.querySelector('[data-entrada]');
+    if (alvo) alvo.textContent = textoEntrada(row);
+  }
+
   function linhaConversao(c) {
     const item = c || {};
     const pacote = item.pacote ? ' checked' : '';
@@ -29,6 +47,7 @@
       ${campo('Fator', 'conversor', item.conversor)}
       ${campo('Unid. estoque', 'uni_estoque', item.uni_estoque, true)}
       <label class="auto-pacote"><input type="checkbox" data-campo="pacote"${pacote} /><span>Pacote</span></label>
+      <p class="auto-conv-entrada" data-entrada></p>
     </div>`;
   }
 
@@ -77,6 +96,11 @@
       </article>`).join('');
     box.querySelectorAll('select[data-campo="importar"]').forEach((sel) => {
       sel.addEventListener('change', () => salvar(sel));
+    });
+    box.querySelectorAll('.auto-conv').forEach((row) => {
+      pintarEntrada(row);
+      row.addEventListener('input', () => pintarEntrada(row));
+      row.addEventListener('change', () => pintarEntrada(row));
     });
     box.querySelectorAll('[data-salvar-param]').forEach((btn) => {
       btn.addEventListener('click', () => salvarDados(btn));
@@ -179,6 +203,8 @@
       if (aviso) aviso.textContent = res?.error || 'Não foi possível salvar os dados.';
       return;
     }
+    if (aviso) aviso.textContent = 'Dados salvos. Valem na próxima importação.';
+    await buscar();
     if (aviso) aviso.textContent = 'Dados salvos. Valem na próxima importação.';
   }
 

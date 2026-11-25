@@ -123,6 +123,45 @@ function filtros(q, grupo) {
   return { where, params };
 }
 
+function chaveConversao(c) {
+  const pacote = String(c.PACOTE || '').trim().toUpperCase() === 'S' ? 'S' : 'N';
+  return [
+    Number(c.ID_IDENTIFICADOR),
+    Number(c.ID_FORNEC || 0),
+    String(c.UNI_XML || '').trim().toUpperCase(),
+    String(c.UNI_ESTOQUE || '').trim().toUpperCase(),
+    textoNumero(c.CONVERSOR),
+    pacote,
+  ].join('|');
+}
+
+/** Linhas iguais do mesmo produto e fornecedor: fica a mais recente. */
+async function removerConversoesDuplicadas(db) {
+  const fatores = await query(db, `
+    SELECT ID, ID_IDENTIFICADOR, COALESCE(ID_FORNEC, 0) AS ID_FORNEC,
+           TRIM(COALESCE(UNI_XML, '')) AS UNI_XML,
+           TRIM(COALESCE(UNI_ESTOQUE, '')) AS UNI_ESTOQUE,
+           CONVERSOR, TRIM(COALESCE(PACOTE, '')) AS PACOTE
+    FROM TB_MT_CONVERSAO`);
+  const grupos = new Map();
+  for (const c of fatores || []) {
+    const k = chaveConversao(c);
+    const lista = grupos.get(k) || [];
+    lista.push(Number(c.ID));
+    grupos.set(k, lista);
+  }
+  const apagar = [];
+  for (const lista of grupos.values()) {
+    if (lista.length < 2) continue;
+    lista.sort((a, b) => a - b);
+    apagar.push(...lista.slice(0, -1));
+  }
+  for (const id of apagar) {
+    await query(db, `DELETE FROM TB_MT_CONVERSAO WHERE ID = ?`, [id]);
+  }
+  return apagar.length;
+}
+
 function textoNumero(v) {
   const n = Number(v);
   if (!Number.isFinite(n)) return '';
@@ -209,6 +248,7 @@ async function buscar(q, grupo) {
           AND E.ID_GRUPO IS NOT NULL
         ORDER BY 2`, []);
       const ids = [...new Set((rows || []).map((r) => Number(r.ID_IDENTIFICADOR)).filter((n) => n > 0))];
+      await removerConversoesDuplicadas(db);
       const conversoes = new Map();
       if (ids.length) {
         const fatores = await query(db, `
@@ -329,6 +369,7 @@ async function salvarDados(idFornec, idIdent, body = {}) {
       if (vazio) continue;
       await gravarConversao(db, id, forn, item);
     }
+    await removerConversoesDuplicadas(db);
     return { id_identificador: id, id_fornec: forn };
   });
 }

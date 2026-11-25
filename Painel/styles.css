@@ -4076,6 +4076,13 @@ html[data-theme="escuro"] .compras-row:hover {
   padding-top: 0.35rem;
   border-top: 1px solid var(--line, rgba(0, 0, 0, 0.08));
 }
+.auto-conv-entrada {
+  flex: 1 0 100%;
+  margin: 0.05rem 0 0.2rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text);
+}
 .auto-prod .auto-pacote {
   display: flex;
   flex-direction: row;
