@@ -462,6 +462,7 @@ const ROTAS_LIVRES = [
   /^\/qrcode$/,
   /^\/shutdown$/,
   /^\/rotinas$/,
+  /^\/os-perfil$/,
   /^\/config$/,
   /^\/tema$/,
   /^\/emitente$/,
