@@ -77,7 +77,7 @@ async function listarConversoesExatas({ idIdentificador, idFornec, uniXml } = {}
   return withDb(async (db) => {
     await ensureConversaoGestor(db);
     const params = [idIdent, uni];
-    let sql = `SELECT ID, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE
+    let sql = `SELECT ID, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE, UPDATED_AT
       FROM ${TABLE}
       WHERE ID_IDENTIFICADOR = ?
         AND UPPER(TRIM(COALESCE(UNI_XML, ''))) = ?`;
@@ -88,10 +88,12 @@ async function listarConversoesExatas({ idIdentificador, idFornec, uniXml } = {}
     sql += ' ORDER BY ID';
     const rows = await query(db, sql, params);
     return (rows || []).map((r) => ({
+      id: Number(r.ID),
       uni_xml: r.UNI_XML || '',
       uni_estoque: r.UNI_ESTOQUE || '',
       conversor: Number(r.CONVERSOR || 1) || 1,
       pacote: String(r.PACOTE || '').trim() === 'S',
+      updated_at: r.UPDATED_AT || null,
     }));
   });
 }

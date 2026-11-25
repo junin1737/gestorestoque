@@ -2555,17 +2555,15 @@ const ImportacaoNfe = (() => {
     return null;
   }
 
-  /** 1 da unidade "12" vira 12 no estoque, sem gravar outra linha de fator. */
+  /** Sem linha gravada para a unidade da nota, 1 da unidade "12" vira 12. A linha editada vence. */
   function aplicarFatorDaUnidadeNota(sys, xml, gest) {
     if (!sys || sys.conversor_manual) return false;
     const uniXml = String(xml?.uCom || sys.uni_medida_xml || '').trim().toUpperCase();
+    const exato = gest && String(gest.uni_xml || '').trim().toUpperCase() === uniXml ? gest : null;
+    if (exato) return false;
     const um = (state.unidades || []).find((u) => String(u.unidade || '').trim().toUpperCase() === uniXml);
     const fatorUni = Number(um?.conversor);
     if (!(fatorUni > 1)) return false;
-    const exato = gest && String(gest.uni_xml || '').trim().toUpperCase() === uniXml ? gest : null;
-    if (exato?.pacote) return false;
-    const fatorGest = Number(exato?.conversor);
-    if (exato && fatorGest > 1 && Math.abs(fatorGest - fatorUni) > 0.00005) return false;
     const uniEst = String(sys.uni_medida_saida || sys.uni_medida_cadastro || 'UN').trim().toUpperCase() || 'UN';
     sys.uni_medida = uniEst;
     sys.conversor = fatorUni;
@@ -4049,7 +4047,7 @@ const ImportacaoNfe = (() => {
     const sys = it?.sistema || {};
     const trib = sys.tributos || {};
     const idFornec = state.sessao?.fornecedor?.id_fornec;
-    if (sys.id_identificador && !(sys.conversor_origem === 'unidade' && !sys.conversor_manual)) {
+    if (sys.id_identificador && !((sys.conversor_origem === 'unidade' || sys.conversor_origem === 'gestor') && !sys.conversor_manual)) {
       try {
         const cv = await api('/importacao/conversao-gestor', {
           method: 'POST',

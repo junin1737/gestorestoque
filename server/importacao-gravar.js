@@ -988,7 +988,7 @@ async function gravarParametroFornecedor(db, sessao, it, idIdent) {
   if (!idFornec || !idIdent) return;
   const trib = it.sistema?.tributos || {};
   const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
-  const inferida = it.sistema?.conversor_origem === 'unidade' && !it.sistema?.conversor_manual;
+  const inferida = (it.sistema?.conversor_origem === 'unidade' || it.sistema?.conversor_origem === 'gestor') && !it.sistema?.conversor_manual;
   const salvo = inferida ? null : await salvarConversaoGestor({
     id_identificador: idIdent,
     id_fornec: idFornec,
@@ -1575,7 +1575,7 @@ async function gravarNfCompra(sessao, {
           }
         }
         try {
-          const inferida = p.it.sistema?.conversor_origem === 'unidade' && !p.it.sistema?.conversor_manual;
+          const inferida = (p.it.sistema?.conversor_origem === 'unidade' || p.it.sistema?.conversor_origem === 'gestor') && !p.it.sistema?.conversor_manual;
           if (!inferida) {
             const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
             await salvarConversaoGestor({

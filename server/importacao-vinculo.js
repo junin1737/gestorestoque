@@ -264,7 +264,7 @@ async function aplicarSugestoesVinculo(sessao) {
           p.it.sistema.qtd = p.it.sistema.qtd_pacotes;
           p.it.sistema.conversor_manual = true;
         }
-        if (escolha.origem === 'unidade') {
+        if (escolha.origem === 'unidade' || escolha.origem === 'gestor') {
           p.it.etapas_ok = { ...(p.it.etapas_ok || {}), conversao: true };
         }
       }
