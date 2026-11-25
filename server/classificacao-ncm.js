@@ -111,36 +111,43 @@ async function lerClassAtual(db, ids) {
   const nfe = new Map();
   const nfce = new Map();
   const codigos = new Map();
+  const descricoes = new Map();
   for (let i = 0; i < ids.length; i += LOTE) {
     const lote = ids.slice(i, i + LOTE);
     if (!lote.length) continue;
     const marcas = lote.map(() => '?').join(',');
     try {
       const rows = await query(db, `
-        SELECT T.ID_ESTOQUE, T.ID_CLASS_TRIB, C.COD_CLASS_TRIB
+        SELECT T.ID_ESTOQUE, T.ID_CLASS_TRIB, C.COD_CLASS_TRIB, C.DESC_CLASS_TRIB
         FROM TB_EST_TRIBUTOS T
         LEFT JOIN TB_CLASS_TRIB C ON C.ID_CLASS_TRIB = T.ID_CLASS_TRIB
         WHERE T.ID_ESTOQUE IN (${marcas})`, lote);
       rows.forEach((r) => {
         const id = r.ID_CLASS_TRIB == null ? null : Number(r.ID_CLASS_TRIB);
         nfe.set(Number(r.ID_ESTOQUE), id);
-        if (id) codigos.set(id, codigoClass(r.COD_CLASS_TRIB) || String(id));
+        if (id) {
+          codigos.set(id, codigoClass(r.COD_CLASS_TRIB) || String(id));
+          descricoes.set(id, txt(r.DESC_CLASS_TRIB));
+        }
       });
     } catch { /* tabela ausente */ }
     try {
       const rows = await query(db, `
-        SELECT T.ID_ESTOQUE, T.ID_CLASS_TRIB, C.COD_CLASS_TRIB
+        SELECT T.ID_ESTOQUE, T.ID_CLASS_TRIB, C.COD_CLASS_TRIB, C.DESC_CLASS_TRIB
         FROM TB_EST_TRIBUTOS_NFCE T
         LEFT JOIN TB_CLASS_TRIB C ON C.ID_CLASS_TRIB = T.ID_CLASS_TRIB
         WHERE T.ID_ESTOQUE IN (${marcas})`, lote);
       rows.forEach((r) => {
         const id = r.ID_CLASS_TRIB == null ? null : Number(r.ID_CLASS_TRIB);
         nfce.set(Number(r.ID_ESTOQUE), id);
-        if (id) codigos.set(id, codigoClass(r.COD_CLASS_TRIB) || String(id));
+        if (id) {
+          codigos.set(id, codigoClass(r.COD_CLASS_TRIB) || String(id));
+          descricoes.set(id, txt(r.DESC_CLASS_TRIB));
+        }
       });
     } catch { /* tabela ausente */ }
   }
-  return { nfe, nfce, codigos };
+  return { nfe, nfce, codigos, descricoes };
 }
 
 async function consultarLote(_crt, ncms) {
@@ -597,6 +604,7 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
   if (!lista.length) return { ok: false, error: 'Nenhum produto com esse NCM para preencher.' };
   const atual = await lerClassAtual(db, lista.map((p) => p.id_estoque));
   const auditoria = [];
+  const linhas = [];
   let alterados = 0;
   let jaIguais = 0;
   await withTransaction(db, async (tx) => {
@@ -605,7 +613,17 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
       if (classeNfe && atual.nfe.get(grupo.id_estoque) !== classeNfe.id) {
         await gravarClass(tx, 'TB_EST_TRIBUTOS', grupo.id_estoque, classeNfe.id);
         mudou = true;
-        const de = atual.codigos.get(atual.nfe.get(grupo.id_estoque)) || '—';
+        const deId = atual.nfe.get(grupo.id_estoque);
+        const de = atual.codigos.get(deId) || '—';
+        linhas.push({
+          ncm: formatarNcm(ncm),
+          documento: 'NF-e',
+          anterior: de,
+          anterior_descricao: atual.descricoes.get(deId) || '',
+          atual: classeNfe.codigo,
+          atual_descricao: classeNfe.descricao || '',
+          produtos: grupo.itens.length,
+        });
         for (const item of grupo.itens) {
           auditoria.push({
             id_identificador: item.id_identificador,
@@ -622,7 +640,17 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
       if (classeNfce && atual.nfce.get(grupo.id_estoque) !== classeNfce.id) {
         await gravarClass(tx, 'TB_EST_TRIBUTOS_NFCE', grupo.id_estoque, classeNfce.id);
         mudou = true;
-        const de = atual.codigos.get(atual.nfce.get(grupo.id_estoque)) || '—';
+        const deId = atual.nfce.get(grupo.id_estoque);
+        const de = atual.codigos.get(deId) || '—';
+        linhas.push({
+          ncm: formatarNcm(ncm),
+          documento: 'NFC-e',
+          anterior: de,
+          anterior_descricao: atual.descricoes.get(deId) || '',
+          atual: classeNfce.codigo,
+          atual_descricao: classeNfce.descricao || '',
+          produtos: grupo.itens.length,
+        });
         for (const item of grupo.itens) {
           auditoria.push({
             id_identificador: item.id_identificador,
@@ -641,7 +669,18 @@ async function aplicarNcm(db, appCfg, autor, ncmInformado, nfeInformado, nfceInf
     }
   });
   for (const entrada of auditoria) await insertAudit(db, entrada);
-  return { ok: true, alterados, jaIguais, conflito };
+  return { ok: true, alterados, jaIguais, conflito, linhas: juntarLinhas(linhas) };
+}
+
+function juntarLinhas(lista) {
+  const mapa = new Map();
+  for (const linha of lista) {
+    const chave = [linha.ncm, linha.documento, linha.anterior, linha.anterior_descricao, linha.atual, linha.atual_descricao].join('|');
+    const atual = mapa.get(chave);
+    if (atual) atual.produtos += linha.produtos;
+    else mapa.set(chave, { ...linha });
+  }
+  return [...mapa.values()].sort((a, b) => a.ncm.localeCompare(b.ncm, 'pt-BR') || a.documento.localeCompare(b.documento, 'pt-BR'));
 }
 
 async function atribuir(body, autor) {
@@ -655,7 +694,7 @@ async function replicador() {
     const regime = await regimeDaBase(db);
     const chave = `REPLACE(COALESCE(P.COD_NCM, ''), '.', '')`;
     const rows = await query(db, `
-      SELECT ${chave} AS NCM, COUNT(*) AS QTD, MIN(E.DESCRICAO) AS EXEMPLO
+      SELECT ${chave} AS NCM, COUNT(*) AS QTD
         FROM ${alvo.tables.estoque} E
         JOIN ${alvo.tables.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
         JOIN ${alvo.tables.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
@@ -673,7 +712,6 @@ async function replicador() {
         ncm,
         ncm_formatado: formatarNcm(ncm),
         quantidade: Number(row.QTD) || 0,
-        exemplo: txt(row.EXEMPLO),
         nfe: [],
         nfce: [],
       };
@@ -700,6 +738,7 @@ async function replicar(body, autor) {
     let jaIguais = 0;
     let conflito = 0;
     const falhas = [];
+    const linhas = [];
     for (const item of itens) {
       try {
         const res = await aplicarNcm(db, appCfg, autor, item.ncm, item.nfe, item.nfce, 'Replicador Geral');
@@ -708,6 +747,7 @@ async function replicar(body, autor) {
           alterados += res.alterados || 0;
           jaIguais += res.jaIguais || 0;
           conflito += res.conflito || 0;
+          linhas.push(...(res.linhas || []));
         }
       } catch (err) {
         falhas.push({ ncm: formatarNcm(item.ncm), error: err.message });
@@ -716,7 +756,7 @@ async function replicar(body, autor) {
     if (!alterados && !jaIguais && falhas.length) {
       return { ok: false, error: falhas[0].error, falhas };
     }
-    return { ok: true, alterados, jaIguais, conflito, falhas };
+    return { ok: true, alterados, jaIguais, conflito, falhas, linhas: juntarLinhas(linhas) };
   });
 }
 

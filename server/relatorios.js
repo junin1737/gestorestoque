@@ -59,6 +59,8 @@ async function executar(id) {
   return withDb(async (db, appCfg) => {
     const view = viewDe(appCfg);
     if (!view) return { ok: false, error: 'A view de estoque não está disponível nesta base.' };
+    const emit = await query(db, `SELECT FIRST 1 NOME_FANTA, NOME FROM TB_EMITENTE`).catch(() => []);
+    const empresa = txt(emit[0]?.NOME_FANTA || emit[0]?.NOME);
     if (id === 'ncm-distintos') {
       const rows = await query(db, `
         SELECT DISTINCT COD_NCM
@@ -69,6 +71,7 @@ async function executar(id) {
         ok: true,
         id,
         titulo: def.titulo,
+        empresa,
         colunas: def.colunas,
         linhas: rows.map((r) => ({ cod_ncm: txt(r.COD_NCM) })),
       };
@@ -84,6 +87,7 @@ async function executar(id) {
       ok: true,
       id,
       titulo: def.titulo,
+      empresa,
       colunas: def.colunas,
       linhas: rows.map((r) => ({
         id_identificador: r.ID_IDENTIFICADOR,

@@ -11,6 +11,7 @@
 
   let deps = { api() { return Promise.resolve({ ok: false }); }, showMsg() {}, showToast() {}, showConfirm() { return Promise.resolve(false); } };
   let resultado = null;
+  let empresaNome = '';
 
   function api(path, options) {
     return deps.api(path, options);
@@ -51,6 +52,7 @@
       host.innerHTML = `<p class="erro">${esc(ctx.error || 'Não foi possível abrir a classificação por NCM.')}</p>`;
       return;
     }
+    empresaNome = ctx.nome || (typeof deps.empresa === 'function' ? deps.empresa() : '');
     const base = ctx.consultaOnline
       ? `Base oficial da Receita Federal${ctx.versaoBase ? ` ${esc(ctx.versaoBase)}` : ''}, repositório calculadora-rtc-regime-regular.`
       : 'A base oficial da Receita Federal não abriu neste aplicativo.';
@@ -109,7 +111,7 @@
       return `
         <tr>
           <td class="rep-check"><input type="checkbox" data-rep-marca="${idx}" ${travado ? 'disabled' : 'checked'} /></td>
-          <td><span class="rep-ncm">${esc(item.ncm_formatado || item.ncm)}</span><span class="rep-exemplo">${esc(item.exemplo || item.descricao || '')}</span></td>
+          <td><span class="rep-ncm">${esc(item.ncm_formatado || item.ncm)}</span></td>
           <td>${item.quantidade || 0}</td>
           <td>${travado ? `<span class="hint">${esc(item.erro || 'Sem opção da Receita')}</span>` : selectLinha('nfe', item.nfe)}</td>
           <td>${travado ? '—' : selectLinha('nfce', item.nfce)}</td>
@@ -162,7 +164,41 @@
     if (res.falhas?.length) partes.push(`${res.falhas.length} NCM(s) não aplicados`);
     deps.showToast(partes.join('. ') + '.');
     if (res.falhas?.length) deps.showMsg(res.falhas.map((f) => `${f.ncm}: ${f.error}`).join('\n'));
+    await oferecerImpressao(res);
     await lerReplicador();
+  }
+
+  function classeTexto(codigo, descricao) {
+    if (!codigo || codigo === '—') return '—';
+    return descricao ? `${codigo} — ${descricao}` : codigo;
+  }
+
+  async function oferecerImpressao(res) {
+    const linhas = (res?.linhas || []).map((linha) => ({
+      ncm: linha.ncm,
+      documento: linha.documento,
+      anterior: classeTexto(linha.anterior, linha.anterior_descricao),
+      atual: classeTexto(linha.atual, linha.atual_descricao),
+      produtos: linha.produtos,
+    }));
+    if (!linhas.length) return;
+    const imprimir = await deps.showConfirm('Deseja imprimir o relatório das alterações?', { okLabel: 'Imprimir', cancelLabel: 'Agora não' });
+    if (!imprimir) return;
+    const abriu = window.ExportarTabela?.abrirPdf({
+      titulo: 'Alterações de classificação tributária',
+      subtitulo: 'NCM, cClassTrib anterior e atual',
+      empresa: empresaNome || (typeof deps.empresa === 'function' ? deps.empresa() : ''),
+      usuario: typeof deps.usuario === 'function' ? deps.usuario() : '',
+      colunas: [
+        { id: 'ncm', titulo: 'NCM', largura: '12%' },
+        { id: 'documento', titulo: 'Documento', largura: '10%' },
+        { id: 'anterior', titulo: 'cClassTrib anterior', largura: '34%' },
+        { id: 'atual', titulo: 'cClassTrib atual', largura: '34%' },
+        { id: 'produtos', titulo: 'Produtos', numero: true, largura: '10%' },
+      ],
+      linhas,
+    });
+    if (!abriu) deps.showMsg('Permita pop-ups para abrir o PDF.');
   }
 
   async function buscar() {
@@ -243,6 +279,7 @@
     const partes = [`${res.alterados || 0} produto(s) atualizados`];
     if (res.jaIguais) partes.push(`${res.jaIguais} já estavam com essa classificação`);
     deps.showToast(partes.join('. ') + '.');
+    await oferecerImpressao(res);
     await buscar();
   }
 

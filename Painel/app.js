@@ -4417,9 +4417,15 @@ window.ClassificacaoNcm?.init({
   showMsg,
   showConfirm,
   showToast,
+  usuario: () => state.usuario?.nome || '',
+  empresa: () => state.emitente?.nome_fanta || '',
 });
 
-window.Relatorios?.init({ api, showMsg });
+window.Relatorios?.init({
+  api,
+  showMsg,
+  usuario: () => state.usuario?.nome || '',
+});
 
 window.ImportacaoNfe?.init({
   api,
