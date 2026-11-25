@@ -4059,6 +4059,7 @@ html[data-theme="escuro"] .compras-row:hover {
   color: var(--muted);
 }
 .auto-campo.largo { width: 5.7rem; }
+.auto-conv .auto-campo { width: 9.5rem; }
 .auto-campo input {
   height: 1.85rem;
   min-height: 0;

@@ -22,16 +22,11 @@
   }
 
   function textoEntrada(row) {
-    const nota = String(lerCampo(row, 'uni_xml') || '').trim().toUpperCase();
-    const est = String(lerCampo(row, 'uni_estoque') || '').trim().toUpperCase();
     const fatorTxt = String(lerCampo(row, 'conversor') || '').trim().replace(/\s/g, '').replace(',', '.');
     const fator = Number(fatorTxt);
-    const pacote = !!row.querySelector('[data-campo="pacote"]')?.checked;
-    if (!nota || !est || !(fator > 0)) return '1 da nota × fator = quantidade no estoque';
-    const qtd = String(Number((fator).toFixed(4))).replace(/\.?0+$/, '').replace('.', ',');
-    const fatorShow = String(fator).replace('.', ',');
-    if (pacote) return `1 ${nota} da nota entra como ${fatorShow} pacote(s)`;
-    return `1 ${nota} da nota × ${fatorShow} = ${qtd} ${est} no estoque`;
+    if (!(fator > 0)) return 'Qtd nota × fator';
+    const show = String(fator).replace('.', ',');
+    return `Qtd nota × ${show}`;
   }
 
   function pintarEntrada(row) {
@@ -41,18 +36,15 @@
 
   function linhaConversao(c) {
     const item = c || {};
-    const pacote = item.pacote ? ' checked' : '';
+    const fator = item.conversor || '1';
     return `<div class="auto-conv" data-id="${esc(item.id || '')}">
-      ${campo('Unid. nota', 'uni_xml', item.uni_xml)}
-      ${campo('Fator', 'conversor', item.conversor)}
-      ${campo('Unid. estoque', 'uni_estoque', item.uni_estoque, true)}
-      <label class="auto-pacote"><input type="checkbox" data-campo="pacote"${pacote} /><span>Pacote</span></label>
+      ${campo('Fator de conversão', 'conversor', fator, true)}
       <p class="auto-conv-entrada" data-entrada></p>
     </div>`;
   }
 
   function linhaParam(p) {
-    const conversoes = (p.conversoes || []).length ? p.conversoes : [{}];
+    const conv = (p.conversoes || [])[0] || { conversor: '1' };
     return `<div class="auto-prod-edit">
       ${campo('CFOP', 'cfop', p.cfop)}
       ${campo('CST', 'cst', p.cst)}
@@ -66,7 +58,7 @@
       ${campo('COFINS', 'cofins', p.cofins)}
       ${campo('MVA', 'mva', p.mva)}
       ${campo('Unidade', 'uni_medida', p.uni_medida, true)}
-      ${conversoes.map((c) => linhaConversao(c)).join('')}
+      ${linhaConversao(conv)}
       <button type="button" class="btn small" data-salvar-param>Salvar dados</button>
     </div>`;
   }
@@ -169,13 +161,12 @@
     if (!card || !edit) return;
     const extra = await autorizacao();
     if (!extra) return;
-    const conversoes = [...edit.querySelectorAll('.auto-conv')].map((row) => ({
+    const row = edit.querySelector('.auto-conv');
+    const conversoes = row ? [{
       id: Number(row.dataset.id) || undefined,
-      uni_xml: lerCampo(row, 'uni_xml'),
       conversor: lerCampo(row, 'conversor'),
-      uni_estoque: lerCampo(row, 'uni_estoque'),
-      pacote: !!row.querySelector('[data-campo="pacote"]')?.checked,
-    }));
+      uni_estoque: lerCampo(edit, 'uni_medida') || 'UN',
+    }] : [];
     btn.disabled = true;
     const res = await deps.api(`/importacao/auto-produtos/${card.dataset.id}/dados`, {
       method: 'PUT',

@@ -237,20 +237,24 @@ async function aplicarSugestoesVinculo(sessao) {
           pacote: gest.pacote,
         } : null,
       });
-      const { fatorDaUnidadeDaNota } = require('./importacao-conversao-decisao');
-      const { fatorUnidade } = require('./importacao-estoque-fornec');
-      const { listarConversoesExatas } = require('./importacao-conversao-gestor');
-      const daNota = fatorDaUnidadeDaNota({
-        uCom: xmlItem.uCom,
+      const { fatorSalvoDoProduto } = require('./importacao-conversao-decisao');
+      const { listarConversoesProduto } = require('./importacao-conversao-gestor');
+      const salva = fatorSalvoDoProduto({
         uniEstoque: p.it.sistema.uni_medida_saida || p.it.sistema.uni_medida || 'UN',
-        fatorUnidade: await fatorUnidade(xmlItem.uCom),
-        linhas: await listarConversoesExatas({
+        linhas: await listarConversoesProduto({
           idIdentificador: p.idLigado,
           idFornec: idFornecConv,
-          uniXml: xmlItem.uCom,
         }),
       });
-      if (daNota) escolha = daNota;
+      if (salva) escolha = salva;
+      else {
+        escolha = {
+          origem: '',
+          uni: p.it.sistema.uni_medida_saida || p.it.sistema.uni_medida || 'UN',
+          conversor: 1,
+          pacote: false,
+        };
+      }
       if (escolha && !p.it.sistema.conversor_manual) {
         usouConversao = true;
         p.it.sistema.uni_medida = escolha.uni || p.it.sistema.uni_medida;

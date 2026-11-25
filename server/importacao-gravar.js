@@ -987,17 +987,15 @@ async function gravarParametroFornecedor(db, sessao, it, idIdent) {
   const idFornec = sessao.fornecedor?.id_fornec ? Number(sessao.fornecedor.id_fornec) : null;
   if (!idFornec || !idIdent) return;
   const trib = it.sistema?.tributos || {};
-  const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
-  const inferida = (it.sistema?.conversor_origem === 'unidade' || it.sistema?.conversor_origem === 'gestor') && !it.sistema?.conversor_manual;
-  const salvo = inferida ? null : await salvarConversaoGestor({
-    id_identificador: idIdent,
-    id_fornec: idFornec,
-    uni_xml: it.sistema?.uni_medida_xml || it.xml?.uCom || '',
-    uni_estoque: it.sistema?.uni_medida || 'UN',
-    conversor: it.sistema?.conversor ?? 1,
-    pacote: !!(it.sistema?.vender_pacote && Number(it.sistema?.qtd_pacotes) > 0),
-  }, db);
-  if (salvo?.unidade && it.sistema) it.sistema.uni_medida = salvo.unidade;
+  if (it.sistema?.conversor_manual) {
+    const { definirFatorProduto } = require('./importacao-conversao-gestor');
+    await definirFatorProduto({
+      id_identificador: idIdent,
+      id_fornec: idFornec,
+      uni_estoque: it.sistema?.uni_medida_saida || it.sistema?.uni_medida || 'UN',
+      conversor: it.sistema?.conversor ?? 1,
+    }, db);
+  }
   const { upsertEstoqueFornecedor } = require('./importacao-estoque-fornec');
   await upsertEstoqueFornecedor({
     id_identificador: idIdent,
@@ -1010,8 +1008,8 @@ async function gravarParametroFornecedor(db, sessao, it, idIdent) {
     pis: trib.p_pis || 0,
     cst_pis: trib.cst_pis || '',
     aliq_icms: trib.p_icms || 0,
-    uni_medida: it.sistema?.uni_medida || salvo?.unidade || '',
-    conversor: salvo?.conversor ?? it.sistema?.conversor,
+    uni_medida: it.sistema?.uni_medida || '',
+    conversor: it.sistema?.conversor,
     cfop: it.sistema?.cfop || '',
     ipi: trib.p_ipi || null,
     cst_ipi: trib.cst_ipi || '49',
@@ -1575,16 +1573,13 @@ async function gravarNfCompra(sessao, {
           }
         }
         try {
-          const inferida = (p.it.sistema?.conversor_origem === 'unidade' || p.it.sistema?.conversor_origem === 'gestor') && !p.it.sistema?.conversor_manual;
-          if (!inferida) {
-            const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
-            await salvarConversaoGestor({
+          if (p.it.sistema?.conversor_manual) {
+            const { definirFatorProduto } = require('./importacao-conversao-gestor');
+            await definirFatorProduto({
               id_identificador: p.idIdent,
               id_fornec: sessao.fornecedor?.id_fornec,
-              uni_xml: p.it.sistema?.uni_medida_xml || p.it.xml?.uCom || '',
-              uni_estoque: p.it.sistema?.uni_medida || 'UN',
+              uni_estoque: p.it.sistema?.uni_medida_saida || p.it.sistema?.uni_medida || 'UN',
               conversor: p.it.sistema?.conversor ?? 1,
-              pacote: !!(p.it.sistema?.vender_pacote && Number(p.it.sistema?.qtd_pacotes) > 0),
             }, db);
           }
         } catch (e) {

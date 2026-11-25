@@ -123,43 +123,39 @@ function filtros(q, grupo) {
   return { where, params };
 }
 
-function chaveConversao(c) {
-  const pacote = String(c.PACOTE || '').trim().toUpperCase() === 'S' ? 'S' : 'N';
-  return [
-    Number(c.ID_IDENTIFICADOR),
-    Number(c.ID_FORNEC || 0),
-    String(c.UNI_XML || '').trim().toUpperCase(),
-    String(c.UNI_ESTOQUE || '').trim().toUpperCase(),
-    textoNumero(c.CONVERSOR),
-    pacote,
-  ].join('|');
-}
-
-/** Linhas iguais do mesmo produto e fornecedor: fica a mais recente. */
-async function removerConversoesDuplicadas(db) {
+/** Várias linhas do mesmo produto: fica um fator. Se só uma multiplica, é essa. */
+async function deixarUmaConversao(db) {
   const fatores = await query(db, `
     SELECT ID, ID_IDENTIFICADOR, COALESCE(ID_FORNEC, 0) AS ID_FORNEC,
-           TRIM(COALESCE(UNI_XML, '')) AS UNI_XML,
-           TRIM(COALESCE(UNI_ESTOQUE, '')) AS UNI_ESTOQUE,
-           CONVERSOR, TRIM(COALESCE(PACOTE, '')) AS PACOTE
+           CONVERSOR, UPDATED_AT
     FROM TB_MT_CONVERSAO`);
   const grupos = new Map();
   for (const c of fatores || []) {
-    const k = chaveConversao(c);
+    const k = `${Number(c.ID_IDENTIFICADOR)}:${Number(c.ID_FORNEC || 0)}`;
     const lista = grupos.get(k) || [];
-    lista.push(Number(c.ID));
+    lista.push(c);
     grupos.set(k, lista);
   }
-  const apagar = [];
+  let apagadas = 0;
   for (const lista of grupos.values()) {
     if (lista.length < 2) continue;
-    lista.sort((a, b) => a - b);
-    apagar.push(...lista.slice(0, -1));
+    const diferentes = lista.filter((c) => Math.abs(Number(c.CONVERSOR) - 1) > 0.00005);
+    const base = diferentes.length === 1 ? diferentes : lista;
+    base.sort((a, b) => {
+      const ta = a.UPDATED_AT ? new Date(a.UPDATED_AT).getTime() : 0;
+      const tb = b.UPDATED_AT ? new Date(b.UPDATED_AT).getTime() : 0;
+      if (ta !== tb) return ta - tb;
+      return Number(a.ID) - Number(b.ID);
+    });
+    const fica = Number(base[base.length - 1].ID);
+    await query(db, `UPDATE TB_MT_CONVERSAO SET UNI_XML = NULL WHERE ID = ?`, [fica]);
+    for (const c of lista) {
+      if (Number(c.ID) === fica) continue;
+      await query(db, `DELETE FROM TB_MT_CONVERSAO WHERE ID = ?`, [Number(c.ID)]);
+      apagadas += 1;
+    }
   }
-  for (const id of apagar) {
-    await query(db, `DELETE FROM TB_MT_CONVERSAO WHERE ID = ?`, [id]);
-  }
-  return apagar.length;
+  return apagadas;
 }
 
 function textoNumero(v) {
@@ -248,7 +244,7 @@ async function buscar(q, grupo) {
           AND E.ID_GRUPO IS NOT NULL
         ORDER BY 2`, []);
       const ids = [...new Set((rows || []).map((r) => Number(r.ID_IDENTIFICADOR)).filter((n) => n > 0))];
-      await removerConversoesDuplicadas(db);
+      await deixarUmaConversao(db);
       const conversoes = new Map();
       if (ids.length) {
         const fatores = await query(db, `
@@ -361,15 +357,15 @@ async function salvarDados(idFornec, idIdent, body = {}) {
       mva: String(body.mva == null ? '' : body.mva).trim() === '' ? '' : numeroCampo(body.mva, 'O MVA'),
       uni_medida: codigoCampo(body.uni_medida, 6),
     }, { db });
-    for (const item of conversoes) {
-      const vazio = !String(item?.uni_xml || '').trim()
-        && !String(item?.uni_estoque || '').trim()
-        && !String(item?.conversor || '').trim()
-        && !item?.id;
-      if (vazio) continue;
-      await gravarConversao(db, id, forn, item);
+    const fatorItem = conversoes.find((item) => String(item?.conversor || '').trim());
+    if (fatorItem) {
+      await require('./importacao-conversao-gestor').definirFatorProduto({
+        id_identificador: id,
+        id_fornec: forn,
+        conversor: numeroCampo(fatorItem.conversor, 'O fator da conversão'),
+        uni_estoque: codigoCampo(body.uni_medida, 6) || 'UN',
+      }, db);
     }
-    await removerConversoesDuplicadas(db);
     return { id_identificador: id, id_fornec: forn };
   });
 }

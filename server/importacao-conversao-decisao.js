@@ -81,6 +81,25 @@ function conversaoEditada(linhas) {
 }
 
 /**
+ * Um fator por produto, gravado na configuração da importação.
+ * A quantidade da nota (10 fardos hoje, 8 na outra) multiplica por esse fator.
+ * Sem fator gravado, a quantidade entra como veio na nota.
+ */
+function fatorSalvoDoProduto({ uniEstoque, linhas } = {}) {
+  const lista = (Array.isArray(linhas) ? linhas : [])
+    .filter((l) => fatorNumero(l.conversor) != null);
+  if (!lista.length) return null;
+  const diferentes = lista.filter((l) => !fatoresIguais(l.conversor, 1));
+  const salva = conversaoEditada(diferentes.length === 1 ? diferentes : lista);
+  return {
+    origem: 'gestor',
+    uni: normUniNota(uniEstoque) || normUniNota(salva.uni_estoque) || 'UN',
+    conversor: fatorNumero(salva.conversor) || 1,
+    pacote: false,
+  };
+}
+
+/**
  * A linha salva na aba Importação do produto vence, inclusive fator 1.
  * Se o cliente editar o fator, a próxima nota usa essa edição.
  * Sem linha para a unidade da nota, vale o fator da unidade no Clipp
@@ -117,4 +136,5 @@ module.exports = {
   fatorEhDoClipp,
   decidirConversao,
   fatorDaUnidadeDaNota,
+  fatorSalvoDoProduto,
 };

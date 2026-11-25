@@ -3042,7 +3042,7 @@ router.get('/importacao/conversao-gestor', async (req, res) => {
 router.post('/importacao/conversao-gestor', async (req, res) => {
   if (!guardImportacaoSupervisor(req, res)) return;
   try {
-    const out = await require('./importacao-conversao-gestor').salvarConversaoGestor(req.body || {});
+    const out = await require('./importacao-conversao-gestor').definirFatorProduto(req.body || {});
     res.json({ ok: true, ...(out || {}) });
   } catch (err) {
     res.json({ ok: false, error: err.message });

@@ -3496,17 +3496,7 @@ const ImportacaoNfe = (() => {
       if (estFornec.cofins != null && sys.tributos?.p_cofins == null) {
         sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
       }
-      if (estFornec.uni_medida && sys.conversor_origem !== 'gestor' && sys.conversor_origem !== 'clipp' && sys.conversor_origem !== 'unidade') {
-        // Primeira entrada: sugere TB_ESTOQUE_FORNECEDOR só se o Gestor ainda não gravou conversão.
-        if (!sys.conversor_manual) {
-          applyConversaoUnidade(
-            sys,
-            estFornec.uni_medida,
-            estFornec.conversor,
-            xmlItem
-          );
-        }
-      }
+      if (estFornec.uni_medida && !filled(sys.uni_medida)) sys.uni_medida = estFornec.uni_medida;
       if (estFornec.cod_barras && !filled(sys.cod_barras)) sys.cod_barras = estFornec.cod_barras;
     }
   }
@@ -3716,31 +3706,17 @@ const ImportacaoNfe = (() => {
         ]);
         const ef = efRes.item;
         const gest = cv.item;
-        const escolha = decidirConversao({
-          clipp: ef?.unidade_no_clipp ? { uni: ef.uni_medida, conversor: ef.conversor_clipp } : null,
-          gestor: gest?.uni_estoque ? { uni: gest.uni_estoque, conversor: gest.conversor, pacote: gest.pacote } : null,
-        });
-        if (escolha && !it.sistema.conversor_manual) {
+        const fatorProduto = gest && Number(gest.conversor) > 0 ? Number(gest.conversor) : null;
+        if (fatorProduto != null && !it.sistema.conversor_manual) {
           it.sistema.vender_pacote = false;
           it.sistema.qtd_pacotes = null;
-          it.sistema.uni_medida = escolha.uni || it.sistema.uni_medida;
-          it.sistema.conversor = Number(escolha.conversor || 1) || 1;
-          it.sistema.conversor_origem = escolha.origem;
+          it.sistema.uni_medida = it.sistema.uni_medida_saida || it.sistema.uni_medida_cadastro || gest.uni_estoque || it.sistema.uni_medida || 'UN';
+          it.sistema.conversor = fatorProduto;
+          it.sistema.conversor_origem = 'gestor';
           const qtdXml = Number(it.sistema.qtd_xml ?? it.xml?.qCom ?? 0);
-          it.sistema.qtd = Number((qtdXml * Number(it.sistema.conversor || 1)).toFixed(6));
-          if (escolha.pacote && it.sistema.qtd > 0) {
-            it.sistema.vender_pacote = true;
-            it.sistema.qtd_pacotes = Number(it.sistema.qtd.toFixed(3));
-            it.sistema.qtd = it.sistema.qtd_pacotes;
-            it.sistema.conversor_manual = true;
-          }
+          it.sistema.qtd = Number((qtdXml * fatorProduto).toFixed(6));
           const custoInfo = calcCustoNotaUnitario(it.sistema, it.xml || {});
           if (custoInfo.custoEstoque > 0) it.sistema.prc_custo = custoInfo.custoEstoque;
-        }
-        await ensureUnidades();
-        if (aplicarFatorDaUnidadeNota(it.sistema, it.xml, gest)) {
-          const custoNota = calcCustoNotaUnitario(it.sistema, it.xml || {});
-          if (custoNota.custoEstoque > 0) it.sistema.prc_custo = custoNota.custoEstoque;
         }
         applySugestoesRegra(it.sistema, rgRes.item, ef, it.xml || {});
         if (rgRes.item || efRes.item) {
@@ -4047,21 +4023,18 @@ const ImportacaoNfe = (() => {
     const sys = it?.sistema || {};
     const trib = sys.tributos || {};
     const idFornec = state.sessao?.fornecedor?.id_fornec;
-    if (sys.id_identificador && !((sys.conversor_origem === 'unidade' || sys.conversor_origem === 'gestor') && !sys.conversor_manual)) {
+    if (sys.id_identificador) {
       try {
         const cv = await api('/importacao/conversao-gestor', {
           method: 'POST',
           body: {
             id_identificador: sys.id_identificador,
             id_fornec: idFornec || null,
-            uni_xml: sys.uni_medida_xml || it.xml?.uCom || '',
-            uni_estoque: sys.uni_medida || 'UN',
+            uni_estoque: sys.uni_medida_saida || sys.uni_medida_cadastro || sys.uni_medida || 'UN',
             conversor: Number(sys.conversor ?? 1) || 1,
-            pacote: !!(sys.vender_pacote && Number(sys.qtd_pacotes) > 0),
           },
         });
         if (cv && cv.ok && it.sistema) {
-          if (cv.unidade) it.sistema.uni_medida = cv.unidade;
           if (Number(cv.conversor) > 0) it.sistema.conversor = Number(cv.conversor);
           it.sistema.conversor_origem = 'gestor';
         }
