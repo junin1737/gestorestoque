@@ -236,6 +236,10 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
 
   function garantirDialog() {
     let dlg = document.getElementById('dlg-previa');
+    if (dlg && !dlg.querySelector('[data-previa-confirma]')) {
+      dlg.remove();
+      dlg = null;
+    }
     if (dlg) return dlg;
     dlg = document.createElement('dialog');
     dlg.id = 'dlg-previa';
@@ -251,14 +255,26 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
         </div>
         <iframe title="Prévia do relatório" data-previa-frame></iframe>
         <div class="previa-aceite" data-previa-aceite hidden>
-          <label class="termo-check"><input type="checkbox" data-previa-check /> Assinar o termo e autorizar a atualização</label>
-          <div data-previa-assina hidden>
-            <label>Nome completo <input data-previa-nome autocomplete="name" /></label>
-            <label>CPF <input data-previa-cpf inputmode="numeric" maxlength="14" placeholder="000.000.000-00" autocomplete="off" /></label>
+          <div data-previa-form>
+            <label class="termo-check"><input type="checkbox" data-previa-check /><span>Assinar o termo e autorizar a atualização</span></label>
+            <div data-previa-assina hidden>
+              <label>Nome completo <input data-previa-nome autocomplete="name" /></label>
+              <label>CPF
+                <input data-previa-cpf inputmode="numeric" maxlength="14" placeholder="000.000.000-00" autocomplete="off" />
+                <span class="termo-erro" data-previa-cpf-erro hidden></span>
+              </label>
+            </div>
+            <p class="termo-erro" data-previa-erro hidden></p>
+            <div class="dlg-actions">
+              <button type="button" class="btn primary" data-previa-sim disabled>Aceitar termos</button>
+            </div>
           </div>
-          <p class="termo-erro" data-previa-erro hidden></p>
-          <div class="dlg-actions">
-            <button type="button" class="btn primary" data-previa-sim disabled>Aceitar termos</button>
+          <div data-previa-confirma hidden>
+            <p class="previa-pergunta">Deseja aplicar estas alterações na base?</p>
+            <div class="dlg-actions">
+              <button type="button" class="btn" data-previa-confirma-nao>Não</button>
+              <button type="button" class="btn primary" data-previa-confirma-sim>Sim, aplicar</button>
+            </div>
           </div>
         </div>
       </div>`;
@@ -280,7 +296,9 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
     dlg.querySelector('[data-previa-titulo]').textContent = opcoes.titulo || 'Prévia';
     dlg.querySelector('[data-previa-baixar]').disabled = true;
     dlg.querySelector('[data-previa-aceite]').hidden = true;
-    dlg.querySelector('[data-previa-frame]').srcdoc = `<!DOCTYPE html><html><body style="font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#1c2430"><h1 style="color:#1f4e79;font-size:18px">${xml(opcoes.titulo || 'Prévia')}</h1><p>${xml(opcoes.carregando || 'Gerando a prévia…')}</p></body></html>`;
+    dlg.querySelector('[data-previa-form]').hidden = false;
+    dlg.querySelector('[data-previa-confirma]').hidden = true;
+    dlg.querySelector('[data-previa-frame]').srcdoc = paginaStatus(opcoes.titulo || 'Prévia', opcoes.carregando || 'Gerando a prévia…');
     if (!dlg.open) dlg.showModal();
     return {
       preencher(dados) {
@@ -288,44 +306,112 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
         dlg.querySelector('[data-previa-titulo]').textContent = previaAtual.titulo || 'Prévia';
         dlg.querySelector('[data-previa-frame]').srcdoc = htmlPdf({ ...previaAtual, embutido: true });
         dlg.querySelector('[data-previa-baixar]').disabled = false;
+        if (!dlg.open) dlg.showModal();
+      },
+      ocupado(texto) {
+        dlg.querySelector('[data-previa-titulo]').textContent = 'Aplicando';
+        dlg.querySelector('[data-previa-baixar]').disabled = true;
+        dlg.querySelector('[data-previa-aceite]').hidden = true;
+        dlg.querySelector('[data-previa-form]').hidden = true;
+        dlg.querySelector('[data-previa-confirma]').hidden = true;
+        dlg.querySelector('[data-previa-frame]').srcdoc = paginaStatus('Aplicando', texto || 'Aplicando as alterações na base…');
+      },
+      ocultarAceite() {
+        dlg.querySelector('[data-previa-aceite]').hidden = true;
       },
       aguardarAceite(termo) {
         const box = dlg.querySelector('[data-previa-aceite]');
+        const form = dlg.querySelector('[data-previa-form]');
+        const confirma = dlg.querySelector('[data-previa-confirma]');
         const check = dlg.querySelector('[data-previa-check]');
         const assina = dlg.querySelector('[data-previa-assina]');
         const nome = dlg.querySelector('[data-previa-nome]');
         const cpf = dlg.querySelector('[data-previa-cpf]');
         const erro = dlg.querySelector('[data-previa-erro]');
+        const erroCpf = dlg.querySelector('[data-previa-cpf-erro]');
         const sim = dlg.querySelector('[data-previa-sim]');
         box.hidden = false;
+        form.hidden = false;
+        confirma.hidden = true;
         check.checked = false;
         assina.hidden = true;
         nome.value = '';
         cpf.value = '';
+        cpf.classList.remove('cpf-invalido');
         erro.hidden = true;
+        erroCpf.hidden = true;
         sim.disabled = true;
+        const mostrarCpf = () => {
+          const msg = mensagemCpf(cpf.value);
+          const incompleto = String(cpf.value || '').replace(/\D/g, '').length < 11;
+          erroCpf.hidden = !msg || incompleto;
+          erroCpf.textContent = msg;
+          cpf.classList.toggle('cpf-invalido', !!msg && !incompleto);
+          return msg;
+        };
         const atualizar = () => {
           assina.hidden = !check.checked;
+          const msgCpf = check.checked ? mostrarCpf() : '';
           const nomeOk = nome.value.trim().split(/\s+/).filter((p) => p.length >= 2).length >= 2;
-          sim.disabled = !check.checked || !nomeOk || !cpfValido(cpf.value);
+          const digitos = String(cpf.value || '').replace(/\D/g, '').length;
+          if (!check.checked || (nomeOk && (!msgCpf || digitos === 11))) {
+            erro.hidden = true;
+          } else {
+            erro.hidden = false;
+            erro.textContent = nomeOk ? msgCpf : 'Informe o nome completo de quem assina.';
+          }
+          sim.disabled = !check.checked || !nomeOk || !!msgCpf;
+        };
+        const pendencia = () => {
+          if (!check.checked) return 'Marque o aceite para assinar o termo.';
+          if (nome.value.trim().split(/\s+/).filter((p) => p.length >= 2).length < 2) return 'Informe o nome completo de quem assina.';
+          return mensagemCpf(cpf.value);
         };
         check.onchange = atualizar;
         nome.oninput = atualizar;
         cpf.oninput = () => { cpf.value = formatarCpf(cpf.value); atualizar(); };
         sim.onclick = () => {
-          atualizar();
-          if (sim.disabled) {
+          const msg = pendencia();
+          erro.hidden = !msg;
+          erro.textContent = msg || '';
+          mostrarCpf();
+          if (msg) return;
+          form.hidden = true;
+          confirma.hidden = false;
+        };
+        dlg.querySelector('[data-previa-confirma-nao]').onclick = () => {
+          confirma.hidden = true;
+          form.hidden = false;
+        };
+        dlg.querySelector('[data-previa-confirma-sim]').onclick = () => {
+          const msg = pendencia();
+          if (msg) {
+            confirma.hidden = true;
+            form.hidden = false;
             erro.hidden = false;
-            erro.textContent = check.checked ? 'Informe o nome completo e um CPF válido.' : 'Marque o aceite para assinar o termo.';
+            erro.textContent = msg;
             return;
           }
-          fecharPrevia({ nome: nome.value.trim().replace(/\s+/g, ' '), cpf: cpf.value });
+          const resolver = resolverAceite;
+          resolverAceite = null;
+          confirma.hidden = true;
+          if (resolver) resolver({ nome: nome.value.trim().replace(/\s+/g, ' '), cpf: cpf.value });
         };
         if (termo) dlg.dataset.termo = termo.titulo || '';
         return new Promise((resolve) => { resolverAceite = resolve; });
       },
       fechar() { fecharPrevia(null); },
     };
+  }
+
+  function paginaStatus(titulo, texto) {
+    return `<!DOCTYPE html><html><body style="font-family:Segoe UI,Arial,sans-serif;padding:24px;color:#1c2430"><h1 style="color:#1f4e79;font-size:18px">${xml(titulo || '')}</h1><p>${xml(texto || '')}</p></body></html>`;
+  }
+
+  function mensagemCpf(valor) {
+    const d = String(valor || '').replace(/\D/g, '');
+    if (d.length !== 11) return 'Informe o CPF com 11 dígitos.';
+    return cpfValido(valor) ? '' : 'CPF inválido.';
   }
 
   function cpfValido(valor) {

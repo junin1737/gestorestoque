@@ -151,10 +151,12 @@
       deps.showMsg('Marque ao menos um NCM e escolha a classificação.');
       return;
     }
-    const aceite = await prepararAlteracao({ itens: escolhidos });
-    if (!aceite) return;
-    const res = await api('/classificacao-ncm/replicar', { method: 'POST', body: { itens: escolhidos, aceite } });
+    const prep = await prepararAlteracao({ itens: escolhidos });
+    if (!prep) return;
+    prep.ui.ocupado('Aplicando as alterações na base…');
+    const res = await api('/classificacao-ncm/replicar', { method: 'POST', body: { itens: escolhidos, aceite: prep.aceite } });
     if (!res?.ok) {
+      prep.ui.fechar();
       deps.showMsg(res?.error || 'Não foi possível aplicar.');
       return;
     }
@@ -162,8 +164,8 @@
     if (res.jaIguais) partes.push(`${res.jaIguais} já estavam iguais`);
     if (res.falhas?.length) partes.push(`${res.falhas.length} NCM(s) não aplicados`);
     deps.showToast(partes.join('. ') + '.');
-    if (res.falhas?.length) deps.showMsg(res.falhas.map((f) => `${f.ncm}: ${f.error}`).join('\n'));
-    await oferecerImpressao(res);
+    if (res.falhas?.length) deps.showToast(res.falhas.map((f) => `${f.ncm}: ${f.error}`).join('\n'));
+    mostrarRelatorio(prep.ui, res);
     await lerReplicador();
   }
 
@@ -222,24 +224,18 @@
       deps.showToast(`${previa.falhas.length} NCM(s) ficaram de fora da prévia.`);
     }
     ui.preencher(opcoesPrevia(previa, linhas));
-    return ui.aguardarAceite(previa.termo);
+    const aceite = await ui.aguardarAceite(previa.termo);
+    if (!aceite) return null;
+    return { aceite, ui };
   }
 
-  function classeTexto(codigo, descricao) {
-    if (!codigo || codigo === '—') return '—';
-    return descricao ? `${codigo} — ${descricao}` : codigo;
-  }
-
-  async function oferecerImpressao(res) {
-    const linhas = (res?.linhas || []).map((linha) => ({
-      ncm: linha.ncm,
-      documento: linha.documento,
-      anterior: classeTexto(linha.anterior, linha.anterior_descricao),
-      atual: classeTexto(linha.atual, linha.atual_descricao),
-      produtos: linha.produtos,
-    }));
-    if (!linhas.length) return;
-    window.ExportarTabela?.abrirPdf({
+  function mostrarRelatorio(ui, res) {
+    const linhas = linhasDaPrevia(res);
+    if (!linhas.length) {
+      ui?.fechar();
+      return;
+    }
+    const dados = {
       titulo: 'Alterações de classificação tributária',
       subtitulo: res.aceite?.nome ? `Assinado por ${res.aceite.nome} · CPF ${res.aceite.cpf}` : 'NCM, cClassTrib anterior e atual',
       empresa: empresaNome || (typeof deps.empresa === 'function' ? deps.empresa() : ''),
@@ -252,7 +248,18 @@
         { id: 'produtos', titulo: 'Produtos', numero: true, largura: '10%' },
       ],
       linhas,
-    });
+    };
+    if (ui) {
+      ui.preencher(dados);
+      ui.ocultarAceite();
+      return;
+    }
+    window.ExportarTabela?.abrirPdf(dados);
+  }
+
+  function classeTexto(codigo, descricao) {
+    if (!codigo || codigo === '—') return '—';
+    return descricao ? `${codigo} — ${descricao}` : codigo;
   }
 
   async function buscar() {
@@ -315,25 +322,27 @@
       deps.showMsg('Escolha a classificação da NF-e, da NFC-e ou as duas.');
       return;
     }
-    const aceite = await prepararAlteracao({ ncm: resultado.ncm_chave, nfe, nfce });
-    if (!aceite) return;
+    const prep = await prepararAlteracao({ ncm: resultado.ncm_chave, nfe, nfce });
+    if (!prep) return;
+    prep.ui.ocupado('Aplicando as alterações na base…');
     const res = await api('/classificacao-ncm/atribuir', {
       method: 'POST',
       body: {
         ncm: resultado.ncm_chave,
         nfe,
         nfce,
-        aceite,
+        aceite: prep.aceite,
       },
     });
     if (!res.ok) {
+      prep.ui.fechar();
       deps.showMsg(res.error || 'Não foi possível atribuir.');
       return;
     }
     const partes = [`${res.alterados || 0} produto(s) atualizados`];
     if (res.jaIguais) partes.push(`${res.jaIguais} já estavam com essa classificação`);
     deps.showToast(partes.join('. ') + '.');
-    await oferecerImpressao(res);
+    mostrarRelatorio(prep.ui, res);
     await buscar();
   }
 

@@ -519,17 +519,43 @@ input, select, textarea {
 #dlg-previa iframe { flex: 1 1 auto; width: 100%; min-height: 220px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
 #dlg-previa .previa-aceite { display: grid; gap: 0.55rem; }
 #dlg-previa .previa-aceite[hidden] { display: none; }
-#dlg-previa .previa-aceite label:not(.termo-check) { display: grid; gap: 0.25rem; font-size: 0.86rem; }
+#dlg-previa .previa-aceite label:not(.termo-check) { display: grid; gap: 0.25rem; margin: 0; font-size: 0.86rem; }
 #dlg-previa .previa-aceite input:not([type="checkbox"]) { width: 100%; }
+#dlg-previa .previa-aceite input.cpf-invalido { border-color: var(--danger); }
+#dlg-previa .previa-pergunta { margin: 0; font-weight: 700; }
 #dlg-termo .dlg-card { width: min(680px, 96vw); display: grid; gap: 0.75rem; }
 #dlg-termo h3 { margin: 0; font-size: 1.05rem; }
 #dlg-termo .hint { margin: 0; }
 .termo-texto { max-height: 240px; overflow: auto; white-space: pre-wrap; font-size: 0.84rem; line-height: 1.45; border: 1px solid var(--border); border-radius: 10px; padding: 0.75rem; background: var(--bg); }
-.termo-check { display: flex; gap: 0.5rem; align-items: center; font-weight: 700; color: var(--text); }
-.termo-check input { margin-top: 0.2rem; flex: 0 0 auto; }
+#dlg-previa .termo-check,
+#dlg-termo .termo-check {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 0.6rem;
+  width: auto;
+  margin: 0;
+  font-weight: 700;
+  color: var(--text);
+}
+#dlg-previa .termo-check input[type="checkbox"],
+#dlg-termo .termo-check input[type="checkbox"] {
+  width: 1.15rem;
+  height: 1.15rem;
+  min-width: 1.15rem;
+  min-height: 1.15rem;
+  max-width: 1.15rem;
+  margin: 0;
+  padding: 0;
+  flex: 0 0 1.15rem;
+  accent-color: var(--accent);
+}
+#dlg-previa .termo-check span,
+#dlg-termo .termo-check span { flex: 1 1 auto; line-height: 1.3; }
 #dlg-termo-assina { display: grid; gap: 0.55rem; }
 #dlg-termo-assina[hidden] { display: none; }
-#dlg-termo label { display: grid; gap: 0.25rem; font-size: 0.86rem; }
+#dlg-termo label:not(.termo-check) { display: grid; gap: 0.25rem; font-size: 0.86rem; }
 #dlg-termo input[type="text"], #dlg-termo input:not([type="checkbox"]) { width: 100%; }
 .termo-erro { color: var(--danger); margin: 0; font-size: 0.86rem; }
 .dlg-acoes-3 { justify-content: stretch; }
