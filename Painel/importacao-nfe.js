@@ -2555,6 +2555,28 @@ const ImportacaoNfe = (() => {
     return null;
   }
 
+  /** 1 da unidade "12" vira 12 no estoque, sem gravar outra linha de fator. */
+  function aplicarFatorDaUnidadeNota(sys, xml, gest) {
+    if (!sys || sys.conversor_manual) return false;
+    const uniXml = String(xml?.uCom || sys.uni_medida_xml || '').trim().toUpperCase();
+    const um = (state.unidades || []).find((u) => String(u.unidade || '').trim().toUpperCase() === uniXml);
+    const fatorUni = Number(um?.conversor);
+    if (!(fatorUni > 1)) return false;
+    const exato = gest && String(gest.uni_xml || '').trim().toUpperCase() === uniXml ? gest : null;
+    if (exato?.pacote) return false;
+    const fatorGest = Number(exato?.conversor);
+    if (exato && fatorGest > 1 && Math.abs(fatorGest - fatorUni) > 0.00005) return false;
+    const uniEst = String(sys.uni_medida_saida || sys.uni_medida_cadastro || 'UN').trim().toUpperCase() || 'UN';
+    sys.uni_medida = uniEst;
+    sys.conversor = fatorUni;
+    sys.conversor_origem = 'unidade';
+    sys.vender_pacote = false;
+    sys.qtd_pacotes = null;
+    const qtdXml = Number(sys.qtd_xml ?? xml?.qCom ?? 0);
+    sys.qtd = Number((qtdXml * fatorUni).toFixed(6));
+    return true;
+  }
+
   function qtdDaNota(sys = {}, xml = {}) {
     const qCom = Number(xml.qCom);
     if (qCom > 0) return qCom;
@@ -3476,7 +3498,7 @@ const ImportacaoNfe = (() => {
       if (estFornec.cofins != null && sys.tributos?.p_cofins == null) {
         sys.tributos = { ...(sys.tributos || {}), p_cofins: estFornec.cofins };
       }
-      if (estFornec.uni_medida && sys.conversor_origem !== 'gestor' && sys.conversor_origem !== 'clipp') {
+      if (estFornec.uni_medida && sys.conversor_origem !== 'gestor' && sys.conversor_origem !== 'clipp' && sys.conversor_origem !== 'unidade') {
         // Primeira entrada: sugere TB_ESTOQUE_FORNECEDOR só se o Gestor ainda não gravou conversão.
         if (!sys.conversor_manual) {
           applyConversaoUnidade(
@@ -3716,6 +3738,11 @@ const ImportacaoNfe = (() => {
           }
           const custoInfo = calcCustoNotaUnitario(it.sistema, it.xml || {});
           if (custoInfo.custoEstoque > 0) it.sistema.prc_custo = custoInfo.custoEstoque;
+        }
+        await ensureUnidades();
+        if (aplicarFatorDaUnidadeNota(it.sistema, it.xml, gest)) {
+          const custoNota = calcCustoNotaUnitario(it.sistema, it.xml || {});
+          if (custoNota.custoEstoque > 0) it.sistema.prc_custo = custoNota.custoEstoque;
         }
         applySugestoesRegra(it.sistema, rgRes.item, ef, it.xml || {});
         if (rgRes.item || efRes.item) {
@@ -4022,7 +4049,7 @@ const ImportacaoNfe = (() => {
     const sys = it?.sistema || {};
     const trib = sys.tributos || {};
     const idFornec = state.sessao?.fornecedor?.id_fornec;
-    if (sys.id_identificador) {
+    if (sys.id_identificador && !(sys.conversor_origem === 'unidade' && !sys.conversor_manual)) {
       try {
         const cv = await api('/importacao/conversao-gestor', {
           method: 'POST',

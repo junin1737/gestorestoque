@@ -229,7 +229,7 @@ async function aplicarSugestoesVinculo(sessao) {
           codFornecedor: xmlItem.cProd || p.it.sistema?.cod_fornecedor,
         });
       }
-      const escolha = decidirConversao({
+      let escolha = decidirConversao({
         clipp: ef?.unidade_no_clipp ? { uni: ef.uni_medida, conversor: ef.conversor_clipp } : null,
         gestor: gest?.uni_estoque ? {
           uni: gest.uni_estoque,
@@ -237,6 +237,20 @@ async function aplicarSugestoesVinculo(sessao) {
           pacote: gest.pacote,
         } : null,
       });
+      const { fatorDaUnidadeDaNota } = require('./importacao-conversao-decisao');
+      const { fatorUnidade } = require('./importacao-estoque-fornec');
+      const { listarConversoesExatas } = require('./importacao-conversao-gestor');
+      const daNota = fatorDaUnidadeDaNota({
+        uCom: xmlItem.uCom,
+        uniEstoque: p.it.sistema.uni_medida_saida || p.it.sistema.uni_medida || 'UN',
+        fatorUnidade: await fatorUnidade(xmlItem.uCom),
+        linhas: await listarConversoesExatas({
+          idIdentificador: p.idLigado,
+          idFornec: idFornecConv,
+          uniXml: xmlItem.uCom,
+        }),
+      });
+      if (daNota) escolha = daNota;
       if (escolha && !p.it.sistema.conversor_manual) {
         usouConversao = true;
         p.it.sistema.uni_medida = escolha.uni || p.it.sistema.uni_medida;
@@ -249,6 +263,9 @@ async function aplicarSugestoesVinculo(sessao) {
           p.it.sistema.qtd_pacotes = Number(p.it.sistema.qtd.toFixed(3));
           p.it.sistema.qtd = p.it.sistema.qtd_pacotes;
           p.it.sistema.conversor_manual = true;
+        }
+        if (escolha.origem === 'unidade') {
+          p.it.etapas_ok = { ...(p.it.etapas_ok || {}), conversao: true };
         }
       }
     } catch (e) {

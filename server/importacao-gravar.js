@@ -988,7 +988,8 @@ async function gravarParametroFornecedor(db, sessao, it, idIdent) {
   if (!idFornec || !idIdent) return;
   const trib = it.sistema?.tributos || {};
   const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
-  const salvo = await salvarConversaoGestor({
+  const inferida = it.sistema?.conversor_origem === 'unidade' && !it.sistema?.conversor_manual;
+  const salvo = inferida ? null : await salvarConversaoGestor({
     id_identificador: idIdent,
     id_fornec: idFornec,
     uni_xml: it.sistema?.uni_medida_xml || it.xml?.uCom || '',
@@ -1574,15 +1575,18 @@ async function gravarNfCompra(sessao, {
           }
         }
         try {
-          const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
-          await salvarConversaoGestor({
-            id_identificador: p.idIdent,
-            id_fornec: sessao.fornecedor?.id_fornec,
-            uni_xml: p.it.sistema?.uni_medida_xml || p.it.xml?.uCom || '',
-            uni_estoque: p.it.sistema?.uni_medida || 'UN',
-            conversor: p.it.sistema?.conversor ?? 1,
-            pacote: !!(p.it.sistema?.vender_pacote && Number(p.it.sistema?.qtd_pacotes) > 0),
-          }, db);
+          const inferida = p.it.sistema?.conversor_origem === 'unidade' && !p.it.sistema?.conversor_manual;
+          if (!inferida) {
+            const { salvarConversaoGestor } = require('./importacao-conversao-gestor');
+            await salvarConversaoGestor({
+              id_identificador: p.idIdent,
+              id_fornec: sessao.fornecedor?.id_fornec,
+              uni_xml: p.it.sistema?.uni_medida_xml || p.it.xml?.uCom || '',
+              uni_estoque: p.it.sistema?.uni_medida || 'UN',
+              conversor: p.it.sistema?.conversor ?? 1,
+              pacote: !!(p.it.sistema?.vender_pacote && Number(p.it.sistema?.qtd_pacotes) > 0),
+            }, db);
+          }
         } catch (e) {
           console.warn('TB_MT_CONVERSAO:', e.message);
         }

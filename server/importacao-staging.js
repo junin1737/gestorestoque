@@ -1134,7 +1134,7 @@ function updateItem(sessaoId, nItem, patch) {
       }
     }
     item.sistema = sys;
-    if (sys.uni_medida_xml && sys.uni_medida) {
+    if (sys.uni_medida_xml && sys.uni_medida && !(sys.conversor_origem === 'unidade' && !sys.conversor_manual)) {
       importacaoParams.upsertConversao({
         uni_xml: sys.uni_medida_xml,
         uni_estoque: sys.uni_medida,
@@ -1163,7 +1163,7 @@ function conferirTodosItens(sessaoId) {
       const xmlItem = it.xml || {};
       const conv = importacaoParams.findConversao(sys.uni_medida_xml || xmlItem.uCom, sys.id_identificador);
       const conversaoJaGravada = !!(it.etapas_ok && it.etapas_ok.conversao);
-      if (conv && !sys.conversor_manual && !conversaoJaGravada) {
+      if (conv && !sys.conversor_manual && !conversaoJaGravada && sys.conversor_origem !== 'unidade') {
         sys.uni_medida = conv.uni_estoque || sys.uni_medida;
         sys.conversor = conv.conversor;
         const qtdXml = Number(sys.qtd_xml ?? xmlItem.qCom ?? 0);

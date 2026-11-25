@@ -212,7 +212,7 @@ async function buscar(q, grupo) {
       const conversoes = new Map();
       if (ids.length) {
         const fatores = await query(db, `
-          SELECT ID_IDENTIFICADOR, ID_FORNEC,
+          SELECT ID, ID_IDENTIFICADOR, ID_FORNEC,
                  TRIM(COALESCE(UNI_XML, '')) AS UNI_XML,
                  TRIM(COALESCE(UNI_ESTOQUE, '')) AS UNI_ESTOQUE,
                  CONVERSOR, TRIM(COALESCE(PACOTE, '')) AS PACOTE

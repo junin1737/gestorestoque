@@ -69,6 +69,33 @@ async function buscarConversaoGestor({ idIdentificador, idFornec, uniXml } = {})
   });
 }
 
+async function listarConversoesExatas({ idIdentificador, idFornec, uniXml } = {}) {
+  const idIdent = Number(idIdentificador || 0);
+  const uni = normUni(uniXml);
+  if (!idIdent || !uni) return [];
+  const idForn = Number(idFornec || 0);
+  return withDb(async (db) => {
+    await ensureConversaoGestor(db);
+    const params = [idIdent, uni];
+    let sql = `SELECT ID, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE
+      FROM ${TABLE}
+      WHERE ID_IDENTIFICADOR = ?
+        AND UPPER(TRIM(COALESCE(UNI_XML, ''))) = ?`;
+    if (idForn) {
+      sql += ' AND (ID_FORNEC = ? OR ID_FORNEC IS NULL)';
+      params.push(idForn);
+    }
+    sql += ' ORDER BY ID';
+    const rows = await query(db, sql, params);
+    return (rows || []).map((r) => ({
+      uni_xml: r.UNI_XML || '',
+      uni_estoque: r.UNI_ESTOQUE || '',
+      conversor: Number(r.CONVERSOR || 1) || 1,
+      pacote: String(r.PACOTE || '').trim() === 'S',
+    }));
+  });
+}
+
 async function salvarConversaoGestor(dados = {}, dbExterno) {
   const idIdent = Number(dados.id_identificador || 0);
   if (!idIdent) return null;
@@ -99,7 +126,7 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
       SELECT FIRST 1 ID FROM ${TABLE}
       WHERE ID_IDENTIFICADOR = ?
         AND COALESCE(ID_FORNEC, 0) = ?
-        AND COALESCE(UNI_XML, '') = ?`, [
+        AND UPPER(TRIM(COALESCE(UNI_XML, ''))) = ?`, [
       idIdent, idForn || 0, uniXml,
     ]);
     if (exist[0]) {
@@ -126,5 +153,6 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
 module.exports = {
   ensureConversaoGestor,
   buscarConversaoGestor,
+  listarConversoesExatas,
   salvarConversaoGestor,
 };

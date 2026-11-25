@@ -141,8 +141,13 @@ async function upsertEstoqueFornecedor(body = {}, { db: conn = null } = {}) {
   });
 }
 
+async function fatorUnidade(uni) {
+  return withDb((db) => lookupConversorUnidade(db, uni));
+}
+
 module.exports = {
   buscarEstoqueFornecedor,
   upsertEstoqueFornecedor,
   mapEstFornec,
+  fatorUnidade,
 };
