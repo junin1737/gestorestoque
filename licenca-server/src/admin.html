@@ -70,6 +70,8 @@
   .ficha-tabs { display: flex; gap: .4rem; flex-wrap: wrap; margin: 0 0 .9rem; position: sticky; top: 0; background: #fff; z-index: 2; padding: .15rem 0 .55rem; }
   .ficha-tab { border: 1px solid #e6ebf2; background: #fff; border-radius: 999px; padding: .4rem .85rem; cursor: pointer; font-weight: 600; color: #5c6b80; }
   .ficha-tab.active { background: #121a2b; color: #fff; border-color: #121a2b; }
+  .os-perfis { display: grid; gap: .35rem; margin: .7rem 0 .9rem; }
+  .os-perfis .chk { font-weight: 650; }
   .ficha-pane > h3:first-child { margin-top: .2rem; }
   .tabs { display: flex; gap: .4rem; flex-wrap: wrap; margin-bottom: .85rem; }
   .tab { border: 1px solid #e6ebf2; background: #fff; border-radius: 999px; padding: .4rem .85rem; cursor: pointer; font-weight: 600; color: #5c6b80; }
@@ -361,6 +363,7 @@
     <div class="ficha-tabs" role="tablist">
       <button class="ficha-tab active" type="button" data-ficha-tab="geral" role="tab" aria-selected="true">Geral</button>
       <button class="ficha-tab" type="button" data-ficha-tab="modulos" role="tab" aria-selected="false">Módulos utilizados</button>
+      <button class="ficha-tab" type="button" data-ficha-tab="servicos" role="tab" aria-selected="false">Serviços</button>
       <button class="ficha-tab" type="button" data-ficha-tab="conexoes" role="tab" aria-selected="false">Conexões</button>
     </div>
     <div data-ficha-pane="geral">
@@ -452,6 +455,16 @@
       </select>
     </label>
     <p class="sub">Com Sim, o Gestor mostra Classificação por NCM para quem tiver a permissão em Usuários. Pode ficar ligado sozinho, sem os outros módulos.</p>
+    </div>
+    <div data-ficha-pane="servicos" hidden>
+      <label class="chk"><input type="checkbox" id="d-os-ativo" /> Usar ordem de serviço</label>
+      <p class="sub">O tipo marcado aqui é o perfil do módulo de ordem de serviço no Gestor desta loja.</p>
+      <div id="d-os-perfis" class="os-perfis"></div>
+      <div class="linha">
+        <label>Cadastrar outro tipo<input id="d-os-novo" maxlength="40" placeholder="Ex.: Oficina, celulares, ar-condicionado" /></label>
+        <button class="btn ghost" id="d-os-adicionar" type="button">Adicionar</button>
+      </div>
+      <p class="sub">Informática, autopeças, motopeças ou um ramo cadastrado aqui. Só um tipo fica marcado. O lançamento no Gestor grava a OS do Clipp e as mesmas tabelas do condicional.</p>
     </div>
     <div data-ficha-pane="conexoes" hidden>
     <div id="d-link-box" hidden>
@@ -1308,6 +1321,46 @@ function atualizarAvisoDominio() {
 $('#d-usa-dominio')?.addEventListener('change', atualizarAvisoDominio);
 $('#d-dominio')?.addEventListener('input', atualizarAvisoDominio);
 
+const PERFIS_OS_PADRAO = [
+  { id: 'informatica', nome: 'Informática' },
+  { id: 'autopecas', nome: 'Autopeças' },
+  { id: 'motopecas', nome: 'Motopeças' },
+];
+let perfisOs = PERFIS_OS_PADRAO.map((p) => ({ ...p }));
+
+function slugOs(valor) {
+  return String(valor || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
+}
+
+function perfilOsMarcado() {
+  return $('#d-os-perfis [data-os-perfil]:checked')?.dataset.osPerfil || '';
+}
+
+function pintarPerfisOs(marcado) {
+  const box = $('#d-os-perfis');
+  if (!box) return;
+  const atual = marcado == null ? perfilOsMarcado() : marcado;
+  box.innerHTML = perfisOs.map((p) => `
+    <label class="chk"><input type="checkbox" data-os-perfil="${esc(p.id)}"${p.id === atual ? ' checked' : ''} /> ${esc(p.nome)}</label>`).join('');
+  $$('#d-os-perfis [data-os-perfil]').forEach((el) => {
+    el.addEventListener('change', () => {
+      if (!el.checked) return;
+      $$('#d-os-perfis [data-os-perfil]').forEach((outro) => { if (outro !== el) outro.checked = false; });
+    });
+  });
+}
+
+function adicionarPerfilOs() {
+  const campo = $('#d-os-novo');
+  const nome = String(campo?.value || '').trim();
+  const id = slugOs(nome);
+  if (!nome || !id) return;
+  if (!perfisOs.some((p) => p.id === id)) perfisOs.push({ id, nome: nome.slice(0, 40) });
+  if (campo) campo.value = '';
+  pintarPerfisOs(id);
+}
+
 function preencherCliente(r) {
   const c = r.cliente;
   st.atual = { cnpj: c.cnpj, app: c.aplicacao };
@@ -1341,6 +1394,19 @@ function preencherCliente(r) {
   $('#d-consultar-compras').value = Number(c.consultar_compras) === 1 ? '1' : '0';
   $('#d-alteracao-massa').value = Number(c.alteracao_massa) === 1 ? '1' : '0';
   $('#d-classificacao-ncm').value = Number(c.classificacao_ncm) === 1 ? '1' : '0';
+  const os = c.servicos || {};
+  const extras = Array.isArray(os.perfis) ? os.perfis : [];
+  const vistos = new Set();
+  perfisOs = [];
+  for (const item of [...PERFIS_OS_PADRAO, ...extras]) {
+    const id = slugOs(item.id || item.nome);
+    const nome = String(item.nome || '').trim().slice(0, 40);
+    if (!id || !nome || vistos.has(id)) continue;
+    vistos.add(id);
+    perfisOs.push({ id, nome });
+  }
+  if ($('#d-os-ativo')) $('#d-os-ativo').checked = os.ativo === true;
+  pintarPerfisOs(os.perfil || '');
   $('#d-usa-dominio').checked = Number(c.usa_dominio) === 1;
   $('#d-dominio').value = c.dominio_proprio || '';
   atualizarAvisoDominio();
@@ -1386,6 +1452,12 @@ function abaFicha(nome) {
 $('#dlg-cliente').addEventListener('click', (e) => {
   const b = e.target.closest('[data-ficha-tab]');
   if (b) abaFicha(b.dataset.fichaTab);
+});
+$('#d-os-adicionar')?.addEventListener('click', adicionarPerfilOs);
+$('#d-os-novo')?.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  adicionarPerfilOs();
 });
 
 async function abrirCliente(cli) {
@@ -1529,6 +1601,11 @@ $('#d-salvar').addEventListener('click', async () => {
       consultar_compras: $('#d-consultar-compras').value === '1' ? 1 : 0,
       alteracao_massa: $('#d-alteracao-massa').value === '1' ? 1 : 0,
       classificacao_ncm: $('#d-classificacao-ncm').value === '1' ? 1 : 0,
+      servicos: {
+        ativo: $('#d-os-ativo')?.checked === true,
+        perfil: perfilOsMarcado(),
+        perfis: perfisOs,
+      },
       usa_dominio: $('#d-usa-dominio').checked ? 1 : 0,
       dominio_proprio: $('#d-dominio').value,
       ig_usuario: $('#d-ig-usuario').value,

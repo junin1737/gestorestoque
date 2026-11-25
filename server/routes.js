@@ -3695,23 +3695,6 @@ router.post('/rotinas', somenteServidorLocal, (req, res) => {
   res.json({ ok: true, rotinas });
 });
 
-router.get('/os-perfil', somenteServidorLocal, (_req, res) => {
-  const { normalizarPerfilOs } = require('./os-perfil');
-  const cfg = loadAppConfig();
-  res.json({ ok: true, os: normalizarPerfilOs(cfg.os || {}) });
-});
-
-router.post('/os-perfil', somenteServidorLocal, (req, res) => {
-  const { normalizarPerfilOs } = require('./os-perfil');
-  const os = normalizarPerfilOs(req.body || {});
-  if (os.ativo && !os.perfil) {
-    return res.json({ ok: false, error: 'Marque o tipo de serviço que esta loja vai usar.' });
-  }
-  const current = loadAppConfig();
-  saveAppConfig({ ...current, os });
-  res.json({ ok: true, os });
-});
-
 const contador = require('./contador');
 
 function autorContador(req) {

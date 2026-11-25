@@ -166,6 +166,70 @@ function classificacaoNcmAtiva(cli) {
   return Number(cli?.classificacao_ncm) === 1;
 }
 
+const PERFIS_SERVICO_PADRAO = [
+  { id: 'informatica', nome: 'Informática' },
+  { id: 'autopecas', nome: 'Autopeças' },
+  { id: 'motopecas', nome: 'Motopeças' },
+];
+
+function slugServico(valor) {
+  return String(valor || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 32);
+}
+
+/** Perfil da ordem de serviço escolhido nesta ficha. O Gestor só usa o que estiver marcado. */
+function normalizarServicos(valor) {
+  let os = valor;
+  if (typeof valor === 'string' && valor.trim()) {
+    try { os = JSON.parse(valor); } catch { os = {}; }
+  }
+  if (!os || typeof os !== 'object') os = {};
+  const recebidos = Array.isArray(os.perfis) ? os.perfis : [];
+  const perfis = [];
+  const vistos = new Set();
+  for (const item of [...PERFIS_SERVICO_PADRAO, ...recebidos]) {
+    const nome = String(item?.nome || '').trim().slice(0, 40);
+    const id = slugServico(item?.id || nome);
+    if (!nome || !id || vistos.has(id)) continue;
+    vistos.add(id);
+    perfis.push({ id, nome });
+  }
+  const pedido = slugServico(os.perfil);
+  const perfil = perfis.some((p) => p.id === pedido) ? pedido : '';
+  return { ativo: os.ativo === true, perfil, perfis };
+}
+
+function servicosDoCliente(cli) {
+  return normalizarServicos(cli?.servicos_json);
+}
+
+function resumoServicos(os) {
+  const item = os?.ativo && os.perfil ? os.perfis.find((p) => p.id === os.perfil) : null;
+  return {
+    ativo: !!(os?.ativo && os.perfil),
+    perfil: item ? item.id : '',
+    nome: item ? item.nome : '',
+  };
+}
+
+let colunaServicosPronta = false;
+
+async function garantirServicos(env) {
+  if (colunaServicosPronta) return;
+  try {
+    await env.DB.prepare('ALTER TABLE clientes ADD COLUMN servicos_json TEXT').run();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (!/duplicate column/i.test(msg)) throw e;
+  }
+  colunaServicosPronta = true;
+}
+
 let colunasDominioProntas = false;
 
 async function garantirDominio(env) {
@@ -417,6 +481,7 @@ async function check(request, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
+  await garantirServicos(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   let body;
@@ -540,6 +605,7 @@ async function check(request, env) {
     consultar_compras: consultarComprasAtiva(cli),
     alteracao_massa: alteracaoMassaAtiva(cli),
     classificacao_ncm: classificacaoNcmAtiva(cli),
+    servicos: resumoServicos(servicosDoCliente(cli)),
     url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });
@@ -662,6 +728,7 @@ async function listarClientes(url, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
+  await garantirServicos(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   const q = String(url.searchParams.get('q') || '').trim();
@@ -728,9 +795,10 @@ async function listarClientes(url, env) {
 
 /** Nunca devolve o hash da senha do supervisor nem o do segredo da instalação ao painel. */
 function clientePublico(c, agora = new Date()) {
-  const { sup_hash: supHash, segredo_hash: segredoHash, ig_token: igToken, oferta_token: ofertaToken, ...resto } = c;
+  const { sup_hash: supHash, segredo_hash: segredoHash, ig_token: igToken, oferta_token: ofertaToken, servicos_json: servicosJson, ...resto } = c;
   return {
     ...resto,
+    servicos: normalizarServicos(servicosJson),
     sup_propria: !!supHash,
     instalacao_confirmada: !!segredoHash,
     ig_token_informado: !!igToken,
@@ -870,6 +938,11 @@ function camposEditaveis(body) {
   }
   if (body.classificacao_ncm !== undefined) {
     out.classificacao_ncm = body.classificacao_ncm === true || body.classificacao_ncm === 1 || body.classificacao_ncm === '1' ? 1 : 0;
+  }
+  if (body.servicos !== undefined) {
+    const os = normalizarServicos(body.servicos);
+    if (os.ativo && !os.perfil) throw new Error('Marque o tipo de serviço que esta loja vai usar.');
+    out.servicos_json = JSON.stringify(os);
   }
   if (body.usa_dominio !== undefined) {
     out.usa_dominio = body.usa_dominio === true || body.usa_dominio === 1 || body.usa_dominio === '1' ? 1 : 0;
@@ -1557,6 +1630,7 @@ async function excluirRevenda(id, env) {
 
 async function criarCliente(request, env) {
   await garantirAdicionais(env);
+  await garantirServicos(env);
   const body = await request.json().catch(() => ({}));
   const cnpj = soDigitos(body.cnpj);
   if (cnpj.length !== 14 && cnpj.length !== 11) return json({ ok: false, error: 'CNPJ/CPF inválido.' }, 400);
@@ -1591,6 +1665,7 @@ async function atualizarCliente(cnpj, app, request, env) {
   await garantirPacoteEntrada(env);
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
+  await garantirServicos(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   const cli = await buscarCliente(env, cnpj, app);
@@ -1630,6 +1705,7 @@ async function atualizarCliente(cnpj, app, request, env) {
       consultar_compras: 'consultar compras',
       alteracao_massa: 'alteração em massa',
       classificacao_ncm: 'classificação por NCM',
+      servicos_json: 'serviços',
       usa_dominio: 'domínio próprio',
       dominio_proprio: 'domínio',
       ig_usuario: 'instagram',
@@ -1642,6 +1718,11 @@ async function atualizarCliente(cnpj, app, request, env) {
       if (k === 'revenda_id') return revendaNova?.nome || 'sem revenda';
       if (k === 'ig_token') return 'atualizado';
       if (k === 'em_teste' || k === 'pacote_entrada' || k === 'central_ofertas' || k === 'consultar_compras' || k === 'alteracao_massa' || k === 'classificacao_ncm' || k === 'usa_dominio') return campos[k] ? 'sim' : 'não';
+      if (k === 'servicos_json') {
+        const os = normalizarServicos(campos[k]);
+        const nome = os.perfis.find((p) => p.id === os.perfil)?.nome;
+        return os.ativo && nome ? nome : 'não';
+      }
       if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
       return campos[k] ?? '—';
     };
@@ -1663,6 +1744,7 @@ async function excluirCliente(cnpj, app, env) {
 async function licencaOffline(cnpj, app, request, env) {
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
+  await garantirServicos(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
@@ -1687,6 +1769,7 @@ async function licencaOffline(cnpj, app, request, env) {
     consultar_compras: consultarComprasAtiva(cli),
     alteracao_massa: alteracaoMassaAtiva(cli),
     classificacao_ncm: classificacaoNcmAtiva(cli),
+    servicos: resumoServicos(servicosDoCliente(cli)),
     url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });

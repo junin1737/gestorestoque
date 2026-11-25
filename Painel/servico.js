@@ -49,7 +49,6 @@ function setConfigTab(tab) {
   if (tab === 'sistema') loadSobre();
   if (tab === 'dispositivos') loadDispositivos();
   if (tab === 'rotinas') loadRotinas();
-  if (tab === 'servicos') loadOs();
 }
 
 $$('.svc-tab[data-config-tab]').forEach((btn) => {
@@ -112,117 +111,6 @@ $('#form-rotinas')?.addEventListener('submit', async (ev) => {
     if (!res.ok) msg.textContent = res.error || 'Não foi possível salvar.';
     else if (!$('#rot-ativo')?.checked) msg.textContent = 'Horários gravados, mas a rotina está desligada. Marque Desligar automaticamente.';
     else msg.textContent = 'Rotina salva. Cada dia desliga no horário marcado.';
-  }
-});
-
-let perfisOs = [];
-
-function perfilMarcado() {
-  return $('#os-perfis [data-perfil]:checked')?.dataset.perfil || '';
-}
-
-function pintarPerfisOs() {
-  const box = $('#os-perfis');
-  if (!box) return;
-  const marcado = perfilMarcado();
-  box.innerHTML = perfisOs.map((p) => `
-    <label class="os-perfil">
-      <input type="checkbox" data-perfil="${esc(p.id)}"${p.id === marcado ? ' checked' : ''} />
-      <span>${esc(p.nome)}</span>
-    </label>`).join('');
-  $$('#os-perfis [data-perfil]').forEach((el) => {
-    el.addEventListener('change', () => {
-      if (el.checked) {
-        $$('#os-perfis [data-perfil]').forEach((outro) => {
-          if (outro !== el) outro.checked = false;
-        });
-      }
-    });
-  });
-}
-
-async function loadOs() {
-  const res = await api('/os-perfil');
-  const msg = $('#os-msg');
-  if (!res.ok && !res.os) {
-    if (msg) {
-      msg.hidden = false;
-      msg.textContent = res.error || 'Não foi possível ler os tipos de serviço.';
-    }
-    return;
-  }
-  const os = res.os || {};
-  perfisOs = Array.isArray(os.perfis) ? os.perfis : [];
-  const ativo = $('#os-ativo');
-  if (ativo) ativo.checked = os.ativo === true;
-  pintarPerfisOs();
-  const atual = $('#os-perfis [data-perfil="' + String(os.perfil || '').replace(/"/g, '') + '"]');
-  if (atual) {
-    $$('#os-perfis [data-perfil]').forEach((el) => { el.checked = el === atual; });
-  }
-}
-
-function adicionarPerfilOs() {
-  const campo = $('#os-novo');
-  const msg = $('#os-msg');
-  const nome = String(campo?.value || '').trim();
-  if (!nome) {
-    if (msg) {
-      msg.hidden = false;
-      msg.textContent = 'Digite o nome do tipo de serviço.';
-    }
-    return;
-  }
-  const id = nome.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 32);
-  if (!id) {
-    if (msg) {
-      msg.hidden = false;
-      msg.textContent = 'Use letras ou números no nome do tipo.';
-    }
-    return;
-  }
-  if (!perfisOs.some((p) => p.id === id)) perfisOs.push({ id, nome: nome.slice(0, 40) });
-  if (campo) campo.value = '';
-  pintarPerfisOs();
-  const novo = $(`#os-perfis [data-perfil="${id}"]`);
-  if (novo) {
-    $$('#os-perfis [data-perfil]').forEach((el) => { el.checked = el === novo; });
-  }
-  if (msg) msg.hidden = true;
-}
-
-$('#os-adicionar')?.addEventListener('click', adicionarPerfilOs);
-$('#os-novo')?.addEventListener('keydown', (ev) => {
-  if (ev.key === 'Enter') {
-    ev.preventDefault();
-    adicionarPerfilOs();
-  }
-});
-
-$('#form-os')?.addEventListener('submit', async (ev) => {
-  ev.preventDefault();
-  const msg = $('#os-msg');
-  const res = await api('/os-perfil', {
-    method: 'POST',
-    body: {
-      ativo: $('#os-ativo')?.checked === true,
-      perfil: perfilMarcado(),
-      perfis: perfisOs,
-    },
-  });
-  if (msg) {
-    msg.hidden = false;
-    msg.textContent = res.ok
-      ? 'Tipo de serviço salvo.'
-      : (res.error || 'Não foi possível salvar.');
-  }
-  if (res.ok && res.os) {
-    perfisOs = res.os.perfis || perfisOs;
-    pintarPerfisOs();
-    const atual = res.os.perfil
-      ? $(`#os-perfis [data-perfil="${res.os.perfil}"]`)
-      : null;
-    if (atual) atual.checked = true;
   }
 });
 

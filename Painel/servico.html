@@ -141,7 +141,6 @@
           <button type="button" class="svc-tab" data-config-tab="sistema">Sistema</button>
           <button type="button" class="svc-tab" data-config-tab="dispositivos">Dispositivos</button>
           <button type="button" class="svc-tab" data-config-tab="rotinas">Rotinas</button>
-          <button type="button" class="svc-tab" data-config-tab="servicos">Serviços</button>
         </nav>
 
         <!-- Aba: Banco -->
@@ -308,28 +307,6 @@
             <p id="rot-msg" class="hint msg-line" hidden></p>
             <div class="banco-actions">
               <button type="submit" class="btn-teal">Salvar rotina</button>
-            </div>
-          </form>
-        </div>
-
-        <div id="config-tab-servicos" class="config-tab-pane" hidden>
-          <p class="svc-lead">Marque o tipo de serviço desta loja. Informática, autopeças, motopeças ou um ramo cadastrado aqui.</p>
-          <form id="form-os" class="banco-form">
-            <label class="switch-row">
-              <input type="checkbox" id="os-ativo" />
-              <span>Usar ordem de serviço</span>
-            </label>
-            <div class="os-perfis" id="os-perfis"></div>
-            <label>Cadastrar outro tipo
-              <div class="row">
-                <input id="os-novo" type="text" maxlength="40" placeholder="Ex.: Oficina, celulares, ar-condicionado" autocomplete="off" />
-                <button type="button" id="os-adicionar" class="btn-outline small">Adicionar</button>
-              </div>
-            </label>
-            <p class="hint">A ordem entra na OS do Clipp e nas mesmas tabelas do condicional. Cada lançamento leva peça e serviço, e a comissão usa o percentual do funcionário.</p>
-            <p id="os-msg" class="hint msg-line" hidden></p>
-            <div class="banco-actions">
-              <button type="submit" class="btn-teal">Salvar</button>
             </div>
           </form>
         </div>

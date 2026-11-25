@@ -484,21 +484,6 @@ button, input, select, textarea {
   flex: none;
 }
 .rot-dias { display: grid; gap: 0.45rem; margin: 0.6rem 0 0.8rem; }
-.os-perfis { display: grid; gap: 0.4rem; margin: 0.7rem 0 0.9rem; }
-.banco-form .os-perfil {
-  display: flex;
-  align-items: center;
-  gap: 0.65rem;
-  margin: 0;
-  font-weight: 650;
-  cursor: pointer;
-}
-.banco-form .os-perfil input[type="checkbox"] {
-  width: 1.05rem;
-  height: 1.05rem;
-  margin: 0;
-  flex: none;
-}
 .banco-form .rot-dia {
   display: grid;
   grid-template-columns: 1.25rem 7.5rem 9.5rem;

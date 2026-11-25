@@ -1,9 +1,12 @@
 'use strict';
 
 /**
- * Perfil da ordem de serviço escolhido no painel do serviço.
+ * Contrato da ordem de serviço. O perfil (informática, autopeças, motopeças
+ * ou outro cadastrado) é escolhido na aba Serviços do painel de licença.
+ * O Gestor recebe esse perfil na licença, em situacao().servicos, e o módulo
+ * de uso abre de acordo com ele.
  *
- * Quando o lançamento for feito, grava os dois lados:
+ * O lançamento grava os dois lados:
  * - as mesmas tabelas do condicional: TB_PEDIDO_VENDA (GEN_TB_DAV_ID),
  *   TB_PED_VENDA_ITEM (GEN_TB_PED_VENDA_ITEM_ID), GESTOR_COND_TOTAL,
  *   e o UPDATE em TB_PEDIDO_VENDA que faz o Clipp preencher TB_PED_VENDA_NOME.

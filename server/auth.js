@@ -48,7 +48,6 @@ const ROTAS_SERVIDOR_LOCAL = [
   /^\/connect$/,
   /^\/shutdown$/,
   /^\/rotinas$/,
-  /^\/os-perfil$/,
   /^\/licenca\/aplicar$/,
   /^\/online(\/|$)/,
   /^\/licenca\/solicitar$/,
