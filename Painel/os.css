@@ -132,6 +132,8 @@ html[data-theme="escuro"] .os {
   background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--accent); }
 .os-aviso.ok { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
 .os-combo { position: relative; }
+.os-com-mais { display: flex; gap: 6px; align-items: center; }
+.os-com-mais .oc { flex: 1; min-width: 0; }
 .os-combo-lista { position: absolute; left: 0; right: 0; top: calc(100% + 4px); z-index: 30; background: var(--bg-elev); border-radius: 12px; box-shadow: var(--os-lift-2); padding: 5px; max-height: 300px; overflow: auto; border: 1px solid var(--os-sep); }
 .os-combo-lista button { display: block; width: 100%; text-align: left; border: 0; background: transparent; font: inherit; padding: 8px 10px; border-radius: 8px; color: var(--text); cursor: pointer; }
 .os-combo-lista button.sel, .os-combo-lista button:hover { background: color-mix(in srgb, var(--accent) 10%, transparent); }

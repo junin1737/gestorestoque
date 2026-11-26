@@ -11,6 +11,7 @@
  * - GESTOR_OS_HISTORICO: troca de status, técnico, envio para a venda e liberação de desconto.
  * - GESTOR_OS_SOLUCAO: base de soluções da lâmpada. GESTOR_OS_MENSAGEM: mensagens do WhatsApp.
  * - GESTOR_OS_FUNC: quem é técnico e quem é gerente (libera desconto acima do limite).
+ * - GESTOR_OS_CATEGORIA: categorias (ID_PAI vazio) e subcategorias (ID_PAI preenchido).
  * - GESTOR_PEDIDO_ORIGEM: marca o pedido de venda gravado pela O.S, para o Condicional não listar.
  *
  * Envio para a Venda Gerencial: grava nas tabelas do condicional (condicionais.gravarPedidoOS).
@@ -132,6 +133,8 @@ const TABELAS = {
       ID_STATUS INTEGER,
       ID_TECNICO INTEGER,
       QUEM_TROUXE VARCHAR(100),
+      ID_CATEGORIA INTEGER,
+      ID_SUBCATEGORIA INTEGER,
       EQUIPAMENTO VARCHAR(300),
       DEFEITO VARCHAR(2000),
       SOLUCAO VARCHAR(2000),
@@ -230,6 +233,14 @@ const TABELAS = {
       GERENTE CHAR(1),
       CONSTRAINT PK_GESTOR_OS_FUNC PRIMARY KEY (ID_FUNCIONARIO)
     )`,
+  GESTOR_OS_CATEGORIA: `
+    CREATE TABLE GESTOR_OS_CATEGORIA (
+      ID INTEGER NOT NULL,
+      ID_PAI INTEGER,
+      NOME VARCHAR(80),
+      ATIVO CHAR(1),
+      CONSTRAINT PK_GESTOR_OS_CATEGORIA PRIMARY KEY (ID)
+    )`,
   GESTOR_PEDIDO_ORIGEM: `
     CREATE TABLE GESTOR_PEDIDO_ORIGEM (
       ID_PEDIDO INTEGER NOT NULL,
@@ -238,7 +249,7 @@ const TABELAS = {
       CONSTRAINT PK_GESTOR_PEDIDO_ORIGEM PRIMARY KEY (ID_PEDIDO)
     )`,
 };
-const GERADORES = ['GESTOR_GEN_OS', 'GESTOR_GEN_OS_ITEM', 'GESTOR_GEN_OS_HIST', 'GESTOR_GEN_OS_SOL', 'GESTOR_GEN_OS_MSG', 'GESTOR_GEN_OS_STATUS'];
+const GERADORES = ['GESTOR_GEN_OS', 'GESTOR_GEN_OS_ITEM', 'GESTOR_GEN_OS_HIST', 'GESTOR_GEN_OS_SOL', 'GESTOR_GEN_OS_MSG', 'GESTOR_GEN_OS_STATUS', 'GESTOR_GEN_OS_CAT'];
 
 let esquemaPronto = false;
 
@@ -258,6 +269,10 @@ async function ensureOsSchema(db) {
     WHERE RDB$GENERATOR_NAME STARTING WITH 'GESTOR_GEN_OS'`)).map((r) => String(r.G).trim()));
   for (const g of GERADORES) {
     if (!gens.has(g)) await query(db, `CREATE GENERATOR ${g}`);
+  }
+  if (tabelas.has('GESTOR_OS') || criou) {
+    if (!(await columnExists(db, 'GESTOR_OS', 'ID_CATEGORIA'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_CATEGORIA INTEGER');
+    if (!(await columnExists(db, 'GESTOR_OS', 'ID_SUBCATEGORIA'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_SUBCATEGORIA INTEGER');
   }
   if (criou) await refreshTables(db);
   const st = await query(db, 'SELECT COUNT(*) AS N FROM GESTOR_OS_STATUS');
@@ -685,6 +700,105 @@ async function buscarClientes(q) {
   });
 }
 
+function semAcento(v) {
+  return txt(v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+
+function montarCategoria(cat, sub) {
+  const nome = txt(cat?.NOME);
+  const subnome = txt(sub?.NOME);
+  return {
+    id_categoria: num(sub ? sub.ID_PAI : cat?.ID) || null,
+    id_subcategoria: sub ? num(sub.ID) : null,
+    categoria: nome,
+    subcategoria: subnome,
+    rotulo: subnome ? `${nome} › ${subnome}` : nome,
+    nome: subnome || nome,
+    detalhe: subnome ? nome : 'Categoria',
+  };
+}
+
+/** Lista categorias e subcategorias que batem com o texto. Sem texto, devolve as primeiras. */
+async function buscarCategorias(q) {
+  const termo = semAcento(q);
+  return comBase(async (db) => {
+    const rows = await query(db, `
+      SELECT C.ID, C.ID_PAI, C.NOME, P.NOME AS PAI
+      FROM GESTOR_OS_CATEGORIA C
+      LEFT JOIN GESTOR_OS_CATEGORIA P ON P.ID = C.ID_PAI
+      WHERE COALESCE(C.ATIVO, 'S') <> 'N'
+      ORDER BY COALESCE(P.NOME, C.NOME), C.ID_PAI, C.NOME`);
+    const itens = [];
+    for (const r of rows) {
+      const pai = num(r.ID_PAI);
+      const cat = pai ? { ID: pai, NOME: r.PAI } : r;
+      const sub = pai ? r : null;
+      const item = montarCategoria(cat, sub);
+      const alvo = semAcento(`${item.categoria} ${item.subcategoria}`);
+      if (termo && !alvo.includes(termo)) continue;
+      itens.push(item);
+      if (itens.length >= 40) break;
+    }
+    return { categorias: itens };
+  });
+}
+
+/** Cria a categoria e, se vier preenchida, a subcategoria. Nome já existente é reaproveitado. */
+async function cadastrarCategoria(body) {
+  const nome = txt(body?.categoria, 80);
+  const subnome = txt(body?.subcategoria, 80);
+  if (!nome) throw new Error('Informe a categoria.');
+  return comBase(async (db) => {
+    const achar = async (pai, texto) => {
+      const rows = await query(db, `
+        SELECT ID, ID_PAI, NOME FROM GESTOR_OS_CATEGORIA
+        WHERE COALESCE(ATIVO, 'S') <> 'N' AND ${pai ? 'ID_PAI = ?' : 'ID_PAI IS NULL'}`, pai ? [pai] : []);
+      return rows.find((r) => semAcento(r.NOME) === semAcento(texto)) || null;
+    };
+    let cat = await achar(null, nome);
+    if (!cat) {
+      const id = await gerar(db, 'GESTOR_GEN_OS_CAT');
+      await query(db, 'INSERT INTO GESTOR_OS_CATEGORIA (ID, ID_PAI, NOME, ATIVO) VALUES (?, NULL, ?, \'S\')', [id, nome]);
+      cat = { ID: id, ID_PAI: null, NOME: nome };
+    }
+    let sub = null;
+    if (subnome) {
+      sub = await achar(num(cat.ID), subnome);
+      if (!sub) {
+        const id = await gerar(db, 'GESTOR_GEN_OS_CAT');
+        await query(db, 'INSERT INTO GESTOR_OS_CATEGORIA (ID, ID_PAI, NOME, ATIVO) VALUES (?, ?, ?, \'S\')', [id, num(cat.ID), subnome]);
+        sub = { ID: id, ID_PAI: num(cat.ID), NOME: subnome };
+      }
+    }
+    return { categoria: montarCategoria(cat, sub) };
+  });
+}
+
+async function resolverCategoria(db, idCat, idSub) {
+  const subId = num(idSub) || null;
+  const catId = num(idCat) || null;
+  if (!subId && !catId) return { id_categoria: null, id_subcategoria: null };
+  if (subId) {
+    const rows = await query(db, 'SELECT ID, ID_PAI, NOME FROM GESTOR_OS_CATEGORIA WHERE ID = ? AND COALESCE(ATIVO, \'S\') <> \'N\'', [subId]);
+    if (!rows.length || !num(rows[0].ID_PAI)) throw new Error('Subcategoria não encontrada.');
+    return { id_categoria: num(rows[0].ID_PAI), id_subcategoria: subId };
+  }
+  const rows = await query(db, 'SELECT ID FROM GESTOR_OS_CATEGORIA WHERE ID = ? AND ID_PAI IS NULL AND COALESCE(ATIVO, \'S\') <> \'N\'', [catId]);
+  if (!rows.length) throw new Error('Categoria não encontrada.');
+  return { id_categoria: catId, id_subcategoria: null };
+}
+
+async function preencherCategoria(db, os) {
+  os.categoria = '';
+  os.subcategoria = '';
+  if (!os.id_categoria && !os.id_subcategoria) return;
+  const ids = [os.id_categoria, os.id_subcategoria].filter(Boolean);
+  const rows = await query(db, `SELECT ID, NOME FROM GESTOR_OS_CATEGORIA WHERE ID IN (${ids.map(() => '?').join(',')})`, ids);
+  const porId = new Map(rows.map((r) => [num(r.ID), txt(r.NOME)]));
+  os.categoria = porId.get(os.id_categoria) || '';
+  os.subcategoria = porId.get(os.id_subcategoria) || '';
+}
+
 /** Dados do CNPJ pela BrasilAPI (gratuita), já no formato do cadastro de clientes. */
 async function consultarCnpj(cnpj) {
   const d = soDigitos(cnpj);
@@ -1010,6 +1124,10 @@ function mapOs(r, funcs, statuses) {
     id_tecnico: num(r.ID_TECNICO) || null,
     tecnico: tec ? { id: tec.id, nome: tec.nome, iniciais: tec.iniciais } : null,
     quem_trouxe: txt(r.QUEM_TROUXE),
+    id_categoria: num(r.ID_CATEGORIA) || null,
+    id_subcategoria: num(r.ID_SUBCATEGORIA) || null,
+    categoria: '',
+    subcategoria: '',
     equipamento: txt(r.EQUIPAMENTO),
     defeito: texto(r.DEFEITO),
     solucao: texto(r.SOLUCAO),
@@ -1164,6 +1282,7 @@ async function lerOs(db, id) {
     const cli = await lerCliente(db, os.id_cliente);
     if (cli) os.cliente.observacao = cli.observacao;
   }
+  await preencherCategoria(db, os);
   return os;
 }
 
@@ -1252,6 +1371,8 @@ async function salvar(body, usuario, opcoes = {}) {
     acres_geral: Math.max(0, r2(body?.acres_geral)),
     frete: Math.max(0, r2(body?.frete)),
     deslocamento: Math.max(0, r2(body?.deslocamento)),
+    id_categoria: Object.prototype.hasOwnProperty.call(body || {}, 'id_categoria') ? (num(body.id_categoria) || null) : undefined,
+    id_subcategoria: Object.prototype.hasOwnProperty.call(body || {}, 'id_subcategoria') ? (num(body.id_subcategoria) || null) : undefined,
     itens: lerItensEntrada(body?.itens),
   };
   if (!entrada.id_cliente) throw new Error('Escolha o cliente.');
@@ -1289,6 +1410,13 @@ async function salvar(body, usuario, opcoes = {}) {
     const liberacoes = enviada ? [] : conferirDescontos({ ...entrada, itens: calc.itens }, body?.liberacoes);
     const statusNovo = porId.get(entrada.id_status);
     if (statusNovo?.final && !entrada.entrega) entrada.entrega = new Date();
+    const cat = await resolverCategoria(
+      db,
+      entrada.id_categoria === undefined ? atual?.id_categoria : entrada.id_categoria,
+      entrada.id_subcategoria === undefined ? atual?.id_subcategoria : entrada.id_subcategoria,
+    );
+    entrada.id_categoria = cat.id_categoria;
+    entrada.id_subcategoria = cat.id_subcategoria;
     let cli = null;
     if (!atual || atual.id_cliente !== entrada.id_cliente) {
       cli = await lerCliente(db, entrada.id_cliente);
@@ -1304,6 +1432,7 @@ async function salvar(body, usuario, opcoes = {}) {
         entrada.previsao, entrada.entrega, entrada.id_cliente,
         entrada.desc_geral, entrada.acres_geral, entrada.frete, entrada.deslocamento,
         calc.totais.bruto_produtos, calc.totais.bruto_servicos, calc.totais.total,
+        entrada.id_categoria, entrada.id_subcategoria,
       ];
       if (!codigo) {
         codigo = await gerar(tx, 'GESTOR_GEN_OS');
@@ -1312,8 +1441,8 @@ async function salvar(body, usuario, opcoes = {}) {
           INSERT INTO GESTOR_OS (
             ID_OS, DT_EMISSAO, TIPO, MODALIDADE, ID_STATUS, ID_TECNICO, QUEM_TROUXE, EQUIPAMENTO, DEFEITO, SOLUCAO, OBS,
             DT_PREVISAO, DT_ENTREGA, ID_CLIENTE, DESC_GERAL, ACRES_GERAL, FRETE, DESLOCAMENTO,
-            TOTAL_PRODUTOS, TOTAL_SERVICOS, TOTAL, ORDEM, PERFIL, ORIGEM, ID_USUARIO, USUARIO, DT_ALTERACAO
-          ) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
+            TOTAL_PRODUTOS, TOTAL_SERVICOS, TOTAL, ID_CATEGORIA, ID_SUBCATEGORIA, ORDEM, PERFIL, ORIGEM, ID_USUARIO, USUARIO, DT_ALTERACAO
+          ) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
           codigo, ...cab, num(ordem[0]?.O) || 1, perfil, opcoes.origem === 'C' ? 'C' : 'S', usuario?.id ?? null, txt(usuario?.nome, 60) || null,
         ]);
         if (opcoes.origem === 'C' && opcoes.provisorio) {
@@ -1334,7 +1463,7 @@ async function salvar(body, usuario, opcoes = {}) {
           UPDATE GESTOR_OS SET
             TIPO = ?, MODALIDADE = ?, ID_STATUS = ?, ID_TECNICO = ?, QUEM_TROUXE = ?, EQUIPAMENTO = ?, DEFEITO = ?, SOLUCAO = ?, OBS = ?,
             DT_PREVISAO = ?, DT_ENTREGA = ?, ID_CLIENTE = ?, DESC_GERAL = ?, ACRES_GERAL = ?, FRETE = ?, DESLOCAMENTO = ?,
-            TOTAL_PRODUTOS = ?, TOTAL_SERVICOS = ?, TOTAL = ?, DT_ALTERACAO = CURRENT_TIMESTAMP${ordemSql}
+            TOTAL_PRODUTOS = ?, TOTAL_SERVICOS = ?, TOTAL = ?, ID_CATEGORIA = ?, ID_SUBCATEGORIA = ?, DT_ALTERACAO = CURRENT_TIMESTAMP${ordemSql}
           WHERE ID_OS = ?`, [...cab, ...extra, codigo]);
         if (atual.id_status !== entrada.id_status) {
           await historico(tx, codigo, usuario, `Status: ${porId.get(atual.id_status)?.descricao || '—'} → ${statusNovo?.descricao || '—'}`, atual.id_status, entrada.id_status);
@@ -1657,11 +1786,11 @@ function htmlImpressao(os, loja, opcoes = {}) {
        <div class="os"><span class="r">${fechamento ? 'Fechamento' : 'Abertura'}</span><b>O.S ${os.id}</b><span>${esc(os.emissao_br)}</span></div></header>`;
   const dadosCli = termico
     ? `Cliente: ${esc(os.cliente?.nome || '—')}${os.cliente?.documento ? `<br>Doc.: ${esc(os.cliente.documento)}` : ''}${os.cliente?.telefone ? `<br>Fone: ${esc(fmtFone(os.cliente.telefone))}` : ''}
-       <br>Equip.: ${esc(os.equipamento)}${os.quem_trouxe ? `<br>Trouxe: ${esc(os.quem_trouxe)}` : ''}${os.tecnico ? `<br>Técnico: ${esc(os.tecnico.nome)}` : ''}
+       <br>Equip.: ${esc(os.equipamento)}${os.categoria ? `<br>Categoria: ${esc(os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}` : ''}${os.quem_trouxe ? `<br>Trouxe: ${esc(os.quem_trouxe)}` : ''}${os.tecnico ? `<br>Técnico: ${esc(os.tecnico.nome)}` : ''}
        ${os.previsao ? `<br>Previsão: ${dataBr(os.previsao)}` : ''}${fechamento && os.entrega ? `<br>Entrega: ${dataHoraBr(os.entrega)}` : ''}
        <div class="sep"></div>Defeito: ${esc(os.defeito)}${fechamento && os.solucao ? `<br>Solução: ${esc(os.solucao)}` : ''}`
     : `<h3>Cliente</h3><div class="bloco grade">${campo('Nome', os.cliente?.nome)}${campo('CPF/CNPJ', os.cliente?.documento)}${campo('Telefone', fmtFone(os.cliente?.telefone))}${campo('Endereço', os.cliente?.endereco)}</div>
-       <h3>Atendimento</h3><div class="bloco grade">${campo('Tipo', tipoTxt)}${campo('Técnico', os.tecnico?.nome)}${campo('Quem trouxe', os.quem_trouxe)}${campo('Previsão', dataBr(os.previsao))}${fechamento ? campo('Entrega', dataHoraBr(os.entrega)) : ''}</div>
+       <h3>Atendimento</h3><div class="bloco grade">${campo('Tipo', tipoTxt)}${campo('Técnico', os.tecnico?.nome)}${campo('Categoria', os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}${campo('Quem trouxe', os.quem_trouxe)}${campo('Previsão', dataBr(os.previsao))}${fechamento ? campo('Entrega', dataHoraBr(os.entrega)) : ''}</div>
        ${bloco('Equipamento', os.equipamento)}${bloco('Defeito apresentado', os.defeito, !fechamento)}${fechamento ? bloco('Solução', os.solucao) : ''}${os.obs ? bloco('Observações', os.obs) : ''}`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>O.S ${os.id}</title>
 <style>
@@ -1777,6 +1906,8 @@ module.exports = {
   usarSolucao,
   clienteResumo,
   buscarClientes,
+  buscarCategorias,
+  cadastrarCategoria,
   consultarCnpj,
   buscarItens,
   lerLimites,

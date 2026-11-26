@@ -451,6 +451,10 @@ const Servicos = (() => {
       id_status: ativos[0]?.id || 0,
       id_tecnico: null,
       quem_trouxe: '',
+      id_categoria: null,
+      id_subcategoria: null,
+      categoria: '',
+      subcategoria: '',
       equipamento: '',
       defeito: '',
       solucao: '',
@@ -526,6 +530,7 @@ const Servicos = (() => {
         <div class="os-campo"><label for="os-quem">Quem trouxe o equipamento</label><input class="oc" id="os-quem" maxlength="100" value="${esc(o.quem_trouxe)}" /></div>
         <div class="os-campo"><label for="os-previsao">Previsão</label><input class="oc" id="os-previsao" type="date" value="${esc(o.previsao || '')}" /></div>
         <div class="os-campo"><label for="os-entrega">Entrega</label><input class="oc" id="os-entrega" type="datetime-local" value="${esc((o.entrega || '').slice(0, 16))}" /></div>
+        <div class="os-campo os-combo"><label for="os-cat">Categoria</label><div class="os-com-mais"><input class="oc" id="os-cat" autocomplete="off" placeholder="Buscar categoria ou subcategoria" value="${esc(rotuloCategoria(o))}" /><button type="button" class="ob ico" id="os-cat-mais" title="Cadastrar categoria" aria-label="Cadastrar categoria">${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-cat-lista" hidden></div></div>
       </div></div></section>`;
     const c = o.cliente || {};
     const cli = `<section class="os-grupo"><header><h2>Cliente</h2><span class="os-esp"></span>${tr ? '' : `<button type="button" class="ob sm" data-os-cadcli>${ic('mais', 'p')}Cadastrar cliente</button>`}</header>
@@ -667,7 +672,108 @@ const Servicos = (() => {
     $('[data-os-lamp]', r).addEventListener('click', abrirLampada);
     $('[data-os-cadcli]', r)?.addEventListener('click', cadastroRapido);
     ligarCliente();
+    ligarCategoria();
     ligarItens();
+  }
+
+  function rotuloCategoria(o) {
+    if (!o?.categoria) return '';
+    return o.subcategoria ? `${o.categoria} › ${o.subcategoria}` : o.categoria;
+  }
+
+  function aplicarCategoria(item) {
+    const o = st.os;
+    o.id_categoria = item?.id_categoria || null;
+    o.id_subcategoria = item?.id_subcategoria || null;
+    o.categoria = item?.categoria || '';
+    o.subcategoria = item?.subcategoria || '';
+    const campo = $('#os-cat');
+    if (campo) campo.value = rotuloCategoria(o);
+    marcarSujo();
+  }
+
+  function ligarCategoria() {
+    const campo = $('#os-cat');
+    const lista = $('#os-cat-lista');
+    const mais = $('#os-cat-mais');
+    if (!campo || !lista) return;
+    let timer = 0;
+    let itens = [];
+    let sel = -1;
+    const pintar = () => {
+      lista.innerHTML = itens.map((c, i) => `<button type="button" data-i="${i}" class="${i === sel ? 'sel' : ''}">${esc(c.nome)}<small>${esc(c.detalhe)}</small></button>`).join('')
+        || '<div class="os-legenda" style="padding:8px 10px">Nenhuma categoria encontrada. Use o + para cadastrar.</div>';
+      lista.hidden = false;
+    };
+    const buscar = async (q) => {
+      const res = await api(`/os/categorias?q=${encodeURIComponent(q)}`);
+      itens = res.categorias || [];
+      sel = itens.length ? 0 : -1;
+      pintar();
+    };
+    const escolher = (item) => {
+      lista.hidden = true;
+      aplicarCategoria(item);
+    };
+    campo.addEventListener('focus', () => { buscar(campo.value.trim() === rotuloCategoria(st.os) ? '' : campo.value.trim()); });
+    campo.addEventListener('input', () => {
+      clearTimeout(timer);
+      const q = campo.value.trim();
+      if (!q) aplicarCategoria(null);
+      timer = setTimeout(() => buscar(q === rotuloCategoria(st.os) ? '' : q), 200);
+    });
+    campo.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { lista.hidden = true; return; }
+      if (lista.hidden) return;
+      if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(itens.length - 1, sel + 1); pintar(); }
+      if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); pintar(); }
+      if (e.key === 'Enter' && itens[sel]) { e.preventDefault(); escolher(itens[sel]); }
+    });
+    lista.addEventListener('mousedown', (e) => {
+      const b = e.target.closest('[data-i]');
+      if (!b) return;
+      e.preventDefault();
+      escolher(itens[Number(b.dataset.i)]);
+    });
+    campo.addEventListener('blur', () => {
+      setTimeout(() => { lista.hidden = true; }, 150);
+      if (!campo.value.trim()) aplicarCategoria(null);
+      else if (campo.value.trim() !== rotuloCategoria(st.os)) campo.value = rotuloCategoria(st.os);
+    });
+    mais?.addEventListener('mousedown', () => {
+      const v = campo.value.trim();
+      campo.dataset.rascunho = v && v !== rotuloCategoria(st.os) ? v : '';
+    });
+    mais?.addEventListener('click', () => cadastrarCategoria(campo.dataset.rascunho || ''));
+  }
+
+  async function cadastrarCategoria(rascunho) {
+    const partes = String(rascunho || '').split(/\s*›\s*/).map((s) => s.trim()).filter(Boolean);
+    const inicialCat = partes[0] || '';
+    const inicialSub = partes.slice(1).join(' › ');
+    const criado = await janela(`<header><div><h2>Cadastrar categoria</h2><p>A subcategoria é opcional. Se a categoria já existir, a subcategoria entra nela.</p></div><span class="os-esp"></span><button type="button" class="ob ico sm" data-fechar="" aria-label="Fechar">${ic('x', 'p')}</button></header>
+      <div class="corpo">
+        <div class="os-campo"><label for="cat-nome">Categoria</label><input class="oc" id="cat-nome" maxlength="80" value="${esc(inicialCat)}" /></div>
+        <div class="os-campo"><label for="cat-sub">Subcategoria</label><input class="oc" id="cat-sub" maxlength="80" placeholder="Opcional" value="${esc(inicialSub)}" /></div>
+        <div class="os-erro" id="cat-erro"></div>
+      </div>
+      <footer><button type="button" class="ob" data-fechar="">Cancelar</button><button type="button" class="ob pri" id="cat-ok">Cadastrar</button></footer>`, {
+      aoAbrir: (dlg, fechar) => {
+        const nome = $('#cat-nome', dlg);
+        const sub = $('#cat-sub', dlg);
+        const erro = $('#cat-erro', dlg);
+        nome.focus();
+        const salvar = async () => {
+          erro.textContent = '';
+          const res = await api('/os/categorias', { method: 'POST', body: { categoria: nome.value, subcategoria: sub.value } });
+          if (!res.ok) { erro.textContent = res.error || 'Não foi possível cadastrar.'; return; }
+          fechar(res.categoria);
+        };
+        $('#cat-ok', dlg).addEventListener('click', salvar);
+        dlg.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); salvar(); } });
+      },
+    });
+    if (criado && criado.id_categoria) aplicarCategoria(criado);
   }
 
   /* ---------- Cliente ---------- */
@@ -1052,6 +1158,12 @@ const Servicos = (() => {
     if (!o.id_cliente) { msg('Escolha o cliente.'); $('#os-cli-nome')?.focus(); return; }
     if (!o.equipamento) { msg('Descreva o equipamento.'); $('#os-equip')?.focus(); return; }
     if (!o.defeito) { msg('Descreva o defeito apresentado.'); $('#os-defeito')?.focus(); return; }
+    const catCampo = $('#os-cat');
+    if (catCampo && catCampo.value.trim() && catCampo.value.trim() !== rotuloCategoria(o)) {
+      msg('Escolha a categoria na lista ou cadastre com +.');
+      catCampo.focus();
+      return;
+    }
     const eraNova = !o.id;
     const statusAntes = eraNova ? null : st.statusGravado;
     st.gravando = true;
@@ -1059,6 +1171,7 @@ const Servicos = (() => {
     const body = {
       tipo: o.tipo, modalidade: o.modalidade, id_status: o.id_status, id_tecnico: o.id_tecnico, quem_trouxe: o.quem_trouxe,
       equipamento: o.equipamento, defeito: o.defeito, solucao: o.solucao, obs: o.obs, previsao: o.previsao, entrega: o.entrega,
+      id_categoria: o.id_categoria, id_subcategoria: o.id_subcategoria,
       id_cliente: o.id_cliente, desc_geral: o.desc_geral, acres_geral: o.acres_geral, frete: o.frete, deslocamento: o.deslocamento,
       itens: o.itens.map((it) => ({ id_identificador: it.id_identificador, descricao: it.descricao, tipo: it.tipo, unidade: it.unidade, qtd: it.qtd, vlr_unit: it.vlr_unit, desc_item: it.desc_item, acres_item: it.acres_item })),
       liberacoes: st.liberacoes,
