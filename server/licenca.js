@@ -355,6 +355,11 @@ function situacao() {
       perfil: String(dados.servicos?.perfil || ''),
       nome: String(dados.servicos?.nome || ''),
     },
+    whatsapp: {
+      ativo: dados.whatsapp?.ativo === true,
+      conectado: dados.whatsapp?.conectado === true,
+      instancia: String(dados.whatsapp?.instancia || ''),
+    },
     instagram_configurado: dados.instagram_configurado === true,
     instagram_expira: dados.instagram_expira || null,
     url_propria: /^https:\/\/[a-z0-9.-]+\/mtgestoronline$/.test(String(dados.url_propria || '')) ? dados.url_propria : '',

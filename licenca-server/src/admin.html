@@ -136,6 +136,7 @@
   .ig-acoes .btn { flex: 1 1 0; height: 2.45rem; margin: 0; white-space: nowrap; }
   .ig-acoes .btn:disabled { opacity: .6; cursor: default; }
   .ig-acoes .btn[aria-pressed="true"] { background: var(--brand); border-color: var(--brand); color: #fff; }
+  .wpp-qr { width: 220px; height: auto; background: #fff; padding: 8px; border-radius: 8px; margin-top: .4rem; }
   #d-ig-resultado { min-height: 1.1rem; margin: .15rem 0 .35rem; }
   #d-ig-resultado.ok { color: var(--ok); }
   #d-ig-resultado.erro { color: var(--danger); }
@@ -506,6 +507,28 @@
     <p class="sub" id="d-ig-resultado"></p>
     <p class="sub" id="d-ig-info">Conectar Instagram pede a autorização da loja e preenche usuário, ID, token e validade. O token não aparece na tela.</p>
     <p class="sub">A renovação só funciona com o token tendo mais de 24 horas.</p>
+
+    <h3>WhatsApp</h3>
+    <p class="sub" style="margin-top:0">O celular conectado aqui envia as mensagens e os relatórios do Gestor. O endpoint e a API Key valem para todas as lojas e ficam só neste painel. O Gestor não recebe a chave: ele pede o envio para cá.</p>
+    <div class="grid2">
+      <label>Endpoint Evolution API<input id="d-wpp-endpoint" maxlength="180" placeholder="https://" /></label>
+      <label>API Key global<input id="d-wpp-apikey" type="password" maxlength="120" autocomplete="new-password" /></label>
+      <label>Descrição<input id="d-wpp-descricao" maxlength="80" placeholder="Ex.: Financeiro MT" /></label>
+      <label>Nome da instância<input id="d-wpp-instancia" maxlength="40" placeholder="Ex.: Financeiro" /></label>
+      <label>Status
+        <select id="d-wpp-status">
+          <option value="ativo">Ativo</option>
+          <option value="inativo">Inativo</option>
+        </select>
+      </label>
+    </div>
+    <div class="ig-acoes">
+      <button class="btn ghost" id="d-wpp-criar" type="button">Criar na Evolution e mostrar o QR</button>
+      <button class="btn ghost" id="d-wpp-qr" type="button">Atualizar QR</button>
+      <button class="btn ghost" id="d-wpp-estado" type="button">Verificar conexão</button>
+    </div>
+    <p class="sub" id="d-wpp-info"></p>
+    <img id="d-wpp-qrcode" class="wpp-qr" alt="QR Code do WhatsApp" hidden />
 
     <h3>Instalações</h3>
     <div class="linha">
@@ -1100,6 +1123,7 @@ async function carregarConfig() {
   if (!r.ok) return;
   st.supPadrao = r.sup_padrao;
   st.diasTeste = r.dias_teste;
+  st.whatsapp = r.whatsapp || {};
   $('#aviso-sup').hidden = !!r.sup_padrao?.definida;
 }
 
@@ -1420,6 +1444,7 @@ function preencherCliente(r) {
   $('#d-ig-info').textContent = c.ig_token_informado
     ? 'Token já informado. Deixe o campo em branco para mantê-lo.'
     : 'O token fica só neste painel. O Gestor da loja vê se a conta está informada, sem receber o token.';
+  pintarWhatsapp(c.whatsapp || {});
   $('#d-mensagem').value = c.mensagem || '';
   $('#d-obs').value = c.observacao || '';
   $('#d-sup-1').value = '';
@@ -1612,9 +1637,12 @@ $('#d-salvar').addEventListener('click', async () => {
       ig_user_id: $('#d-ig-user-id').value,
       ig_token_expira: $('#d-ig-expira').value || null,
       ig_token: $('#d-ig-token').value,
+      whatsapp: dadosWhatsapp(),
       mensagem: $('#d-mensagem').value,
       observacao: $('#d-obs').value,
     };
+    const apiWpp = await salvarApiWhatsapp();
+    if (!apiWpp.ok) { toast(apiWpp.error || 'Falha ao salvar a API do WhatsApp.', true); return; }
     const r = await api(rotaCliente(st.atual), { method: 'PUT', body });
     if (!r.ok) { toast(r.error || 'Falha ao salvar.', true); return; }
     $('#dlg-cliente').close();
@@ -1627,6 +1655,70 @@ $('#d-salvar').addEventListener('click', async () => {
     btn.disabled = false;
   }
 });
+function dadosWhatsapp() {
+  return {
+    descricao: $('#d-wpp-descricao').value,
+    instancia: $('#d-wpp-instancia').value.trim(),
+    status: $('#d-wpp-status').value,
+  };
+}
+function textoEstadoWhatsapp(w) {
+  if (!w?.instancia) return 'Informe o nome da instância e crie na Evolution para gerar o QR.';
+  if (w.status === 'inativo') return `${w.instancia} está inativa. O Gestor não envia por ela.`;
+  if (w.conectado || w.estado === 'open') return `${w.instancia} conectada${w.numero ? ` no número ${w.numero}` : ''}. O Gestor envia por este celular.`;
+  return `${w.instancia} aguardando a leitura do QR no celular da loja.`;
+}
+function pintarWhatsapp(w) {
+  const api = st.whatsapp || {};
+  $('#d-wpp-endpoint').value = api.endpoint || '';
+  $('#d-wpp-apikey').value = api.apikey || '';
+  $('#d-wpp-descricao').value = w.descricao || '';
+  $('#d-wpp-instancia').value = w.instancia || '';
+  $('#d-wpp-status').value = w.status === 'inativo' ? 'inativo' : 'ativo';
+  const info = $('#d-wpp-info');
+  info.textContent = textoEstadoWhatsapp(w);
+  info.className = `sub${w.conectado ? ' ok' : ''}`;
+  const img = $('#d-wpp-qrcode');
+  img.hidden = true;
+  img.removeAttribute('src');
+}
+async function salvarApiWhatsapp() {
+  const r = await api('/config/whatsapp', {
+    method: 'PUT',
+    body: { endpoint: $('#d-wpp-endpoint').value, apikey: $('#d-wpp-apikey').value },
+  });
+  if (r.ok) st.whatsapp = r.whatsapp || st.whatsapp;
+  return r;
+}
+async function acaoWhatsapp(acao) {
+  if (!st.atual) { toast('Abra o cliente antes.', true); return; }
+  const info = $('#d-wpp-info');
+  info.textContent = 'Falando com a Evolution API…';
+  info.className = 'sub';
+  const apiWpp = await salvarApiWhatsapp();
+  if (!apiWpp.ok) {
+    info.textContent = apiWpp.error || 'Falha ao salvar a API.';
+    info.className = 'sub erro';
+    return;
+  }
+  const r = await api(`${rotaCliente(st.atual)}/whatsapp`, { method: 'POST', body: { ...dadosWhatsapp(), acao } });
+  const w = r.whatsapp || dadosWhatsapp();
+  info.textContent = r.ok ? textoEstadoWhatsapp(w) : (r.error || 'A Evolution API não respondeu.');
+  info.className = `sub${r.ok ? (w.conectado ? ' ok' : '') : ' erro'}`;
+  const img = $('#d-wpp-qrcode');
+  if (r.qrcode) {
+    img.src = r.qrcode;
+    img.hidden = false;
+  } else {
+    img.hidden = true;
+    img.removeAttribute('src');
+  }
+  if (!r.ok) toast(r.error || 'Falha no WhatsApp.', true);
+}
+$('#d-wpp-criar').addEventListener('click', () => acaoWhatsapp('criar'));
+$('#d-wpp-qr').addEventListener('click', () => acaoWhatsapp('qr'));
+$('#d-wpp-estado').addEventListener('click', () => acaoWhatsapp('estado'));
+
 function mostrarResultadoIg(texto, erro) {
   const el = $('#d-ig-resultado');
   el.textContent = texto || '';

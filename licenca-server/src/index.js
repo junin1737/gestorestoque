@@ -230,6 +230,281 @@ async function garantirServicos(env) {
   colunaServicosPronta = true;
 }
 
+const WHATSAPP_ENDPOINT_PADRAO = 'https://mtautomacoes.apleuatendo3.com.br';
+const WHATSAPP_KEY_PADRAO = '8gYagN8AMJG16aZP7qcCNtbvNTCGWV9K';
+const NOME_INSTANCIA = /^[A-Za-z0-9][A-Za-z0-9_-]{1,39}$/;
+
+function normalizarEndpoint(valor) {
+  const bruto = String(valor || '').trim().replace(/\/+$/, '');
+  if (!/^https:\/\/[a-z0-9.-]+(?::\d+)?(?:\/[a-z0-9._~/-]*)?$/i.test(bruto)) return '';
+  return bruto;
+}
+
+function normalizarWhatsapp(valor) {
+  let bruto = valor;
+  if (typeof valor === 'string') {
+    try { bruto = JSON.parse(valor || '{}'); } catch { bruto = {}; }
+  }
+  const w = bruto && typeof bruto === 'object' ? bruto : {};
+  const instancia = String(w.instancia || '').trim();
+  return {
+    descricao: texto(w.descricao, 80),
+    instancia: NOME_INSTANCIA.test(instancia) ? instancia : '',
+    status: w.status === 'inativo' ? 'inativo' : 'ativo',
+    apikey_instancia: String(w.apikey_instancia || '').trim().slice(0, 120),
+    estado: String(w.estado || '').trim().slice(0, 20),
+    numero: String(w.numero || '').replace(/\D/g, '').slice(0, 15),
+  };
+}
+
+function whatsappDoCliente(cli) {
+  return normalizarWhatsapp(cli?.whatsapp_json);
+}
+
+function whatsappPublico(w) {
+  return {
+    descricao: w.descricao,
+    instancia: w.instancia,
+    status: w.status,
+    conectado: w.estado === 'open',
+    estado: w.estado,
+    numero: w.numero,
+    apikey_informada: !!w.apikey_instancia,
+  };
+}
+
+function resumoWhatsapp(cli) {
+  const w = whatsappDoCliente(cli);
+  return {
+    ativo: w.status === 'ativo' && !!w.instancia,
+    conectado: w.estado === 'open',
+    instancia: w.instancia,
+  };
+}
+
+function mesclarWhatsapp(atual, body) {
+  const descricao = texto(body?.descricao, 80);
+  const instancia = String(body?.instancia || '').trim();
+  if (instancia && !NOME_INSTANCIA.test(instancia)) {
+    throw new Error('Nome da instância: use letras, números, hífen ou sublinhado, sem espaço.');
+  }
+  const mudouNome = instancia !== atual.instancia;
+  return {
+    descricao,
+    instancia,
+    status: body?.status === 'inativo' ? 'inativo' : 'ativo',
+    apikey_instancia: mudouNome ? '' : atual.apikey_instancia,
+    estado: mudouNome ? '' : atual.estado,
+    numero: mudouNome ? '' : atual.numero,
+  };
+}
+
+let colunaWhatsappPronta = false;
+
+async function garantirWhatsapp(env) {
+  if (colunaWhatsappPronta) return;
+  try {
+    await env.DB.prepare('ALTER TABLE clientes ADD COLUMN whatsapp_json TEXT').run();
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (!/duplicate column/i.test(msg)) throw e;
+  }
+  colunaWhatsappPronta = true;
+}
+
+async function gravarWhatsappGlobal(env, cfg) {
+  await env.DB.prepare(
+    `INSERT INTO config (chave, valor, atualizado_em) VALUES ('whatsapp', ?, ?)
+     ON CONFLICT (chave) DO UPDATE SET valor = excluded.valor, atualizado_em = excluded.atualizado_em`
+  ).bind(JSON.stringify({ endpoint: cfg.endpoint, apikey: cfg.apikey }), agoraIso()).run();
+}
+
+async function whatsappGlobal(env) {
+  const row = await env.DB.prepare("SELECT valor FROM config WHERE chave = 'whatsapp'").first();
+  let salvo = {};
+  try { salvo = JSON.parse(row?.valor || '{}'); } catch { salvo = {}; }
+  const endpoint = normalizarEndpoint(salvo.endpoint || WHATSAPP_ENDPOINT_PADRAO);
+  const apikey = String(salvo.apikey || WHATSAPP_KEY_PADRAO).trim();
+  if (!row && endpoint && apikey) await gravarWhatsappGlobal(env, { endpoint, apikey });
+  return { endpoint, apikey };
+}
+
+function erroEvolution(data, status) {
+  const msg = data?.response?.message || data?.message || data?.error;
+  const textoMsg = Array.isArray(msg) ? msg.join(' ') : String(msg || '');
+  return textoMsg.replace(/apikey[=:][^&\s"']+/gi, 'apikey').slice(0, 180) || `A Evolution API respondeu ${status}.`;
+}
+
+async function evolutionFetch(cfg, caminho, { method = 'GET', body, apikey } = {}) {
+  const res = await fetch(`${cfg.endpoint}${caminho}`, {
+    method,
+    headers: { apikey: apikey || cfg.apikey, 'Content-Type': 'application/json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(erroEvolution(data, res.status));
+    err.jaExiste = /already|já existe|em uso/i.test(err.message);
+    throw err;
+  }
+  return data;
+}
+
+function qrcodeEvolution(data) {
+  const b = data?.qrcode?.base64 || data?.base64 || '';
+  if (!b) return '';
+  const s = String(b);
+  return s.startsWith('data:') ? s : `data:image/png;base64,${s}`;
+}
+
+function chaveInstanciaEvolution(data) {
+  if (typeof data?.hash === 'string') return data.hash.trim();
+  return String(data?.hash?.apikey || data?.instance?.apikey || '').trim();
+}
+
+function estadoEvolution(data) {
+  return String(data?.instance?.state || data?.state || '').toLowerCase();
+}
+
+function numeroEvolution(data) {
+  const bruto = data?.instance?.owner || data?.instance?.ownerJid || data?.ownerJid || '';
+  return String(bruto).split('@')[0].replace(/\D/g, '').slice(0, 15);
+}
+
+async function salvarWhatsappCliente(env, cnpj, app, w) {
+  await env.DB.prepare('UPDATE clientes SET whatsapp_json = ?, atualizado_em = ? WHERE cnpj = ? AND aplicacao = ?')
+    .bind(JSON.stringify(w), agoraIso(), cnpj, app).run();
+}
+
+async function definirWhatsapp(request, env) {
+  const body = await request.json().catch(() => ({}));
+  const atual = await whatsappGlobal(env);
+  const endpoint = normalizarEndpoint(body.endpoint || atual.endpoint);
+  if (!endpoint) return json({ ok: false, error: 'Endpoint da Evolution API inválido. Use um endereço https.' }, 400);
+  const apikey = String(body.apikey || '').trim() || atual.apikey;
+  if (apikey.length < 8) return json({ ok: false, error: 'Informe a API Key global.' }, 400);
+  await gravarWhatsappGlobal(env, { endpoint, apikey });
+  await registrarEvento(env, '*', null, 'config', 'API do WhatsApp atualizada');
+  return obterConfig(env);
+}
+
+async function conectarWhatsapp(cnpj, app, request, env) {
+  await garantirWhatsapp(env);
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  const body = await request.json().catch(() => ({}));
+  const cfg = await whatsappGlobal(env);
+  if (!cfg.endpoint || !cfg.apikey) return json({ ok: false, error: 'Configure o endpoint e a API Key do WhatsApp.' }, 400);
+  let w;
+  try {
+    w = mesclarWhatsapp(whatsappDoCliente(cli), body);
+  } catch (e) {
+    return json({ ok: false, error: e.message }, 400);
+  }
+  if (!w.instancia) return json({ ok: false, error: 'Informe o nome da instância.' }, 400);
+  const acao = body.acao === 'qr' || body.acao === 'estado' ? body.acao : 'criar';
+  let qrcode = '';
+  try {
+    if (acao === 'criar') {
+      try {
+        const criado = await evolutionFetch(cfg, '/instance/create', {
+          method: 'POST',
+          body: { instanceName: w.instancia, qrcode: true, integration: 'WHATSAPP-BAILEYS' },
+        });
+        const chave = chaveInstanciaEvolution(criado);
+        if (chave) w.apikey_instancia = chave;
+        w.estado = estadoEvolution(criado) || 'connecting';
+        const dono = numeroEvolution(criado);
+        if (dono) w.numero = dono;
+        qrcode = qrcodeEvolution(criado);
+      } catch (e) {
+        if (!e.jaExiste) throw e;
+      }
+    }
+    if (acao === 'estado' || (acao === 'criar' && !qrcode)) {
+      const estado = await evolutionFetch(cfg, `/instance/connectionState/${encodeURIComponent(w.instancia)}`);
+      w.estado = estadoEvolution(estado) || w.estado;
+      const dono = numeroEvolution(estado);
+      if (dono) w.numero = dono;
+    }
+    if (acao !== 'estado' && w.estado !== 'open') {
+      const conexao = await evolutionFetch(cfg, `/instance/connect/${encodeURIComponent(w.instancia)}`);
+      qrcode = qrcodeEvolution(conexao) || qrcode;
+      if (!w.estado) w.estado = 'connecting';
+    }
+  } catch (e) {
+    await salvarWhatsappCliente(env, cnpj, app, w);
+    return json({ ok: false, error: e.message || 'A Evolution API não respondeu.', code: 'EVOLUTION', whatsapp: whatsappPublico(w) }, 502);
+  }
+  await salvarWhatsappCliente(env, cnpj, app, w);
+  await registrarEvento(env, cnpj, app, 'whatsapp', w.estado === 'open'
+    ? `WhatsApp ${w.instancia} conectado`
+    : `WhatsApp ${w.instancia}: aguardando QR`);
+  return json({ ok: true, whatsapp: whatsappPublico(w), qrcode });
+}
+
+function numeroEnvio(valor) {
+  let d = String(valor || '').replace(/\D/g, '');
+  if (d.length === 10 || d.length === 11) d = `55${d}`;
+  if (d.length < 12 || d.length > 15) return '';
+  return d;
+}
+
+async function enviarWhatsappDaLoja(request, env) {
+  const app = nomeApp(request.headers.get('X-Gestor-App')) || APP_PADRAO;
+  const cnpj = await instalacaoDaRequisicao(request, env, app);
+  if (!cnpj) return json({ ok: false, error: 'Instalação não confirmada no painel.', code: 'SEM_INSTALACAO' }, 401);
+  await garantirWhatsapp(env);
+  const cli = await buscarCliente(env, cnpj, app);
+  const w = whatsappDoCliente(cli);
+  if (w.status !== 'ativo' || !w.instancia) {
+    return json({ ok: false, error: 'WhatsApp da loja ainda não está configurado.', code: 'SEM_WHATSAPP' }, 409);
+  }
+  const body = await request.json().catch(() => ({}));
+  const numero = numeroEnvio(body.numero);
+  const textoMsg = String(body.texto || '').trim().slice(0, 4000);
+  if (!numero) return json({ ok: false, error: 'Informe o telefone do cliente com DDD.', code: 'NUMERO' }, 400);
+  if (!textoMsg) return json({ ok: false, error: 'Mensagem vazia.', code: 'NUMERO' }, 400);
+  const cfg = await whatsappGlobal(env);
+  try {
+    const estado = await evolutionFetch(cfg, `/instance/connectionState/${encodeURIComponent(w.instancia)}`);
+    w.estado = estadoEvolution(estado) || w.estado;
+    const dono = numeroEvolution(estado);
+    if (dono) w.numero = dono;
+    if (w.estado !== 'open') {
+      await salvarWhatsappCliente(env, cnpj, app, w);
+      return json({ ok: false, error: 'O celular da loja não está conectado no WhatsApp.', code: 'DESCONECTADO' }, 409);
+    }
+    const caminho = `/message/sendText/${encodeURIComponent(w.instancia)}`;
+    const chaves = [...new Set([w.apikey_instancia, cfg.apikey].filter(Boolean))];
+    let enviado = false;
+    let ultima = null;
+    for (const apikey of chaves) {
+      try {
+        await evolutionFetch(cfg, caminho, { method: 'POST', body: { number: numero, text: textoMsg }, apikey });
+        enviado = true;
+        break;
+      } catch (e) {
+        ultima = e;
+        if (/text/i.test(e.message)) {
+          try {
+            await evolutionFetch(cfg, caminho, { method: 'POST', body: { number: numero, textMessage: { text: textoMsg } }, apikey });
+            enviado = true;
+            break;
+          } catch (e2) {
+            ultima = e2;
+          }
+        }
+      }
+    }
+    if (!enviado) throw ultima || new Error('A Evolution API não enviou a mensagem.');
+  } catch (e) {
+    return json({ ok: false, error: e.message || 'A Evolution API não enviou a mensagem.', code: 'EVOLUTION' }, 502);
+  }
+  await salvarWhatsappCliente(env, cnpj, app, w);
+  return json({ ok: true });
+}
+
 let colunasDominioProntas = false;
 
 async function garantirDominio(env) {
@@ -482,6 +757,7 @@ async function check(request, env) {
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
   await garantirServicos(env);
+  await garantirWhatsapp(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   let body;
@@ -606,6 +882,7 @@ async function check(request, env) {
     alteracao_massa: alteracaoMassaAtiva(cli),
     classificacao_ncm: classificacaoNcmAtiva(cli),
     servicos: resumoServicos(servicosDoCliente(cli)),
+    whatsapp: resumoWhatsapp(cli),
     url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });
@@ -729,6 +1006,7 @@ async function listarClientes(url, env) {
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
   await garantirServicos(env);
+  await garantirWhatsapp(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   const q = String(url.searchParams.get('q') || '').trim();
@@ -795,10 +1073,11 @@ async function listarClientes(url, env) {
 
 /** Nunca devolve o hash da senha do supervisor nem o do segredo da instalação ao painel. */
 function clientePublico(c, agora = new Date()) {
-  const { sup_hash: supHash, segredo_hash: segredoHash, ig_token: igToken, oferta_token: ofertaToken, servicos_json: servicosJson, ...resto } = c;
+  const { sup_hash: supHash, segredo_hash: segredoHash, ig_token: igToken, oferta_token: ofertaToken, servicos_json: servicosJson, whatsapp_json: whatsappJson, ...resto } = c;
   return {
     ...resto,
     servicos: normalizarServicos(servicosJson),
+    whatsapp: whatsappPublico(normalizarWhatsapp(whatsappJson)),
     sup_propria: !!supHash,
     instalacao_confirmada: !!segredoHash,
     ig_token_informado: !!igToken,
@@ -850,6 +1129,7 @@ async function obterConfig(env) {
     ok: true,
     sup_padrao: { definida: !!padrao?.valor, atualizado_em: padrao?.atualizado_em || null },
     dias_teste: await diasTeste(env),
+    whatsapp: await whatsappGlobal(env),
   });
 }
 
@@ -1666,6 +1946,7 @@ async function atualizarCliente(cnpj, app, request, env) {
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
   await garantirServicos(env);
+  await garantirWhatsapp(env);
   await garantirInstagram(env);
   await garantirDominio(env);
   const cli = await buscarCliente(env, cnpj, app);
@@ -1680,6 +1961,9 @@ async function atualizarCliente(cnpj, app, request, env) {
     if (Number(usaDominio) === 1 && !hostProprio(hostDominio)) throw new Error('Informe o domínio do site para usar o link próprio.');
     revendaNova = await conferirRevenda(env, campos);
     await conferirContador(env, campos);
+    if (body.whatsapp !== undefined) {
+      campos.whatsapp_json = JSON.stringify(mesclarWhatsapp(whatsappDoCliente(cli), body.whatsapp));
+    }
   } catch (e) {
     return json({ ok: false, error: e.message }, 400);
   }
@@ -1706,6 +1990,7 @@ async function atualizarCliente(cnpj, app, request, env) {
       alteracao_massa: 'alteração em massa',
       classificacao_ncm: 'classificação por NCM',
       servicos_json: 'serviços',
+      whatsapp_json: 'whatsapp',
       usa_dominio: 'domínio próprio',
       dominio_proprio: 'domínio',
       ig_usuario: 'instagram',
@@ -1722,6 +2007,10 @@ async function atualizarCliente(cnpj, app, request, env) {
         const os = normalizarServicos(campos[k]);
         const nome = os.perfis.find((p) => p.id === os.perfil)?.nome;
         return os.ativo && nome ? nome : 'não';
+      }
+      if (k === 'whatsapp_json') {
+        const w = normalizarWhatsapp(campos[k]);
+        return w.instancia ? `${w.descricao || w.instancia} (${w.status})` : 'não';
       }
       if (k === 'pago_ate' && campos[k]) return campos[k].split('-').reverse().join('/');
       return campos[k] ?? '—';
@@ -1745,6 +2034,7 @@ async function licencaOffline(cnpj, app, request, env) {
   await garantirCentralOfertas(env);
   await garantirAdicionais(env);
   await garantirServicos(env);
+  await garantirWhatsapp(env);
   const cli = await buscarCliente(env, cnpj, app);
   if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
   const body = await request.json().catch(() => ({}));
@@ -1770,6 +2060,7 @@ async function licencaOffline(cnpj, app, request, env) {
     alteracao_massa: alteracaoMassaAtiva(cli),
     classificacao_ncm: classificacaoNcmAtiva(cli),
     servicos: resumoServicos(servicosDoCliente(cli)),
+    whatsapp: resumoWhatsapp(cli),
     url_propria: urlPropriaCliente(cli) || null,
     ...instagramDoCliente(cli),
   });
@@ -2508,7 +2799,7 @@ async function vinculoDoContador(sess, url, env) {
 }
 
 const ROTA_CONTADOR = /^\/api\/admin\/contadores\/(\d+)$/;
-const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/oferta-usuario|/instagram/conectar|/instagram/testar|/instagram/renovar|/instagram/post-teste)?$`);
+const ROTA_CLIENTE = new RegExp(`^/api/admin/clientes/(${APP_ROTA})/(\\d{11,14})(/licenca-offline|/supervisor|/instalacao|/oferta-usuario|/instagram/conectar|/instagram/testar|/instagram/renovar|/instagram/post-teste|/whatsapp)?$`);
 const ROTA_REVENDA = /^\/api\/admin\/revendas\/(\d{1,9})$/;
 
 async function rotaAdmin(request, env, url) {
@@ -2549,6 +2840,7 @@ async function rotaAdmin(request, env, url) {
   if (url.pathname === '/api/admin/config' && request.method === 'GET') return obterConfig(env);
   if (url.pathname === '/api/admin/config/supervisor' && request.method === 'PUT') return definirSupPadrao(request, env);
   if (url.pathname === '/api/admin/config/teste' && request.method === 'PUT') return definirDiasTeste(request, env);
+  if (url.pathname === '/api/admin/config/whatsapp' && request.method === 'PUT') return definirWhatsapp(request, env);
   if (url.pathname === '/api/admin/clientes') {
     if (request.method === 'GET') return listarClientes(url, env);
     if (request.method === 'POST') return criarCliente(request, env);
@@ -2576,6 +2868,7 @@ async function rotaAdmin(request, env, url) {
     if (sub === '/instagram/testar' && request.method === 'POST') return testarInstagram(cnpj, app, request, env);
     if (sub === '/instagram/renovar' && request.method === 'POST') return renovarInstagram(cnpj, app, request, env);
     if (sub === '/instagram/post-teste' && request.method === 'POST') return publicarPostTeste(cnpj, app, request, env);
+    if (sub === '/whatsapp' && request.method === 'POST') return conectarWhatsapp(cnpj, app, request, env);
     if (!sub && request.method === 'GET') return detalheCliente(cnpj, app, env);
     if (!sub && request.method === 'PUT') return atualizarCliente(cnpj, app, request, env);
     if (!sub && request.method === 'DELETE') return excluirCliente(cnpj, app, env);
@@ -2740,6 +3033,7 @@ export default {
         return await atualizacaoArquivo(request, env, decodeURIComponent(arquivo[1]));
       }
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
+      if (url.pathname === '/api/whatsapp/enviar' && request.method === 'POST') return await enviarWhatsappDaLoja(request, env);
       if (url.pathname === '/api/aceite-ncm' && request.method === 'POST') return await aceiteNcm(request, env);
       if (url.pathname === '/api/revenda/autorizar' && request.method === 'POST') return await autorizarSenhaRevenda(request, env);
       const paginaOferta = url.pathname.match(/^\/ofertas\/([A-Za-z0-9_-]{20,80})$/);

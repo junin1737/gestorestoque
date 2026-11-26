@@ -129,7 +129,17 @@ const Condicionais = (() => {
       return;
     }
     const fone = telefone || res.condicional?.telefone || '';
-    window.open(waLink(fone, res.whatsapp || ''), '_blank', 'noopener');
+    const texto = res.whatsapp || '';
+    const envio = await api('/whatsapp/enviar', { method: 'POST', body: { numero: fone, texto } });
+    if (envio?.ok) {
+      alert('Mensagem enviada pelo WhatsApp conectado da loja.');
+      return;
+    }
+    if (envio?.code === 'EVOLUTION') {
+      alert(envio.error || 'Não foi possível enviar pelo WhatsApp da loja.');
+      return;
+    }
+    window.open(waLink(fone, texto), '_blank', 'noopener');
   }
 
   function ligarAcoes(root) {

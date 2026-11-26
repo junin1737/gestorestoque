@@ -1,6 +1,7 @@
 'use strict';
 const express = require('express');
 const historicoProduto = require('./historico-produto');
+const whatsappLoja = require('./whatsapp');
 const {
   loadAppConfig,
   saveAppConfig,
@@ -3581,6 +3582,15 @@ router.get('/condicionais/:id/pdf', VER_CONDICIONAL, async (req, res) => {
     res.type('html').send(condicionais.htmlPdf(doc, loja, { formato, validade }));
   } catch (err) {
     res.status(400).type('html').send(`<p>${err.message}</p>`);
+  }
+});
+
+router.post('/whatsapp/enviar', async (req, res) => {
+  try {
+    await whatsappLoja.enviarTexto({ numero: req.body?.numero, texto: req.body?.texto });
+    res.json({ ok: true });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, code: err.code || 'EVOLUTION' });
   }
 });
 
