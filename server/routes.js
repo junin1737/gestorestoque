@@ -3594,6 +3594,15 @@ router.post('/whatsapp/enviar', async (req, res) => {
   }
 });
 
+router.post('/whatsapp/conectar', async (req, res) => {
+  try {
+    const data = await whatsappLoja.conectar({ acao: req.body?.acao });
+    res.json({ ok: true, whatsapp: data.whatsapp || {}, qrcode: data.qrcode || '' });
+  } catch (err) {
+    res.json({ ok: false, error: err.message, code: err.code || 'EVOLUTION', whatsapp: err.whatsapp || null });
+  }
+});
+
 router.get('/condicionais/:id', VER_CONDICIONAL, async (req, res) => {
   try {
     const doc = await condicionais.detalhe(req.params.id);

@@ -12,7 +12,7 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=304" />
+  <link rel="stylesheet" href="styles.css?v=305" />
   <link rel="stylesheet" href="dashboard.css?v=1" />
   <link rel="stylesheet" href="importacao-nfe.css?v=257" />
 </head>
@@ -1079,6 +1079,13 @@
           </div>
           <div id="cfg-tab-conexoes" class="cfg-tab" hidden>
             <div class="pref-card">
+              <h3>WhatsApp</h3>
+              <p id="cfg-wpp-status">Nenhum celular conectado.</p>
+              <p class="hint">Gere o QR Code e leia no WhatsApp do celular que vai disparar as mensagens e os relatórios. Em Aparelhos conectados, use Conectar aparelho.</p>
+              <button type="button" class="btn primary" id="cfg-wpp-qr">Gerar QR Code</button>
+              <img id="cfg-wpp-qrcode" class="wpp-qr" alt="QR Code do WhatsApp" hidden />
+            </div>
+            <div class="pref-card">
               <h3>Instagram</h3>
               <p id="cfg-ig-status">Nenhuma conta informada no cadastro do cliente, no painel.</p>
               <p class="hint">Usuário, ID e token ficam no cadastro do cliente, no painel. Aqui só aparece se a conta está conectada e até quando o token vale.</p>
@@ -1545,6 +1552,6 @@
   <script src="dashboard.js?v=264"></script>
   <script src="gondola.js?v=4"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=289"></script>
+  <script src="app.js?v=290"></script>
 </body>
 </html>

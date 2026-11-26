@@ -2080,6 +2080,16 @@ body:not(.gestor-demo) #imp-btn-demo { display: none !important; }
   box-shadow: var(--shadow);
 }
 .pref-card h3 { margin: 0 0 0.85rem; }
+#cfg-tab-conexoes .pref-card + .pref-card { margin-top: 1rem; }
+.wpp-qr {
+  display: block;
+  width: 220px;
+  height: auto;
+  margin-top: 0.85rem;
+  background: #fff;
+  padding: 8px;
+  border-radius: 8px;
+}
 .mais-sheet {
   position: fixed; inset: 0; z-index: 50;
 }

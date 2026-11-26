@@ -234,6 +234,71 @@ function pintarConexaoInstagram() {
   el.textContent = ig.expira ? `Conectada. Token válido até ${ig.expira}.` : 'Conectada.';
 }
 
+let wppTimer = 0;
+
+function pararWhatsapp() {
+  clearInterval(wppTimer);
+  wppTimer = 0;
+}
+
+function pintarWhatsapp(w, qrcode) {
+  const el = $('#cfg-wpp-status');
+  const img = $('#cfg-wpp-qrcode');
+  const btn = $('#cfg-wpp-qr');
+  if (!el) return;
+  const conectado = w?.conectado === true || w?.estado === 'open';
+  if (conectado) {
+    el.textContent = w?.numero
+      ? `Conectado no número ${w.numero}. Este celular dispara as mensagens.`
+      : 'Conectado. Este celular dispara as mensagens.';
+    if (img) {
+      img.hidden = true;
+      img.removeAttribute('src');
+    }
+    if (btn) btn.textContent = 'Gerar novo QR Code';
+    pararWhatsapp();
+    return;
+  }
+  el.textContent = qrcode
+    ? 'Leia o QR Code no celular que vai disparar as mensagens.'
+    : 'Nenhum celular conectado. Gere o QR Code e leia no WhatsApp da loja.';
+  if (img) {
+    if (qrcode) {
+      img.src = qrcode;
+      img.hidden = false;
+    } else if (!img.getAttribute('src')) {
+      img.hidden = true;
+    }
+  }
+  if (btn) btn.textContent = 'Gerar QR Code';
+}
+
+async function pedirWhatsapp(acao) {
+  const btn = $('#cfg-wpp-qr');
+  const el = $('#cfg-wpp-status');
+  if (btn && acao !== 'estado') {
+    btn.disabled = true;
+    btn.textContent = 'Gerando QR Code…';
+  }
+  const res = await api('/whatsapp/conectar', { method: 'POST', body: { acao } });
+  if (btn) btn.disabled = false;
+  if (!res?.ok) {
+    if (el && acao !== 'estado') el.textContent = res?.error || 'Não foi possível gerar o QR Code.';
+    if (btn && acao !== 'estado') btn.textContent = 'Gerar QR Code';
+    return;
+  }
+  pintarWhatsapp(res.whatsapp, res.qrcode);
+  if (res.qrcode && res.whatsapp?.conectado !== true && !wppTimer) {
+    wppTimer = setInterval(() => {
+      if (stateCfgTab !== 'conexoes') {
+        pararWhatsapp();
+        return;
+      }
+      pedirWhatsapp('estado');
+    }, 4000);
+  }
+}
+
 function setCfgTab(tab) {
   if (tab === 'supervisor' && !state.usuario?.supervisor) tab = 'tema';
   stateCfgTab = tab || 'tema';
@@ -250,7 +315,12 @@ function setCfgTab(tab) {
     if (barra) barra.hidden = salvar.hidden;
   }
   if (stateCfgTab === 'etiquetas') window.Gondola?.onEtiquetas();
-  if (stateCfgTab === 'conexoes') pintarConexaoInstagram();
+  if (stateCfgTab === 'conexoes') {
+    pintarConexaoInstagram();
+    pedirWhatsapp('estado');
+  } else {
+    pararWhatsapp();
+  }
   if (stateCfgTab === 'importacao') window.ImportacaoAuto?.montar();
   if (stateCfgTab === 'supervisor') carregarAbaSupervisor();
   if (stateCfgTab !== 'tema' && stateCfgTab !== 'etiquetas' && !cfgMontada) {
@@ -1580,6 +1650,7 @@ $('#ui-scale')?.addEventListener('change', (e) => {
 $$('#cfg-tabs .tab').forEach((btn) => {
   btn.addEventListener('click', () => setCfgTab(btn.dataset.cfgTab));
 });
+$('#cfg-wpp-qr')?.addEventListener('click', () => pedirWhatsapp('criar'));
 $('#cfg-params-salvar')?.addEventListener('click', () => window.ImportacaoNfe?.saveConfig?.());
 async function salvarImportarAutomatico(marcado) {
   const authz = await pedirAutorizacao();

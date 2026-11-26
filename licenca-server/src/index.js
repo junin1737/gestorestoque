@@ -388,11 +388,7 @@ async function definirWhatsapp(request, env) {
   return obterConfig(env);
 }
 
-async function conectarWhatsapp(cnpj, app, request, env) {
-  await garantirWhatsapp(env);
-  const cli = await buscarCliente(env, cnpj, app);
-  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
-  const body = await request.json().catch(() => ({}));
+async function executarConexaoWhatsapp(env, cnpj, app, cli, body) {
   const cfg = await whatsappGlobal(env);
   if (!cfg.endpoint || !cfg.apikey) return json({ ok: false, error: 'Configure o endpoint e a API Key do WhatsApp.' }, 400);
   let w;
@@ -437,10 +433,45 @@ async function conectarWhatsapp(cnpj, app, request, env) {
     return json({ ok: false, error: e.message || 'A Evolution API não respondeu.', code: 'EVOLUTION', whatsapp: whatsappPublico(w) }, 502);
   }
   await salvarWhatsappCliente(env, cnpj, app, w);
-  await registrarEvento(env, cnpj, app, 'whatsapp', w.estado === 'open'
-    ? `WhatsApp ${w.instancia} conectado`
-    : `WhatsApp ${w.instancia}: aguardando QR`);
+  if (acao !== 'estado' && w.estado !== 'open' && !qrcode) {
+    return json({ ok: false, error: 'A Evolution API não devolveu o QR Code.', code: 'EVOLUTION', whatsapp: whatsappPublico(w) }, 502);
+  }
+  if (acao !== 'estado') {
+    await registrarEvento(env, cnpj, app, 'whatsapp', w.estado === 'open'
+      ? `WhatsApp ${w.instancia} conectado`
+      : `WhatsApp ${w.instancia}: aguardando QR`);
+  }
   return json({ ok: true, whatsapp: whatsappPublico(w), qrcode });
+}
+
+async function conectarWhatsapp(cnpj, app, request, env) {
+  await garantirWhatsapp(env);
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado.' }, 404);
+  const body = await request.json().catch(() => ({}));
+  return executarConexaoWhatsapp(env, cnpj, app, cli, body);
+}
+
+async function conectarWhatsappDaLoja(request, env) {
+  const app = nomeApp(request.headers.get('X-Gestor-App')) || APP_PADRAO;
+  const cnpj = await instalacaoDaRequisicao(request, env, app);
+  if (!cnpj) return json({ ok: false, error: 'Instalação não confirmada no painel.', code: 'SEM_INSTALACAO' }, 401);
+  await garantirWhatsapp(env);
+  const cli = await buscarCliente(env, cnpj, app);
+  if (!cli) return json({ ok: false, error: 'Cliente não encontrado no painel.', code: 'SEM_CLIENTE' }, 404);
+  const body = await request.json().catch(() => ({}));
+  const atual = whatsappDoCliente(cli);
+  const acao = body.acao === 'estado' ? 'estado' : 'criar';
+  if (acao === 'estado' && !atual.instancia) {
+    return json({ ok: true, whatsapp: whatsappPublico(atual), qrcode: '' });
+  }
+  const instancia = atual.instancia || `loja${soDigitos(cli.cnpj)}`.slice(0, 40);
+  return executarConexaoWhatsapp(env, cnpj, app, cli, {
+    descricao: atual.descricao || texto(cli.fantasia || cli.razao || 'WhatsApp da loja', 80),
+    instancia,
+    status: acao === 'criar' ? 'ativo' : atual.status,
+    acao,
+  });
 }
 
 function numeroEnvio(valor) {
@@ -3034,6 +3065,7 @@ export default {
       }
       if (url.pathname === '/api/check' && request.method === 'POST') return await check(request, env);
       if (url.pathname === '/api/whatsapp/enviar' && request.method === 'POST') return await enviarWhatsappDaLoja(request, env);
+      if (url.pathname === '/api/whatsapp/conectar' && request.method === 'POST') return await conectarWhatsappDaLoja(request, env);
       if (url.pathname === '/api/aceite-ncm' && request.method === 'POST') return await aceiteNcm(request, env);
       if (url.pathname === '/api/revenda/autorizar' && request.method === 'POST') return await autorizarSenhaRevenda(request, env);
       const paginaOferta = url.pathname.match(/^\/ofertas\/([A-Za-z0-9_-]{20,80})$/);
