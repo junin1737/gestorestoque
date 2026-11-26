@@ -1835,6 +1835,28 @@ function montarFiltros(opcoes, perfil) {
   };
 }
 
+/* Série de receitas x despesas do ano (mesma do gráfico do Financeiro). */
+async function serieReceitasDespesas(db, filtros, usaManage, usaGr, ignorarCartao) {
+  const filtrosIniciais = filtrosDaAba(filtros, usaManage ? 'manage' : 'resumo', usaManage, usaGr);
+  return usaManage
+    ? porMesFinanceiro(db, filtrosIniciais, ignorarCartao, usaManage)
+    : porMes(db, usaManage, filtrosIniciais);
+}
+
+async function consultarReceitasDespesas(db, opcoes = {}) {
+  const usaManage = opcoes.usaManage === undefined
+    ? lerUsaManage(opcoes.appCfg || loadAppConfig())
+    : (Number(opcoes.usaManage) === 1 ? 1 : 0);
+  const filtros = montarFiltros(opcoes, 'PADRAO');
+  const usaGr = await empresaUsaGr(db);
+  const appCfg = opcoes.appCfg || loadAppConfig();
+  const ignorarCartao = Number(appCfg.ignorar_receber_cartao) === 1;
+  return {
+    ano: String(filtros.inicio || isoHoje()).slice(0, 4),
+    porMes: await serieReceitasDespesas(db, filtros, usaManage, usaGr, ignorarCartao),
+  };
+}
+
 async function consultarDashboard(db, opcoes = {}) {
   const perfil = String(opcoes.perfil || 'PADRAO').trim().toUpperCase();
   if (!['PADRAO', 'CONTADOR_ACESSA', 'MT_ENTRADAS'].includes(perfil)) {
@@ -1898,6 +1920,7 @@ async function consultarDashboard(db, opcoes = {}) {
   const abas = [];
   if (usaManage) abas.push('manage');
   if (usaGr || !usaManage) abas.push('resumo', 'vendas');
+  if (opcoes.servicos === true) abas.push('servicos');
   abas.push('financeiro');
   const pedida = String(opcoes.aba || '').trim().toLowerCase();
   const aba = abas.includes(pedida) ? pedida : abas[0];
@@ -1924,10 +1947,7 @@ async function consultarDashboard(db, opcoes = {}) {
     } catch (err) {
       erroRealizar = err.message || 'Falha ao ler as contas em aberto';
     }
-    const filtrosIniciais = filtrosDaAba(filtros, usaManage ? 'manage' : 'resumo', usaManage, usaGr);
-    const serieMensal = usaManage
-      ? await porMesFinanceiro(db, filtrosIniciais, ignorarCartao, usaManage)
-      : await porMes(db, usaManage, filtrosIniciais);
+    const serieMensal = await serieReceitasDespesas(db, filtros, usaManage, usaGr, ignorarCartao);
     return {
       ...cabecalho,
       ...fin,
@@ -1936,6 +1956,12 @@ async function consultarDashboard(db, opcoes = {}) {
       considerarCartao: !ignorarCartao,
       porMes: serieMensal,
     };
+  }
+  if (aba === 'servicos') {
+    const dados = await require('./os-relatorios').dashboardServicos(db, {
+      inicio: filtros.inicio, fim: filtros.fim, status: opcoes.status, tipo: opcoes.tipoOs, tecnico: opcoes.tecnico,
+    });
+    return { ...cabecalho, ...dados, vazio: false };
   }
   if (aba === 'vendas') {
     const filtrosVendas = filtrosDaAba(filtros, aba, usaManage, usaGr);
@@ -1965,6 +1991,14 @@ async function consultarDashboard(db, opcoes = {}) {
     vendidoDiaComFrete = reais(dia.totalComFrete);
     vendidoMesComFrete = reais(mes.totalComFrete);
   }
+  let servicosPeriodo = null;
+  if (opcoes.servicos === true) {
+    try {
+      servicosPeriodo = await require('./os-relatorios').faturamentoServicos(db, filtros.inicio, filtros.fim);
+    } catch {
+      servicosPeriodo = null;
+    }
+  }
   const gruposVenda = await porGrupo(db, usaManage, filtrosAba, 'vendas');
   const gruposCompra = await porGrupo(db, usaManage, filtrosAba, 'compras');
   const pagamento = await porPagamento(db, usaManage, filtrosAba, t.devolucaoVenda);
@@ -1993,7 +2027,8 @@ async function consultarDashboard(db, opcoes = {}) {
     porGrupoCompra: gruposCompra,
     porPagamento: pagamento,
     porMes: serieMensal,
-    vazio,
+    servicosPeriodo,
+    vazio: vazio && !(servicosPeriodo && servicosPeriodo.valor),
     mensagem: vazio ? 'Nenhuma movimentação no período' : '',
   };
 }
@@ -2046,6 +2081,7 @@ function filtrosDaAba(filtros, aba, usaManage, usaGr) {
 
 module.exports = {
   consultarDashboard,
+  consultarReceitasDespesas,
   detalharDashboard,
   lerUsaManage,
   periodoAnterior,

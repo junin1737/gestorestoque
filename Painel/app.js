@@ -322,6 +322,7 @@ function setCfgTab(tab) {
     pararWhatsapp();
   }
   if (stateCfgTab === 'importacao') window.ImportacaoAuto?.montar();
+  if (stateCfgTab === 'saida') window.Servicos?.montarConfigSaida();
   if (stateCfgTab === 'supervisor') carregarAbaSupervisor();
   if (stateCfgTab !== 'tema' && stateCfgTab !== 'etiquetas' && !cfgMontada) {
     cfgMontada = true;
@@ -1257,6 +1258,11 @@ $('#form-login').addEventListener('submit', async (e) => {
     return;
   }
   state.usuario = res.usuario;
+  // App desktop: guarda um hash da senha no computador para o login da contingência (servidor fora).
+  try {
+    const nat = window.pywebview?.api;
+    if (nat && typeof nat.lembrar_login === 'function') nat.lembrar_login(res.usuario.id, res.usuario.nome || '', senha);
+  } catch { /* o login no servidor já valeu */ }
   enterApp();
 });
 
@@ -1327,6 +1333,27 @@ function iniciarConexao() {
   conexaoTimer = setInterval(pulsoConexao, 10000);
 }
 
+/** Serviços (O.S): liberado no painel (licença) e com a permissão do usuário no Gestor. */
+function podeServicos() {
+  return !!state.servicos && can('servicos', 'acesso');
+}
+
+function mostrarNavServicos() {
+  const mostrar = podeServicos();
+  if ($('#nav-servicos')) $('#nav-servicos').hidden = !mostrar;
+  if ($('#nav-servicos-mobile')) $('#nav-servicos-mobile').hidden = !mostrar;
+  ['nav-rel-servicos', 'nav-rel-servicos-mobile'].forEach((id) => {
+    const el = document.getElementById(id);
+    if (el) el.hidden = !mostrar;
+  });
+  if (!mostrar) {
+    ['nav-ramo-servicos-rel', 'mais-ramo-servicos-rel'].forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) el.hidden = true;
+    });
+  }
+}
+
 function guardarVinculos(licenca) {
   state.pacoteEntrada = licenca?.pacote_entrada === true;
   state.contadorVinculado = licenca?.contador_vinculado === true;
@@ -1334,6 +1361,8 @@ function guardarVinculos(licenca) {
   state.consultarCompras = licenca?.consultar_compras === true;
   state.alteracaoMassa = licenca?.alteracao_massa === true;
   state.classificacaoNcm = licenca?.classificacao_ncm === true;
+  state.servicos = licenca?.servicos?.ativo === true;
+  state.servicosPerfil = licenca?.servicos || null;
   const btn = $('#login-modo-contador');
   if (btn) btn.hidden = !state.contadorVinculado && !loginModoContador;
 }
@@ -1382,6 +1411,7 @@ async function enterApp() {
   if ($('#nav-central-ofertas')) $('#nav-central-ofertas').hidden = !showCentral;
   if ($('#nav-central-ofertas-mobile')) $('#nav-central-ofertas-mobile').hidden = !showCentral;
   if ($('#dash-central-ofertas')) $('#dash-central-ofertas').hidden = !showCentral;
+  mostrarNavServicos();
   const tabSup = $('#cfg-tab-btn-supervisor');
   if (tabSup) tabSup.hidden = !state.usuario?.supervisor;
   const tabImp = $('#cfg-tab-btn-importacao');
@@ -1520,7 +1550,11 @@ document.querySelectorAll('[data-alvo]').forEach((btn) => {
   });
 });
 function revelarRelatorio() {
-  ['nav-ramo-produtos', 'nav-ramo-ncms', 'mais-ramo-produtos', 'mais-ramo-ncms'].forEach((id) => {
+  const deServicos = String(window.Relatorios?.atual?.() || '').startsWith('os-');
+  const ramos = deServicos
+    ? ['nav-ramo-servicos-rel', 'mais-ramo-servicos-rel']
+    : ['nav-ramo-produtos', 'nav-ramo-ncms', 'mais-ramo-produtos', 'mais-ramo-ncms'];
+  ramos.forEach((id) => {
     const box = document.getElementById(id);
     if (box) box.hidden = false;
   });
@@ -1710,7 +1744,7 @@ function setNavActive(page) {
   $$('#mobile-nav [data-page]').forEach((b) => b.classList.toggle('active', b.dataset.page === pagina && !atual));
   const mais = $('#btn-mais-mobile');
   if (mais) {
-    mais.classList.toggle('active', ['clientes', 'compras', 'condicionais', 'central-ofertas', 'alteracoes', 'relatorios', 'usuarios', 'preferencias'].includes(page));
+    mais.classList.toggle('active', ['clientes', 'compras', 'condicionais', 'servicos', 'central-ofertas', 'alteracoes', 'relatorios', 'usuarios', 'preferencias'].includes(page));
   }
 }
 
@@ -1798,6 +1832,10 @@ async function showPage(page) {
     showMsg('Sem permissão para a Central de Ofertas.');
     page = 'dashboard';
   }
+  if (page === 'servicos' && !podeServicos()) {
+    showMsg(state.servicos ? 'Sem permissão para Serviços.' : 'O módulo de Serviços não está liberado para esta loja.');
+    page = 'dashboard';
+  }
   if (page === 'empresas') page = 'dashboard';
   if (page === 'usuarios' && !state.usuario?.supervisor) {
     showMsg('Só o supervisor cadastra os usuários do painel.');
@@ -1805,6 +1843,11 @@ async function showPage(page) {
   }
   if (page === 'contador' && !(state.alteracaoMassa && (state.usuario?.contador || can('massa', 'acesso')))) {
     showMsg('Sem permissão para alteração em massa.');
+    page = 'dashboard';
+  }
+  if (page === 'relatorios' && String(window.Relatorios?.atual?.() || '').startsWith('os-') && !podeServicos()) {
+    window.Relatorios?.definir('ncm-branco');
+    showMsg('O módulo de Serviços não está liberado para este usuário.');
     page = 'dashboard';
   }
   if (page === 'relatorios' && !can('relatorios', 'acesso')) {
@@ -1847,6 +1890,7 @@ async function showPage(page) {
   if ($('#page-compras')) $('#page-compras').hidden = page !== 'compras';
   if ($('#page-clientes')) $('#page-clientes').hidden = page !== 'clientes';
   if ($('#page-condicionais')) $('#page-condicionais').hidden = page !== 'condicionais';
+  if ($('#page-servicos')) $('#page-servicos').hidden = page !== 'servicos';
   if ($('#page-central-ofertas')) $('#page-central-ofertas').hidden = page !== 'central-ofertas';
   if ($('#page-alteracoes')) $('#page-alteracoes').hidden = page !== 'alteracoes';
   $('#page-usuarios').hidden = page !== 'usuarios';
@@ -1881,7 +1925,7 @@ async function showPage(page) {
     window.ClassificacaoNcm?.onPageEnter();
   } else if (page === 'relatorios') {
     $('#page-title').textContent = window.Relatorios?.titulo?.() || 'Relatórios';
-    $('#page-sub').textContent = 'Produtos · NCMs';
+    $('#page-sub').textContent = String(window.Relatorios?.atual?.() || '').startsWith('os-') ? 'Relatórios · Serviços' : 'Produtos · NCMs';
     window.Relatorios?.onPageEnter();
   } else if (page === 'usuarios') {
     $('#page-title').textContent = 'Usuários';
@@ -1916,6 +1960,10 @@ async function showPage(page) {
     $('#page-title').textContent = 'Condicionais';
     $('#page-sub').textContent = 'Peças reservadas para o cliente';
     window.Condicionais?.onPageEnter();
+  } else if (page === 'servicos') {
+    $('#page-title').textContent = 'Serviços';
+    $('#page-sub').textContent = state.servicosPerfil?.nome ? `Ordens de serviço · ${state.servicosPerfil.nome}` : 'Ordens de serviço';
+    window.Servicos?.onPageEnter();
   } else if (page === 'central-ofertas') {
     $('#page-title').textContent = 'Central de Ofertas';
     $('#page-sub').textContent = 'Configurações e produtos da loja';
@@ -2018,6 +2066,12 @@ function exportarEstoqueCsv() {
     lines.push(row.join(';'));
   }
   const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8' });
+  if (window.ExportarTabela?.salvarArquivo) {
+    window.ExportarTabela.salvarArquivo(blob, 'estoque.csv').then((ok) => {
+      if (!ok) showMsg('Atualize o aplicativo para salvar arquivos pelo celular.');
+    });
+    return;
+  }
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'estoque.csv';
@@ -3215,6 +3269,12 @@ function htmlFormUsuario(u) {
             <option value="false" ${u.permissoes?.condicionais?.acesso === false ? 'selected' : ''}>Não</option>
           </select>
         </label>
+        <label>Serviços (O.S)
+          <select data-perm="servicos.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
+            <option value="true" ${u.supervisor || u.permissoes?.servicos?.acesso ? 'selected' : ''}>Sim</option>
+            <option value="false" ${!u.supervisor && !u.permissoes?.servicos?.acesso ? 'selected' : ''}>Não</option>
+          </select>
+        </label>
         <label>Central de Ofertas
           <select data-perm="central_ofertas.acesso" ${u.supervisor || u.mtEntradas ? 'disabled' : ''}>
             <option value="true" ${u.supervisor || u.permissoes?.central_ofertas?.acesso ? 'selected' : ''}>Sim</option>
@@ -3364,6 +3424,9 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
           acesso: $('[data-perm="central_ofertas.acesso"]', card)?.value === 'true',
           preco: $('[data-perm="central_ofertas.preco"]', card)?.value === 'true',
         },
+        servicos: {
+          acesso: $('[data-perm="servicos.acesso"]', card)?.value === 'true',
+        },
         massa: {
           acesso: $('[data-perm="massa.acesso"]', card)?.value === 'true',
         },
@@ -3417,6 +3480,7 @@ $('#btn-salvar-usuarios').addEventListener('click', async () => {
     if ($('#nav-central-ofertas')) $('#nav-central-ofertas').hidden = !showCentral;
     if ($('#nav-central-ofertas-mobile')) $('#nav-central-ofertas-mobile').hidden = !showCentral;
     if ($('#dash-central-ofertas')) $('#dash-central-ofertas').hidden = !showCentral;
+    mostrarNavServicos();
     const showCompras = !!state.consultarCompras && can('compras', 'acesso');
     if ($('#nav-compras')) $('#nav-compras').hidden = !showCompras;
     if ($('#nav-compras-mobile')) $('#nav-compras-mobile').hidden = !showCompras;
@@ -4556,6 +4620,7 @@ window.Compras?.init({
 window.Condicionais?.init({ api });
 window.Clientes?.init({ api, showMsg, escapeHtml, getUsuario: () => state.usuario });
 window.CentralOfertas?.init({ api, showMsg, escapeHtml });
+window.Servicos?.init({ api, showMsg, escapeHtml, getUsuario: () => state.usuario, servicosAtivo: () => podeServicos() });
 window.Gondola?.init({
   api,
   showMsg,
@@ -4579,9 +4644,24 @@ window.Gondola?.init({
     try { if (dlg.open) dlg.close(); } catch { /* ignore */ }
   };
 
-  const imprimir = () => {
+  const imprimir = async () => {
     const html = frame.getAttribute('srcdoc') || '';
     const src = frame.getAttribute('src') || '';
+    // No APK o window.print() do WebView não faz nada: a impressão vai pelo Android.
+    if (window.GestorApp && typeof window.GestorApp.printHtml === 'function') {
+      const titulo = dlg.querySelector('.dlg-danfe-bar strong')?.textContent || 'Impressão';
+      let conteudo = html;
+      if (!conteudo && src && src !== 'about:blank') {
+        try {
+          const resp = await fetch(src, { credentials: 'same-origin' });
+          conteudo = resp.ok ? await resp.text() : '';
+        } catch { conteudo = ''; }
+      }
+      if (conteudo) {
+        window.GestorApp.printHtml(titulo, conteudo);
+        return;
+      }
+    }
     const tmp = document.createElement('iframe');
     tmp.setAttribute('aria-hidden', 'true');
     tmp.style.cssText = 'position:fixed;width:0;height:0;border:0;left:0;bottom:0';
@@ -4645,6 +4725,14 @@ window.gestorHardwareBack = () => {
     return true;
   }
   if (window.ImportacaoNfe?.handleBack?.()) return true;
+  if (window.Servicos?.handleBack?.()) return true;
+  for (const pagina of ['servicos', 'relatorios', 'condicionais', 'clientes', 'central-ofertas', 'preferencias']) {
+    const el = $(`#page-${pagina}`);
+    if (el && !el.hidden) {
+      showPage('dashboard');
+      return true;
+    }
+  }
   const pageCompras = $('#page-compras');
   if (pageCompras && !pageCompras.hidden) {
     showPage('dashboard');

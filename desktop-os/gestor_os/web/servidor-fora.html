@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestor O.S — servidor fora</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main class="centro">
+  <div class="cartao alerta">
+    <div class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l9.5 17h-19z"/><path d="M12 10v4M12 17h.01"/></svg></div>
+    <div>
+      <h1>Não consegui falar com o servidor</h1>
+      <p class="muted" id="detalhe">O Gestor no servidor pode estar desligado, ou a rede da loja caiu.</p>
+    </div>
+    <p>Deseja entrar em <b>modo contingência</b>? As O.S ficam neste computador com número provisório e vão para o servidor quando ele voltar. Não grava venda no Clipp até sincronizar.</p>
+    <p class="erro" id="erro"></p>
+    <div class="acoes">
+      <button type="button" class="btn" id="config">Trocar servidor</button>
+      <button type="button" class="btn" id="tentar">Tentar de novo</button>
+      <button type="button" class="btn pri" id="entrar">Entrar em contingência</button>
+    </div>
+    <p class="muted" data-versao></p>
+  </div>
+</main>
+<script src="comum.js"></script>
+<script>
+(async () => {
+  const api = await ponte();
+  const info = await api.info();
+  document.getElementById('detalhe').textContent = `Servidor ${info.servidor}: sem resposta. ${info.copia_em ? `Cópia da contingência de ${new Date(info.copia_em).toLocaleString('pt-BR')}.` : 'Este computador ainda não tem cópia para a contingência.'}`;
+  if (!info.copia_em) document.getElementById('entrar').disabled = true;
+  const erro = document.getElementById('erro');
+  document.getElementById('tentar').addEventListener('click', async () => {
+    erro.textContent = 'Tentando…';
+    const r = await api.tentar_servidor();
+    if (!r.ok) erro.textContent = 'O servidor ainda não responde.';
+  });
+  document.getElementById('entrar').addEventListener('click', () => api.entrar_contingencia());
+  document.getElementById('config').addEventListener('click', () => api.abrir_config());
+  window.gestorServidorVoltou = () => api.tentar_servidor();
+})();
+</script>
+</body>
+</html>

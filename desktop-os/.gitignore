@@ -1,0 +1,9 @@
+.venv/
+build/
+dist/
+saida/*
+!saida/.gitkeep
+!saida/GestorOS-Setup.exe
+!saida/versao.json
+*.spec
+__pycache__/

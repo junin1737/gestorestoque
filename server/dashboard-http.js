@@ -3,8 +3,8 @@
 const express = require('express');
 const { withDb, query } = require('./db');
 const { lerUsaManage, perfisDashboard } = require('./config');
-const { consultarDashboard, detalharDashboard } = require('./dashboard-dados');
-const { excelContador, pdfContador } = require('./dashboard-export');
+const { consultarDashboard, consultarReceitasDespesas, detalharDashboard } = require('./dashboard-dados');
+const { excelContador, pdfContador, pdfReceitasDespesas } = require('./dashboard-export');
 
 const router = express.Router();
 
@@ -17,7 +17,21 @@ function filtrosDe(req) {
     ncm: req.query.ncm || '',
     modelo: req.query.modelo || '',
     aba: req.query.aba || '',
+    status: req.query.status || '',
+    tipoOs: req.query.tipoOs || '',
+    tecnico: req.query.tecnico || '',
+    servicos: podeServicos(req),
   };
+}
+
+/** Aba Serviços: módulo liberado no painel e permissão do usuário. */
+function podeServicos(req) {
+  try {
+    if (require('./licenca').situacao().servicos?.ativo !== true) return false;
+    return require('./auth').temAcesso(req.usuario, 'servicos');
+  } catch {
+    return false;
+  }
 }
 
 function acessoDashboard(req) {
@@ -85,6 +99,38 @@ router.get('/dashboard/exportar', async (req, res) => {
     return res.send(excelContador(pack.dados, pack.detalhe, meta));
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message || 'Falha ao exportar.' });
+  }
+});
+
+router.get('/dashboard/receitas-despesas.pdf', async (req, res) => {
+  const acesso = acessoDashboard(req);
+  if (acesso.status) return res.status(acesso.status).json({ ok: false, error: acesso.error });
+  if (acesso.perfil !== 'PADRAO') {
+    return res.status(403).json({ ok: false, error: 'Exportação disponível só no dashboard padrão.' });
+  }
+  try {
+    const pack = await withDb(async (db, appCfg) => {
+      const serie = await consultarReceitasDespesas(db, {
+        ...filtrosDe(req),
+        usaManage: lerUsaManage(appCfg),
+        appCfg,
+      });
+      const emit = await query(db, 'SELECT FIRST 1 NOME_FANTA, NOME FROM TB_EMITENTE');
+      const e = emit[0] || {};
+      return { ...serie, empresa: String(e.NOME_FANTA || e.NOME || '').trim() };
+    });
+    const pdf = pdfReceitasDespesas(pack.porMes, {
+      empresa: pack.empresa,
+      ano: pack.ano,
+      usuario: req.usuario?.nome || '',
+      geradoEm: new Date().toLocaleString('pt-BR'),
+    });
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="receitas-despesas-${pack.ano}.pdf"`);
+    return res.send(pdf);
+  } catch (err) {
+    const status = /inválid|anterior/i.test(err.message || '') ? 400 : 500;
+    res.status(status).json({ ok: false, error: err.message || 'Falha ao exportar.' });
   }
 });
 

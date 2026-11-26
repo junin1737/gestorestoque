@@ -136,6 +136,7 @@ html[data-theme="escuro"] .dash {
 .dash-barra i { display: block; height: 100%; background: var(--d-acc); border-radius: 3px; }
 .dash-barra i.pos { background: var(--d-pos); }
 .dash-barra i.neutro { background: var(--d-neutro); }
+.dash-ponto { display: inline-block; width: 0.55rem; height: 0.55rem; border-radius: 50%; margin-right: 0.4rem; vertical-align: 0.05rem; }
 
 /* Listas de ranking e pagamento */
 .dash-rank { list-style: none; margin: 0; padding: 0; }
@@ -152,6 +153,35 @@ html[data-theme="escuro"] .dash {
 /* Gráficos */
 .dash-grafico svg { display: block; width: 100%; height: auto; }
 .dash-grafico text { font-family: inherit; }
+.dash-grafico-mensal { position: relative; }
+.dash-mes { cursor: pointer; }
+.dash-mes-fundo { fill: transparent; transition: fill 0.12s; }
+.dash-mes.ativo .dash-mes-fundo { fill: var(--d-suave); }
+.dash-dica {
+  position: absolute;
+  z-index: 5;
+  pointer-events: none;
+  min-width: 180px;
+  padding: 0.55rem 0.7rem;
+  border-radius: 10px;
+  background: var(--d-card);
+  border: 1px solid var(--d-linha);
+  box-shadow: var(--d-sombra), 0 4px 14px rgba(15, 30, 55, 0.12);
+  font-size: 0.8rem;
+  display: grid;
+  gap: 0.2rem;
+}
+.dash-dica[hidden] { display: none; }
+.dash-dica b { font-size: 0.82rem; margin-bottom: 0.1rem; }
+.dash-dica span { display: flex; align-items: center; gap: 0.35rem; color: var(--muted); }
+.dash-dica span i { width: 9px; height: 9px; border-radius: 3px; display: inline-block; }
+.dash-dica strong { margin-left: auto; padding-left: 0.8rem; color: var(--text); white-space: nowrap; }
+.dash-dica-sobra { border-top: 1px solid var(--d-linha); padding-top: 0.25rem; margin-top: 0.1rem; font-weight: 650; }
+.dash-dica-sobra.pos strong { color: var(--d-pos); }
+.dash-dica-sobra.neg strong { color: var(--d-neg); }
+.dash-rodape-grafico { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.6rem; margin-top: 0.4rem; }
+.dash-rodape-grafico .dash-legenda { margin-top: 0; }
+.dash-btn-exportar { font-size: 0.8rem; padding: 0.35rem 0.75rem; }
 .dash-legenda { display: flex; flex-wrap: wrap; gap: 0.9rem; color: var(--muted); font-size: 0.78rem; margin-top: 0.4rem; }
 .dash-legenda i { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 0.3rem; vertical-align: -1px; }
 .dash-rosca { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 1rem; align-items: center; margin-bottom: 0.6rem; }

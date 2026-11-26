@@ -75,6 +75,10 @@ const MODULOS = {
     label: 'Central de Ofertas',
     default: { acesso: false, preco: false },
   },
+  servicos: {
+    label: 'Serviços (O.S)',
+    default: { acesso: false },
+  },
 };
 
 const CHAVES_DASHBOARD = ['dashboard_entradas', 'dashboard_contador', 'dashboard_padrao'];
@@ -175,6 +179,7 @@ function fullPermissoes() {
     if (key === 'importacao') out[key] = { acesso: true };
     if (key === 'compras') out[key] = { acesso: true };
     if (key === 'condicionais') out[key] = { acesso: true };
+    if (key === 'servicos') out[key] = { acesso: true };
     if (key === 'clientes') out[key] = { acesso: true };
     if (key === 'massa') out[key] = { acesso: true };
     if (key === 'classificacao_ncm') out[key] = { acesso: true };

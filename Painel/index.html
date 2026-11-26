@@ -12,8 +12,9 @@
   <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="manifest" href="manifest.webmanifest" />
-  <link rel="stylesheet" href="styles.css?v=305" />
-  <link rel="stylesheet" href="dashboard.css?v=1" />
+  <link rel="stylesheet" href="styles.css?v=308" />
+  <link rel="stylesheet" href="dashboard.css?v=3" />
+  <link rel="stylesheet" href="os.css?v=4" />
   <link rel="stylesheet" href="importacao-nfe.css?v=257" />
 </head>
 <body>
@@ -173,6 +174,10 @@
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10a1 1 0 0 1 1 1v14l-6-3-6 3V5a1 1 0 0 1 1-1z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
             Condicionais
           </button>
+          <button class="nav-btn" data-page="servicos" id="nav-servicos" hidden>
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14.7 6.3a4 4 0 0 0-5.3 5.3L3.5 17.5a1.4 1.4 0 0 0 0 2l1 1a1.4 1.4 0 0 0 2 0l5.9-5.9a4 4 0 0 0 5.3-5.3l-2.5 2.5-2.3-.5-.5-2.3z" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round"/></svg>
+            Serviços
+          </button>
           <button class="nav-btn" data-page="alteracoes" id="nav-alteracoes">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16M8 15v4M12 11v8M16 8v11" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round"/></svg>
             Alterações
@@ -192,6 +197,18 @@
                 <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="ncm-branco">NCM em branco ou inválido</button>
                 <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="ncm-distintos">NCMs distintos</button>
               </div>
+            </div>
+            <button type="button" class="nav-ramo" data-alvo="nav-ramo-servicos-rel" aria-expanded="false" aria-controls="nav-ramo-servicos-rel" id="nav-rel-servicos" hidden>
+              <span class="nav-seta" aria-hidden="true"></span>
+              Serviços
+            </button>
+            <div class="nav-filhos" id="nav-ramo-servicos-rel" hidden>
+              <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-abertos">Serviços em aberto</button>
+              <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-finalizados">Serviços finalizados</button>
+              <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-tecnico">Serviços por técnico</button>
+              <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-produtos">Produtos vendidos em O.S</button>
+              <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-totalizador">Totalizador de serviços</button>
+              <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-descontos">Descontos e acréscimos</button>
             </div>
           </div>
           <p class="nav-section">Administração</p>
@@ -829,6 +846,10 @@
           <div id="co-raiz"></div>
         </div>
 
+        <div id="page-servicos" class="page" hidden>
+          <div id="os-raiz"></div>
+        </div>
+
         <div id="page-condicionais" class="page" hidden>
           <div class="cond-split" id="cond-split">
             <section class="cond-col cond-col-lista">
@@ -1204,15 +1225,25 @@
             <button type="button" data-page="compras" id="nav-compras-mobile">Consultar compras</button>
             <button type="button" data-page="central-ofertas" id="nav-central-ofertas-mobile" hidden>Central de Ofertas</button>
             <button type="button" data-page="condicionais" id="nav-condicionais-mobile">Condicionais</button>
+            <button type="button" data-page="servicos" id="nav-servicos-mobile" hidden>Serviços</button>
             <button type="button" data-page="alteracoes" id="nav-alteracoes-mobile">Alterações</button>
             <div class="mais-cascata" id="nav-relatorios-mobile">
-              <button type="button" class="mais-ramo" data-alvo="mais-ramo-produtos" aria-expanded="false">Produtos</button>
+              <button type="button" class="mais-ramo" data-alvo="mais-ramo-produtos" aria-expanded="false">Relatórios de produtos</button>
               <div class="mais-filhos" id="mais-ramo-produtos" hidden>
                 <button type="button" class="mais-ramo" data-alvo="mais-ramo-ncms" aria-expanded="false">NCMs</button>
                 <div class="mais-filhos" id="mais-ramo-ncms" hidden>
                   <button type="button" data-page="relatorios" data-relatorio="ncm-branco">NCM em branco ou inválido</button>
                   <button type="button" data-page="relatorios" data-relatorio="ncm-distintos">NCMs distintos</button>
                 </div>
+              </div>
+              <button type="button" class="mais-ramo" data-alvo="mais-ramo-servicos-rel" aria-expanded="false" id="nav-rel-servicos-mobile" hidden>Relatórios de serviços</button>
+              <div class="mais-filhos" id="mais-ramo-servicos-rel" hidden>
+                <button type="button" data-page="relatorios" data-relatorio="os-abertos">Serviços em aberto</button>
+                <button type="button" data-page="relatorios" data-relatorio="os-finalizados">Serviços finalizados</button>
+                <button type="button" data-page="relatorios" data-relatorio="os-tecnico">Serviços por técnico</button>
+                <button type="button" data-page="relatorios" data-relatorio="os-produtos">Produtos vendidos em O.S</button>
+                <button type="button" data-page="relatorios" data-relatorio="os-totalizador">Totalizador de serviços</button>
+                <button type="button" data-page="relatorios" data-relatorio="os-descontos">Descontos e acréscimos</button>
               </div>
             </div>
             <button type="button" data-page="contador" id="nav-contador-mobile" hidden>Alteração em massa</button>
@@ -1546,12 +1577,13 @@
   <script src="condicionais.js?v=254"></script>
   <script src="clientes.js?v=6"></script>
   <script src="contador.js?v=241"></script>
-  <script src="exportar-tabela.js?v=4"></script>
+  <script src="exportar-tabela.js?v=5"></script>
   <script src="classificacao-ncm.js?v=11"></script>
-  <script src="relatorios.js?v=4"></script>
-  <script src="dashboard.js?v=264"></script>
+  <script src="relatorios.js?v=7"></script>
+  <script src="dashboard.js?v=267"></script>
   <script src="gondola.js?v=4"></script>
   <script src="central-ofertas.js?v=20"></script>
-  <script src="app.js?v=290"></script>
+  <script src="os.js?v=3"></script>
+  <script src="app.js?v=294"></script>
 </body>
 </html>

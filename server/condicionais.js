@@ -223,6 +223,17 @@ function montarBuscaPedido(busca) {
   };
 }
 
+/**
+ * A O.S grava nas mesmas tabelas do condicional e fica marcada em GESTOR_PEDIDO_ORIGEM.
+ * O Condicional lista tudo menos esses pedidos (inclusive os abertos no Clipp).
+ */
+async function filtroSemOs(db) {
+  const tem = await query(db, `
+    SELECT 1 AS OK FROM RDB$RELATIONS WHERE TRIM(RDB$RELATION_NAME) = 'GESTOR_PEDIDO_ORIGEM'`);
+  if (!tem.length) return '';
+  return `NOT EXISTS (SELECT 1 FROM GESTOR_PEDIDO_ORIGEM GPO WHERE GPO.ID_PEDIDO = P.ID_PEDIDO AND GPO.ORIGEM = 'OS')`;
+}
+
 async function listar(statusFiltro, busca) {
   return withDb(async (db) => {
     if (!hasTable('TB_PEDIDO_VENDA') || !hasTable('TB_PED_VENDA_ITEM')) {
@@ -244,6 +255,8 @@ async function listar(statusFiltro, busca) {
       where.push(...extra.where);
       params.push(...extra.params);
     }
+    const semOs = await filtroSemOs(db);
+    if (semOs) where.push(semOs);
     const corpo = (await sqlPedido(db)).replace(/^\s*SELECT\s*/i, '');
     const rows = await query(db, `
       SELECT FIRST 200 ${corpo}
@@ -341,6 +354,7 @@ async function doProduto(idIdentificador) {
   return withDb(async (db, appCfg) => {
     const reservas = await reservasDoProduto(db, id);
     if (!hasTable('TB_PEDIDO_VENDA')) return { reservas, condicionais: [] };
+    const semOs = await filtroSemOs(db);
     const rows = await query(db, `
       ${await sqlPedido(db)}
       WHERE EXISTS (
@@ -350,6 +364,7 @@ async function doProduto(idIdentificador) {
           AND COALESCE(TRIM(I.ITEM_CANCEL), 'N') <> 'S'
       )
         AND TRIM(S.RESERVA) = 'S'
+        ${semOs ? `AND ${semOs}` : ''}
       ORDER BY P.DT_PEDIDO DESC, P.ID_PEDIDO DESC`, [id]);
     const condicionais = [];
     for (const r of rows) {
@@ -845,6 +860,123 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
   });
 }
 
+/**
+ * Grava a O.S como pedido de venda, do mesmo jeito do condicional, para a Venda Gerencial importar.
+ * - Mercadoria confere o saldo (atual − reservado). Serviço (tipo 9) não confere quantidade.
+ * - A reserva é feita pelo trigger do Clipp (TRG_ATUALIZA_RESERVA_ITENSPED) por estar numa situação que reserva.
+ * - O desconto e o acréscimo geral já chegam rateados nos itens; frete + deslocamento vão no total do pedido.
+ * - `depois(tx, idPedido)` roda na mesma transação (marca a origem e grava o número na O.S).
+ */
+async function gravarPedidoOS({ idCliente, idVendedor, obs, validade, itens, frete, depois }) {
+  const itensOk = (itens || []).map((it) => ({
+    id: num(it.id_identificador),
+    qtd: num(it.qtd),
+    prc: num(it.prc),
+    desconto: Math.max(0, num(it.desconto)),
+    acrescimo: Math.max(0, num(it.acrescimo)),
+    servico: !!it.servico,
+    descricao: String(it.descricao || ''),
+  })).filter((it) => it.id > 0 && it.qtd > 0);
+  if (!num(idCliente)) throw new Error('A O.S precisa de cliente para ir para a venda.');
+  if (!itensOk.length) throw new Error('Inclua ao menos um produto ou serviço antes de enviar para a venda.');
+  const dtValidade = validade instanceof Date && !Number.isNaN(validade.getTime()) ? validade : new Date();
+  return withDb(async (db, appCfg) => {
+    if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
+    const temValidade = await columnExists(db, 'TB_PEDIDO_VENDA', 'DT_VALIDA');
+    const t = writeTargets(appCfg)[0]?.tables;
+    if (!t) throw new Error('Estoque não encontrado nesta base.');
+    const idStatusPedido = await resolverStatus(db, 0);
+    const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
+    const temFlagDesc = await columnExists(db, 'TB_PED_VENDA_ITEM', 'EFETUOU_DESCONTO');
+    const nenhum = await query(db, 'SELECT FIRST 1 ID_PARCELA, ID_FMAPGTO FROM TB_PARCELAMENTO WHERE ID_PARCELA = 1');
+    const idParcela = nenhum.length ? 1 : null;
+    const idFmapgto = num(nenhum[0]?.ID_FMAPGTO) || 1;
+    const mod = await query(db, `
+      SELECT FIRST 1 P.ID_MODULO
+      FROM TB_PEDIDO_VENDA P
+      JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
+      WHERE TRIM(S.RESERVA) = 'S' AND P.ID_MODULO IS NOT NULL`);
+    const idModulo = num(mod[0]?.ID_MODULO) || 4;
+    await ensureCondTotal(db);
+    const colsFechamento = await colunasFechamento(db);
+    const casas = await casasClipp(db);
+    let ultimoErro = null;
+    for (let tentativa = 0; tentativa < 3; tentativa += 1) {
+      try {
+        return await withTransaction(db, async (tx) => {
+          const id = await proximoIdPedido(tx);
+          const colsValidade = temValidade ? ', DT_VALIDA' : '';
+          const valValidade = temValidade ? ', ?' : '';
+          const paramsPedido = [
+            num(idCliente), num(idVendedor) || null, id, idParcela, idFmapgto,
+            idStatusPedido, idModulo, String(obs || '').slice(0, 300) || null,
+          ];
+          if (temValidade) paramsPedido.push(dtValidade);
+          await query(tx, `
+            INSERT INTO TB_PEDIDO_VENDA (
+              ID_CLIENTE, ID_VENDEDOR, ID_PEDIDO, DT_PEDIDO, HR_PEDIDO,
+              ID_PARCELA, ID_FMAPGTO, ID_STATUS, ID_MODULO, ORIGEM,
+              UPDATED_INTEGRADORA, ENVIAR_INTEGRADORA, OBSERVACAO${colsValidade}
+            ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?${valValidade})`, paramsPedido);
+          const porId = new Map();
+          for (const it of itensOk) if (!it.servico) porId.set(it.id, (porId.get(it.id) || 0) + it.qtd);
+          const conferido = new Set();
+          for (const it of itensOk) {
+            const prod = await query(tx, `
+              SELECT FIRST 1 E.DESCRICAO, E.PRC_CUSTO, P.COD_BARRA, P.QTD_ATUAL
+                     ${temReserv ? ', P.QTD_RESERV' : ''}
+              FROM ${t.produto} P
+              JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
+              JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+              WHERE P.ID_IDENTIFICADOR = ?`, [it.id]);
+            if (!prod.length) throw new Error(`Produto ${it.id} não encontrado.`);
+            const nome = String(prod[0].DESCRICAO || it.descricao || it.id).trim();
+            if (!it.servico && !conferido.has(it.id)) {
+              conferido.add(it.id);
+              const disponivel = disponivelDe(prod[0], temReserv);
+              const pedido = porId.get(it.id) || it.qtd;
+              if (!(disponivel > 0)) throw new Error(`${nome} está sem estoque. Não é possível enviar para a venda.`);
+              if (pedido > disponivel + 0.0001) {
+                throw new Error(`${nome} tem ${textoQtd(disponivel)} em estoque. A O.S usa ${textoQtd(pedido)}.`);
+              }
+            }
+            if (!(it.prc > 0)) throw new Error(`Informe o valor de ${nome}.`);
+            const bruto = Math.round(it.qtd * it.prc * 100) / 100;
+            const desc = Math.round(Math.min(it.desconto, bruto) * 100) / 100;
+            const acres = Math.round(it.acrescimo * 100) / 100;
+            const idItem = await nextGenIdSincronizado(tx, GENERATORS_ITEM_PEDIDO, 'TB_PED_VENDA_ITEM', 'ID_ITEMPED');
+            await query(tx, `
+              INSERT INTO TB_PED_VENDA_ITEM (
+                ID_ITEMPED, QTD_ITEM, VLR_TOTAL, PRC_CUSTO, PRC_LISTA, VLR_DESC,
+                ID_IDENTIFICADOR, ID_PEDIDO, ITEM_CANCEL, VLR_UNIT, COD_BARRA, UPDATED_INTEGRADORA
+                ${temFlagDesc ? ', EFETUOU_DESCONTO' : ''}
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, CURRENT_TIMESTAMP${temFlagDesc ? ', ?' : ''})`, [
+              idItem, it.qtd, bruto + acres, num(prod[0].PRC_CUSTO), it.prc, desc,
+              it.id, id, it.prc, String(prod[0].COD_BARRA || '').slice(0, 20) || null,
+              ...(temFlagDesc ? [desc > 0 ? 1 : 0] : []),
+            ]);
+          }
+          await query(tx, `
+            UPDATE OR INSERT INTO GESTOR_COND_TOTAL (ID_PEDIDO, VLR_FRETE, VLR_DESC, VLR_ACRESC)
+            VALUES (?, ?, 0, 0)
+            MATCHING (ID_PEDIDO)`, [id, Math.max(0, num(frete))]);
+          await query(tx, `
+            UPDATE TB_PEDIDO_VENDA
+            SET UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+            WHERE ID_PEDIDO = ?`, [id]);
+          await fecharItensNoPedido(tx, colsFechamento, casas, id);
+          if (typeof depois === 'function') await depois(tx, id);
+          return { id };
+        });
+      } catch (err) {
+        ultimoErro = err;
+        if (!/UNIQUE|PRIMARY|violation/i.test(String(err.message || '')) || tentativa === 2) throw erroDeBloqueio(err);
+      }
+    }
+    throw ultimoErro || new Error('Não foi possível enviar a O.S para a venda.');
+  });
+}
+
 async function condicionalFinalizado(db, idPedido) {
   const rows = await query(db, `
     SELECT FIRST 1 1 AS X
@@ -1267,6 +1399,7 @@ module.exports = {
   listarPagamentos,
   criar,
   atualizar,
+  gravarPedidoOS,
   selarCondicionaisAntigos: () => withDb((db) => selarCondicionaisAntigos(db)),
   alinharGeradorPedido: () => withDb((db) => alinharGeradorPedido(db)),
   alterarStatus,

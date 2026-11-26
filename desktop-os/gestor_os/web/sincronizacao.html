@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Sincronização da contingência</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<div class="pagina">
+  <div class="topo"><div><h1>Sincronização da contingência</h1><p class="muted" id="ultimo"></p></div><span class="esp"></span><button class="btn pri" id="agora">Sincronizar agora</button></div>
+  <section class="grupo"><header><h2>Na fila deste computador</h2></header><div class="corpo" id="fila"></div></section>
+  <section class="grupo"><header><h2>Conflitos</h2><span class="muted">A mesma O.S mudou aqui e no servidor. Escolha qual versão fica; a escolha vai para o histórico da O.S.</span></header><div class="corpo" id="conflitos"></div></section>
+</div>
+<script src="comum.js"></script>
+<script>
+(async () => {
+  const api = await ponte();
+  const resumo = (o) => `<div class="versao">
+    <div><b>Status</b> ${esc(o.status?.descricao || o.id_status || '—')} · <b>Técnico</b> ${esc(o.tecnico?.nome || '—')}</div>
+    <div><b>Equipamento</b> ${esc(o.equipamento || '')}</div>
+    <div><b>Defeito</b> ${esc(o.defeito || '')}</div>
+    <div><b>Solução</b> ${esc(o.solucao || '—')}</div>
+    <div><b>Itens</b> ${(o.itens || []).map((i) => esc(i.descricao)).join(', ') || '—'}</div>
+    <div><b>Total</b> ${moeda(o.total)}</div></div>`;
+  async function desenhar() {
+    const r = await api.sync_estado();
+    document.getElementById('ultimo').textContent = r.ultimo ? r.ultimo.titulo : 'Nenhuma sincronização nesta sessão.';
+    document.getElementById('fila').innerHTML = r.pendentes.length
+      ? `<table class="lista"><thead><tr><th>Número</th><th>Cliente</th><th>Situação</th></tr></thead><tbody>${r.pendentes.map((p) => `<tr><td>${esc(p.id ? `O.S ${p.id}` : p.provisorio)}</td><td>${esc(p.cliente)}</td><td>${p.situacao === 'erro' ? `<span class="etq erro">${esc(p.erro)}</span>` : '<span class="etq pend">A enviar</span>'}</td></tr>`).join('')}</tbody></table>`
+      : '<p class="muted">Nada pendente.</p>';
+    document.getElementById('conflitos').innerHTML = r.conflitos.length ? r.conflitos.map((c) => `<div class="grupo"><header><h2>O.S ${esc(c.id)}</h2></header><div class="corpo">
+        <div class="duas"><div><h3>Feita neste computador</h3>${resumo(c.local)}<div class="acoes"><button class="btn pri" data-p="${esc(c.provisorio)}" data-e="local">Ficar com esta</button></div></div>
+        <div><h3>Que está no servidor</h3>${resumo(c.servidor)}<div class="acoes"><button class="btn" data-p="${esc(c.provisorio)}" data-e="servidor">Ficar com a do servidor</button></div></div></div>
+      </div></div>`).join('') : '<p class="muted">Nenhum conflito.</p>';
+    document.querySelectorAll('[data-p]').forEach((b) => b.addEventListener('click', async () => {
+      const rr = await api.sync_resolver(b.dataset.p, b.dataset.e);
+      if (!rr.ok) alert(rr.error);
+      desenhar();
+    }));
+  }
+  document.getElementById('agora').addEventListener('click', async (e) => {
+    e.target.disabled = true;
+    await api.sync_agora();
+    e.target.disabled = false;
+    desenhar();
+  });
+  desenhar();
+})();
+</script>
+</body>
+</html>

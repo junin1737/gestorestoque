@@ -55,6 +55,8 @@ const { gerarHashSenha } = require('./senha');
 
 const router = express.Router();
 router.use(require('./dashboard-http'));
+router.use(require('./os-http'));
+router.use(require('./desktop-http'));
 const { exigirModulo } = auth;
 
 /** NF-e de demonstração (mock) só para treinamento — nunca em base de cliente por padrão. */

@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Gestor O.S — servidor</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<main class="centro">
+  <form class="cartao" id="form">
+    <div class="icone"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/><path d="M7 7h.01M7 17h.01"/></svg></div>
+    <div>
+      <h1>Onde está o servidor?</h1>
+      <p class="muted">Informe o IP ou o nome do computador onde o Gestor está instalado. É o endereço que aparece na tela do serviço.</p>
+    </div>
+    <label>Endereço do servidor
+      <input class="campo" id="endereco" placeholder="ex.: 192.168.0.10 ou 192.168.0.10:5077" autocomplete="off" autofocus>
+    </label>
+    <p class="erro" id="erro"></p>
+    <div class="acoes">
+      <button type="button" class="btn" id="testar">Testar</button>
+      <button type="submit" class="btn pri" id="salvar">Salvar e conectar</button>
+    </div>
+    <p class="muted" data-versao></p>
+  </form>
+</main>
+<script src="comum.js"></script>
+<script>
+(async () => {
+  const api = await ponte();
+  const info = await api.info();
+  const campo = document.getElementById('endereco');
+  campo.value = (info.servidor || '').replace(/^https?:\/\//, '');
+  const erro = document.getElementById('erro');
+  document.getElementById('testar').addEventListener('click', async () => {
+    erro.className = 'erro'; erro.textContent = 'Testando…';
+    const r = await api.config_testar(campo.value);
+    erro.className = r.ok ? 'ok' : 'erro';
+    erro.textContent = r.ok ? `O servidor respondeu em ${r.url}.` : r.error;
+  });
+  document.getElementById('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    erro.className = 'erro'; erro.textContent = 'Conectando…';
+    const r = await api.config_salvar(campo.value);
+    if (!r.ok) erro.textContent = r.error;
+  });
+})();
+</script>
+</body>
+</html>

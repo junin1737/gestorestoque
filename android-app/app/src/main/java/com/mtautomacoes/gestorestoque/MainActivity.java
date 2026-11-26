@@ -869,6 +869,41 @@ public class MainActivity extends AppCompatActivity {
             startActivity(Intent.createChooser(send, title));
         }
 
+        /**
+         * Salva um arquivo gerado no painel (PDF, Excel, CSV). O WebView ignora download de blob,
+         * então o arquivo vai para o compartilhar do Android: Arquivos, Drive, WhatsApp, e-mail.
+         */
+        @JavascriptInterface
+        public void shareFile(String fileName, String mime, String base64) {
+            final String nome = (fileName == null || fileName.isEmpty()) ? "arquivo" : fileName;
+            final String tipo = (mime == null || mime.isEmpty()) ? "application/octet-stream" : mime.split(";")[0].trim();
+            final String dados = base64 == null ? "" : base64;
+            runOnUiThread(() -> {
+                try {
+                    byte[] bytes = Base64.decode(dados, Base64.DEFAULT);
+                    File dir = new File(getCacheDir(), "share");
+                    if (!dir.exists() && !dir.mkdirs()) {
+                        Toast.makeText(MainActivity.this, "Não foi possível preparar o arquivo.", Toast.LENGTH_LONG).show();
+                        return;
+                    }
+                    String seguro = nome.replaceAll("[^A-Za-z0-9._-]", "_");
+                    File arquivo = new File(dir, seguro);
+                    try (FileOutputStream out = new FileOutputStream(arquivo)) {
+                        out.write(bytes);
+                    }
+                    Uri uri = FileProvider.getUriForFile(MainActivity.this, getPackageName() + ".fileprovider", arquivo);
+                    Intent send = new Intent(Intent.ACTION_SEND);
+                    send.setType(tipo);
+                    send.putExtra(Intent.EXTRA_STREAM, uri);
+                    send.setClipData(android.content.ClipData.newRawUri(seguro, uri));
+                    send.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+                    startActivity(Intent.createChooser(send, seguro));
+                } catch (Exception e) {
+                    Toast.makeText(MainActivity.this, "Não foi possível salvar o arquivo.", Toast.LENGTH_LONG).show();
+                }
+            });
+        }
+
         @JavascriptInterface
         public void sharePdf(String fileName, String base64) {
             final String nome = (fileName == null || fileName.isEmpty()) ? "relatorio.pdf" : fileName;

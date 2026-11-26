@@ -43,6 +43,9 @@
     const body = linhas.length
       ? linhas.map((linha) => `<tr>${colunas.map((c) => `<td class="${c.numero ? 'num' : ''}">${xml(texto(linha[c.id]))}</td>`).join('')}</tr>`).join('')
       : `<tr><td colspan="${colunas.length || 1}">Nenhum registro</td></tr>`;
+    const foot = opcoes.total && linhas.length
+      ? `<tfoot><tr>${colunas.map((c) => `<td class="${c.numero ? 'num' : ''}">${xml(opcoes.total[c.id] ?? '')}</td>`).join('')}</tr></tfoot>`
+      : '';
     return `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>${xml(opcoes.titulo || 'Relatório')}</title>
 <style>
 @page { size: A4 ${opcoes.paisagem === false ? 'portrait' : 'landscape'}; margin: 12mm 12mm 14mm; }
@@ -59,6 +62,7 @@ th { background: #1f4e79; color: #fff; text-align: left; padding: 6px 8px; font-
 td { border-bottom: 1px solid #d5dde8; padding: 5px 8px; vertical-align: top; overflow-wrap: anywhere; }
 tr:nth-child(even) td { background: #f4f7fb; }
 .num { text-align: right; font-variant-numeric: tabular-nums; }
+tfoot td { font-weight: 700; border-top: 2px solid #1f4e79; background: #eef3f9; }
 .aviso { background: #fff4e5; border: 1px solid #e6b15c; padding: 8px 10px; font-weight: 700; margin: 0 0 10px; }
 .termo { font-size: 10px; line-height: 1.45; margin: 0 0 8px; white-space: pre-wrap; }
 .rodape { margin-top: 14px; color: #5c6b7a; font-size: 10px; }
@@ -71,7 +75,7 @@ tr:nth-child(even) td { background: #f4f7fb; }
 </header>
 ${opcoes.aviso ? `<p class="aviso">${xml(opcoes.aviso)}</p>` : ''}
 ${(opcoes.paragrafos || []).map((p) => `<p class="termo">${xml(p)}</p>`).join('')}
-<table><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>
+<table><colgroup>${cols}</colgroup><thead><tr>${head}</tr></thead><tbody>${body}</tbody>${foot}</table>
 <p class="rodape">Documento para conferência do usuário e do contador. Gestor de Estoque · MT Automações</p>
 ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="window.print()">Imprimir / Salvar PDF</button></p>'}
 </body></html>`;
@@ -164,8 +168,10 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
       });
     };
     if (colunas.length) cabeca();
-    linhas.forEach((linha, idx) => {
-      const celulas = colunas.map((c, i) => quebrar(texto(linha[c.id]), larguras[i] - 6, ft));
+    const extra = opcoes.total && opcoes.linhas?.length ? [{ ...opcoes.total, __total: true }] : [];
+    linhas.concat(extra).forEach((linha, idx) => {
+      const fonte = linha.__total ? 'F2' : 'F1';
+      const celulas = colunas.map((c, i) => quebrar(linha.__total ? (linha[c.id] ?? ' ') : texto(linha[c.id]), larguras[i] - 6, ft));
       const n = Math.max(1, ...celulas.map((c) => c.length));
       const alt = n * (ft + 2) + 6;
       if (y - alt < M) { guardar(); cabeca(); }
@@ -175,7 +181,7 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
       celulas.forEach((ls, i) => {
         ls.forEach((t, k) => {
           const ty = y + alt - 4 - ft - k * (ft + 2);
-          cmds += `0.11 0.14 0.19 rg\nBT /F1 ${ft} Tf 1 0 0 1 ${(x + 3).toFixed(1)} ${ty.toFixed(1)} Tm ${pdfLiteral(t)} Tj ET\n`;
+          cmds += `0.11 0.14 0.19 rg\nBT /${fonte} ${ft} Tf 1 0 0 1 ${(x + 3).toFixed(1)} ${ty.toFixed(1)} Tm ${pdfLiteral(t)} Tj ET\n`;
         });
         x += larguras[i];
       });
@@ -221,17 +227,51 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
     if (resolver) resolver(valor);
   }
 
-  function baixarAtual() {
-    if (!previaAtual) return;
-    const pdf = pdfBytes(previaAtual);
-    const blob = new Blob([pdf], { type: 'application/pdf' });
+  function appNativo() {
+    return typeof window !== 'undefined' && window.GestorApp ? window.GestorApp : null;
+  }
+
+  function blobBase64(blob) {
+    return new Promise((resolve, reject) => {
+      const leitor = new FileReader();
+      leitor.onload = () => resolve(String(leitor.result || '').split(',')[1] || '');
+      leitor.onerror = () => reject(leitor.error);
+      leitor.readAsDataURL(blob);
+    });
+  }
+
+  /**
+   * Salva um arquivo gerado na tela. No navegador baixa pelo link; no APK o WebView ignora
+   * download de blob, então o arquivo vai para o compartilhar do Android (Arquivos, Drive,
+   * WhatsApp, e-mail). Devolve false quando o aparelho não tem como salvar.
+   */
+  async function salvarArquivo(blob, nome) {
+    const app = appNativo();
+    if (app) {
+      if (typeof app.shareFile === 'function') {
+        app.shareFile(nome, blob.type || 'application/octet-stream', await blobBase64(blob));
+        return true;
+      }
+      return false;
+    }
     const link = document.createElement('a');
     link.href = URL.createObjectURL(blob);
-    link.download = `${nomeArquivo(previaAtual.titulo)}.pdf`;
+    link.download = nome;
     document.body.appendChild(link);
     link.click();
     link.remove();
     setTimeout(() => URL.revokeObjectURL(link.href), 1500);
+    return true;
+  }
+
+  async function baixarAtual() {
+    if (!previaAtual) return;
+    const pdf = pdfBytes(previaAtual);
+    const blob = new Blob([pdf], { type: 'application/pdf' });
+    if (await salvarArquivo(blob, `${nomeArquivo(previaAtual.titulo)}.pdf`)) return;
+    // APK antigo, sem shareFile: a impressão do Android tem "Salvar como PDF".
+    const app = appNativo();
+    if (app && typeof app.printHtml === 'function') app.printHtml(previaAtual.titulo || 'relatorio', htmlPdf({ ...previaAtual, embutido: true }));
   }
 
   function garantirDialog() {
@@ -449,7 +489,8 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
     };
     const larguras = colunas.map((c) => `<Column ss:Width="${larguraExcel(c)}"/>`).join('');
     const cabeca = colunas.map((c) => celula(c.titulo, 'cabeca')).join('');
-    const corpo = linhas.map((linha) => `<Row>${colunas.map((c) => celula(linha[c.id])).join('')}</Row>`).join('');
+    const corpo = linhas.map((linha) => `<Row>${colunas.map((c) => celula(linha[c.id])).join('')}</Row>`).join('')
+      + (opcoes.total && linhas.length ? `<Row>${colunas.map((c) => celula(opcoes.total[c.id] ?? '', 'cabeca')).join('')}</Row>` : '');
     const xmlDoc = `<?xml version="1.0" encoding="UTF-8"?>
 <?mso-application progid="Excel.Sheet"?>
 <Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">
@@ -467,14 +508,10 @@ ${opcoes.embutido ? '' : '<p class="no-print"><button type="button" onclick="win
 ${corpo}
 </Table></Worksheet></Workbook>`;
     const blob = new Blob([xmlDoc], { type: 'application/vnd.ms-excel;charset=utf-8' });
-    const link = document.createElement('a');
-    link.href = URL.createObjectURL(blob);
-    link.download = `${nomeArquivo(opcoes.titulo)}.xls`;
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    setTimeout(() => URL.revokeObjectURL(link.href), 1000);
+    salvarArquivo(blob, `${nomeArquivo(opcoes.titulo)}.xls`).then((ok) => {
+      if (!ok && typeof window !== 'undefined') window.alert('Atualize o aplicativo para exportar em Excel pelo celular.');
+    });
   }
 
-  return { htmlPdf, abrirPdf, excel, nomeArquivo, pdfBytes, iniciarPrevia };
+  return { htmlPdf, abrirPdf, excel, nomeArquivo, pdfBytes, iniciarPrevia, salvarArquivo };
 }));

@@ -103,6 +103,9 @@ function lerFiltros() {
     tipoItem: valor('tipo'),
     modelo: valor('modelo'),
     ncm: valor('ncm').trim(),
+    osTecnico: valor('os-tecnico'),
+    osStatus: valor('os-status'),
+    osTipo: valor('os-tipo'),
   };
 }
 
@@ -114,6 +117,11 @@ function queryDash(extra) {
     if (dashFiltros[k]) params.set(k, dashFiltros[k]);
   });
   if (dashAba) params.set('aba', dashAba);
+  if (dashAba === 'servicos') {
+    if (dashFiltros.osTecnico) params.set('tecnico', dashFiltros.osTecnico);
+    if (dashFiltros.osStatus) params.set('status', dashFiltros.osStatus);
+    if (dashFiltros.osTipo) params.set('tipoOs', dashFiltros.osTipo);
+  }
   Object.entries(extra || {}).forEach(([k, v]) => { if (v) params.set(k, v); });
   return params;
 }
@@ -149,7 +157,14 @@ function tabelaGrupo(linhas, lado) {
 
 function htmlFiltros(perfil) {
   const p = dashFiltros.inicio ? dashFiltros : (perfil === 'CONTADOR_ACESSA' ? periodoContador() : periodoPadrao());
-  const extra = perfil === 'CONTADOR_ACESSA'
+  const opc = (lista, atual) => (lista || []).map((o) => `<option value="${esc(o.id)}" ${String(o.id) === String(atual || '') ? 'selected' : ''}>${esc(o.nome || o.descricao)}</option>`).join('');
+  const filtrosOs = `<label>Técnico<select data-filtro="os-tecnico"><option value="">Todos</option>${opc(dashUltimo?.tecnicos, p.osTecnico)}<option value="sem" ${p.osTecnico === 'sem' ? 'selected' : ''}>Sem técnico</option></select></label>
+       <label>Status<select data-filtro="os-status"><option value="">Todos</option>${opc(dashUltimo?.statuses, p.osStatus)}</select></label>
+       <label>Tipo<select data-filtro="os-tipo"><option value="">Todos</option>
+         <option value="I" ${p.osTipo === 'I' ? 'selected' : ''}>Interna</option>
+         <option value="E" ${p.osTipo === 'E' ? 'selected' : ''}>Externa</option>
+       </select></label>`;
+  const extra = perfil === 'PADRAO' && dashAba === 'servicos' ? filtrosOs : perfil === 'CONTADOR_ACESSA'
     ? `<label>NCM<input data-filtro="ncm" placeholder="Código" value="${esc(p.ncm || '')}" /></label>`
     : (perfil === 'PADRAO' && dashAba !== 'financeiro'
       ? `<label>Grupo<select data-filtro="grupo"><option value="">Todos</option></select></label>
@@ -182,7 +197,7 @@ function htmlFiltros(perfil) {
 
 /* ---------- Dashboard padrão: Resumo, Vendas e Financeiro ---------- */
 
-const ROTULO_ABA = { manage: 'Manage', resumo: 'Resumo', vendas: 'Vendas', financeiro: 'Financeiro' };
+const ROTULO_ABA = { manage: 'Manage', resumo: 'Resumo', vendas: 'Vendas', servicos: 'Serviços', financeiro: 'Financeiro' };
 /* Primeira cor é a do tema (logo); as demais são fixas e validadas para daltonismo. */
 const CORES_SERIE = ['var(--d-acc)', '#eb6834', '#1baf7a', '#eda100', '#6250d6', '#e87ba4'];
 const LINHAS_VISIVEIS = 8;
@@ -264,6 +279,10 @@ function cardsResumo(d) {
       kpi('Vendas fiscais', brl(d.vendasFiscais), 'modelos 55 e 65'),
       kpi('Vendas gerenciais', brl(d.vendasGerenciais), 'modelo GR'),
     );
+  }
+  if (d.servicosPeriodo) {
+    const sv = d.servicosPeriodo;
+    base.push(kpi('Serviços', brl(sv.valor), `${num(sv.vendas)} ${sv.vendas === 1 ? 'venda GR' : 'vendas GR'} com serviço`));
   }
   base.push(
     kpi('Total comprado', brl(d.totalComprado), `${num(d.notasEntrada)} notas de entrada`),
@@ -364,6 +383,51 @@ function htmlVendas(d) {
     ${caixa('Produtos mais vendidos', 'Por valor vendido no período', htmlRankProdutos(d.maisVendidos || [], 'valor'))}
     ${caixa('Produtos que mais deram lucro', 'Lucro bruto em R$ (venda − custo)', htmlRankProdutos(d.maisLucro || [], 'lucro'))}
   </div>`;
+}
+
+/* ----- Serviços (O.S) ----- */
+
+function htmlOsStatus(lista) {
+  const itens = (lista || []).filter((s) => s.quantidade > 0 || !s.final);
+  if (!itens.length) return '<p class="dash-vazio">Nenhuma O.S</p>';
+  const max = Math.max(1, ...itens.map((s) => s.quantidade));
+  return `<ul class="dash-rank">${itens.map((s) => `
+    <li style="grid-template-columns:minmax(0,1fr) auto">
+      <span class="n"><b><i class="dash-ponto" style="background:${esc(s.cor)}"></i>${esc(s.nome)}</b><small>${s.final ? 'finalizadas no período' : 'em aberto agora'}</small>
+        <span class="dash-barra"><i style="width:${((s.quantidade / max) * 100).toFixed(1)}%;background:${esc(s.cor)}"></i></span></span>
+      <span class="v">${num(s.quantidade)}</span>
+    </li>`).join('')}</ul>`;
+}
+
+function htmlOsTecnicos(lista) {
+  if (!lista.length) return '<p class="dash-vazio">Nenhuma venda com serviço no período</p>';
+  const max = Math.max(0, ...lista.map((t) => Number(t.valor) || 0));
+  return `<ul class="dash-rank">${lista.map((t, i) => `
+    <li class="${i >= LINHAS_VISIVEIS ? 'dash-extra' : ''}">
+      <span class="pos-rank">${i + 1}º</span>
+      <span class="n"><b title="${esc(t.nome)}">${esc(t.nome)}</b><small>${num(t.vendas)} ${t.vendas === 1 ? 'venda' : 'vendas'} · serviços ${brl(t.servicos)}</small>${barra(t.valor, max)}</span>
+      <span class="v">${brl(t.valor)}</span>
+    </li>`).join('')}</ul>${verTodos(lista.length)}`;
+}
+
+function htmlServicos(d) {
+  const total = (Number(d.faturamentoServicos) || 0) + (Number(d.faturamentoProdutos) || 0);
+  return `<div class="dash-kpis">
+    ${kpi('Faturamento de serviços', brl(d.faturamentoServicos), 'mão de obra nas vendas GR', { destaque: true })}
+    ${kpi('Produtos nessas vendas', brl(d.faturamentoProdutos), `total ${brl(total)}`)}
+    ${kpi('Vendas com serviço', num(d.vendas), `ticket médio ${brl(d.ticket)}`)}
+    ${kpi('O.S em aberto', num(d.abertas), d.atrasadas ? `${num(d.atrasadas)} com previsão vencida` : 'nenhuma atrasada', { tom: d.atrasadas ? 'neg' : '' })}
+    ${kpi('Finalizadas no período', num(d.finalizadas), 'pela data de entrega')}
+  </div>
+  <div class="dash-grade meio">
+    ${caixa('O.S por status', 'Abertas agora e finalizadas no período', htmlOsStatus(d.porStatus))}
+    ${caixa('Faturamento por técnico', 'Vendas GR que vieram de uma O.S', htmlOsTecnicos(d.porTecnico || []))}
+  </div>
+  <div class="dash-grade meio">
+    ${caixa('Serviços mais vendidos', 'Por valor no período', htmlRankProdutos(d.maisServicos || [], 'valor'))}
+    ${caixa('Produtos mais usados', 'Produtos das vendas com serviço', htmlRankProdutos(d.maisProdutos || [], 'valor'))}
+  </div>
+  <p class="dash-vazio">Valores das vendas modelo GR com pelo menos um serviço, inclusive as já convertidas em nota. Os filtros de técnico, status e tipo consideram só as vendas que vieram de uma O.S.</p>`;
 }
 
 /* ----- Financeiro ----- */
@@ -510,14 +574,18 @@ function htmlFinanceiro(d) {
   ${erro}
   ${d.erro ? '' : htmlRealizado(d)}
   <div id="dash-realizar">${htmlRealizar(d, dashCartao)}</div>
-  ${caixa(`Receitas x Despesas · ${d.ano || ''}`, 'Vendas e compras por mês', `<div class="dash-grafico" data-grafico="mensal"></div>
-    <div class="dash-legenda"><span><i style="background:var(--d-acc)"></i>Receitas (vendas)</span><span><i style="background:var(--d-neutro)"></i>Despesas (compras)</span></div>`)}`;
+  ${caixa(`Receitas x Despesas · ${d.ano || ''}`, 'Vendas e compras por mês · passe o mouse (ou toque) no mês para ver os valores', `<div class="dash-grafico dash-grafico-mensal" data-grafico="mensal"></div>
+    <div class="dash-rodape-grafico">
+      <div class="dash-legenda"><span><i style="background:var(--d-acc)"></i>Receitas (vendas)</span><span><i style="background:var(--d-neutro)"></i>Despesas (compras)</span></div>
+      <button type="button" class="btn dash-btn-exportar" data-exportar-mensal>Exportar valores (PDF)</button>
+    </div>`)}`;
 }
 
 function htmlPadrao(d) {
   if (d.vazio && d.aba !== 'financeiro') return `${htmlAbas(d)}<p class="dash-vazio">${esc(d.mensagem || 'Nenhuma movimentação no período')}</p>`;
   if (d.aba === 'financeiro') return `${htmlAbas(d)}${htmlFinanceiro(d)}`;
   if (d.aba === 'vendas') return `${htmlAbas(d)}${htmlVendas(d)}`;
+  if (d.aba === 'servicos') return `${htmlAbas(d)}${htmlServicos(d)}`;
   return `${htmlAbas(d)}${htmlResumo(d)}`;
 }
 
@@ -592,13 +660,65 @@ function graficoMensal(el, serie) {
     const cx = esq + passo * i + passo / 2;
     const hr = ((base - topo) * (Number(m.vendido) || 0)) / max;
     const hd = ((base - topo) * (Number(m.comprado) || 0)) / max;
-    g += `<g><title>${esc(m.nome)}: receitas ${brl(m.vendido)} · despesas ${brl(m.comprado)}</title>
+    g += `<g class="dash-mes" data-mes="${i}">
+      <rect class="dash-mes-fundo" x="${esq + passo * i + 2}" y="${topo - 6}" width="${Math.max(0, passo - 4)}" height="${base - topo + 30}" rx="6"/>
       <rect x="${cx - bw - 1}" y="${base - hr}" width="${bw}" height="${hr}" rx="3" style="fill:var(--d-acc)"/>
       <rect x="${cx + 1}" y="${base - hd}" width="${bw}" height="${hd}" rx="3" style="fill:var(--d-neutro)"/>
       <text x="${cx}" y="${base + 18}" text-anchor="middle" font-size="11.5" style="fill:var(--muted)">${esc(m.nome)}</text>
     </g>`;
   });
-  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Receitas e despesas por mês">${g}</svg>`;
+  el.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Receitas e despesas por mês">${g}</svg><div class="dash-dica" hidden></div>`;
+  ligarDicaMensal(el, meses);
+}
+
+/* Dica do gráfico mensal: entrou, saiu e sobrou do mês sob o mouse (ou tocado no celular). */
+function ligarDicaMensal(el, meses) {
+  const dica = el.querySelector('.dash-dica');
+  const svg = el.querySelector('svg');
+  if (!dica || !svg) return;
+  let atual = null;
+  function esconder() {
+    dica.hidden = true;
+    atual?.classList.remove('ativo');
+    atual = null;
+  }
+  function mostrar(grupo, ev) {
+    const m = meses[Number(grupo.dataset.mes)];
+    if (!m) return;
+    if (atual !== grupo) {
+      atual?.classList.remove('ativo');
+      grupo.classList.add('ativo');
+      atual = grupo;
+      const ent = Number(m.vendido) || 0;
+      const sai = Number(m.comprado) || 0;
+      const sob = Math.round((ent - sai) * 100) / 100;
+      dica.innerHTML = `<b>${esc(m.nome)}${dashUltimo?.ano ? ` · ${esc(dashUltimo.ano)}` : ''}</b>
+        <span><i style="background:var(--d-acc)"></i>Entrou<strong>${esc(brl(ent))}</strong></span>
+        <span><i style="background:var(--d-neutro)"></i>Saiu<strong>${esc(brl(sai))}</strong></span>
+        <span class="dash-dica-sobra ${sob < 0 ? 'neg' : 'pos'}">Sobrou<strong>${esc(brl(sob))}</strong></span>`;
+      dica.hidden = false;
+    }
+    const caixaEl = el.getBoundingClientRect();
+    const r = grupo.querySelector('.dash-mes-fundo').getBoundingClientRect();
+    const larg = dica.offsetWidth;
+    let x = r.left - caixaEl.left + r.width / 2 - larg / 2;
+    x = Math.max(0, Math.min(caixaEl.width - larg, x));
+    const y = ev && ev.clientY ? ev.clientY - caixaEl.top - dica.offsetHeight - 14 : 4;
+    dica.style.left = `${x}px`;
+    dica.style.top = `${Math.max(0, y)}px`;
+  }
+  svg.addEventListener('mousemove', (ev) => {
+    const grupo = ev.target.closest?.('.dash-mes');
+    if (grupo) mostrar(grupo, ev);
+    else esconder();
+  });
+  svg.addEventListener('mouseleave', esconder);
+  svg.addEventListener('click', (ev) => {
+    const grupo = ev.target.closest?.('.dash-mes');
+    if (!grupo) return esconder();
+    if (grupo === atual && ev.pointerType && ev.pointerType !== 'mouse') return esconder();
+    return mostrar(grupo, ev);
+  });
 }
 
 function desenharGraficos() {
@@ -735,6 +855,9 @@ function ligarFiltros() {
       guardarCache();
     });
   });
+  document.querySelectorAll('#dash-financeiro [data-exportar-mensal]').forEach((btn) => {
+    btn.addEventListener('click', () => exportarMensal(btn));
+  });
   document.querySelectorAll('#dash-financeiro [data-cartao]').forEach((chk) => {
     chk.addEventListener('change', () => {
       dashCartao = chk.checked;
@@ -756,12 +879,44 @@ async function exportarDash(formato) {
     return;
   }
   const blob = await res.blob();
+  await salvarDash(blob, formato === 'pdf' ? 'contador.pdf' : 'contador.xls');
+}
+
+/** Navegador baixa; o APK manda para o compartilhar do Android. */
+async function salvarDash(blob, nome) {
+  if (window.ExportarTabela?.salvarArquivo) {
+    if (!(await window.ExportarTabela.salvarArquivo(blob, nome))) showMsg('Atualize o aplicativo para salvar arquivos pelo celular.');
+    return;
+  }
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = formato === 'pdf' ? 'contador.pdf' : 'contador.xls';
+  a.download = nome;
   a.click();
-  URL.revokeObjectURL(url);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportarMensal(btn) {
+  const texto = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Gerando…';
+  try {
+    const params = queryDash();
+    const res = await fetch(`/api/dashboard/receitas-despesas.pdf?${params.toString()}`, { credentials: 'same-origin' });
+    if (!res.ok) {
+      let msg = 'Falha ao exportar.';
+      try { msg = (await res.json()).error || msg; } catch { /* arquivo */ }
+      showMsg(msg);
+      return;
+    }
+    const blob = await res.blob();
+    await salvarDash(blob, `receitas-despesas-${dashUltimo?.ano || ''}.pdf`);
+  } catch {
+    showMsg('Falha ao exportar.');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = texto;
+  }
 }
 
 function abrirDash(origem) {

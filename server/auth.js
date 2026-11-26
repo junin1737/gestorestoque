@@ -39,6 +39,7 @@ const ROTAS_PUBLICAS = [
   /^\/contador\/sessao$/,
   /^\/licenca$/,
   /^\/licenca\/verificar$/,
+  /^\/desktop\/(versao|instalador)$/,
   /^\/mt\/grupo$/,
 ];
 

@@ -1,0 +1,89 @@
+/* Telas locais do app (configuração, servidor fora, contingência e sincronização).
+   Mesmas cores do tema do Gestor (Painel/styles.css): claro e escuro. */
+:root {
+  --bg: #eef2f8; --bg-elev: #ffffff; --text: #152033; --muted: #6b7a90;
+  --accent: #2563eb; --accent-hover: #1d4ed8; --border: #dde3ee;
+  --ok: #1b7f4a; --ok-bg: #e7f7ee; --danger: #dc2626; --danger-bg: #fdecea; --warn: #ea580c;
+  --fill: rgba(15, 30, 55, .06); --shadow: 0 8px 24px rgba(15, 30, 55, .07); --radius: 14px;
+  --font: "Segoe UI", "Helvetica Neue", -apple-system, BlinkMacSystemFont, sans-serif;
+  color-scheme: light;
+}
+html[data-theme="escuro"] {
+  --bg: #0f1724; --bg-elev: #182338; --text: #e8eef8; --muted: #9aa8bd;
+  --accent: #4d8dff; --accent-hover: #6ba0ff; --border: #2a3b55;
+  --fill: rgba(255, 255, 255, .06); --shadow: 0 10px 30px rgba(0, 0, 0, .35);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 14px/1.45 var(--font); }
+button, input, select, textarea { font: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; letter-spacing: -.01em; }
+h1 { font-size: 1.5rem; }
+h2 { font-size: 1.05rem; }
+.muted { color: var(--muted); }
+
+.centro { min-height: 100%; display: grid; place-items: center; padding: 24px; }
+.cartao { width: min(460px, 100%); background: var(--bg-elev); border: 1px solid var(--border); border-radius: 18px; box-shadow: var(--shadow); padding: 28px; display: grid; gap: 14px; }
+.cartao .icone { width: 52px; height: 52px; border-radius: 14px; display: grid; place-items: center; background: var(--fill); color: var(--accent); }
+.cartao .icone svg { width: 28px; height: 28px; }
+.cartao.alerta .icone { color: var(--warn); }
+
+label { display: grid; gap: 5px; font-size: .82rem; font-weight: 600; color: var(--muted); }
+.campo { width: 100%; border: 1px solid var(--border); background: var(--bg); border-radius: 10px; padding: 9px 11px; }
+.campo:focus { outline: 2px solid var(--accent); outline-offset: 1px; border-color: transparent; }
+textarea.campo { min-height: 72px; resize: vertical; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.btn { border: 0; border-radius: 10px; padding: 9px 16px; font-weight: 600; background: var(--fill); cursor: pointer; display: inline-flex; align-items: center; gap: 6px; justify-content: center; }
+.btn:hover { filter: brightness(.97); }
+.btn.pri { background: var(--accent); color: #fff; }
+.btn.pri:hover { background: var(--accent-hover); }
+.btn.perigo { color: var(--danger); }
+.btn:disabled { opacity: .55; cursor: default; }
+.acoes { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+.erro { color: var(--danger); font-weight: 600; min-height: 1.2em; font-size: .85rem; }
+.ok { color: var(--ok); font-weight: 600; }
+
+/* Faixa da contingência: sempre visível */
+.faixa { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; gap: 12px; padding: 10px 18px; background: var(--warn); color: #fff; font-weight: 600; }
+.faixa .esp { flex: 1; }
+.faixa .btn { background: rgba(255, 255, 255, .2); color: #fff; padding: 6px 12px; }
+.faixa.voltou { background: var(--ok); }
+
+.pagina { max-width: 1240px; margin: 0 auto; padding: 18px 22px 40px; display: grid; gap: 14px; }
+.topo { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.topo .esp { flex: 1; }
+.grupo { background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow); }
+.grupo > header { display: flex; align-items: center; gap: 10px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+.grupo > .corpo { padding: 14px 16px; display: grid; gap: 12px; }
+.g2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.seg { display: inline-flex; padding: 2px; border-radius: 10px; background: var(--fill); gap: 2px; }
+.seg button { border: 0; background: transparent; padding: 6px 14px; border-radius: 8px; color: var(--muted); font-weight: 600; cursor: pointer; }
+.seg button.on { background: var(--bg-elev); color: var(--text); box-shadow: 0 1px 3px rgba(0, 0, 0, .12); }
+
+table.lista { width: 100%; border-collapse: collapse; }
+table.lista th, table.lista td { text-align: left; padding: 9px 12px; border-bottom: 1px solid var(--border); vertical-align: top; }
+table.lista th { font-size: .72rem; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); }
+table.lista tbody tr { cursor: pointer; }
+table.lista tbody tr:hover { background: var(--fill); }
+.etq { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: .72rem; font-weight: 700; background: var(--fill); color: var(--muted); }
+.etq.pend { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+.etq.erro { background: var(--danger-bg); color: var(--danger); }
+.etq.conf { background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+
+.res { position: absolute; z-index: 30; left: 0; right: 0; top: 100%; margin-top: 4px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 12px; box-shadow: var(--shadow); max-height: 280px; overflow: auto; }
+.res button { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 9px 12px; cursor: pointer; }
+.res button:hover, .res button:focus { background: var(--fill); }
+.res small { color: var(--muted); display: block; }
+.rel { position: relative; }
+
+.totais { display: grid; gap: 6px; }
+.totais div { display: flex; justify-content: space-between; }
+.totais .total { font-size: 1.25rem; font-weight: 700; border-top: 1px solid var(--border); padding-top: 8px; }
+
+.duas { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.versao { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 12px; display: grid; gap: 6px; font-size: .88rem; }
+.versao h3 { font-size: .95rem; }
+
+@media (max-width: 900px) { .g4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .duas, .g2 { grid-template-columns: 1fr; } }

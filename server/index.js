@@ -257,7 +257,17 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     condicionais.selarCondicionaisAntigos()
       .then((n) => { if (n) console.log(`Condicionais protegidos para não irem no próximo lançamento do sistema: ${n}.`); })
       .catch((err) => console.warn('Proteção dos condicionais:', err.message));
+    // A atualização do Clipp pode reescrever os triggers de reserva do pedido: avisa para conferir a O.S.
+    require('./os').conferirTriggersClipp()
+      .then((r) => { if (r.mudou) console.warn('Os triggers de pedido do Clipp mudaram desde a última verificação. Confira a reserva de estoque da O.S e do condicional.'); })
+      .catch((err) => console.warn('Triggers do Clipp:', err.message));
   }, 8000).unref();
+  // WhatsApp da O.S que ficou na fila por falta de internet: tenta de 2 em 2 minutos.
+  setInterval(() => {
+    require('./os').processarFilaWhatsapp()
+      .then((r) => { if (r.enviadas) console.log(`WhatsApp da O.S: ${r.enviadas} mensagem(ns) da fila enviada(s).`); })
+      .catch(() => { /* tenta de novo no próximo ciclo */ });
+  }, 120000).unref();
   setTimeout(() => {
     require('./importacao-gravar').corrigirTransportadoresNf()
       .then((n) => { if (n) console.log(`Transportador corrigido em ${n} nota(s) de compra importada(s).`); })
