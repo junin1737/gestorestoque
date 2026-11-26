@@ -2,8 +2,10 @@
 
 /**
  * Baixar aplicativo desktop (O.S). O serviço entrega o instalador que veio junto com ele.
- * /desktop/versao e /desktop/instalador são livres (o app se atualiza sem sessão), mas só na rede
- * da loja: pelo túnel (acesso de fora) não saem.
+ * Quem está logado baixa pelo acesso online ou pela rede da loja. O arquivo já sai com o
+ * endereço da loja, para o aplicativo falar com o servidor na rede local.
+ * /desktop/versao e /desktop/instalador continuam livres (o app se atualiza sem sessão) e só
+ * na rede da loja.
  */
 
 const fs = require('fs');
@@ -23,12 +25,16 @@ function soRedeLocal(req, res) {
   return false;
 }
 
-/** Endereço que os computadores da loja usam para falar com o serviço. */
+/** Endereço que os computadores da loja usam para falar com o serviço. Pelo túnel, o host é o
+ * domínio público; o instalador precisa do IP da loja. */
 function enderecoServidor(req) {
   const host = String(req.headers.host || '');
-  if (host && !/^(localhost|127\.)/i.test(host)) return host;
-  const porta = host.includes(':') ? host.split(':').pop() : String(require('./index').PORT || 5077);
+  const portaLocal = String(require('./index').PORT || 5077);
   const lan = require('./index').lanAddresses?.()[0]?.address;
+  if (viaTunel(req)) return lan ? `${lan}:${portaLocal}` : host;
+  const nome = host.split(':')[0];
+  if (nome && !/^(localhost|127\.)/i.test(nome)) return host;
+  const porta = host.includes(':') ? host.split(':').pop() : portaLocal;
   return lan ? `${lan}:${porta}` : host;
 }
 
@@ -46,12 +52,15 @@ function enviarInstalador(res, nome) {
 }
 
 router.get('/desktop/info', (req, res) => {
-  if (!soRedeLocal(req, res)) return;
-  res.json({ ok: true, ...desktop.info(ipDe(req)), servidor: enderecoServidor(req) });
+  res.json({
+    ok: true,
+    ...desktop.info(ipDe(req)),
+    servidor: enderecoServidor(req),
+    acesso: viaTunel(req) ? 'online' : 'local',
+  });
 });
 
 router.get('/desktop/baixar', (req, res) => {
-  if (!soRedeLocal(req, res)) return;
   enviarInstalador(res, desktop.nomeComServidor(enderecoServidor(req)));
 });
 

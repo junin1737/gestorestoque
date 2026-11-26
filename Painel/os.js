@@ -214,9 +214,12 @@ const Servicos = (() => {
     const situacao = inst
       ? `<p class="os-app-sit">Este computador já tem o aplicativo${inst.versao ? `, versão ${esc(inst.versao)}` : ''}.${r.atualizar ? ' <b>Há uma versão nova.</b>' : ''}</p>`
       : '';
+    const onde = r.acesso === 'online'
+      ? `O download funciona no acesso online. Instalado no computador da loja, o aplicativo fala com o servidor em ${esc(r.servidor || '')}.`
+      : `Roda nos computadores da loja e fala com este serviço pela rede (${esc(r.servidor || '')}).`;
     await janela(`<header><div><h2>Aplicativo desktop da O.S</h2><p>Versão ${esc(r.versao)}${data ? ` · ${esc(data)}` : ''} · ${esc(mb)} MB</p></div><span class="os-esp"></span><button type="button" class="ob ico sm" data-fechar="" aria-label="Fechar">${ic('x', 'p')}</button></header>
       <div class="corpo os-app-corpo">
-        <p>Roda nos computadores da loja e fala com este serviço pela rede (${esc(r.servidor || '')}). Se a internet cair, continua funcionando; se o servidor cair, entra em contingência e sincroniza depois.</p>
+        <p>${onde} Se a internet cair, continua funcionando; se o servidor cair, entra em contingência e sincroniza depois.</p>
         <ul class="os-app-lista"><li>O instalador já vem com o endereço do servidor.</li><li>Ícone no menu Iniciar e na área de trabalho.</li><li>Imprime direto na impressora escolhida, inclusive a de 80 mm.</li><li>Atualiza sozinho quando sair versão nova.</li></ul>
         ${situacao}
       </div>
