@@ -408,7 +408,7 @@ const Servicos = (() => {
     const status = modo === 'tudo'
       ? `<p>Mudar status</p>${st.dados.statuses.filter((s) => s.ativo).map((s) => `<button type="button" role="menuitem" data-st="${s.id}" class="${s.id === o.id_status ? 'on' : ''}" style="--h:${esc(s.cor)}"><span class="os-icost" style="width:24px;height:24px">${ic(s.icone, 'p')}</span>${esc(s.descricao)}</button>`).join('')}`
       : '';
-    const tecs = `<p>Técnico</p>${st.dados.tecnicos.map((t) => `<button type="button" role="menuitem" data-tec="${t.id}" class="${t.id === o.id_tecnico ? 'on' : ''}"><span class="os-av" style="width:22px;height:22px">${esc(t.iniciais)}</span>${esc(t.nome)}</button>`).join('') || '<p style="text-transform:none;font-weight:500">Nenhum técnico. Marque na aba Técnicos.</p>'}
+    const tecs = `<p>Técnico</p>${st.dados.tecnicos.map((t) => `<button type="button" role="menuitem" data-tec="${t.id}" class="${t.id === o.id_tecnico ? 'on' : ''}"><span class="os-av" style="width:22px;height:22px">${esc(t.iniciais)}</span>${esc(t.nome)}</button>`).join('') || '<p style="text-transform:none;font-weight:500">Nenhum técnico. Marque a função Técnico no cadastro de funcionários.</p>'}
       ${o.id_tecnico ? '<button type="button" role="menuitem" data-tec="0">Remover técnico</button>' : ''}`;
     m.innerHTML = status + tecs;
     document.body.appendChild(m);
@@ -1443,11 +1443,11 @@ const Servicos = (() => {
     const sup = !!usuario()?.supervisor;
     const lista = res.funcionarios || [];
     raizEl().innerHTML = `<div class="os">${abasHtml()}<section class="os-grupo"><header><h2>Técnicos e gerentes</h2><span class="os-esp"></span>
-        <span class="os-legenda">${sup ? 'Técnico aparece para vincular na O.S. Gerente libera desconto acima do limite com a senha dele no Gestor.' : 'Só o supervisor altera estas marcações.'}</span></header>
+        <span class="os-legenda">${sup ? 'Técnico vem da função Técnico no cadastro de funcionários. Gerente libera desconto acima do limite com a senha dele no Gestor.' : 'Técnico vem do cadastro de funcionários. Só o supervisor marca gerente.'}</span></header>
       <div class="corpo"><div class="os-tabela-wrap"><table class="os-tabela"><thead><tr><th>Funcionário</th><th>Celular (aviso do WhatsApp)</th><th class="n">Técnico</th><th class="n">Gerente</th></tr></thead><tbody>
       ${lista.map((f) => `<tr><td><span class="os-linha"><span class="os-av" style="cursor:default">${esc(f.iniciais)}</span>${esc(f.nome)}</span></td>
         <td>${f.celular ? esc(fmtFone(f.celular)) : '<span class="os-legenda" style="color:var(--warn)">sem celular no cadastro</span>'}</td>
-        <td class="n"><button type="button" class="os-chave${f.tecnico ? ' on' : ''}" data-func="${f.id}" data-campo="tecnico" ${sup ? '' : 'disabled'} aria-label="Técnico ${esc(f.nome)}" aria-pressed="${f.tecnico}"></button></td>
+        <td class="n"><button type="button" class="os-chave${f.tecnico ? ' on' : ''}" disabled title="Função Técnico no cadastro de funcionários" aria-label="Técnico ${esc(f.nome)}" aria-pressed="${f.tecnico}"></button></td>
         <td class="n"><button type="button" class="os-chave${f.gerente ? ' on' : ''}" data-func="${f.id}" data-campo="gerente" ${sup ? '' : 'disabled'} aria-label="Gerente ${esc(f.nome)}" aria-pressed="${f.gerente}"></button></td></tr>`).join('')
         || `<tr class="vazia"><td colspan="4">${res.ok ? 'Nenhum funcionário ativo.' : esc(res.error)}</td></tr>`}
       </tbody></table></div></div></section></div>`;

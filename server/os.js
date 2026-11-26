@@ -10,7 +10,8 @@
  * - GESTOR_OS_STATUS: colunas do quadro (ícone e cor de lista pronta, ordem, ativo, final).
  * - GESTOR_OS_HISTORICO: troca de status, técnico, envio para a venda e liberação de desconto.
  * - GESTOR_OS_SOLUCAO: base de soluções da lâmpada. GESTOR_OS_MENSAGEM: mensagens do WhatsApp.
- * - GESTOR_OS_FUNC: quem é técnico e quem é gerente (libera desconto acima do limite).
+ * - GESTOR_OS_FUNC: quem é gerente (libera desconto acima do limite). Técnico vem da função
+ *   Técnico do cadastro (TB_FUNC_PAPEL / TB_FUNC_PAPEL_TIPO_SIS), não desta tabela.
  * - GESTOR_OS_CATEGORIA: categorias (ID_PAI vazio) e subcategorias (ID_PAI preenchido).
  * - GESTOR_PEDIDO_ORIGEM: marca o pedido de venda gravado pela O.S, para o Condicional não listar.
  *
@@ -381,9 +382,23 @@ function foneFuncionario(r) {
   return cel.length >= 10 ? cel : `${ddd}${cel}`;
 }
 
+/** Id do papel no cadastro de funcionários (Atendente, Vendedor, Técnico, ...). */
+async function idPapel(db, nome) {
+  if (!(await columnExists(db, 'TB_FUNC_PAPEL', 'ID_PAPEL'))) return null;
+  if (!(await columnExists(db, 'TB_FUNC_PAPEL_TIPO_SIS', 'DESCRICAO'))) return null;
+  const rows = await query(db, 'SELECT ID_PAPEL, DESCRICAO FROM TB_FUNC_PAPEL_TIPO_SIS');
+  const alvo = semAcento(nome);
+  const hit = rows.find((r) => semAcento(r.DESCRICAO) === alvo);
+  return hit ? num(hit.ID_PAPEL) : null;
+}
+
 async function lerFuncionarios(db) {
+  const papelTecnico = await idPapel(db, 'Técnico');
+  const tecnicoSql = papelTecnico
+    ? `(SELECT FIRST 1 'S' FROM TB_FUNC_PAPEL P WHERE P.ID_FUNCIONARIO = F.ID_FUNCIONARIO AND P.ID_PAPEL = ${papelTecnico})`
+    : 'G.TECNICO';
   const rows = await query(db, `
-    SELECT F.ID_FUNCIONARIO, F.NOME, F.STATUS, F.DDD, F.CELULAR, G.TECNICO, G.GERENTE
+    SELECT F.ID_FUNCIONARIO, F.NOME, F.STATUS, F.DDD, F.CELULAR, G.GERENTE, ${tecnicoSql} AS TECNICO
     FROM TB_FUNCIONARIO F
     LEFT JOIN GESTOR_OS_FUNC G ON G.ID_FUNCIONARIO = F.ID_FUNCIONARIO
     WHERE (F.STATUS = 'A' OR F.STATUS IS NULL) AND F.ID_FUNCIONARIO <> 0
@@ -1392,7 +1407,7 @@ async function salvar(body, usuario, opcoes = {}) {
       entrada.id_status = atual?.id_status || [...porId.values()].filter((s) => s.ativo)[0]?.id;
     }
     if (entrada.id_tecnico && !funcs.get(entrada.id_tecnico)?.tecnico && entrada.id_tecnico !== atual?.id_tecnico) {
-      throw new Error('Escolha um funcionário marcado como técnico.');
+      throw new Error('Escolha um funcionário com a função Técnico no cadastro.');
     }
     const enviada = !!atual?.id_pedido;
     if (enviada) {
@@ -1561,7 +1576,7 @@ async function vincularTecnico(id, idTecnico, usuario) {
     if (!os) throw new Error('O.S não encontrada.');
     const { funcs } = await mapasApoio(db);
     const novo = num(idTecnico) || null;
-    if (novo && !funcs.get(novo)?.tecnico) throw new Error('Escolha um funcionário marcado como técnico.');
+    if (novo && !funcs.get(novo)?.tecnico) throw new Error('Escolha um funcionário com a função Técnico no cadastro.');
     if (novo === os.id_tecnico) return { id: os.id, avisos: [] };
     await withTransaction(db, async (tx) => {
       await query(tx, 'UPDATE GESTOR_OS SET ID_TECNICO = ?, DT_ALTERACAO = CURRENT_TIMESTAMP WHERE ID_OS = ?', [novo, os.id]);
