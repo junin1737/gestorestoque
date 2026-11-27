@@ -427,13 +427,14 @@ async function salvar(body) {
     } else {
       id = await nextGenId(tx, 'GEN_TB_CLIENTE_ID', 'TB_CLIENTE', 'ID_CLIENTE');
       const marcaAtualizacao = await columnExists(tx, 'TB_CLIENTE', 'UPDATED_INTEGRADORA');
+      const hoje = sqlDate();
       await query(tx, `
         INSERT INTO TB_CLIENTE (
           ID_CLIENTE, NOME, STATUS, ID_TIPO, CONTATO, EMAIL_CONT, EMAIL_NFE,
           DDD_CELUL, FONE_CELUL, DDD_RESID, FONE_RESID, DDD_COMER, FONE_COMER,
           END_CEP, END_TIPO, END_LOGRAD, END_NUMERO, END_BAIRRO, END_COMPLE, ID_CIDADE,
           ID_PAIS, DT_CADASTRO${marcaAtualizacao ? ', UPDATED_INTEGRADORA' : ''}
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${sqlDate()}${marcaAtualizacao ? ', ${sqlDate()}' : ''})`, [
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${hoje}${marcaAtualizacao ? `, ${hoje}` : ''})`, [
         id, ...valores, PAIS_BRASIL,
       ]);
     }

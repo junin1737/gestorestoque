@@ -443,6 +443,17 @@ const Servicos = (() => {
     return Number(escolhido) || null;
   }
 
+  async function trocarEntregador() {
+    if (!st.os?.id) { msg('Grave a O.S antes de trocar quem entrega.'); return; }
+    const idc = await escolherColaborador('entrega');
+    if (!idc) return;
+    const res = await api(`/os/${st.os.id}/entregador`, { method: 'POST', body: { id_colaborador: idc } });
+    if (!res.ok) { msg(res.error || 'Não foi possível trocar quem entrega.'); return; }
+    avisar(res.avisos);
+    const det = await api(`/os/${st.os.id}`);
+    if (det.ok) { st.os = det.os; st.sujo = false; renderOs(); }
+  }
+
   async function escolherBusca() {
     const res = await api('/os/funcionarios');
     const lista = res.funcionarios || [];
@@ -513,11 +524,11 @@ const Servicos = (() => {
     const res = await api('/os/funcionarios');
     const lista = res.funcionarios || [];
     if (!lista.length) { msg('Nenhum funcionário ativo no cadastro.'); return null; }
-    const texto = $('#os-autorizacao')?.value.trim() || '';
-    return janela(`<header><div><h2>Autorização</h2><p>Quem falou com o cliente e o que foi autorizado.</p></div></header>
+    const texto = '';
+    return janela(`<header><div><h2>Autorização</h2><p>Quem falou com o cliente e o que foi combinado.</p></div></header>
       <div class="corpo">
         <div class="os-campo"><label for="aut-func">Funcionário que entrou em contato</label><select class="oc" id="aut-func">${lista.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div>
-        <div class="os-campo"><label for="aut-desc">Descrição da autorização</label><textarea class="oc" id="aut-desc" maxlength="2000" placeholder="Cliente autorizou a abertura do equipamento.">${esc(texto)}</textarea></div>
+        <div class="os-campo"><label for="aut-desc">Detalhes da autorização</label><textarea class="oc" id="aut-desc" maxlength="2000" style="min-height:110px" placeholder="Falei com o cliente por WhatsApp e me autorizou a abertura do equipamento.">${esc(texto)}</textarea></div>
         <label class="os-linha" style="padding:11px 13px;border-radius:12px;background:var(--os-fill)"><span>Enviar para a próxima etapa</span><span class="os-esp"></span><button type="button" class="os-chave on" id="aut-prox" aria-pressed="true" aria-label="Enviar para a próxima etapa"></button></label>
       </div>
       <footer><button type="button" class="ob" data-fechar="">Cancelar</button><button type="button" class="ob pri" id="aut-ok">Confirmar</button></footer>`, {
@@ -529,7 +540,7 @@ const Servicos = (() => {
         });
         const ok = () => {
           const descricao = $('#aut-desc', dlg).value.trim();
-          if (!descricao) { msg('Descreva a autorização. Ex.: Cliente autorizou a abertura do equipamento.'); $('#aut-desc', dlg).focus(); return; }
+          if (!descricao) { msg('Informe os detalhes da autorização. Ex.: Falei com o cliente por WhatsApp e me autorizou a abertura do equipamento.'); $('#aut-desc', dlg).focus(); return; }
           const sel = $('#aut-func', dlg);
           const funcionario = Number(sel.value) || null;
           if (!funcionario) { msg('Escolha quem entrou em contato.'); return; }
@@ -722,7 +733,9 @@ const Servicos = (() => {
         <div class="os-campo"><label for="os-entrega">Entrega</label><input class="oc" id="os-entrega" type="datetime-local" value="${esc((o.entrega || '').slice(0, 16))}" /></div>
         <div class="os-campo os-combo"><label for="os-cat">Categoria</label><div class="os-com-mais"><input class="oc" id="os-cat" autocomplete="off" placeholder="Ex.: Computador" value="${esc(o.categoria || '')}" /><button type="button" class="ob ico" id="os-cat-mais" title="Cadastrar categoria" aria-label="Cadastrar categoria">${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-cat-lista" hidden></div></div>
         <div class="os-campo os-combo"><label for="os-sub">Subcategoria</label><div class="os-com-mais"><input class="oc" id="os-sub" autocomplete="off" placeholder="Notebook, Desktop, All in One" value="${esc(o.subcategoria || '')}" ${o.id_categoria ? '' : 'disabled'} /><button type="button" class="ob ico" id="os-sub-mais" title="Cadastrar subcategoria" aria-label="Cadastrar subcategoria" ${o.id_categoria ? '' : 'disabled'}>${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-sub-lista" hidden></div></div>
-      </div></div></section>`;
+      </div>
+      ${tipoEtapa(s) === 'entregando' ? `<div class="os-campo" style="margin-top:12px"><label>Quem vai entregar</label><div class="os-linha" style="align-items:stretch"><input class="oc" value="${esc(o.entregador || 'Ninguém definido')}" disabled /><button type="button" class="ob" data-os-trocar-entrega ${tr || o.cancelada || o.importada ? 'disabled' : ''}>Trocar e avisar</button></div><p class="os-legenda" style="margin:6px 0 0">Se outro colaborador for levar, troque aqui. Ele recebe o aviso no WhatsApp.</p></div>` : ''}
+      </div></section>`;
     const c = o.cliente || {};
     const cli = `<section class="os-grupo"><header><h2>Cliente</h2><span class="os-esp"></span>${tr ? '' : `<button type="button" class="ob sm" data-os-cadcli>${ic('mais', 'p')}Cadastrar cliente</button>`}</header>
       <div class="corpo">
@@ -945,6 +958,7 @@ const Servicos = (() => {
       clearTimeout(tecTimer);
       aplicarTecnico(codTec.value);
     });
+    $('[data-os-trocar-entrega]', r)?.addEventListener('click', trocarEntregador);
     $$('#os-autor button', r).forEach((b) => b.addEventListener('click', async () => {
       const novo = b.dataset.autor || '';
       if (novo === 'P' && st.os.autor_status !== 'P') {
@@ -956,12 +970,23 @@ const Servicos = (() => {
         }
         st.os.autor_status = 'P';
         $$('#os-autor button', r).forEach((x) => x.classList.toggle('on', x === b));
+        const coluna = (st.statuses || []).find((s) => s.ativo && tipoEtapa(s) === 'autorizacao');
+        if (coluna && podeMoverPara(statusDe(st.os.id_status), coluna)) {
+          st.os.id_status = coluna.id;
+          const sel = $('#os-status', r);
+          if (sel && ![...sel.options].some((op) => op.value === String(coluna.id))) {
+            const opt = document.createElement('option');
+            opt.value = String(coluna.id);
+            opt.textContent = coluna.descricao;
+            sel.appendChild(opt);
+          }
+          if (sel) sel.value = String(coluna.id);
+        }
         marcarSujo();
-        const enviar = await confirmar('Enviar a solicitação para o cliente?', 'A mensagem sai pelo WhatsApp da loja, com a autorização pendente.', { sim: 'Enviar', nao: 'Agora não', icone: 'whats' });
-        if (!enviar) return;
+        const enviar = await confirmar('Enviar a solicitação para o cliente?', 'A O.S vai para Aguardando Autorização. A mensagem sai pelo WhatsApp da loja.', { sim: 'Enviar', nao: 'Agora não', icone: 'whats' });
         const id = await gravar({ ficar: true });
         if (!id) return;
-        await janelaWhats(id, 'autorizacao');
+        if (enviar) await janelaWhats(id, 'autorizacao');
         irPara('quadro');
         return;
       }
@@ -969,7 +994,8 @@ const Servicos = (() => {
         const pedido = await pedirAutorizacao();
         if (!pedido) return;
         st.os.autor_status = 'A';
-        st.os.autorizacao = pedido.descricao;
+        const proposta = ($('#os-autorizacao')?.value || '').trim();
+        st.os.autorizacao = proposta && proposta !== pedido.descricao ? `${proposta}\n${pedido.descricao}` : pedido.descricao;
         st.os.id_autor_contato = pedido.funcionario;
         st.os.autor_contato = pedido.nome || '';
         if ($('#os-autorizacao')) $('#os-autorizacao').value = pedido.descricao;

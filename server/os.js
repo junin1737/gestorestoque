@@ -1707,6 +1707,7 @@ async function salvar(body, usuario, opcoes = {}) {
     }
     if (resultado.colaborador) {
       avisos.push(...await avisarColaborador(db, resultado.codigo, resultado.colaborador.id, resultado.papel, usuario));
+      if (resultado.papel === 'entrega') avisos.push(...await avisarClienteEntrega(db, resultado.codigo, resultado.colaborador.nome, usuario));
     }
     return { id: resultado.codigo, avisos };
   });
@@ -1720,6 +1721,45 @@ async function gravarColaborador(tx, idOs, papel, idFunc, usuario, funcs) {
   await query(tx, `UPDATE GESTOR_OS SET ${coluna} = ? WHERE ID_OS = ?`, [f.id, idOs]);
   await historico(tx, idOs, usuario, `${f.nome} vai ${papel === 'busca' ? 'buscar no cliente' : 'entregar'}`);
   return f;
+}
+
+/** Avisa o cliente quando o equipamento sai para entrega. */
+async function avisarClienteEntrega(db, idOs, nomeEntregador, usuario) {
+  const os = await lerOs(db, idOs);
+  if (!os) return [];
+  const fone = soDigitos(os.cliente?.telefone || '');
+  if (fone.length < 10) return ['O cliente não tem celular no cadastro. O aviso de entrega não foi enviado.'];
+  const quem = txt(nomeEntregador);
+  const textoMsg = `O.S ${os.id}${os.cliente?.nome ? ` — ${os.cliente.nome}` : ''}. Seu equipamento${os.equipamento ? ` (${os.equipamento})` : ''} está saindo para entrega${quem ? ` com ${quem}` : ''}.`;
+  const rotulo = 'Aviso de entrega enviado no WhatsApp para o cliente';
+  try {
+    const r = await enviarOuEnfileirar({ numero: fone, texto: textoMsg, idOs: os.id, rotulo, usuario });
+    if (r.enfileirada) return ['Sem internet agora: o aviso de entrega para o cliente vai sair quando a conexão voltar.'];
+    await historico(db, os.id, usuario, rotulo);
+    return ['Aviso de entrega enviado no WhatsApp para o cliente.'];
+  } catch (err) {
+    return [`O aviso de entrega para o cliente não saiu: ${err.message}`];
+  }
+}
+
+/** Troca quem entrega sem mudar a etapa, e avisa o novo colaborador. */
+async function trocarEntregador(id, idFunc, usuario) {
+  return comBase(async (db) => {
+    const os = await lerOs(db, id);
+    if (!os) throw new Error('O.S não encontrada.');
+    if (os.cancelada) throw new Error('O.S cancelada não pode ser editada.');
+    if (os.importada) throw new Error('O.S importada não pode ser editada.');
+    if (papelStatus(os.status?.descricao) !== 'entrega') throw new Error('A troca de quem entrega só vale na etapa de entrega.');
+    const { funcs } = await mapasApoio(db);
+    const novo = num(idFunc);
+    if (!funcs.get(novo)) throw new Error('Escolha quem vai entregar.');
+    if (novo === os.id_entregador) return { id: os.id, avisos: [] };
+    await withTransaction(db, async (tx) => {
+      await gravarColaborador(tx, os.id, 'entrega', novo, usuario, funcs);
+    });
+    const avisos = await avisarColaborador(db, os.id, novo, 'entrega', usuario);
+    return { id: os.id, avisos };
+  });
 }
 
 /** Avisa no WhatsApp o colaborador escolhido para buscar ou entregar. */
@@ -1781,7 +1821,10 @@ async function mudarStatus(id, idStatus, usuario, extra) {
     if (novo.final && os.solucao) {
       try { await registrarSolucao(db, os); } catch (err) { avisos.push(`A solução não entrou na base: ${err.message}`); }
     }
-    if (colaborador) avisos.push(...await avisarColaborador(db, os.id, colaborador.id, papel, usuario));
+    if (colaborador) {
+      avisos.push(...await avisarColaborador(db, os.id, colaborador.id, papel, usuario));
+      if (papel === 'entrega') avisos.push(...await avisarClienteEntrega(db, os.id, colaborador.nome, usuario));
+    }
     return { id: os.id, avisos, final: novo.final, enviada: !!os.id_pedido };
   });
 }
@@ -2230,6 +2273,7 @@ module.exports = {
   detalhe,
   salvar,
   mudarStatus,
+  trocarEntregador,
   reordenar,
   vincularTecnico,
   enviarParaVenda,

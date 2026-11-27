@@ -103,6 +103,7 @@ router.post('/os/:id/status', rota((req) => os.mudarStatus(req.params.id, req.bo
   na_empresa: req.body?.na_empresa,
 })));
 router.post('/os/:id/tecnico', rota((req) => os.vincularTecnico(req.params.id, req.body?.id_tecnico, usuario(req))));
+router.post('/os/:id/entregador', rota((req) => os.trocarEntregador(req.params.id, req.body?.id_colaborador, usuario(req))));
 router.post('/os/:id/enviar-venda', rota((req) => os.enviarParaVenda(req.params.id, usuario(req))));
 router.post('/os/:id/cancelar', rota((req) => os.cancelar(req.params.id, usuario(req))));
 router.post('/os/:id/whatsapp', rota((req) => os.enviarWhatsapp(req.params.id, req.body || {}, usuario(req))));
