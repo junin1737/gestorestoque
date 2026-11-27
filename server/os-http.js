@@ -55,11 +55,11 @@ router.post('/os/solucoes', rota((req) => os.salvarSolucao(req.body?.id, req.bod
 router.post('/os/solucoes/:id/usar', rota((req) => os.usarSolucao(req.params.id)));
 router.delete('/os/solucoes/:id', rota((req) => os.excluirSolucao(req.params.id)));
 router.get('/os/clientes', rota((req) => os.buscarClientes(req.query.q)));
-router.get('/os/categorias', rota((req) => os.buscarCategorias(req.query.q)));
+router.get('/os/categorias', rota((req) => os.buscarCategorias(req.query.q, req.query.pai)));
 router.post('/os/categorias', rota((req) => os.cadastrarCategoria(req.body)));
 router.get('/os/clientes/:id', rota((req) => os.clienteResumo(req.params.id)));
 router.get('/os/cnpj/:cnpj', rota(async (req) => ({ empresa: await os.consultarCnpj(req.params.cnpj) })));
-router.get('/os/itens', rota((req) => os.buscarItens(req.query.q, req.query.aba)));
+router.get('/os/itens', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, rota((req) => os.buscarItens(req.query.q, req.query.aba)));
 router.get('/os/config', rota(() => ({ limites: os.lerLimites(), perfil: os.perfilServicos() })));
 router.post('/os/config', rota((req) => {
   if (!req.usuario?.supervisor) throw new Error('Só o supervisor altera os limites de desconto.');
@@ -97,7 +97,7 @@ router.post('/os', rota((req) => os.salvar(req.body, usuario(req))));
 router.post('/os/ordem', rota((req) => os.reordenar(req.body?.id_status, req.body?.ids)));
 router.get('/os/:id', rota((req) => os.detalhe(req.params.id)));
 router.post('/os/:id', rota((req) => os.salvar({ ...req.body, id: req.params.id }, usuario(req))));
-router.post('/os/:id/status', rota((req) => os.mudarStatus(req.params.id, req.body?.id_status, usuario(req))));
+router.post('/os/:id/status', rota((req) => os.mudarStatus(req.params.id, req.body?.id_status, usuario(req), req.body?.id_colaborador)));
 router.post('/os/:id/tecnico', rota((req) => os.vincularTecnico(req.params.id, req.body?.id_tecnico, usuario(req))));
 router.post('/os/:id/enviar-venda', rota((req) => os.enviarParaVenda(req.params.id, usuario(req))));
 router.post('/os/:id/whatsapp', rota((req) => os.enviarWhatsapp(req.params.id, req.body || {}, usuario(req))));
@@ -109,9 +109,14 @@ router.get('/os/:id/whatsapp', rota(async (req) => {
 router.get('/os/:id/impressao', async (req, res) => {
   try {
     const doc = await os.impressao(req.params.id);
-    let loja = { nome: '', endereco: '', telefone: '' };
+    let loja = { nome: '', endereco: '', telefone: '', logo: '' };
     try {
       loja = await require('./condicionais').lojaEmitente();
+      const { withDb, query, blobToDataUrl } = require('./db');
+      loja.logo = await withDb(async (db) => {
+        const rows = await query(db, 'SELECT FIRST 1 LOGO FROM TB_EMITENTE');
+        return (await blobToDataUrl(rows[0]?.LOGO)) || '';
+      });
     } catch { /* imprime sem o cabeçalho da loja */ }
     const formato = String(req.query.formato || 'a4').toLowerCase();
     const modelo = String(req.query.modelo || 'abertura').toLowerCase();

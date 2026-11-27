@@ -378,10 +378,42 @@ const Servicos = (() => {
     $$('[data-os-menu]', r).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); menuCard(Number(b.dataset.osMenu), b, 'tudo'); }));
   }
 
+  function papelStatus(descricao) {
+    const n = String(descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (n.includes('buscar')) return 'busca';
+    if (n.includes('entreg') && !n.includes('conclu')) return 'entrega';
+    return '';
+  }
+
+  async function escolherColaborador(papel) {
+    const res = await api('/os/funcionarios');
+    const lista = res.funcionarios || [];
+    if (!lista.length) { msg('Nenhum funcionário ativo no cadastro.'); return null; }
+    const titulo = papel === 'busca' ? 'Quem vai buscar?' : 'Quem vai entregar?';
+    const texto = papel === 'busca'
+      ? 'Essa pessoa é avisada no WhatsApp para buscar o equipamento no cliente.'
+      : 'Essa pessoa é avisada no WhatsApp para entregar o equipamento.';
+    const escolhido = await janela(`<header><div><h2>${titulo}</h2><p>${texto}</p></div><span class="os-esp"></span><button type="button" class="ob ico sm" data-fechar="" aria-label="Fechar">${ic('x', 'p')}</button></header>
+      <div class="corpo"><div class="os-campo"><label for="os-colab">Colaborador</label><select class="oc" id="os-colab">${lista.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div></div>
+      <footer><button type="button" class="ob" data-fechar="">Cancelar</button><button type="button" class="ob pri" id="colab-ok">Confirmar</button></footer>`, {
+      aoAbrir: (dlg, fechar) => {
+        $('#colab-ok', dlg).addEventListener('click', () => fechar(Number($('#os-colab', dlg).value) || null));
+      },
+    });
+    return Number(escolhido) || null;
+  }
+
   async function moverCard(id, idStatus, ids) {
     const atual = st.dados.os.find((o) => o.id === id);
     if (atual && atual.id_status !== idStatus) {
-      const res = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: idStatus } });
+      const destino = (st.dados.statuses || st.statuses || []).find((s) => s.id === idStatus);
+      const papel = papelStatus(destino?.descricao);
+      let idColab = null;
+      if (papel) {
+        idColab = await escolherColaborador(papel);
+        if (!idColab) return carregarQuadro();
+      }
+      const res = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: idStatus, id_colaborador: idColab } });
       if (!res.ok) { msg(res.error || 'Não foi possível mudar o status.'); return carregarQuadro(); }
       avisar(res.avisos);
       await api('/os/ordem', { method: 'POST', body: { id_status: idStatus, ids } });
@@ -460,6 +492,8 @@ const Servicos = (() => {
       subcategoria: '',
       equipamento: '',
       defeito: '',
+      autorizacao: '',
+      autor_status: '',
       solucao: '',
       obs: '',
       previsao: '',
@@ -533,7 +567,8 @@ const Servicos = (() => {
         <div class="os-campo"><label for="os-quem">Quem trouxe o equipamento</label><input class="oc" id="os-quem" maxlength="100" value="${esc(o.quem_trouxe)}" /></div>
         <div class="os-campo"><label for="os-previsao">Previsão</label><input class="oc" id="os-previsao" type="date" value="${esc(o.previsao || '')}" /></div>
         <div class="os-campo"><label for="os-entrega">Entrega</label><input class="oc" id="os-entrega" type="datetime-local" value="${esc((o.entrega || '').slice(0, 16))}" /></div>
-        <div class="os-campo os-combo"><label for="os-cat">Categoria</label><div class="os-com-mais"><input class="oc" id="os-cat" autocomplete="off" placeholder="Buscar categoria ou subcategoria" value="${esc(rotuloCategoria(o))}" /><button type="button" class="ob ico" id="os-cat-mais" title="Cadastrar categoria" aria-label="Cadastrar categoria">${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-cat-lista" hidden></div></div>
+        <div class="os-campo os-combo"><label for="os-cat">Categoria</label><div class="os-com-mais"><input class="oc" id="os-cat" autocomplete="off" placeholder="Ex.: Computador" value="${esc(o.categoria || '')}" /><button type="button" class="ob ico" id="os-cat-mais" title="Cadastrar categoria" aria-label="Cadastrar categoria">${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-cat-lista" hidden></div></div>
+        <div class="os-campo os-combo"><label for="os-sub">Subcategoria</label><div class="os-com-mais"><input class="oc" id="os-sub" autocomplete="off" placeholder="Notebook, Desktop, All in One" value="${esc(o.subcategoria || '')}" ${o.id_categoria ? '' : 'disabled'} /><button type="button" class="ob ico" id="os-sub-mais" title="Cadastrar subcategoria" aria-label="Cadastrar subcategoria" ${o.id_categoria ? '' : 'disabled'}>${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-sub-lista" hidden></div></div>
       </div></div></section>`;
     const c = o.cliente || {};
     const cli = `<section class="os-grupo"><header><h2>Cliente</h2><span class="os-esp"></span>${tr ? '' : `<button type="button" class="ob sm" data-os-cadcli>${ic('mais', 'p')}Cadastrar cliente</button>`}</header>
@@ -549,9 +584,15 @@ const Servicos = (() => {
       </div></section>`;
     const eq = `<section class="os-grupo"><header><h2>Equipamento e defeito</h2></header><div class="corpo">
         <div class="os-campo"><label for="os-equip">Equipamento</label><input class="oc" id="os-equip" maxlength="300" value="${esc(o.equipamento)}" placeholder="Marca, modelo, cor e acessórios que vieram junto" /></div>
-        <div class="os-campo"><label for="os-defeito">Defeito apresentado</label><div class="os-linha" style="align-items:flex-start">
-          <textarea class="oc" id="os-defeito" maxlength="2000" style="flex:1">${esc(o.defeito)}</textarea>
-          <button type="button" class="os-lamp" data-os-lamp title="Sugerir soluções de defeitos parecidos" aria-label="Sugerir soluções">${ic('lampada', 'g')}</button></div></div>
+        <div class="os-g2">
+          <div class="os-campo"><label for="os-defeito">Defeito apresentado</label><div class="os-linha" style="align-items:flex-start">
+            <textarea class="oc" id="os-defeito" maxlength="2000" style="flex:1">${esc(o.defeito)}</textarea>
+            <button type="button" class="os-lamp" data-os-lamp title="Sugerir soluções de defeitos parecidos" aria-label="Sugerir soluções">${ic('lampada', 'g')}</button></div></div>
+          <div class="os-campo"><label for="os-autorizacao">Autorização solicitada</label>
+            <textarea class="oc" id="os-autorizacao" maxlength="2000" placeholder="O que será proposto para o cliente autorizar">${esc(o.autorizacao || '')}</textarea>
+            <div class="os-seg" id="os-autor" style="margin-top:8px">${[['','Sem status'],['P','Pendente'],['A','Autorizada'],['N','Recusada']].map(([v, n]) => `<button type="button" data-autor="${v}" class="${(o.autor_status || '') === v ? 'on' : ''}">${n}</button>`).join('')}</div>
+          </div>
+        </div>
         <div class="os-campo"><label for="os-solucao">Solução</label><textarea class="oc" id="os-solucao" maxlength="2000" placeholder="O que foi feito para resolver o problema">${esc(o.solucao)}</textarea></div>
         <div class="os-campo"><label for="os-obs">Observações</label><textarea class="oc" id="os-obs" maxlength="1000" style="min-height:52px">${esc(o.obs)}</textarea></div>
       </div></section>`;
@@ -627,8 +668,9 @@ const Servicos = (() => {
       <div class="os-acoes-lat">
         <button type="button" class="ob pri" data-os-gravar ${st.gravando ? 'disabled' : ''}>${st.gravando ? 'Gravando…' : 'Gravar O.S'}</button>
         <button type="button" class="ob" data-os-imprimir ${o.id ? '' : 'disabled'}>${ic('impressora', 'p')}Imprimir</button>
+        <button type="button" class="ob" data-os-hist ${o.id ? '' : 'disabled'}>${ic('impressora', 'p')}Imprimir histórico</button>
         <button type="button" class="ob" data-os-whats ${o.id ? '' : 'disabled'}>${ic('whats', 'p')}WhatsApp</button>
-        ${tr ? '' : `<button type="button" class="ob largo" data-os-venda ${o.id && o.itens.length ? '' : 'disabled'} title="Grava como pedido para a Venda Gerencial do Clipp importar">${ic('venda', 'p')}Enviar para a venda</button>`}
+        ${tr ? '' : `<button type="button" class="ob largo" data-os-venda ${o.id && o.itens.length ? '' : 'disabled'} title="Grava o pedido para o Clipp concluir a venda">${ic('venda', 'p')}Concluir serviço</button>`}
       </div>
       ${o.id ? `<section class="os-grupo"><header><h2>Histórico</h2></header><div class="corpo"><div class="os-hist">${hist || '<span class="os-legenda">Sem registros</span>'}</div></div></section>` : ''}`;
     ligarLateral();
@@ -648,6 +690,7 @@ const Servicos = (() => {
     o.entrega = $('#os-entrega').value;
     o.equipamento = $('#os-equip').value.trim();
     o.defeito = $('#os-defeito').value.trim();
+    o.autorizacao = $('#os-autorizacao')?.value.trim() || '';
     o.solucao = $('#os-solucao').value.trim();
     o.obs = $('#os-obs').value.trim();
   }
@@ -664,13 +707,27 @@ const Servicos = (() => {
       $$(`[data-seg="${b.dataset.seg}"]`, r).forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
       marcarSujo();
     }));
-    $$('#os-status, #os-tecnico, #os-quem, #os-previsao, #os-entrega, #os-equip, #os-defeito, #os-solucao, #os-obs', r)
-      .forEach((el) => el.addEventListener('input', marcarSujo));
-    $('#os-status', r).addEventListener('change', () => {
-      st.os.id_status = Number($('#os-status').value);
+    $$('#os-status, #os-tecnico, #os-quem, #os-previsao, #os-entrega, #os-equip, #os-defeito, #os-autorizacao, #os-solucao, #os-obs', r)
+      .forEach((el) => el?.addEventListener('input', marcarSujo));
+    $$('#os-autor button', r).forEach((b) => b.addEventListener('click', () => {
+      st.os.autor_status = b.dataset.autor || '';
+      $$('#os-autor button', r).forEach((x) => x.classList.toggle('on', x === b));
+      marcarSujo();
+    }));
+    $('#os-status', r).addEventListener('change', async () => {
+      const anterior = st.os.id_status;
+      const novoId = Number($('#os-status').value);
+      const papel = papelStatus(statusDe(novoId)?.descricao);
+      if (papel && novoId !== anterior) {
+        const idc = await escolherColaborador(papel);
+        if (!idc) { $('#os-status').value = String(anterior || ''); return; }
+        st.os.id_colaborador_pendente = idc;
+      }
+      st.os.id_status = novoId;
       const cab = $('.os-cab-os', r);
       cab.querySelector('.os-pill')?.remove();
       cab.insertAdjacentHTML('beforeend', pillHtml(statusDe(st.os.id_status)));
+      marcarSujo();
     });
     $('[data-os-lamp]', r).addEventListener('click', abrirLampada);
     $('[data-os-cadcli]', r)?.addEventListener('click', cadastroRapido);
@@ -679,96 +736,130 @@ const Servicos = (() => {
     ligarItens();
   }
 
-  function rotuloCategoria(o) {
-    if (!o?.categoria) return '';
-    return o.subcategoria ? `${o.categoria} › ${o.subcategoria}` : o.categoria;
-  }
-
-  function aplicarCategoria(item) {
-    const o = st.os;
-    o.id_categoria = item?.id_categoria || null;
-    o.id_subcategoria = item?.id_subcategoria || null;
-    o.categoria = item?.categoria || '';
-    o.subcategoria = item?.subcategoria || '';
-    const campo = $('#os-cat');
-    if (campo) campo.value = rotuloCategoria(o);
-    marcarSujo();
-  }
-
-  function ligarCategoria() {
-    const campo = $('#os-cat');
-    const lista = $('#os-cat-lista');
-    const mais = $('#os-cat-mais');
+  function ligarCombo({ campo, lista, mais, atual, url, aoEscolher, aoLimpar, cadastrar, vazio }) {
     if (!campo || !lista) return;
     let timer = 0;
     let itens = [];
     let sel = -1;
     const pintar = () => {
       lista.innerHTML = itens.map((c, i) => `<button type="button" data-i="${i}" class="${i === sel ? 'sel' : ''}">${esc(c.nome)}<small>${esc(c.detalhe)}</small></button>`).join('')
-        || '<div class="os-legenda" style="padding:8px 10px">Nenhuma categoria encontrada. Use o + para cadastrar.</div>';
+        || `<div class="os-legenda" style="padding:8px 10px">${vazio}</div>`;
       lista.hidden = false;
     };
     const buscar = async (q) => {
-      const res = await api(`/os/categorias?q=${encodeURIComponent(q)}`);
+      const res = await api(url(q));
       itens = res.categorias || [];
       sel = itens.length ? 0 : -1;
       pintar();
     };
-    const escolher = (item) => {
-      lista.hidden = true;
-      aplicarCategoria(item);
-    };
-    campo.addEventListener('focus', () => { buscar(campo.value.trim() === rotuloCategoria(st.os) ? '' : campo.value.trim()); });
+    campo.addEventListener('focus', () => { if (!campo.disabled) buscar(campo.value.trim() === atual() ? '' : campo.value.trim()); });
     campo.addEventListener('input', () => {
       clearTimeout(timer);
-      const q = campo.value.trim();
-      if (!q) aplicarCategoria(null);
-      timer = setTimeout(() => buscar(q === rotuloCategoria(st.os) ? '' : q), 200);
+      if (!campo.value.trim()) aoLimpar();
+      timer = setTimeout(() => buscar(campo.value.trim() === atual() ? '' : campo.value.trim()), 200);
     });
     campo.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') { lista.hidden = true; return; }
       if (lista.hidden) return;
       if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(itens.length - 1, sel + 1); pintar(); }
       if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); pintar(); }
-      if (e.key === 'Enter' && itens[sel]) { e.preventDefault(); escolher(itens[sel]); }
+      if (e.key === 'Enter' && itens[sel]) { e.preventDefault(); lista.hidden = true; aoEscolher(itens[sel]); }
     });
     lista.addEventListener('mousedown', (e) => {
       const b = e.target.closest('[data-i]');
       if (!b) return;
       e.preventDefault();
-      escolher(itens[Number(b.dataset.i)]);
+      lista.hidden = true;
+      aoEscolher(itens[Number(b.dataset.i)]);
     });
     campo.addEventListener('blur', () => {
       setTimeout(() => { lista.hidden = true; }, 150);
-      if (!campo.value.trim()) aplicarCategoria(null);
-      else if (campo.value.trim() !== rotuloCategoria(st.os)) campo.value = rotuloCategoria(st.os);
+      if (!campo.value.trim()) aoLimpar();
+      else if (campo.value.trim() !== atual()) campo.value = atual();
     });
     mais?.addEventListener('mousedown', () => {
       const v = campo.value.trim();
-      campo.dataset.rascunho = v && v !== rotuloCategoria(st.os) ? v : '';
+      campo.dataset.rascunho = v && v !== atual() ? v : '';
     });
-    mais?.addEventListener('click', () => cadastrarCategoria(campo.dataset.rascunho || ''));
+    mais?.addEventListener('click', () => { if (!mais.disabled) cadastrar(campo.dataset.rascunho || ''); });
   }
 
-  async function cadastrarCategoria(rascunho) {
-    const partes = String(rascunho || '').split(/\s*›\s*/).map((s) => s.trim()).filter(Boolean);
-    const inicialCat = partes[0] || '';
-    const inicialSub = partes.slice(1).join(' › ');
-    const criado = await janela(`<header><div><h2>Cadastrar categoria</h2><p>A subcategoria é opcional. Se a categoria já existir, a subcategoria entra nela.</p></div><span class="os-esp"></span><button type="button" class="ob ico sm" data-fechar="" aria-label="Fechar">${ic('x', 'p')}</button></header>
+  function ligarCategoria() {
+    const sub = $('#os-sub');
+    const maisSub = $('#os-sub-mais');
+    const liberarSub = (ligado) => {
+      if (sub) sub.disabled = !ligado;
+      if (maisSub) maisSub.disabled = !ligado;
+    };
+    ligarCombo({
+      campo: $('#os-cat'),
+      lista: $('#os-cat-lista'),
+      mais: $('#os-cat-mais'),
+      atual: () => st.os.categoria || '',
+      url: (q) => `/os/categorias?q=${encodeURIComponent(q)}`,
+      vazio: 'Nenhuma categoria. Use o + para cadastrar.',
+      aoEscolher: (item) => {
+        st.os.id_categoria = item.id_categoria;
+        st.os.categoria = item.categoria;
+        st.os.id_subcategoria = null;
+        st.os.subcategoria = '';
+        const campo = $('#os-cat');
+        if (campo) campo.value = item.categoria;
+        if (sub) sub.value = '';
+        liberarSub(true);
+        marcarSujo();
+      },
+      aoLimpar: () => {
+        st.os.id_categoria = null;
+        st.os.categoria = '';
+        st.os.id_subcategoria = null;
+        st.os.subcategoria = '';
+        if (sub) sub.value = '';
+        liberarSub(false);
+        marcarSujo();
+      },
+      cadastrar: (rascunho) => cadastrarCategoria(rascunho, false),
+    });
+    ligarCombo({
+      campo: sub,
+      lista: $('#os-sub-lista'),
+      mais: maisSub,
+      atual: () => st.os.subcategoria || '',
+      url: (q) => `/os/categorias?pai=${encodeURIComponent(st.os.id_categoria || '')}&q=${encodeURIComponent(q)}`,
+      vazio: 'Nenhuma subcategoria nesta categoria. Use o + para cadastrar.',
+      aoEscolher: (item) => {
+        st.os.id_subcategoria = item.id_subcategoria;
+        st.os.subcategoria = item.subcategoria;
+        if (sub) sub.value = item.subcategoria;
+        marcarSujo();
+      },
+      aoLimpar: () => {
+        st.os.id_subcategoria = null;
+        st.os.subcategoria = '';
+        marcarSujo();
+      },
+      cadastrar: (rascunho) => cadastrarCategoria(rascunho, true),
+    });
+  }
+
+  async function cadastrarCategoria(rascunho, sub) {
+    if (sub && !st.os.id_categoria) { msg('Escolha a categoria antes da subcategoria.'); return; }
+    const criado = await janela(`<header><div><h2>${sub ? 'Cadastrar subcategoria' : 'Cadastrar categoria'}</h2><p>${sub ? `Entra em ${esc(st.os.categoria)}.` : 'Ex.: Computador. As subcategorias (Notebook, Desktop) entram depois, nesta categoria.'}</p></div><span class="os-esp"></span><button type="button" class="ob ico sm" data-fechar="" aria-label="Fechar">${ic('x', 'p')}</button></header>
       <div class="corpo">
-        <div class="os-campo"><label for="cat-nome">Categoria</label><input class="oc" id="cat-nome" maxlength="80" value="${esc(inicialCat)}" /></div>
-        <div class="os-campo"><label for="cat-sub">Subcategoria</label><input class="oc" id="cat-sub" maxlength="80" placeholder="Opcional" value="${esc(inicialSub)}" /></div>
+        <div class="os-campo"><label for="cat-nome">${sub ? 'Subcategoria' : 'Categoria'}</label><input class="oc" id="cat-nome" maxlength="80" value="${esc(rascunho || '')}" /></div>
         <div class="os-erro" id="cat-erro"></div>
       </div>
       <footer><button type="button" class="ob" data-fechar="">Cancelar</button><button type="button" class="ob pri" id="cat-ok">Cadastrar</button></footer>`, {
       aoAbrir: (dlg, fechar) => {
         const nome = $('#cat-nome', dlg);
-        const sub = $('#cat-sub', dlg);
         const erro = $('#cat-erro', dlg);
         nome.focus();
         const salvar = async () => {
           erro.textContent = '';
-          const res = await api('/os/categorias', { method: 'POST', body: { categoria: nome.value, subcategoria: sub.value } });
+          const body = sub
+            ? { categoria: st.os.categoria, subcategoria: nome.value }
+            : { categoria: nome.value };
+          const res = await api('/os/categorias', { method: 'POST', body });
           if (!res.ok) { erro.textContent = res.error || 'Não foi possível cadastrar.'; return; }
           fechar(res.categoria);
         };
@@ -776,7 +867,25 @@ const Servicos = (() => {
         dlg.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); salvar(); } });
       },
     });
-    if (criado && criado.id_categoria) aplicarCategoria(criado);
+    if (!criado?.id_categoria) return;
+    if (sub) {
+      st.os.id_subcategoria = criado.id_subcategoria;
+      st.os.subcategoria = criado.subcategoria;
+      const campo = $('#os-sub');
+      if (campo) campo.value = criado.subcategoria || '';
+    } else {
+      st.os.id_categoria = criado.id_categoria;
+      st.os.categoria = criado.categoria;
+      st.os.id_subcategoria = null;
+      st.os.subcategoria = '';
+      const campo = $('#os-cat');
+      if (campo) campo.value = criado.categoria || '';
+      const campoSub = $('#os-sub');
+      if (campoSub) { campoSub.value = ''; campoSub.disabled = false; }
+      const maisSub = $('#os-sub-mais');
+      if (maisSub) maisSub.disabled = false;
+    }
+    marcarSujo();
   }
 
   /* ---------- Cliente ---------- */
@@ -1039,17 +1148,26 @@ const Servicos = (() => {
           ($('#it-qtd', dlg) || $('#it-vlr', dlg)).select();
         };
         let timer = 0;
+        const consultar = async (mostrar) => {
+          const q = busca.value.trim();
+          if (!q || !dlg.isConnected) return;
+          const r = await api(`/os/itens?aba=${servico ? 'servicos' : 'produtos'}&q=${encodeURIComponent(q)}&_=${Date.now()}`);
+          if (!r.ok || !dlg.isConnected || busca.value.trim() !== q) return;
+          itens = r.itens || [];
+          if (sel >= itens.length) sel = itens.length ? 0 : -1;
+          if (itens.length && sel < 0) sel = 0;
+          if (mostrar || !res.hidden) pintar();
+        };
+        const noFoco = () => consultar(true);
+        const vivo = setInterval(() => consultar(false), 3000);
+        dlg.addEventListener('close', () => { clearInterval(vivo); window.removeEventListener('focus', noFoco); });
+        window.addEventListener('focus', noFoco);
         busca.addEventListener('input', () => {
           escolhido = null;
           clearTimeout(timer);
           const q = busca.value.trim();
           if (!q) { itens = []; res.hidden = true; return; }
-          timer = setTimeout(async () => {
-            const r = await api(`/os/itens?aba=${servico ? 'servicos' : 'produtos'}&q=${encodeURIComponent(q)}`);
-            itens = r.itens || [];
-            sel = itens.length ? 0 : -1;
-            pintar();
-          }, 260);
+          timer = setTimeout(() => consultar(true), 260);
         });
         busca.addEventListener('keydown', (e) => {
           if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(itens.length - 1, sel + 1); pintar(); }
@@ -1150,6 +1268,7 @@ const Servicos = (() => {
     const lat = $('#os-lateral');
     $('[data-os-gravar]', lat)?.addEventListener('click', gravar);
     $('[data-os-imprimir]', lat)?.addEventListener('click', () => janelaImprimir(st.os.id, statusDe(st.os.id_status)?.final ? 'fechamento' : 'abertura', { titulo: `Imprimir O.S ${st.os.id}`, semWhats: true }));
+    $('[data-os-hist]', lat)?.addEventListener('click', () => imprimir(st.os.id, 'a4', 'historico'));
     $('[data-os-whats]', lat)?.addEventListener('click', () => janelaWhats(st.os.id, statusDe(st.os.id_status)?.final ? 'fechamento' : 'abertura'));
     $('[data-os-venda]', lat)?.addEventListener('click', enviarVenda);
   }
@@ -1162,9 +1281,19 @@ const Servicos = (() => {
     if (!o.equipamento) { msg('Descreva o equipamento.'); $('#os-equip')?.focus(); return; }
     if (!o.defeito) { msg('Descreva o defeito apresentado.'); $('#os-defeito')?.focus(); return; }
     const catCampo = $('#os-cat');
-    if (catCampo && catCampo.value.trim() && catCampo.value.trim() !== rotuloCategoria(o)) {
+    if (catCampo && catCampo.value.trim() && catCampo.value.trim() !== (o.categoria || '')) {
       msg('Escolha a categoria na lista ou cadastre com +.');
       catCampo.focus();
+      return;
+    }
+    const subCampo = $('#os-sub');
+    if (subCampo && subCampo.value.trim() && subCampo.value.trim() !== (o.subcategoria || '')) {
+      msg('Escolha a subcategoria na lista ou cadastre com +.');
+      subCampo.focus();
+      return;
+    }
+    if (o.subcategoria && !o.id_categoria) {
+      msg('A subcategoria precisa de uma categoria.');
       return;
     }
     const eraNova = !o.id;
@@ -1173,8 +1302,8 @@ const Servicos = (() => {
     renderLateral();
     const body = {
       tipo: o.tipo, modalidade: o.modalidade, id_status: o.id_status, id_tecnico: o.id_tecnico, quem_trouxe: o.quem_trouxe,
-      equipamento: o.equipamento, defeito: o.defeito, solucao: o.solucao, obs: o.obs, previsao: o.previsao, entrega: o.entrega,
-      id_categoria: o.id_categoria, id_subcategoria: o.id_subcategoria,
+      equipamento: o.equipamento, defeito: o.defeito, autorizacao: o.autorizacao, autor_status: o.autor_status, solucao: o.solucao, obs: o.obs, previsao: o.previsao, entrega: o.entrega,
+      id_categoria: o.id_categoria, id_subcategoria: o.id_subcategoria, id_colaborador: o.id_colaborador_pendente || null,
       id_cliente: o.id_cliente, desc_geral: o.desc_geral, acres_geral: o.acres_geral, frete: o.frete, deslocamento: o.deslocamento,
       itens: o.itens.map((it) => ({ id_identificador: it.id_identificador, descricao: it.descricao, tipo: it.tipo, unidade: it.unidade, qtd: it.qtd, vlr_unit: it.vlr_unit, desc_item: it.desc_item, acres_item: it.acres_item })),
       liberacoes: st.liberacoes,
@@ -1188,9 +1317,40 @@ const Servicos = (() => {
     st.sujo = false;
     st.statusGravado = st.os.id_status;
     renderOs();
+    o.id_colaborador_pendente = null;
     const virouFinal = statusDe(st.os.id_status)?.final && statusAntes !== st.os.id_status;
+    const mudouStatus = !eraNova && statusAntes !== st.os.id_status;
     if (eraNova) await janelaImprimir(res.id, 'abertura', { titulo: `O.S ${res.id} gravada`, texto: 'Abertura registrada. Deseja imprimir ou enviar?' });
     else if (virouFinal) await perguntarFechamento(res.id, !!st.os.id_pedido);
+    if (!mudouStatus && !virouFinal) await perguntarProxima(res.id);
+  }
+
+  async function perguntarProxima(id) {
+    const ordem = [...(st.statuses || [])].filter((s) => s.ativo).sort((a, b) => a.ordem - b.ordem);
+    const atual = statusDe(st.os?.id_status);
+    const i = ordem.findIndex((s) => s.id === atual?.id);
+    const nomeAtual = String(atual?.descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (nomeAtual === 'finalizada' && !st.os?.id_pedido) {
+      const ok = await confirmar('Concluir serviço?', 'A O.S vira um pedido para o Clipp importar na venda. Os produtos ficam reservados e os itens não podem mais ser alterados.', { sim: 'Concluir serviço', nao: 'Agora não', icone: 'venda' });
+      if (ok) await enviarVenda(id, true);
+      return;
+    }
+    const prox = i >= 0 ? ordem[i + 1] : null;
+    if (!prox) return;
+    const ok = await confirmar('Enviar para a próxima etapa?', `Mover esta O.S para ${prox.descricao}.`, { sim: 'Enviar', nao: 'Ficar aqui' });
+    if (!ok) return;
+    const papel = papelStatus(prox.descricao);
+    let idColab = null;
+    if (papel) {
+      idColab = await escolherColaborador(papel);
+      if (!idColab) return;
+    }
+    const mov = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: prox.id, id_colaborador: idColab } });
+    if (!mov.ok) { msg(mov.error || 'Não foi possível mudar a etapa.'); return; }
+    avisar(mov.avisos);
+    const det = await api(`/os/${id}`);
+    if (det.ok) { st.os = det.os; st.statusGravado = det.os.id_status; renderOs(); }
+    if (mov.final) await perguntarFechamento(id, !!st.os.id_pedido);
   }
 
   async function janelaImprimir(id, modelo, { titulo, texto, semWhats, oferecerVenda } = {}) {
@@ -1198,10 +1358,10 @@ const Servicos = (() => {
     const fone = det.telefone || '';
     const escolha = await janela(`<header><span class="circ" style="background:color-mix(in srgb,var(--ok) 16%,transparent);color:var(--ok)">${ic('check')}</span><div><h2>${esc(titulo || `O.S ${id}`)}</h2><p>${esc(texto || 'Escolha o formato.')}</p></div></header>
       <div class="corpo">
-        <div class="os-campo"><span>Modelo</span><div class="os-seg" id="im-modelo"><button type="button" data-v="abertura" class="${modelo === 'abertura' ? 'on' : ''}">Abertura</button><button type="button" data-v="fechamento" class="${modelo === 'fechamento' ? 'on' : ''}">Fechamento</button></div></div>
+        <div class="os-campo"><span>Modelo</span><div class="os-seg" id="im-modelo"><button type="button" data-v="abertura" class="${modelo === 'abertura' ? 'on' : ''}">Abertura</button><button type="button" data-v="fechamento" class="${modelo === 'fechamento' ? 'on' : ''}">Fechamento</button><button type="button" data-v="historico" class="${modelo === 'historico' ? 'on' : ''}">Histórico</button></div></div>
         <div class="os-campo"><span>Formato</span><div class="os-seg" id="im-formato"><button type="button" data-v="a4">A4</button><button type="button" data-v="meia" class="on">Meia folha</button><button type="button" data-v="80">80 mm</button></div></div>
         ${semWhats ? '' : `<label class="os-linha" style="padding:11px 13px;border-radius:12px;background:var(--os-fill)">${ic('whats')}<span>Enviar para o WhatsApp do cliente${fone ? ` <b>${esc(fmtFone(fone))}</b>` : ''}</span><span class="os-esp"></span><button type="button" class="os-chave${fone ? ' on' : ''}" id="im-whats" aria-pressed="${!!fone}" aria-label="Enviar pelo WhatsApp"></button></label>`}
-        ${oferecerVenda ? `<label class="os-linha" style="padding:11px 13px;border-radius:12px;background:var(--os-fill)">${ic('venda')}<span>Enviar para a venda gerencial</span><span class="os-esp"></span><button type="button" class="os-chave on" id="im-venda" aria-pressed="true" aria-label="Enviar para a venda"></button></label>` : ''}
+        ${oferecerVenda ? `<label class="os-linha" style="padding:11px 13px;border-radius:12px;background:var(--os-fill)">${ic('venda')}<span>Concluir serviço</span><span class="os-esp"></span><button type="button" class="os-chave on" id="im-venda" aria-pressed="true" aria-label="Concluir serviço"></button></label>` : ''}
       </div>
       <footer><button type="button" class="ob" data-fechar="">Agora não</button><button type="button" class="ob pri" id="im-ok">${ic('impressora', 'p')}Continuar</button></footer>`, {
       aoAbrir: (dlg, fechar) => {
@@ -1254,18 +1414,20 @@ const Servicos = (() => {
     }
   }
 
-  async function enviarVenda(idParam) {
+  async function enviarVenda(idParam, jaConfirmado) {
     const id = Number(idParam) || st.os?.id;
     if (!id) return;
     if (st.view === 'os' && st.sujo) {
-      msg('Grave a O.S antes de enviar para a venda.');
+      msg('Grave a O.S antes de concluir o serviço.');
       return;
     }
-    const ok = await confirmar('Enviar para a venda gerencial?', 'A O.S vira um pedido para o Clipp importar na venda. Os produtos ficam reservados e os itens não podem mais ser alterados.', { sim: 'Enviar', nao: 'Cancelar', icone: 'venda' });
-    if (!ok) return;
+    if (!jaConfirmado) {
+      const ok = await confirmar('Concluir serviço?', 'A O.S vira um pedido para o Clipp importar na venda. Os produtos ficam reservados e os itens não podem mais ser alterados.', { sim: 'Concluir serviço', nao: 'Cancelar', icone: 'venda' });
+      if (!ok) return;
+    }
     const res = await api(`/os/${id}/enviar-venda`, { method: 'POST', body: {} });
-    if (!res.ok) { msg(res.error || 'Não foi possível enviar para a venda.'); return; }
-    msg(`O.S ${id} enviada para a venda gerencial (pedido ${res.id_pedido}).`);
+    if (!res.ok) { msg(res.error || 'Não foi possível concluir o serviço.'); return; }
+    msg(`Serviço da O.S ${id} concluído (pedido ${res.id_pedido}).`);
     if (st.view === 'os' && st.os?.id === id) {
       const d = await api(`/os/${id}`);
       if (d.ok) { st.os = d.os; renderOs(); }

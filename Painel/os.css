@@ -65,6 +65,7 @@ html[data-theme="escuro"] .os {
 .os-grupo > header h2 { margin: 0; font-size: .95rem; font-weight: 650; letter-spacing: -.01em; }
 .os-grupo > .corpo { padding: 12px 18px 18px; display: grid; gap: 12px; }
 .os-g2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+#os-defeito, #os-autorizacao { min-height: 96px; }
 .os-g4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 14px; }
 
 /* Status */

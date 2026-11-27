@@ -30,8 +30,9 @@ const NUM_STATUS_PADRAO = [
   { descricao: 'Aguardando Autorização', icone: 'pergunta', cor: '#d4a106' },
   { descricao: 'Aguardando Peças', icone: 'caixa', cor: '#f97316' },
   { descricao: 'Em Andamento', icone: 'chave', cor: '#0d9488' },
+  { descricao: 'Finalizada', icone: 'check', cor: '#22a35a' },
   { descricao: 'Entregando', icone: 'caminhao', cor: '#14b8a6' },
-  { descricao: 'Finalizada', icone: 'check', cor: '#22a35a', final: true },
+  { descricao: 'Concluído e Entregue', icone: 'estrela', cor: '#166534', final: true },
 ];
 const ICONES = ['pasta', 'carro', 'pergunta', 'caixa', 'chave', 'caminhao', 'check', 'relogio', 'cadeado', 'whats', 'monitor', 'tag', 'pessoa', 'ferramenta', 'alerta', 'estrela'];
 const CORES = ['#3b82f6', '#8b5cf6', '#d4a106', '#f97316', '#0d9488', '#14b8a6', '#22a35a', '#ec4899', '#ef4444', '#64748b'];
@@ -156,6 +157,10 @@ const TABELAS = {
       TOTAL_PRODUTOS NUMERIC(15,2),
       TOTAL_SERVICOS NUMERIC(15,2),
       TOTAL NUMERIC(15,2),
+      AUTORIZACAO VARCHAR(2000),
+      AUTOR_STATUS CHAR(1),
+      ID_BUSCADOR INTEGER,
+      ID_ENTREGADOR INTEGER,
       ID_PEDIDO INTEGER,
       DT_ENVIO TIMESTAMP,
       PERFIL VARCHAR(32),
@@ -274,6 +279,10 @@ async function ensureOsSchema(db) {
   if (tabelas.has('GESTOR_OS') || criou) {
     if (!(await columnExists(db, 'GESTOR_OS', 'ID_CATEGORIA'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_CATEGORIA INTEGER');
     if (!(await columnExists(db, 'GESTOR_OS', 'ID_SUBCATEGORIA'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_SUBCATEGORIA INTEGER');
+    if (!(await columnExists(db, 'GESTOR_OS', 'AUTORIZACAO'))) await query(db, 'ALTER TABLE GESTOR_OS ADD AUTORIZACAO VARCHAR(2000)');
+    if (!(await columnExists(db, 'GESTOR_OS', 'AUTOR_STATUS'))) await query(db, 'ALTER TABLE GESTOR_OS ADD AUTOR_STATUS CHAR(1)');
+    if (!(await columnExists(db, 'GESTOR_OS', 'ID_BUSCADOR'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_BUSCADOR INTEGER');
+    if (!(await columnExists(db, 'GESTOR_OS', 'ID_ENTREGADOR'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_ENTREGADOR INTEGER');
   }
   if (criou) await refreshTables(db);
   const st = await query(db, 'SELECT COUNT(*) AS N FROM GESTOR_OS_STATUS');
@@ -294,7 +303,53 @@ async function ensureOsSchema(db) {
       INSERT INTO GESTOR_OS_MENSAGEM (ID, TITULO, TEXTO, EVENTO, ATIVO)
       VALUES (?, ?, ?, 'atribuida', 'S')`, [id, 'O.S atribuída ao técnico', MENSAGEM_PADRAO]);
   }
+  await ajustarFluxoStatus(db);
   esquemaPronto = true;
+}
+
+/** Buscar pede quem busca. Entregar pede quem entrega. Concluído e Entregue não pede de novo. */
+function papelStatus(descricao) {
+  const n = semAcento(descricao);
+  if (n.includes('buscar')) return 'busca';
+  if (n.includes('entreg') && !n.includes('conclu')) return 'entrega';
+  return '';
+}
+
+function autorStatus(v) {
+  const s = String(v || '').trim().toUpperCase();
+  return s === 'P' || s === 'A' || s === 'N' ? s : '';
+}
+
+function rotuloAutor(v) {
+  return { P: 'Pendente', A: 'Autorizada', N: 'Recusada' }[autorStatus(v)] || '';
+}
+
+/** Deixa o quadro na ordem do atendimento e só Concluído e Entregue encerra a O.S. */
+async function ajustarFluxoStatus(db) {
+  let lista = await lerStatus(db);
+  const achar = (nome) => lista.find((s) => semAcento(s.descricao) === semAcento(nome));
+  if (!achar('Concluído e Entregue')) {
+    const id = await gerar(db, 'GESTOR_GEN_OS_STATUS');
+    await query(db, `
+      INSERT INTO GESTOR_OS_STATUS (ID_STATUS, DESCRICAO, ICONE, COR, ORDEM, ATIVO, FINAL)
+      VALUES (?, 'Concluído e Entregue', 'estrela', '#166534', 99, 'S', 'S')`, [id]);
+    lista = await lerStatus(db);
+  }
+  const pipeline = ['Aberta', 'Buscar no Cliente', 'Aguardando Autorização', 'Aguardando Peças', 'Em Andamento', 'Finalizada', 'Entregando', 'Concluído e Entregue'];
+  const idsPipe = new Set();
+  let ordem = 0;
+  for (const nome of pipeline) {
+    const s = achar(nome);
+    if (!s) continue;
+    ordem += 1;
+    idsPipe.add(s.id);
+    const final = semAcento(nome) === semAcento('Concluído e Entregue') ? 'S' : 'N';
+    await query(db, `UPDATE GESTOR_OS_STATUS SET ORDEM = ?, FINAL = ?, ATIVO = 'S' WHERE ID_STATUS = ?`, [ordem, final, s.id]);
+  }
+  for (const s of lista.filter((x) => !idsPipe.has(x.id)).sort((a, b) => a.ordem - b.ordem || a.id - b.id)) {
+    ordem += 1;
+    await query(db, 'UPDATE GESTOR_OS_STATUS SET ORDEM = ? WHERE ID_STATUS = ?', [ordem, s.id]);
+  }
 }
 
 async function gerar(db, gen) {
@@ -733,9 +788,10 @@ function montarCategoria(cat, sub) {
   };
 }
 
-/** Lista categorias e subcategorias que batem com o texto. Sem texto, devolve as primeiras. */
-async function buscarCategorias(q) {
+/** Sem pai, só categorias. Com pai, só as subcategorias daquela categoria. */
+async function buscarCategorias(q, pai) {
   const termo = semAcento(q);
+  const paiId = num(pai);
   return comBase(async (db) => {
     const rows = await query(db, `
       SELECT C.ID, C.ID_PAI, C.NOME, P.NOME AS PAI
@@ -745,11 +801,14 @@ async function buscarCategorias(q) {
       ORDER BY COALESCE(P.NOME, C.NOME), C.ID_PAI, C.NOME`);
     const itens = [];
     for (const r of rows) {
-      const pai = num(r.ID_PAI);
-      const cat = pai ? { ID: pai, NOME: r.PAI } : r;
-      const sub = pai ? r : null;
+      const idPai = num(r.ID_PAI);
+      if (paiId) {
+        if (idPai !== paiId) continue;
+      } else if (idPai) continue;
+      const cat = idPai ? { ID: idPai, NOME: r.PAI } : r;
+      const sub = idPai ? r : null;
       const item = montarCategoria(cat, sub);
-      const alvo = semAcento(`${item.categoria} ${item.subcategoria}`);
+      const alvo = semAcento(item.nome);
       if (termo && !alvo.includes(termo)) continue;
       itens.push(item);
       if (itens.length >= 40) break;
@@ -1145,6 +1204,13 @@ function mapOs(r, funcs, statuses) {
     subcategoria: '',
     equipamento: txt(r.EQUIPAMENTO),
     defeito: texto(r.DEFEITO),
+    autorizacao: texto(r.AUTORIZACAO),
+    autor_status: autorStatus(r.AUTOR_STATUS),
+    autor_rotulo: rotuloAutor(r.AUTOR_STATUS),
+    id_buscador: num(r.ID_BUSCADOR) || null,
+    id_entregador: num(r.ID_ENTREGADOR) || null,
+    buscador: funcs?.get(num(r.ID_BUSCADOR))?.nome || '',
+    entregador: funcs?.get(num(r.ID_ENTREGADOR))?.nome || '',
     solucao: texto(r.SOLUCAO),
     obs: texto(r.OBS),
     previsao,
@@ -1388,6 +1454,9 @@ async function salvar(body, usuario, opcoes = {}) {
     deslocamento: Math.max(0, r2(body?.deslocamento)),
     id_categoria: Object.prototype.hasOwnProperty.call(body || {}, 'id_categoria') ? (num(body.id_categoria) || null) : undefined,
     id_subcategoria: Object.prototype.hasOwnProperty.call(body || {}, 'id_subcategoria') ? (num(body.id_subcategoria) || null) : undefined,
+    autorizacao: Object.prototype.hasOwnProperty.call(body || {}, 'autorizacao') ? texto(body.autorizacao, 2000) : undefined,
+    autor_status: Object.prototype.hasOwnProperty.call(body || {}, 'autor_status') ? autorStatus(body.autor_status) : undefined,
+    id_colaborador: num(body?.id_colaborador) || null,
     itens: lerItensEntrada(body?.itens),
   };
   if (!entrada.id_cliente) throw new Error('Escolha o cliente.');
@@ -1432,6 +1501,8 @@ async function salvar(body, usuario, opcoes = {}) {
     );
     entrada.id_categoria = cat.id_categoria;
     entrada.id_subcategoria = cat.id_subcategoria;
+    if (entrada.autorizacao === undefined) entrada.autorizacao = atual?.autorizacao || '';
+    if (entrada.autor_status === undefined) entrada.autor_status = atual?.autor_status || '';
     let cli = null;
     if (!atual || atual.id_cliente !== entrada.id_cliente) {
       cli = await lerCliente(db, entrada.id_cliente);
@@ -1448,6 +1519,7 @@ async function salvar(body, usuario, opcoes = {}) {
         entrada.desc_geral, entrada.acres_geral, entrada.frete, entrada.deslocamento,
         calc.totais.bruto_produtos, calc.totais.bruto_servicos, calc.totais.total,
         entrada.id_categoria, entrada.id_subcategoria,
+        entrada.autorizacao || null, entrada.autor_status || null,
       ];
       if (!codigo) {
         codigo = await gerar(tx, 'GESTOR_GEN_OS');
@@ -1456,8 +1528,8 @@ async function salvar(body, usuario, opcoes = {}) {
           INSERT INTO GESTOR_OS (
             ID_OS, DT_EMISSAO, TIPO, MODALIDADE, ID_STATUS, ID_TECNICO, QUEM_TROUXE, EQUIPAMENTO, DEFEITO, SOLUCAO, OBS,
             DT_PREVISAO, DT_ENTREGA, ID_CLIENTE, DESC_GERAL, ACRES_GERAL, FRETE, DESLOCAMENTO,
-            TOTAL_PRODUTOS, TOTAL_SERVICOS, TOTAL, ID_CATEGORIA, ID_SUBCATEGORIA, ORDEM, PERFIL, ORIGEM, ID_USUARIO, USUARIO, DT_ALTERACAO
-          ) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
+            TOTAL_PRODUTOS, TOTAL_SERVICOS, TOTAL, ID_CATEGORIA, ID_SUBCATEGORIA, AUTORIZACAO, AUTOR_STATUS, ORDEM, PERFIL, ORIGEM, ID_USUARIO, USUARIO, DT_ALTERACAO
+          ) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
           codigo, ...cab, num(ordem[0]?.O) || 1, perfil, opcoes.origem === 'C' ? 'C' : 'S', usuario?.id ?? null, txt(usuario?.nome, 60) || null,
         ]);
         if (opcoes.origem === 'C' && opcoes.provisorio) {
@@ -1478,7 +1550,7 @@ async function salvar(body, usuario, opcoes = {}) {
           UPDATE GESTOR_OS SET
             TIPO = ?, MODALIDADE = ?, ID_STATUS = ?, ID_TECNICO = ?, QUEM_TROUXE = ?, EQUIPAMENTO = ?, DEFEITO = ?, SOLUCAO = ?, OBS = ?,
             DT_PREVISAO = ?, DT_ENTREGA = ?, ID_CLIENTE = ?, DESC_GERAL = ?, ACRES_GERAL = ?, FRETE = ?, DESLOCAMENTO = ?,
-            TOTAL_PRODUTOS = ?, TOTAL_SERVICOS = ?, TOTAL = ?, ID_CATEGORIA = ?, ID_SUBCATEGORIA = ?, DT_ALTERACAO = CURRENT_TIMESTAMP${ordemSql}
+            TOTAL_PRODUTOS = ?, TOTAL_SERVICOS = ?, TOTAL = ?, ID_CATEGORIA = ?, ID_SUBCATEGORIA = ?, AUTORIZACAO = ?, AUTOR_STATUS = ?, DT_ALTERACAO = CURRENT_TIMESTAMP${ordemSql}
           WHERE ID_OS = ?`, [...cab, ...extra, codigo]);
         if (atual.id_status !== entrada.id_status) {
           await historico(tx, codigo, usuario, `Status: ${porId.get(atual.id_status)?.descricao || '—'} → ${statusNovo?.descricao || '—'}`, atual.id_status, entrada.id_status);
@@ -1520,7 +1592,17 @@ async function salvar(body, usuario, opcoes = {}) {
         const nome = entrada.id_tecnico ? funcs.get(entrada.id_tecnico)?.nome : '';
         await historico(tx, codigo, usuario, nome ? `Técnico ${nome} vinculado` : 'Técnico removido');
       }
-      return { codigo, trocouTecnico };
+      const mudouAutor = !atual || atual.autorizacao !== entrada.autorizacao || atual.autor_status !== entrada.autor_status;
+      if (atual && mudouAutor && (entrada.autorizacao || entrada.autor_status)) {
+        const rot = rotuloAutor(entrada.autor_status);
+        await historico(tx, codigo, usuario, `Autorização solicitada${rot ? ` (${rot})` : ''}${entrada.autorizacao ? `: ${entrada.autorizacao.slice(0, 180)}` : ''}`);
+      }
+      let colaborador = null;
+      const papel = papelStatus(statusNovo?.descricao);
+      if (papel && (!atual || atual.id_status !== entrada.id_status)) {
+        colaborador = await gravarColaborador(tx, codigo, papel, entrada.id_colaborador, usuario, funcs);
+      }
+      return { codigo, trocouTecnico, colaborador, papel };
     });
     if (statusNovo?.final && entrada.solucao) {
       try { await registrarSolucao(db, { ...entrada, id: resultado.codigo }); } catch (err) { avisos.push(`A solução não entrou na base de soluções: ${err.message}`); }
@@ -1528,19 +1610,55 @@ async function salvar(body, usuario, opcoes = {}) {
     if (resultado.trocouTecnico && entrada.id_tecnico) {
       avisos.push(...await avisarTecnico(db, resultado.codigo, usuario));
     }
+    if (resultado.colaborador) {
+      avisos.push(...await avisarColaborador(db, resultado.codigo, resultado.colaborador.id, resultado.papel, usuario));
+    }
     return { id: resultado.codigo, avisos };
   });
 }
 
+/** Grava quem busca ou entrega e deixa o nome no histórico. */
+async function gravarColaborador(tx, idOs, papel, idFunc, usuario, funcs) {
+  const f = funcs.get(num(idFunc));
+  if (!f) throw new Error(papel === 'busca' ? 'Escolha quem vai buscar o equipamento.' : 'Escolha quem vai entregar.');
+  const coluna = papel === 'busca' ? 'ID_BUSCADOR' : 'ID_ENTREGADOR';
+  await query(tx, `UPDATE GESTOR_OS SET ${coluna} = ? WHERE ID_OS = ?`, [f.id, idOs]);
+  await historico(tx, idOs, usuario, `${f.nome} vai ${papel === 'busca' ? 'buscar no cliente' : 'entregar'}`);
+  return f;
+}
+
+/** Avisa no WhatsApp o colaborador escolhido para buscar ou entregar. */
+async function avisarColaborador(db, idOs, idFunc, papel, usuario) {
+  const os = await lerOs(db, idOs);
+  if (!os) return [];
+  const f = await query(db, 'SELECT NOME, DDD, CELULAR FROM TB_FUNCIONARIO WHERE ID_FUNCIONARIO = ?', [idFunc]);
+  const nome = txt(f[0]?.NOME) || 'O colaborador';
+  const fone = foneFuncionario(f[0]);
+  const acao = papel === 'busca' ? 'buscar o equipamento no cliente' : 'entregar o equipamento';
+  if (!fone) return [`${nome} não tem celular no cadastro de funcionários. O aviso não foi enviado.`];
+  const textoMsg = `O.S ${os.id} — ${os.cliente?.nome || 'cliente'}. Você foi indicado para ${acao}. Equipamento: ${os.equipamento || '—'}.`;
+  const rotulo = `Aviso de ${papel === 'busca' ? 'busca' : 'entrega'} enviado no WhatsApp para ${nome}`;
+  try {
+    const r = await enviarOuEnfileirar({ numero: fone, texto: textoMsg, idOs: os.id, rotulo, usuario });
+    if (r.enfileirada) return [`Sem internet agora: o aviso para ${nome} vai sair pelo WhatsApp quando a conexão voltar.`];
+    await historico(db, os.id, usuario, rotulo);
+    return [`Aviso enviado no WhatsApp para ${nome}.`];
+  } catch (err) {
+    return [`O aviso para ${nome} não saiu pelo WhatsApp: ${err.message}`];
+  }
+}
+
 /** Troca de status pelo quadro (arrastar ou escolher no card). Vai para o fim da coluna nova. */
-async function mudarStatus(id, idStatus, usuario) {
+async function mudarStatus(id, idStatus, usuario, idColaborador) {
   return comBase(async (db) => {
     const os = await lerOs(db, id);
     if (!os) throw new Error('O.S não encontrada.');
-    const { porId } = await mapasApoio(db);
+    const { porId, funcs } = await mapasApoio(db);
     const novo = porId.get(num(idStatus));
     if (!novo || !novo.ativo) throw new Error('Status inválido.');
     if (novo.id === os.id_status) return { id: os.id, avisos: [] };
+    const papel = papelStatus(novo.descricao);
+    let colaborador = null;
     await withTransaction(db, async (tx) => {
       const ordem = await query(tx, 'SELECT COALESCE(MAX(ORDEM), 0) + 1 AS O FROM GESTOR_OS WHERE ID_STATUS = ?', [novo.id]);
       await query(tx, `
@@ -1548,11 +1666,13 @@ async function mudarStatus(id, idStatus, usuario) {
           ${novo.final && !os.entrega ? ', DT_ENTREGA = CURRENT_TIMESTAMP' : ''}
         WHERE ID_OS = ?`, [novo.id, num(ordem[0]?.O) || 1, os.id]);
       await historico(tx, os.id, usuario, `Status: ${os.status?.descricao || '—'} → ${novo.descricao}`, os.id_status, novo.id);
+      if (papel) colaborador = await gravarColaborador(tx, os.id, papel, idColaborador, usuario, funcs);
     });
     const avisos = [];
     if (novo.final && os.solucao) {
       try { await registrarSolucao(db, os); } catch (err) { avisos.push(`A solução não entrou na base: ${err.message}`); }
     }
+    if (colaborador) avisos.push(...await avisarColaborador(db, os.id, colaborador.id, papel, usuario));
     return { id: os.id, avisos, final: novo.final, enviada: !!os.id_pedido };
   });
 }
@@ -1727,7 +1847,7 @@ async function enviarParaVenda(id, usuario) {
       await query(tx, `
         UPDATE GESTOR_OS SET ID_PEDIDO = ?, DT_ENVIO = CURRENT_TIMESTAMP, DT_ALTERACAO = CURRENT_TIMESTAMP
         WHERE ID_OS = ?`, [idPedido, dados.id]);
-      await historico(tx, dados.id, usuario, `Enviada para a venda gerencial (pedido ${idPedido})`);
+      await historico(tx, dados.id, usuario, `Serviço concluído — pedido ${idPedido} na venda gerencial`);
     },
   });
   return { id: dados.id, id_pedido: gravado.id };
@@ -1757,18 +1877,16 @@ async function impressao(id) {
 
 function htmlImpressao(os, loja, opcoes = {}) {
   const formato = ['a4', 'meia', '80'].includes(opcoes.formato) ? opcoes.formato : 'a4';
+  if (opcoes.modelo === 'historico') return htmlHistorico(os, loja);
   const fechamento = opcoes.modelo === 'fechamento';
   const termico = formato === '80';
+  const meia = formato === 'meia';
   const page = termico
     ? '@page { size: 80mm auto; margin: 3mm; }'
-    : formato === 'meia'
-      ? '@page { size: 148mm 210mm portrait; margin: 9mm; }'
-      : '@page { size: A4 portrait; margin: 14mm; }';
+    : '@page { size: A4 portrait; margin: 8mm; }';
   const tela = termico
-    ? 'width:72mm;margin:8px auto;padding:3mm;font-size:11.5px;font-family:Consolas,monospace;'
-    : formato === 'meia'
-      ? 'max-width:148mm;margin:0 auto;padding:9mm;font-size:12px;'
-      : 'max-width:210mm;margin:0 auto;padding:14mm;font-size:12.5px;';
+    ? 'width:72mm;margin:8px auto;padding:3mm;font-size:11.5px;font-family:Consolas,monospace;background:#fff;'
+    : 'margin:0;padding:0;background:#e8edf2;font-size:12.5px;';
   const t = os.totais || calcular(os).totais;
   const linhasTot = [
     ['Produtos', t.bruto_produtos],
@@ -1794,25 +1912,41 @@ function htmlImpressao(os, loja, opcoes = {}) {
        <div class="g"><span>Total</span><span>${money(t.total)}</span></div></div>`;
   const campo = (rotulo, valor) => (valor ? `<div><span class="r">${rotulo}</span><br>${esc(valor)}</div>` : '');
   const bloco = (rotulo, valor, alto) => (valor || alto ? `<h3>${rotulo}</h3><div class="bloco${alto ? ' alto' : ''}">${esc(valor || '')}</div>` : '');
+  const marca = loja?.logo
+    ? `<img class="logo" src="${esc(loja.logo)}" alt="Logo" />`
+    : '<div class="logo vazio" aria-hidden="true"></div>';
+  const autor = os.autorizacao || os.autor_rotulo
+    ? `${os.autor_rotulo ? `${os.autor_rotulo}${os.autorizacao ? ' — ' : ''}` : ''}${os.autorizacao || ''}`
+    : '';
   const cab = termico
-    ? `<div style="text-align:center"><b style="font-size:13px">${esc(loja?.nome || 'Loja')}</b>${endereco}${loja?.telefone ? `<div>${esc(loja.telefone)}</div>` : ''}</div>
+    ? `<div class="cab-t">${marca}<div><b style="font-size:13px">${esc(loja?.nome || 'Loja')}</b>${endereco}${loja?.telefone ? `<div>${esc(loja.telefone)}</div>` : ''}</div></div>
        <div class="sep"></div><div style="text-align:center"><b style="font-size:14px">O.S ${os.id} — ${fechamento ? 'FECHAMENTO' : 'ABERTURA'}</b><br>${esc(os.emissao_br)}</div><div class="sep"></div>`
-    : `<header class="cab"><div><h1>${esc(loja?.nome || 'Loja')}</h1><div class="end">${endereco}${loja?.telefone ? `<div>${esc(loja.telefone)}</div>` : ''}</div></div>
+    : `<header class="cab">${marca}<div class="loja"><h1>${esc(loja?.nome || 'Loja')}</h1><div class="end">${endereco}${loja?.telefone ? `<div>${esc(loja.telefone)}</div>` : ''}</div></div>
        <div class="os"><span class="r">${fechamento ? 'Fechamento' : 'Abertura'}</span><b>O.S ${os.id}</b><span>${esc(os.emissao_br)}</span></div></header>`;
   const dadosCli = termico
     ? `Cliente: ${esc(os.cliente?.nome || '—')}${os.cliente?.documento ? `<br>Doc.: ${esc(os.cliente.documento)}` : ''}${os.cliente?.telefone ? `<br>Fone: ${esc(fmtFone(os.cliente.telefone))}` : ''}
        <br>Equip.: ${esc(os.equipamento)}${os.categoria ? `<br>Categoria: ${esc(os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}` : ''}${os.quem_trouxe ? `<br>Trouxe: ${esc(os.quem_trouxe)}` : ''}${os.tecnico ? `<br>Técnico: ${esc(os.tecnico.nome)}` : ''}
        ${os.previsao ? `<br>Previsão: ${dataBr(os.previsao)}` : ''}${fechamento && os.entrega ? `<br>Entrega: ${dataHoraBr(os.entrega)}` : ''}
-       <div class="sep"></div>Defeito: ${esc(os.defeito)}${fechamento && os.solucao ? `<br>Solução: ${esc(os.solucao)}` : ''}`
+       <div class="sep"></div>Defeito: ${esc(os.defeito)}${autor ? `<br>Autorização${os.autor_rotulo ? ` (${esc(os.autor_rotulo)})` : ''}: ${esc(os.autorizacao)}` : ''}${fechamento && os.solucao ? `<br>Solução: ${esc(os.solucao)}` : ''}`
     : `<h3>Cliente</h3><div class="bloco grade">${campo('Nome', os.cliente?.nome)}${campo('CPF/CNPJ', os.cliente?.documento)}${campo('Telefone', fmtFone(os.cliente?.telefone))}${campo('Endereço', os.cliente?.endereco)}</div>
        <h3>Atendimento</h3><div class="bloco grade">${campo('Tipo', tipoTxt)}${campo('Técnico', os.tecnico?.nome)}${campo('Categoria', os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}${campo('Quem trouxe', os.quem_trouxe)}${campo('Previsão', dataBr(os.previsao))}${fechamento ? campo('Entrega', dataHoraBr(os.entrega)) : ''}</div>
-       ${bloco('Equipamento', os.equipamento)}${bloco('Defeito apresentado', os.defeito, !fechamento)}${fechamento ? bloco('Solução', os.solucao) : ''}${os.obs ? bloco('Observações', os.obs) : ''}`;
+       ${bloco('Equipamento', os.equipamento)}<div class="par">${bloco('Defeito apresentado', os.defeito, !fechamento)}${bloco(`Autorização solicitada${os.autor_rotulo ? ` · ${os.autor_rotulo}` : ''}`, os.autorizacao, !fechamento)}</div>${fechamento ? bloco('Solução', os.solucao) : ''}${os.obs ? bloco('Observações', os.obs) : ''}`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>O.S ${os.id}</title>
 <style>
   ${page}
   body{color:#152033;box-sizing:border-box;font-family:Segoe UI,Arial,sans-serif;${tela}}
-  .cab{display:flex;justify-content:space-between;gap:16px;border-bottom:2px solid #152033;padding-bottom:10px}
-  .cab h1{margin:0;font-size:${formato === 'meia' ? '16px' : '19px'}} .end{font-size:11px;color:#5c6b7a;margin-top:3px}
+  .folha{width:210mm;min-height:297mm;margin:12px auto;background:#fff;box-shadow:0 8px 28px rgba(21,32,51,.12)}
+  .miolo{padding:8mm 10mm;box-sizing:border-box}
+  .folha.meia .miolo{height:148.5mm;overflow:hidden;border-bottom:1px dashed #c5ced8}
+  .logo{width:32mm;height:18mm;object-fit:contain;object-position:left center;flex:none}
+  .logo.vazio{border:1px dashed #d5dde6;border-radius:4px}
+  .cab-t{display:flex;align-items:center;gap:8px;text-align:left}
+  .cab-t .logo{width:16mm;height:12mm}
+  .cab{display:flex;align-items:flex-start;gap:12px;border-bottom:2px solid #152033;padding-bottom:8px}
+  .cab .loja{flex:1;min-width:0}
+  .cab h1{margin:0;font-size:${meia ? '16px' : '19px'}} .end{font-size:11px;color:#5c6b7a;margin-top:3px}
+  .par{display:grid;grid-template-columns:1fr 1fr;gap:10px;align-items:start}
+  .par h3{margin-top:12px}
   .os{text-align:right;white-space:nowrap} .os b{display:block;font-size:${formato === 'meia' ? '18px' : '22px'}}
   .r{font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;color:#5c6b7a}
   h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#5c6b7a;margin:14px 0 5px}
@@ -1826,18 +1960,54 @@ function htmlImpressao(os, loja, opcoes = {}) {
   .assina div{border-top:1px solid #152033;padding-top:5px}
   .sep{border-top:1px dashed #000;margin:7px 0} .lin{display:flex;justify-content:space-between;gap:8px} .lin.g{font-weight:700;font-size:14px;margin-top:3px}
   .termo{font-size:10.5px;color:#5c6b7a;margin-top:12px}
-  button{margin:0 0 12px;padding:8px 14px;font:inherit}
-  @media print { body{margin:0;padding:0;max-width:none;width:auto} button{display:none} }
+  button{margin:12px;padding:8px 14px;font:inherit}
+  @media print {
+    body{background:#fff}
+    button{display:none}
+    .folha{width:auto;min-height:0;margin:0;box-shadow:none}
+    .folha.meia .miolo{height:140.5mm;overflow:hidden;border-bottom:0}
+  }
 </style></head><body>
 <button type="button" onclick="if(parent!==window){parent.postMessage({tipo:'gestor-imprimir'}, location.origin)}else{window.print()}">Imprimir / Salvar PDF</button>
-${cab}
+${termico ? `${cab}` : `<div class="folha${meia ? ' meia' : ''}"><div class="miolo">${cab}`}
 ${dadosCli}
 ${corpoItens}
 ${totaisHtml}
 ${!fechamento && !termico ? '<p class="termo">O orçamento é informado antes da execução do serviço. Equipamento não retirado em até 90 dias após o aviso de conclusão poderá ter a destinação prevista em lei.</p>' : ''}
 ${termico ? '<div class="sep" style="margin-bottom:26px"></div><div style="border-top:1px solid #000;text-align:center;padding-top:3px">Assinatura do cliente</div>'
-    : `<div class="assina"><div>${fechamento ? 'Recebi o equipamento em ordem' : 'Assinatura do cliente'}</div><div>${esc(loja?.nome || 'Loja')}${os.tecnico ? ` — ${esc(os.tecnico.nome)}` : ''}</div></div>`}
+    : `<div class="assina"><div>${fechamento ? 'Recebi o equipamento em ordem' : 'Assinatura do cliente'}</div><div>${esc(loja?.nome || 'Loja')}${os.tecnico ? ` — ${esc(os.tecnico.nome)}` : ''}</div></div></div></div>`}
 </body></html>`;
+}
+
+function htmlHistorico(os, loja) {
+  const linhas = [...(os.historico || [])].reverse();
+  const marca = loja?.logo
+    ? `<img class="logo" src="${esc(loja.logo)}" alt="Logo" />`
+    : '<div class="logo vazio" aria-hidden="true"></div>';
+  const itens = linhas.length
+    ? linhas.map((h) => `<tr><td>${esc(h.data)}</td><td>${esc(h.usuario || '—')}</td><td>${esc(h.evento || '')}${h.status_novo?.descricao ? ` <b>${esc(h.status_novo.descricao)}</b>` : ''}</td></tr>`).join('')
+    : '<tr><td colspan="3">Sem registros</td></tr>';
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Histórico O.S ${os.id}</title>
+<style>
+  @page { size: A4 portrait; margin: 10mm; }
+  body{margin:0;background:#e8edf2;color:#152033;font-family:Segoe UI,Arial,sans-serif;font-size:12.5px}
+  .folha{width:210mm;min-height:297mm;margin:12px auto;background:#fff}
+  .miolo{padding:10mm}
+  .logo{width:32mm;height:18mm;object-fit:contain;object-position:left center;flex:none}
+  .logo.vazio{border:1px dashed #d5dde6;border-radius:4px}
+  .cab{display:flex;align-items:flex-start;gap:12px;border-bottom:2px solid #152033;padding-bottom:8px}
+  .cab .loja{flex:1} .cab h1{margin:0;font-size:18px} .os{text-align:right} .os b{display:block;font-size:20px}
+  table{width:100%;border-collapse:collapse;margin-top:14px} th,td{text-align:left;padding:6px 8px;border-bottom:1px solid #e6ebf0;vertical-align:top}
+  th{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:#5c6b7a}
+  button{margin:12px;padding:8px 14px;font:inherit}
+  @media print { body{background:#fff} button{display:none} .folha{width:auto;min-height:0;margin:0} }
+</style></head><body>
+<button type="button" onclick="if(parent!==window){parent.postMessage({tipo:'gestor-imprimir'}, location.origin)}else{window.print()}">Imprimir / Salvar PDF</button>
+<div class="folha"><div class="miolo">
+<header class="cab">${marca}<div class="loja"><h1>${esc(loja?.nome || 'Loja')}</h1><div>Histórico da O.S</div></div>
+<div class="os"><b>O.S ${os.id}</b><span>${esc(os.cliente?.nome || '')}</span></div></header>
+<table><thead><tr><th>Quando</th><th>Quem</th><th>O que aconteceu</th></tr></thead><tbody>${itens}</tbody></table>
+</div></div></body></html>`;
 }
 
 function textoWhatsapp(os, modelo) {
@@ -1849,6 +2019,7 @@ function textoWhatsapp(os, modelo) {
     `Equipamento: ${os.equipamento}`,
     `Defeito: ${os.defeito}`,
   ];
+  if (os.autorizacao || os.autor_rotulo) linhas.push(`Autorização solicitada${os.autor_rotulo ? ` (${os.autor_rotulo})` : ''}: ${os.autorizacao || '—'}`);
   if (os.previsao) linhas.push(`Previsão: ${dataBr(os.previsao)}`);
   if (fechamento) {
     if (os.solucao) linhas.push(`Solução: ${os.solucao}`);
