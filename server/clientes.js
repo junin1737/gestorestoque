@@ -461,7 +461,16 @@ async function ensureApelido(db) {
 }
 
 function celularDe(r) {
-  return digitos([String(r.DDD_CELUL || '').trim(), String(r.FONE_CELUL || '').trim()].filter(Boolean).join(''));
+  const pares = [
+    [r.DDD_CELUL, r.FONE_CELUL],
+    [r.DDD_RESID, r.FONE_RESID],
+    [r.DDD_COMER, r.FONE_COMER],
+  ];
+  for (const [ddd, fone] of pares) {
+    const n = digitos(`${ddd || ''}${fone || ''}`);
+    if (n.length >= 10) return n;
+  }
+  return '';
 }
 
 function textoAniversario(modelo, apelido, nome) {

@@ -409,6 +409,11 @@ const Servicos = (() => {
     return (st.statuses || []).filter((s) => s.ativo).find((s) => tipoEtapa(s) === alvo) || null;
   }
 
+  function etapaExigeItem(s) {
+    const t = tipoEtapa(s);
+    return t === 'finalizada' || t === 'entregando' || t === 'concluido';
+  }
+
   function podeMoverPara(origem, destino) {
     if (!origem || !destino || origem.id === destino.id) return true;
     const o = tipoEtapa(origem);
@@ -477,6 +482,10 @@ const Servicos = (() => {
       msg('Depois de finalizada a O.S só segue para a próxima etapa.');
       return null;
     }
+    if (st.view === 'os' && etapaExigeItem(destino) && !(st.os?.itens || []).length) {
+      msg('Informe ao menos um produto ou serviço para finalizar. O valor pode ser zero.');
+      return null;
+    }
     if (tipoEtapa(destino) === 'buscar' && tipoEtapa(origem) === 'aberta') {
       const r = await escolherBusca();
       return r && typeof r === 'object' ? r : null;
@@ -492,6 +501,10 @@ const Servicos = (() => {
 
   async function oferecerConclusao(id, enviada) {
     if (enviada) return;
+    if (st.view === 'os' && st.os?.id === id && !(st.os.itens || []).length) {
+      msg('Informe ao menos um produto ou serviço para finalizar. O valor pode ser zero.');
+      return;
+    }
     const ok = await confirmar('Concluir serviço?', 'A O.S vira um pedido para o Clipp importar na venda. Os produtos ficam reservados e os itens não podem mais ser alterados.', { sim: 'Concluir serviço', nao: 'Agora não', icone: 'venda' });
     if (ok) await enviarVenda(id, true);
   }
@@ -704,7 +717,7 @@ const Servicos = (() => {
         <div class="os-campo"><span>Tipo</span>${seg('tipo', [['I', 'Interna'], ['E', 'Externa']])}</div>
         <div class="os-campo"><span>Modalidade</span>${seg('modalidade', [['P', 'Presencial'], ['R', 'Remota']])}</div>
         <div class="os-campo"><label for="os-status">Status</label><select class="oc" id="os-status">${st.statuses.filter((x) => (x.ativo || x.id === o.id_status) && (x.id === o.id_status || podeMoverPara(s, x))).map((x) => `<option value="${x.id}" ${x.id === o.id_status ? 'selected' : ''}>${esc(x.descricao)}</option>`).join('')}</select></div>
-        <div class="os-campo"><label for="os-tecnico">Técnico responsável</label><select class="oc" id="os-tecnico"><option value="">Sem técnico</option>${tecnicosOpc.map((t) => `<option value="${t.id}" ${t.id === o.id_tecnico ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div>
+        <div class="os-campo"><label for="os-tec-cod">Técnico responsável</label><div class="os-linha" style="align-items:stretch"><input class="oc" id="os-tec-cod" inputmode="numeric" value="${esc(o.id_tecnico || '')}" placeholder="Nº" title="Número do técnico" style="width:84px;flex:none" ${tr ? 'disabled' : ''} /><select class="oc" id="os-tecnico" style="flex:1;min-width:0" ${tr ? 'disabled' : ''}><option value="">Sem técnico</option>${tecnicosOpc.map((t) => `<option value="${t.id}" ${t.id === o.id_tecnico ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div></div>
         <div class="os-campo"><label for="os-previsao">Previsão</label><input class="oc" id="os-previsao" type="date" value="${esc(o.previsao || '')}" /></div>
         <div class="os-campo"><label for="os-entrega">Entrega</label><input class="oc" id="os-entrega" type="datetime-local" value="${esc((o.entrega || '').slice(0, 16))}" /></div>
         <div class="os-campo os-combo"><label for="os-cat">Categoria</label><div class="os-com-mais"><input class="oc" id="os-cat" autocomplete="off" placeholder="Ex.: Computador" value="${esc(o.categoria || '')}" /><button type="button" class="ob ico" id="os-cat-mais" title="Cadastrar categoria" aria-label="Cadastrar categoria">${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-cat-lista" hidden></div></div>
@@ -824,6 +837,71 @@ const Servicos = (() => {
     st.sujo = true;
   }
 
+  function tecnicoPorNumero(valor, confirmar) {
+    const bruto = String(valor ?? '').trim();
+    if (!bruto) return { id: null, ok: true };
+    const id = Number(bruto);
+    if (!id) return { ok: false };
+    const lista = (st.tecnicos || []).filter((t) => t.tecnico !== false);
+    const exato = lista.find((t) => t.id === id);
+    const temMaior = lista.some((t) => String(t.id).startsWith(bruto) && String(t.id).length > bruto.length);
+    if (temMaior && !confirmar) return { ok: false, aguardar: true };
+    if (exato) return { id, ok: true, t: exato };
+    return { ok: false };
+  }
+
+  function pintarTecnico(id) {
+    const sel = $('#os-tecnico');
+    const cod = $('#os-tec-cod');
+    if (sel) sel.value = id ? String(id) : '';
+    if (cod && document.activeElement !== cod) cod.value = id ? String(id) : '';
+  }
+
+  async function aplicarTecnico(valor, opcoes = {}) {
+    const achou = tecnicoPorNumero(valor, !opcoes.silencioso);
+    if (achou.aguardar) return;
+    if (!achou.ok) {
+      if (!opcoes.silencioso) msg('Técnico não encontrado.');
+      pintarTecnico(st.os?.id_tecnico || null);
+      return;
+    }
+    const id = achou.id || null;
+    if ((st.os.id_tecnico || null) === id) {
+      pintarTecnico(id);
+      return;
+    }
+    if (st.os.cancelada || st.os.importada || travada()) {
+      msg('Esta O.S não pode mais trocar o técnico.');
+      pintarTecnico(st.os.id_tecnico || null);
+      return;
+    }
+    const antes = st.os.id_tecnico || null;
+    st.os.id_tecnico = id;
+    st.os.tecnico = achou.t ? { id: achou.t.id, nome: achou.t.nome, iniciais: achou.t.iniciais } : null;
+    pintarTecnico(id);
+    if (!st.os.id) {
+      marcarSujo();
+      return;
+    }
+    const res = await api(`/os/${st.os.id}/tecnico`, { method: 'POST', body: { id_tecnico: id } });
+    if (!res.ok) {
+      st.os.id_tecnico = antes;
+      const antigo = (st.tecnicos || []).find((t) => t.id === antes);
+      st.os.tecnico = antigo ? { id: antigo.id, nome: antigo.nome, iniciais: antigo.iniciais } : st.os.tecnico;
+      pintarTecnico(antes);
+      msg(res.error || 'Não foi possível atualizar o técnico.');
+      return;
+    }
+    avisar(res.avisos);
+    const det = await api(`/os/${st.os.id}`);
+    if (det.ok) {
+      st.os.historico = det.os.historico;
+      st.os.tecnico = det.os.tecnico;
+      st.os.id_tecnico = det.os.id_tecnico;
+      renderLateral();
+    }
+  }
+
   function lerCabecalho() {
     const o = st.os;
     if (!$('#os-equip')) return;
@@ -850,10 +928,43 @@ const Servicos = (() => {
       $$(`[data-seg="${b.dataset.seg}"]`, r).forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
       marcarSujo();
     }));
-    $$('#os-status, #os-tecnico, #os-previsao, #os-entrega, #os-equip, #os-defeito, #os-autorizacao, #os-solucao, #os-obs', r)
+    $$('#os-status, #os-previsao, #os-entrega, #os-equip, #os-defeito, #os-autorizacao, #os-solucao, #os-obs', r)
       .forEach((el) => el?.addEventListener('input', marcarSujo));
+    const selTec = $('#os-tecnico', r);
+    const codTec = $('#os-tec-cod', r);
+    let tecTimer = 0;
+    selTec?.addEventListener('change', () => aplicarTecnico(selTec.value));
+    codTec?.addEventListener('input', () => {
+      clearTimeout(tecTimer);
+      tecTimer = setTimeout(() => aplicarTecnico(codTec.value, { silencioso: true }), 400);
+    });
+    codTec?.addEventListener('change', () => { clearTimeout(tecTimer); aplicarTecnico(codTec.value); });
+    codTec?.addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      e.preventDefault();
+      clearTimeout(tecTimer);
+      aplicarTecnico(codTec.value);
+    });
     $$('#os-autor button', r).forEach((b) => b.addEventListener('click', async () => {
       const novo = b.dataset.autor || '';
+      if (novo === 'P' && st.os.autor_status !== 'P') {
+        lerCabecalho();
+        if (!st.os.autorizacao) {
+          msg('Descreva a solicitação de autorização.');
+          $('#os-autorizacao')?.focus();
+          return;
+        }
+        st.os.autor_status = 'P';
+        $$('#os-autor button', r).forEach((x) => x.classList.toggle('on', x === b));
+        marcarSujo();
+        const enviar = await confirmar('Enviar a solicitação para o cliente?', 'A mensagem sai pelo WhatsApp da loja, com a autorização pendente.', { sim: 'Enviar', nao: 'Agora não', icone: 'whats' });
+        if (!enviar) return;
+        const id = await gravar({ ficar: true });
+        if (!id) return;
+        await janelaWhats(id, 'autorizacao');
+        irPara('quadro');
+        return;
+      }
       if (novo === 'A' && st.os.autor_status !== 'A') {
         const pedido = await pedirAutorizacao();
         if (!pedido) return;
@@ -1456,28 +1567,33 @@ const Servicos = (() => {
     $('[data-os-cancelar]', lat)?.addEventListener('click', cancelarOs);
   }
 
-  async function gravar() {
-    if (st.gravando) return;
+  async function gravar(opcoes = {}) {
+    const ficar = opcoes?.ficar === true;
+    if (st.gravando) return null;
     lerCabecalho();
     const o = st.os;
-    if (!o.id_cliente) { msg('Escolha o cliente.'); $('#os-cli-nome')?.focus(); return; }
-    if (!o.equipamento) { msg('Descreva o equipamento.'); $('#os-equip')?.focus(); return; }
-    if (!o.defeito) { msg('Descreva o defeito apresentado.'); $('#os-defeito')?.focus(); return; }
+    if (!o.id_cliente) { msg('Escolha o cliente.'); $('#os-cli-nome')?.focus(); return null; }
+    if (!o.equipamento) { msg('Descreva o equipamento.'); $('#os-equip')?.focus(); return null; }
+    if (!o.defeito) { msg('Descreva o defeito apresentado.'); $('#os-defeito')?.focus(); return null; }
     const catCampo = $('#os-cat');
     if (catCampo && catCampo.value.trim() && catCampo.value.trim() !== (o.categoria || '')) {
       msg('Escolha a categoria na lista ou cadastre com +.');
       catCampo.focus();
-      return;
+      return null;
     }
     const subCampo = $('#os-sub');
     if (subCampo && subCampo.value.trim() && subCampo.value.trim() !== (o.subcategoria || '')) {
       msg('Escolha a subcategoria na lista ou cadastre com +.');
       subCampo.focus();
-      return;
+      return null;
     }
     if (o.subcategoria && !o.id_categoria) {
       msg('A subcategoria precisa de uma categoria.');
-      return;
+      return null;
+    }
+    if (etapaExigeItem(statusDe(o.id_status)) && !(o.itens || []).length) {
+      msg('Informe ao menos um produto ou serviço para finalizar. O valor pode ser zero.');
+      return null;
     }
     const eraNova = !o.id;
     const statusAntes = eraNova ? null : st.statusGravado;
@@ -1493,7 +1609,7 @@ const Servicos = (() => {
     };
     const res = await api(eraNova ? '/os' : `/os/${o.id}`, { method: 'POST', body });
     st.gravando = false;
-    if (!res.ok) { renderLateral(); msg(res.error || 'Não foi possível gravar.'); return; }
+    if (!res.ok) { renderLateral(); msg(res.error || 'Não foi possível gravar.'); return null; }
     avisar(res.avisos);
     const det = await api(`/os/${res.id}`);
     if (det.ok) st.os = det.os;
@@ -1504,10 +1620,12 @@ const Servicos = (() => {
     const mudouStatus = !eraNova && statusAntes !== st.os.id_status;
     const jaPerguntou = st.proximaPerguntada;
     st.proximaPerguntada = false;
+    if (ficar) return res.id;
     if (eraNova) await janelaImprimir(res.id, 'abertura', { titulo: `O.S ${res.id} gravada`, texto: 'Abertura registrada. Deseja imprimir ou enviar?' });
     else if (virouFinal) await perguntarFechamento(res.id, !!st.os.id_pedido);
     if (!mudouStatus && !virouFinal && !jaPerguntou) await perguntarProxima(res.id);
     irPara('quadro');
+    return res.id;
   }
 
   async function perguntarProxima(id) {
@@ -1566,7 +1684,8 @@ const Servicos = (() => {
   async function janelaWhats(id, modelo) {
     const det = await api(`/os/${id}/whatsapp?modelo=${encodeURIComponent(modelo)}`);
     if (!det.ok) { msg(det.error || 'Não foi possível montar a mensagem.'); return; }
-    await janela(`<header><span class="circ" style="background:color-mix(in srgb,#22a35a 16%,transparent);color:#1b8a4a">${ic('whats')}</span><div><h2>Enviar por WhatsApp</h2><p>O.S ${id} · ${modelo === 'fechamento' ? 'fechamento' : 'abertura'}</p></div></header>
+    const rotuloWa = modelo === 'fechamento' ? 'fechamento' : (modelo === 'autorizacao' ? 'autorização pendente' : 'abertura');
+    await janela(`<header><span class="circ" style="background:color-mix(in srgb,#22a35a 16%,transparent);color:#1b8a4a">${ic('whats')}</span><div><h2>Enviar por WhatsApp</h2><p>O.S ${id} · ${rotuloWa}</p></div></header>
       <div class="corpo">
         <div class="os-campo"><label for="wa-num">Celular do cliente — confira antes de enviar</label><input class="oc" id="wa-num" inputmode="tel" value="${esc(fmtFone(det.telefone))}" /></div>
         <div class="os-bolha">${esc(det.texto)}</div>
@@ -1609,6 +1728,10 @@ const Servicos = (() => {
   async function enviarVenda(idParam, jaConfirmado) {
     const id = Number(idParam) || st.os?.id;
     if (!id) return;
+    if (st.view === 'os' && st.os?.id === id && !(st.os.itens || []).length) {
+      msg('Informe ao menos um produto ou serviço para finalizar. O valor pode ser zero.');
+      return;
+    }
     if (st.view === 'os' && st.sujo) {
       msg('Grave a O.S antes de concluir o serviço.');
       return;

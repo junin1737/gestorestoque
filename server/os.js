@@ -346,6 +346,13 @@ function podeMudarEtapa(origemDesc, destinoDesc) {
   return true;
 }
 
+function etapaExigeItem(descricao) {
+  const c = chaveEtapa(descricao);
+  return c === 'finalizada' || c === 'entregando' || c === 'concluido';
+}
+
+const MSG_ITEM_OS = 'Informe ao menos um produto ou serviço para finalizar a O.S. O valor pode ser zero.';
+
 function autorStatus(v) {
   const s = String(v || '').trim().toUpperCase();
   return s === 'P' || s === 'A' || s === 'N' ? s : '';
@@ -1544,6 +1551,9 @@ async function salvar(body, usuario, opcoes = {}) {
     if (atual && atual.id_status !== entrada.id_status && !podeMudarEtapa(atual.status?.descricao, statusNovo?.descricao)) {
       throw new Error('Depois de finalizada a O.S só segue para a próxima etapa.');
     }
+    if (!enviada && etapaExigeItem(statusNovo?.descricao) && !entrada.itens.length) {
+      throw new Error(MSG_ITEM_OS);
+    }
     if (statusNovo?.final && !entrada.entrega) entrada.entrega = new Date();
     const cat = await resolverCategoria(
       db,
@@ -1728,6 +1738,7 @@ async function mudarStatus(id, idStatus, usuario, extra) {
     if (!podeMudarEtapa(os.status?.descricao, novo.descricao)) {
       throw new Error('Depois de finalizada a O.S só segue para a próxima etapa.');
     }
+    if (etapaExigeItem(novo.descricao) && !(os.itens || []).length) throw new Error(MSG_ITEM_OS);
     const papel = papelStatus(novo.descricao);
     let colaborador = null;
     await withTransaction(db, async (tx) => {
@@ -1918,6 +1929,7 @@ async function enviarParaVenda(id, usuario) {
     if (os.cancelada) throw new Error('O.S cancelada não pode ser concluída.');
     if (os.importada) throw new Error('O.S importada não pode ser editada.');
     if (os.id_pedido) throw new Error(`Esta O.S já foi enviada para a venda (pedido ${os.id_pedido}).`);
+    if (!(os.itens || []).length) throw new Error(MSG_ITEM_OS);
     return os;
   });
   const calc = calcular(dados);
@@ -2119,6 +2131,17 @@ function htmlHistorico(os, loja) {
 }
 
 function textoWhatsapp(os, modelo) {
+  if (modelo === 'autorizacao') {
+    return [
+      `*O.S ${os.id}* — autorização pendente`,
+      os.cliente?.nome ? `Olá, ${os.cliente.nome}.` : 'Olá.',
+      'Precisamos da sua autorização para continuar o atendimento.',
+      `Equipamento: ${os.equipamento || '—'}`,
+      `Defeito: ${os.defeito || '—'}`,
+      `Solicitação: ${os.autorizacao || '—'}`,
+      'Responda esta mensagem autorizando ou recusando.',
+    ].join('\n');
+  }
   const fechamento = modelo === 'fechamento';
   const t = os.totais || calcular(os).totais;
   const linhas = [
@@ -2147,7 +2170,8 @@ async function enviarWhatsapp(id, { numero, modelo }, usuario) {
   return comBase(async (db) => {
     const os = await lerOs(db, id);
     if (!os) throw new Error('O.S não encontrada.');
-    const rotulo = `${modelo === 'fechamento' ? 'Fechamento' : 'Abertura'} enviado no WhatsApp para ${fmtFone(fone)}`;
+    const nomes = { fechamento: 'Fechamento', autorizacao: 'Solicitação de autorização', historico: 'Histórico' };
+    const rotulo = `${nomes[modelo] || 'Abertura'} enviado no WhatsApp para ${fmtFone(fone)}`;
     const r = await enviarOuEnfileirar({ numero: fone, texto: textoWhatsapp(os, modelo), idOs: os.id, rotulo, usuario });
     if (r.enfileirada) return { ok: true, enfileirada: true, aviso: 'Sem internet agora: a mensagem vai sair quando a conexão voltar.' };
     await historico(db, os.id, usuario, rotulo);
