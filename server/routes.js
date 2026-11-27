@@ -3581,7 +3581,7 @@ router.get('/condicionais/:id/pdf', VER_CONDICIONAL, async (req, res) => {
     } catch { /* a folha segue sem o cabeçalho da loja */ }
     const formato = String(req.query.formato || 'a4');
     const validade = String(req.query.validade || '');
-    res.type('html').send(condicionais.htmlPdf(doc, loja, { formato, validade }));
+    res.type('html').send(condicionais.htmlFolha(doc, loja, { formato, validade }));
   } catch (err) {
     res.status(400).type('html').send(`<p>${err.message}</p>`);
   }

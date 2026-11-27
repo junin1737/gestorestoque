@@ -60,10 +60,21 @@ router.post('/os/categorias', rota((req) => os.cadastrarCategoria(req.body)));
 router.get('/os/clientes/:id', rota((req) => os.clienteResumo(req.params.id)));
 router.get('/os/cnpj/:cnpj', rota(async (req) => ({ empresa: await os.consultarCnpj(req.params.cnpj) })));
 router.get('/os/itens', (req, res, next) => { res.set('Cache-Control', 'no-store'); next(); }, rota((req) => os.buscarItens(req.query.q, req.query.aba)));
-router.get('/os/config', rota(() => ({ limites: os.lerLimites(), perfil: os.perfilServicos() })));
+router.get('/os/config', rota(() => ({
+  limites: os.lerLimites(),
+  perfil: os.perfilServicos(),
+  aceita_servico_condicional: os.lerAceitaServico(),
+})));
 router.post('/os/config', rota((req) => {
-  if (!req.usuario?.supervisor) throw new Error('Só o supervisor altera os limites de desconto.');
-  return { limites: os.salvarLimites(req.body) };
+  const out = { limites: os.lerLimites(), aceita_servico_condicional: os.lerAceitaServico() };
+  if (req.body && Object.prototype.hasOwnProperty.call(req.body, 'aceita_servico_condicional')) {
+    out.aceita_servico_condicional = os.salvarAceitaServico(req.body.aceita_servico_condicional);
+  }
+  if (req.body && (req.body.item != null || req.body.geral != null)) {
+    if (!req.usuario?.supervisor) throw new Error('Só o supervisor altera os limites de desconto.');
+    out.limites = os.salvarLimites(req.body);
+  }
+  return out;
 }));
 router.get('/os/liberadores', rota(async () => {
   const { funcionarios } = await os.listarFuncionarios();

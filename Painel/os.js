@@ -267,11 +267,18 @@ const Servicos = (() => {
     renderQuadro();
   }
 
+  function podeArrastarCard(o) {
+    if (!o || o.cancelada) return false;
+    if (!o.importada) return true;
+    const etapa = tipoEtapa(statusDe(o.id_status));
+    return etapa === 'finalizada' || etapa === 'entregando';
+  }
+
   function cardHtml(o) {
     const tec = o.tecnico
       ? `<button type="button" class="os-av" data-os-tec="${o.id}" title="Técnico: ${esc(o.tecnico.nome)} — trocar">${esc(o.tecnico.iniciais)}</button>`
       : `<button type="button" class="os-av vazio" data-os-tec="${o.id}" title="Vincular técnico">+</button>`;
-    return `<article class="os-card${o.cancelada ? ' cancelada' : (o.atrasada ? ' atrasada' : '')}" draggable="${o.cancelada || o.importada ? 'false' : 'true'}" tabindex="0" data-os-card="${o.id}" data-status="${o.id_status}" data-importada="${o.importada ? '1' : '0'}">
+    return `<article class="os-card${o.cancelada ? ' cancelada' : (o.atrasada ? ' atrasada' : '')}" draggable="${podeArrastarCard(o) ? 'true' : 'false'}" tabindex="0" data-os-card="${o.id}" data-status="${o.id_status}" data-importada="${o.importada ? '1' : '0'}" data-arrastar="${podeArrastarCard(o) ? '1' : '0'}">
       <div class="l1"><span class="n">O.S ${o.id}</span><span class="tp">${o.tipo === 'E' ? 'Externa' : 'Interna'} · ${o.modalidade === 'R' ? 'Remota' : 'Presencial'}</span>
         <span class="acoes"><button type="button" data-os-subir="${o.id}" title="Subir prioridade">${ic('cima')}</button><button type="button" data-os-descer="${o.id}" title="Descer prioridade">${ic('baixo')}</button><button type="button" data-os-menu="${o.id}" title="Status e técnico">${ic('pontos')}</button></span></div>
       <div class="cli">${esc(o.cliente || '—')}</div>
@@ -344,7 +351,7 @@ const Servicos = (() => {
       });
       card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === card) abrirOs(Number(card.dataset.osCard)); });
       card.addEventListener('dragstart', (e) => {
-        if (usaToque || card.classList.contains('cancelada') || card.dataset.importada === '1') { e.preventDefault(); return; }
+        if (usaToque || card.dataset.arrastar !== '1') { e.preventDefault(); return; }
         card.classList.add('arrastando');
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', card.dataset.osCard);
@@ -408,7 +415,7 @@ const Servicos = (() => {
     quadro.addEventListener('pointerdown', (e) => {
       const card = e.target.closest?.('.os-card');
       if (!card || e.target.closest('button')) return;
-      if (card.classList.contains('cancelada') || card.dataset.importada === '1') return;
+      if (card.dataset.arrastar !== '1') return;
       press = { id: Number(card.dataset.osCard), card, x: e.clientX, y: e.clientY, pointerId: e.pointerId };
       timer = setTimeout(() => {
         if (!press) return;
@@ -821,7 +828,7 @@ const Servicos = (() => {
         <div class="os-campo os-combo"><label for="os-cat">Categoria</label><div class="os-com-mais"><input class="oc" id="os-cat" autocomplete="off" placeholder="Ex.: Computador" value="${esc(o.categoria || '')}" /><button type="button" class="ob ico" id="os-cat-mais" title="Cadastrar categoria" aria-label="Cadastrar categoria">${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-cat-lista" hidden></div></div>
         <div class="os-campo os-combo"><label for="os-sub">Subcategoria</label><div class="os-com-mais"><input class="oc" id="os-sub" autocomplete="off" placeholder="Notebook, Desktop, All in One" value="${esc(o.subcategoria || '')}" ${o.id_categoria ? '' : 'disabled'} /><button type="button" class="ob ico" id="os-sub-mais" title="Cadastrar subcategoria" aria-label="Cadastrar subcategoria" ${o.id_categoria ? '' : 'disabled'}>${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-sub-lista" hidden></div></div>
       </div>
-      ${tipoEtapa(s) === 'entregando' ? `<div class="os-campo" style="margin-top:12px"><label>Quem vai entregar</label><div class="os-linha" style="align-items:stretch"><input class="oc" value="${esc(o.entregador || 'Ninguém definido')}" disabled /><button type="button" class="ob" data-os-trocar-entrega ${tr || o.cancelada || o.importada ? 'disabled' : ''}>Trocar e avisar</button></div><p class="os-legenda" style="margin:6px 0 0">Se outro colaborador for levar, troque aqui. Ele recebe o aviso no WhatsApp.</p></div>` : ''}
+      ${tipoEtapa(s) === 'entregando' ? `<div class="os-campo" style="margin-top:12px"><label>Quem vai entregar</label><div class="os-linha" style="align-items:stretch"><input class="oc" value="${esc(o.entregador || 'Ninguém definido')}" disabled /><button type="button" class="ob" data-os-trocar-entrega ${o.cancelada ? 'disabled' : ''}>Trocar e avisar</button></div><p class="os-legenda" style="margin:6px 0 0">Se outro colaborador for levar, troque aqui. Ele recebe o aviso no WhatsApp. Vale mesmo com a venda já na gerencial.</p></div>` : ''}
       </div></section>`;
     const c = o.cliente || {};
     const cli = `<section class="os-grupo"><header><h2>Cliente</h2><span class="os-esp"></span>${tr ? '' : `<button type="button" class="ob sm" data-os-cadcli>${ic('mais', 'p')}Cadastrar cliente</button>`}</header>
@@ -1124,6 +1131,31 @@ const Servicos = (() => {
       const cab = $('.os-cab-os', r);
       cab.querySelector('.os-pill')?.remove();
       cab.insertAdjacentHTML('beforeend', pillHtml(statusDe(st.os.id_status)));
+      if (st.os.importada && st.os.id && st.os.id_status !== anterior) {
+        const mov = await api(`/os/${st.os.id}/status`, {
+          method: 'POST',
+          body: {
+            id_status: st.os.id_status,
+            id_colaborador: st.os.id_colaborador_pendente || null,
+            na_empresa: !!st.os.na_empresa,
+            quem_trouxe: st.os.quem_trouxe || '',
+          },
+        });
+        st.os.id_colaborador_pendente = null;
+        if (!mov.ok) {
+          msg(mov.error || 'Não foi possível mudar a etapa.');
+          const det = await api(`/os/${st.os.id}`);
+          if (det.ok) { st.os = det.os; st.statusGravado = det.os.id_status; }
+          renderOs();
+          return;
+        }
+        avisar(mov.avisos);
+        const det = await api(`/os/${st.os.id}`);
+        if (det.ok) { st.os = det.os; st.statusGravado = det.os.id_status; }
+        st.sujo = false;
+        renderOs();
+        return;
+      }
       marcarSujo();
     });
     $('[data-os-lamp]', r).addEventListener('click', abrirLampada);
@@ -1133,7 +1165,8 @@ const Servicos = (() => {
     ligarItens();
     if (st.os.cancelada || st.os.importada) {
       $$('input, textarea, select, button', r).forEach((el) => {
-        if (el.matches('[data-os-voltar], [data-os-imprimir], [data-os-hist], [data-fechar]')) return;
+        if (el.matches('[data-os-voltar], [data-os-imprimir], [data-os-hist], [data-fechar], [data-os-trocar-entrega]')) return;
+        if (st.os.importada && el.id === 'os-status') return;
         el.disabled = true;
       });
     }
@@ -1748,9 +1781,10 @@ const Servicos = (() => {
     const jaPerguntou = st.proximaPerguntada;
     st.proximaPerguntada = false;
     if (ficar) return res.id;
-    if (eraNova) await janelaImprimir(res.id, 'abertura', { titulo: `O.S ${res.id} gravada`, texto: 'Abertura registrada. Deseja imprimir ou enviar?' });
+    if (eraNova) await perguntarProxima(res.id);
     else if (virouFinal) await perguntarFechamento(res.id, !!st.os.id_pedido);
-    if (!mudouStatus && !virouFinal && !jaPerguntou) await perguntarProxima(res.id);
+    if (!eraNova && !mudouStatus && !virouFinal && !jaPerguntou) await perguntarProxima(res.id);
+    if (eraNova) await janelaImprimir(res.id, 'abertura', { titulo: `O.S ${res.id} gravada`, texto: 'Abertura registrada. Deseja imprimir ou enviar?' });
     irPara('quadro');
     return res.id;
   }
@@ -1888,7 +1922,7 @@ const Servicos = (() => {
     const alvo = host || raizEl();
     const embutido = !!host;
     const deNovo = () => renderMensagens(embutido ? alvo : null);
-    const res = await api('/os/mensagens');
+    const [res, cfg] = await Promise.all([api('/os/mensagens'), embutido ? api('/os/config') : Promise.resolve(null)]);
     if (!res.ok) {
       alvo.innerHTML = embutido ? `<p class="os-vazio">${esc(res.error)}</p>` : `<div class="os">${abasHtml()}<p class="os-vazio">${esc(res.error)}</p></div>`;
       return;
@@ -1897,7 +1931,12 @@ const Servicos = (() => {
     if (!msgSel || (msgSel.id && !lista.some((m) => m.id === msgSel.id))) msgSel = lista[0] ? { ...lista[0] } : { id: 0, titulo: '', texto: '', evento: 'atribuida', ativo: true };
     const m = msgSel;
     const ev = Object.entries(res.eventos);
-    alvo.innerHTML = `<div class="os">${embutido ? '' : abasHtml()}<div class="os-cad">
+    const aceita = !!cfg?.aceita_servico_condicional;
+    const blocoCond = embutido ? `<section class="os-grupo"><header><h2>Condicional</h2></header><div class="corpo">
+        <label class="os-linha" style="padding:11px 13px;border-radius:12px;background:var(--os-fill)">Aceita serviço no condicional<span class="os-esp"></span><button type="button" class="os-chave${aceita ? ' on' : ''}" id="cfg-aceita-servico" aria-pressed="${aceita}" aria-label="Aceita serviço no condicional"></button></label>
+        <p class="os-legenda" style="margin:8px 0 0">Com esta opção, a busca do condicional inclui serviços (tipo 9), mesmo sem estoque. A impressão de uma venda que tenha serviço usa o formulário da O.S.</p>
+      </div></section>` : '';
+    alvo.innerHTML = `<div class="os">${embutido ? '' : abasHtml()}${blocoCond}<div class="os-cad">
       <section class="os-grupo"><header><h2>Mensagens</h2><span class="os-esp"></span><button type="button" class="ob sm pri" data-msg-nova>${ic('mais', 'p')}Nova</button></header>
         <div class="corpo" style="gap:2px">${lista.map((x) => `<button type="button" class="os-item-lista${x.id === m.id ? ' on' : ''}" data-msg="${x.id}"><span class="os-icost" style="--h:${x.ativo ? '#0d9488' : '#64748b'}">${ic('whats', 'p')}</span>
           <span style="min-width:0"><b>${esc(x.titulo)}</b><br><span class="os-legenda">${esc(res.eventos[x.evento] || '')}${res.automaticos.includes(x.evento) ? ' · automática' : ' · em breve'}${x.ativo ? '' : ' · inativa'}</span></span></button>`).join('') || '<p class="os-legenda">Nenhuma mensagem.</p>'}</div></section>
@@ -1924,6 +1963,17 @@ const Servicos = (() => {
       previa();
     }));
     $('#msg-ativo', r).addEventListener('click', (e) => { e.currentTarget.classList.toggle('on'); });
+    $('#cfg-aceita-servico', r)?.addEventListener('click', async (e) => {
+      const b = e.currentTarget;
+      const ligado = !b.classList.contains('on');
+      b.disabled = true;
+      const salvo = await api('/os/config', { method: 'POST', body: { aceita_servico_condicional: ligado } });
+      b.disabled = false;
+      if (!salvo.ok) { msg(salvo.error || 'Não foi possível salvar.'); return; }
+      b.classList.toggle('on', !!salvo.aceita_servico_condicional);
+      b.setAttribute('aria-pressed', String(b.classList.contains('on')));
+      msg(salvo.aceita_servico_condicional ? 'O condicional passa a aceitar serviço.' : 'O condicional volta a buscar só produtos.');
+    });
     $$('[data-msg]', r).forEach((b) => b.addEventListener('click', () => { msgSel = { ...lista.find((x) => x.id === Number(b.dataset.msg)) }; deNovo(); }));
     $('[data-msg-nova]', r).addEventListener('click', () => { msgSel = { id: 0, titulo: '', texto: '', evento: 'atribuida', ativo: true }; deNovo(); });
     $('[data-msg-salvar]', r).addEventListener('click', async () => {

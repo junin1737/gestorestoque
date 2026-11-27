@@ -283,9 +283,11 @@ async function listar(statusFiltro, busca) {
 async function itensDoPedido(db, appCfg, idPedido) {
   const t = activeTargets(appCfg)[0]?.tables;
   if (!t) throw new Error('Estoque não encontrado nesta base.');
+  const temTipo = await columnExists(db, t.estoque, 'ID_TIPOITEM');
+  const sqlTipo = `COALESCE(NULLIF(TRIM(LEADING '0' FROM TRIM(E.ID_TIPOITEM)), ''), '0')`;
   const itens = await query(db, `
     SELECT I.ID_ITEMPED, I.ID_IDENTIFICADOR, I.QTD_ITEM, I.VLR_UNIT, I.VLR_DESC, I.VLR_TOTAL, I.ITEM_CANCEL,
-           E.DESCRICAO, E.GRADE_SERIE, E.UNI_MEDIDA, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
+           E.DESCRICAO, E.GRADE_SERIE, E.UNI_MEDIDA, ${temTipo ? `${sqlTipo} AS TIPO,` : ''} N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
     FROM TB_PED_VENDA_ITEM I
     LEFT JOIN ${t.identificador} IDN ON IDN.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
     LEFT JOIN ${t.estoque} E ON E.ID_ESTOQUE = IDN.ID_ESTOQUE
@@ -309,6 +311,7 @@ async function itensDoPedido(db, appCfg, idPedido) {
       acrescimo: Math.max(0, Math.round((num(r.VLR_TOTAL) - bruto) * 100) / 100),
       total: num(r.VLR_TOTAL),
       uni_medida: String(r.UNI_MEDIDA || '').trim(),
+      servico: temTipo && String(r.TIPO || '').trim() === '9',
     };
   });
 }
@@ -437,19 +440,27 @@ async function buscarPecas(q) {
       params = lista.flatMap((p) => [p, p, p]);
     }
     const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
+    const temTipo = await columnExists(db, t.estoque, 'ID_TIPOITEM');
+    const aceita = Number(appCfg?.aceita_servico_condicional ?? loadAppConfig().aceita_servico_condicional) === 1;
+    const sqlTipo = `COALESCE(NULLIF(TRIM(LEADING '0' FROM TRIM(E.ID_TIPOITEM)), ''), '0')`;
+    const saldo = temReserv
+      ? 'COALESCE(P.QTD_ATUAL, 0) - COALESCE(P.QTD_RESERV, 0)'
+      : 'COALESCE(P.QTD_ATUAL, 0)';
     if (Number(appCfg?.somente_com_estoque ?? loadAppConfig().somente_com_estoque) === 1) {
-      const saldo = temReserv
-        ? 'COALESCE(P.QTD_ATUAL, 0) - COALESCE(P.QTD_RESERV, 0)'
-        : 'COALESCE(P.QTD_ATUAL, 0)';
-      where = `(${where}) AND ${saldo} > 0`;
+      where = aceita && temTipo
+        ? `(${where}) AND (${sqlTipo} = '9' OR ${saldo} > 0)`
+        : `(${where}) AND ${saldo} > 0`;
     }
+    if (!aceita && temTipo) where = `(${where}) AND ${sqlTipo} <> '9'`;
+    const ligaProd = aceita ? 'LEFT JOIN' : 'JOIN';
     const rows = await query(db, `
       SELECT FIRST 20 I.ID_IDENTIFICADOR, E.ID_ESTOQUE, E.DESCRICAO, E.PRC_VENDA,
              P.COD_BARRA, P.REFERENCIA, P.QTD_ATUAL${temReserv ? ', P.QTD_RESERV' : ''},
+             ${temTipo ? `${sqlTipo} AS TIPO,` : ''}
              E.GRADE_SERIE, N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO
       FROM ${t.estoque} E
       JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
-      JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+      ${ligaProd} ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
       LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
       LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
       WHERE (E.STATUS = 'A' OR E.STATUS IS NULL) AND ${where}
@@ -463,6 +474,7 @@ async function buscarPecas(q) {
       prc_venda: num(r.PRC_VENDA),
       qtd_atual: num(r.QTD_ATUAL),
       qtd_disponivel: disponivelDe(r, temReserv),
+      servico: temTipo && String(r.TIPO || '').trim() === '9',
     }));
   });
 }
@@ -1238,6 +1250,52 @@ function lojaDe(empresa) {
   return { nome: limpo(empresa), endereco: '', telefone: '' };
 }
 
+function htmlComoOs(doc, loja, opcoes = {}) {
+  const itens = (doc.itens || []).map((it) => ({
+    tipo: it.servico ? 'S' : 'P',
+    descricao: it.descricao,
+    qtd: it.qtd,
+    vlr_unit: it.prc_unit,
+    total: num(it.total),
+  }));
+  const bruto = (tipo) => itens.filter((it) => it.tipo === tipo).reduce((s, it) => s + num(it.total), 0);
+  const validade = textoValidade(opcoes.validade, doc);
+  const osDoc = {
+    id: doc.id,
+    emissao_br: [doc.data, doc.horario].filter(Boolean).join(' '),
+    tipo: 'I',
+    modalidade: 'P',
+    cliente: { nome: doc.cliente, telefone: doc.telefone, documento: '', endereco: '' },
+    tecnico: doc.vendedor ? { nome: doc.vendedor } : null,
+    equipamento: '',
+    defeito: '',
+    itens,
+    obs: [doc.obs, doc.pagamento ? `Pagamento: ${doc.pagamento}` : '', validade && validade !== '____/____/________' ? `Validade: ${validade}` : ''].filter(Boolean).join('\n'),
+    totais: {
+      bruto_produtos: bruto('P'),
+      bruto_servicos: bruto('S'),
+      desconto_total: descontoExibido(doc),
+      acrescimo_total: acrescimoExibido(doc),
+      frete: num(doc.frete),
+      deslocamento: 0,
+      total: num(doc.total),
+    },
+  };
+  return require('./os').htmlImpressao(osDoc, loja, {
+    formato: opcoes.formato,
+    modelo: 'fechamento',
+    rotulo: 'Venda',
+    documento: 'Venda',
+  });
+}
+
+function htmlFolha(doc, empresa, opcoes = {}) {
+  const aceita = Number(loadAppConfig().aceita_servico_condicional) === 1;
+  const temServico = (doc.itens || []).some((it) => it.servico);
+  if (aceita && temServico) return htmlComoOs(doc, lojaDe(empresa), opcoes);
+  return htmlPdf(doc, empresa, opcoes);
+}
+
 function htmlPdf(doc, empresa, opcoes = {}) {
   const formato = ['a4', 'meia', '80'].includes(opcoes.formato) ? opcoes.formato : 'a4';
   const validade = textoValidade(opcoes.validade, doc);
@@ -1432,6 +1490,7 @@ module.exports = {
   reprovar,
   pedidoImportado,
   htmlPdf,
+  htmlFolha,
   lojaEmitente,
   textoWhatsapp,
 };

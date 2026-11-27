@@ -84,7 +84,15 @@ function lerFiltros(q = {}, periodoObrigatorio) {
     tipo: ['I', 'E'].includes(q.tipo) ? q.tipo : '',
     tecnico: tecnicoLista.map(num).filter(Boolean),
     semTecnico: tecnicoLista.includes('sem'),
+    item: ['servico', 'ambos'].includes(q.item) ? q.item : 'produto',
   };
+}
+
+function semAcento(v) {
+  return String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+}
+function ehAberta(descricao) {
+  return semAcento(descricao).includes('abert');
 }
 
 function rotuloPeriodo(f) {
@@ -202,9 +210,10 @@ async function osDasNotas(db, notas) {
 
 const RELATORIOS = [
   { id: 'os-abertos', titulo: 'Serviços em aberto', base: 'os', periodo: 'opcional' },
+  { id: 'os-status', titulo: 'O.S por status', base: 'os', periodo: 'opcional' },
   { id: 'os-finalizados', titulo: 'Serviços finalizados', base: 'os', periodo: 'mes' },
   { id: 'os-tecnico', titulo: 'Serviços por técnico', base: 'os', periodo: 'mes' },
-  { id: 'os-produtos', titulo: 'Serviços vendidos (tipo 9)', base: 'gr', periodo: 'mes' },
+  { id: 'os-produtos', titulo: 'Produtos vendidos em O.S', base: 'gr', periodo: 'mes' },
   { id: 'os-totalizador', titulo: 'Totalizador de serviços', base: 'gr', periodo: 'mes' },
   { id: 'os-descontos', titulo: 'Descontos e acréscimos', base: 'gr', periodo: 'mes' },
 ];
@@ -240,7 +249,9 @@ async function relOperacional(db, def, f) {
   const hoje = isoHoje();
 
   if (def.id === 'os-abertos') {
-    const extra = finais.length ? [`(O.ID_STATUS IS NULL OR O.ID_STATUS NOT IN (${finais.join(',')}))`] : [];
+    const idsAberta = statuses.filter((s) => ehAberta(s.descricao)).map((s) => s.id);
+    if (!idsAberta.length) return { colunas: [], linhas: [], aviso: 'Nenhum status de abertura cadastrado.' };
+    const extra = [`O.ID_STATUS IN (${idsAberta.join(',')})`, `COALESCE(O.CANCELADA, 'N') <> 'S'`];
     const rows = await lerOs(db, f, extra, [], 'O.DT_EMISSAO');
     let total = 0;
     const linhas = rows.map((r) => {
@@ -263,12 +274,40 @@ async function relOperacional(db, def, f) {
         C('previsao', 'Previsão', { largura: '9%' }), C('total', 'Valor', { numero: true, largura: '10%' })],
       linhas,
       total: { numero: 'Total', cliente: `${linhas.length} O.S`, total: brl(total) },
+      nota: 'Só as O.S no status Aberta. As demais etapas ficam em O.S por status.',
+    };
+  }
+
+  if (def.id === 'os-status') {
+    const extra = [`COALESCE(O.CANCELADA, 'N') <> 'S'`];
+    const rows = await lerOs(db, f, extra, [], 'O.DT_EMISSAO');
+    let total = 0;
+    const linhas = rows.map((r) => {
+      total += cent(r.TOTAL);
+      return {
+        numero: String(num(r.ID_OS)),
+        emissao: dataBr(r.DT_EMISSAO),
+        cliente: txt(r.CLI_NOME),
+        equipamento: txt(r.EQUIPAMENTO),
+        status: nomeSt(r.ID_STATUS),
+        tecnico: nomeTec(r.ID_TECNICO),
+        total: brl(cent(r.TOTAL)),
+      };
+    });
+    return {
+      colunas: [C('numero', 'O.S', { largura: '8%' }), C('emissao', 'Emissão', { largura: '12%' }), C('cliente', 'Cliente', { largura: '24%' }),
+        C('equipamento', 'Equipamento', { largura: '22%' }), C('status', 'Status', { largura: '14%' }), C('tecnico', 'Técnico', { largura: '12%' }),
+        C('total', 'Valor', { numero: true, largura: '8%' })],
+      linhas,
+      total: { numero: 'Total', cliente: `${linhas.length} O.S`, total: brl(total) },
+      nota: 'Escolha o status no filtro e exporte. Sem status, lista todas as etapas.',
     };
   }
 
   if (def.id === 'os-finalizados') {
-    if (!finais.length) return { colunas: [], linhas: [], aviso: 'Nenhum status está marcado como final.' };
-    const rows = await lerOs(db, f, [`O.ID_STATUS IN (${finais.join(',')})`], [], 'COALESCE(O.DT_ENTREGA, O.DT_ALTERACAO)');
+    const idsFinais = statuses.filter((s) => s.final && !ehAberta(s.descricao)).map((s) => s.id);
+    if (!idsFinais.length) return { colunas: [], linhas: [], aviso: 'Nenhum status está marcado como final.' };
+    const rows = await lerOs(db, f, [`O.ID_STATUS IN (${idsFinais.join(',')})`], [], 'COALESCE(O.DT_ENTREGA, O.DT_ALTERACAO)');
     let total = 0;
     const linhas = rows.map((r) => {
       total += cent(r.TOTAL);
@@ -332,8 +371,13 @@ async function relFinanceiro(db, def, f) {
   const nota = `Vendas GR com pelo menos um serviço${filtraOs(f) ? ', vindas de O.S com os filtros escolhidos' : ''}. ${notas.size} ${notas.size === 1 ? 'venda' : 'vendas'}.`;
 
   if (def.id === 'os-produtos') {
+    const lista = itens.filter((i) => {
+      if (f.item === 'ambos') return true;
+      if (f.item === 'servico') return i.servico;
+      return !i.servico;
+    });
     const mapa = new Map();
-    itens.filter((i) => i.servico).forEach((i) => {
+    lista.forEach((i) => {
       const p = mapa.get(i.id) || { id: i.id, descricao: i.descricao, un: i.un, qtd: 0, valor: 0, notas: new Set() };
       p.qtd += i.qtd;
       p.valor += i.valor;
@@ -342,44 +386,44 @@ async function relFinanceiro(db, def, f) {
     });
     const ordenados = [...mapa.values()].sort((a, b) => b.valor - a.valor);
     const total = ordenados.reduce((s, p) => s + p.valor, 0);
+    const nomeItem = f.item === 'servico'
+      ? (ordenados.length === 1 ? 'serviço' : 'serviços')
+      : (f.item === 'ambos' ? (ordenados.length === 1 ? 'item' : 'itens') : (ordenados.length === 1 ? 'produto' : 'produtos'));
     return {
       colunas: [C('codigo', 'Código', { largura: '10%' }), C('descricao', 'Descrição', { largura: '46%' }), C('vendas', 'Vendas', { numero: true, largura: '10%' }),
         C('quantidade', 'Quantidade', { numero: true, largura: '14%' }), C('valor', 'Valor', { numero: true, largura: '20%' })],
       linhas: ordenados.map((p) => ({
         codigo: String(p.id), descricao: p.descricao, vendas: String(p.notas.size), quantidade: `${qtdBr(p.qtd)}${p.un ? ` ${p.un.toLowerCase()}` : ''}`, valor: brl(p.valor),
       })),
-      total: { codigo: 'Total', descricao: `${ordenados.length} ${ordenados.length === 1 ? 'serviço' : 'serviços'}`, valor: brl(total) },
-      nota: `${nota} Só o tipo 9. O valor já tira o desconto e mantém o acréscimo. Nota cancelada não entra.`,
+      total: { codigo: 'Total', descricao: `${ordenados.length} ${nomeItem}`, valor: brl(total) },
+      nota: `${nota} Filtro: ${f.item === 'servico' ? 'só serviços (tipo 9)' : (f.item === 'ambos' ? 'produtos e serviços' : 'só produtos')}. O valor já tira o desconto e mantém o acréscimo. Nota cancelada não entra.`,
     };
   }
 
   if (def.id === 'os-totalizador') {
-    const dias = Math.round((Date.parse(`${f.fim}T12:00:00`) - Date.parse(`${f.inicio}T12:00:00`)) / 86400000) + 1;
-    const porMes = dias > 31;
-    const chave = (d) => (porMes ? d.slice(0, 7) : d);
-    const rotulo = (k) => {
-      if (!porMes) return dataBr(k);
-      const [y, m] = k.split('-');
-      return `${['jan', 'fev', 'mar', 'abr', 'mai', 'jun', 'jul', 'ago', 'set', 'out', 'nov', 'dez'][Number(m) - 1]}/${y}`;
-    };
+    const { funcs } = await os._mapasApoio(db);
+    const nomeTec = (id) => (id ? (funcs.get(num(id))?.nome || `Funcionário ${id}`) : '—');
     const mapa = new Map();
     itens.forEach((i) => {
-      const k = chave(i.data);
-      const g = mapa.get(k) || { k, notas: new Set(), produtos: 0, servicos: 0 };
-      g.notas.add(i.nota);
+      const g = mapa.get(i.nota) || {
+        nota: i.nota, numero: i.numero, data: i.data, cliente: i.cliente, os: i.os?.id || null,
+        tecnico: nomeTec(i.os?.tecnico), produtos: 0, servicos: 0,
+      };
       if (i.servico) g.servicos += i.valor; else g.produtos += i.valor;
-      mapa.set(k, g);
+      mapa.set(i.nota, g);
     });
-    const ordenados = [...mapa.values()].sort((a, b) => (a.k < b.k ? -1 : 1));
+    const ordenados = [...mapa.values()].sort((a, b) => (a.data < b.data ? -1 : a.data > b.data ? 1 : a.nota - b.nota));
     const soma = ordenados.reduce((s, g) => ({ produtos: s.produtos + g.produtos, servicos: s.servicos + g.servicos }), { produtos: 0, servicos: 0 });
     return {
-      colunas: [C('periodo', porMes ? 'Mês' : 'Dia', { largura: '20%' }), C('vendas', 'Vendas', { numero: true, largura: '14%' }),
-        C('produtos', 'Produtos', { numero: true, largura: '22%' }), C('servicos', 'Serviços', { numero: true, largura: '22%' }), C('total', 'Total', { numero: true, largura: '22%' })],
+      colunas: [C('data', 'Data', { largura: '10%' }), C('venda', 'Venda', { largura: '8%' }), C('os', 'O.S', { largura: '7%' }),
+        C('cliente', 'Cliente', { largura: '22%' }), C('tecnico', 'Técnico', { largura: '16%' }),
+        C('produtos', 'Produtos', { numero: true, largura: '12%' }), C('servicos', 'Serviços', { numero: true, largura: '12%' }), C('total', 'Total', { numero: true, largura: '13%' })],
       linhas: ordenados.map((g) => ({
-        periodo: rotulo(g.k), vendas: String(g.notas.size), produtos: brl(g.produtos), servicos: brl(g.servicos), total: brl(g.produtos + g.servicos),
+        data: dataBr(g.data), venda: String(g.numero || g.nota), os: g.os ? String(g.os) : '—', cliente: g.cliente, tecnico: g.tecnico,
+        produtos: brl(g.produtos), servicos: brl(g.servicos), total: brl(g.produtos + g.servicos),
       })),
-      total: { periodo: 'Total', vendas: String(notas.size), produtos: brl(soma.produtos), servicos: brl(soma.servicos), total: brl(soma.produtos + soma.servicos) },
-      nota,
+      total: { data: 'Total', cliente: `${ordenados.length} vendas`, produtos: brl(soma.produtos), servicos: brl(soma.servicos), total: brl(soma.produtos + soma.servicos) },
+      nota: `${nota} Cada linha é uma venda, com o cliente e o técnico da O.S.`,
     };
   }
 

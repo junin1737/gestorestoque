@@ -204,6 +204,7 @@
             </button>
             <div class="nav-filhos" id="nav-ramo-servicos-rel" hidden>
               <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-abertos">Serviços em aberto</button>
+              <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-status">O.S por status</button>
               <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-finalizados">Serviços finalizados</button>
               <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-tecnico">Serviços por técnico</button>
               <button type="button" class="nav-btn nav-folha" data-page="relatorios" data-relatorio="os-produtos">Produtos vendidos em O.S</button>
@@ -1243,6 +1244,7 @@
               <button type="button" class="mais-ramo" data-alvo="mais-ramo-servicos-rel" aria-expanded="false" id="nav-rel-servicos-mobile" hidden>Relatórios de serviços</button>
               <div class="mais-filhos" id="mais-ramo-servicos-rel" hidden>
                 <button type="button" data-page="relatorios" data-relatorio="os-abertos">Serviços em aberto</button>
+                <button type="button" data-page="relatorios" data-relatorio="os-status">O.S por status</button>
                 <button type="button" data-page="relatorios" data-relatorio="os-finalizados">Serviços finalizados</button>
                 <button type="button" data-page="relatorios" data-relatorio="os-tecnico">Serviços por técnico</button>
                 <button type="button" data-page="relatorios" data-relatorio="os-produtos">Produtos vendidos em O.S</button>
@@ -1563,7 +1565,7 @@
         <label>Validade
           <input type="date" id="cond-pdf-validade" />
         </label>
-        <p class="hint">A4 e meia folha saem em retrato, com linha para o cliente assinar. 80 mm é o cupom da impressora gerencial. O valor total e a validade vão no final.</p>
+        <p class="hint">A4 e meia folha saem em retrato, com linha para o cliente assinar. 80 mm é o cupom da impressora gerencial. Se a venda tiver serviço e a opção Aceita serviço no condicional estiver marcada, a folha sai no formulário da O.S.</p>
         <div class="dlg-actions">
           <button type="submit" class="btn" value="cancel">Cancelar</button>
           <button type="submit" class="btn primary" value="ok">Gerar</button>
@@ -1579,16 +1581,16 @@
   <script src="importacao-nfe.js?v=262"></script>
   <script src="compras.js?v=243"></script>
   <script src="importacao-auto.js?v=8"></script>
-  <script src="condicionais.js?v=255"></script>
+  <script src="condicionais.js?v=256"></script>
   <script src="clientes.js?v=8"></script>
   <script src="contador.js?v=242"></script>
   <script src="exportar-tabela.js?v=6"></script>
   <script src="classificacao-ncm.js?v=11"></script>
-  <script src="relatorios.js?v=8"></script>
+  <script src="relatorios.js?v=9"></script>
   <script src="dashboard.js?v=269"></script>
   <script src="gondola.js?v=4"></script>
   <script src="central-ofertas.js?v=21"></script>
-  <script src="os.js?v=14"></script>
+  <script src="os.js?v=15"></script>
   <script src="app.js?v=297"></script>
 </body>
 </html>

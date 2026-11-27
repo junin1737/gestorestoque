@@ -3,6 +3,7 @@
     'ncm-branco': 'NCM em branco ou inválido',
     'ncm-distintos': 'NCMs distintos',
     'os-abertos': 'Serviços em aberto',
+    'os-status': 'O.S por status',
     'os-finalizados': 'Serviços finalizados',
     'os-tecnico': 'Serviços por técnico',
     'os-produtos': 'Produtos vendidos em O.S',
@@ -10,7 +11,7 @@
     'os-descontos': 'Descontos e acréscimos',
   };
   /** Relatórios da O.S: filtros iguais aos do quadro (período, status, tipo e técnico). */
-  const PERIODO_OPCIONAL = ['os-abertos'];
+  const PERIODO_OPCIONAL = ['os-abertos', 'os-status'];
   let deps = {};
   let pedido = 'ncm-branco';
   let atual = null;
@@ -41,8 +42,8 @@
     if (!filtrosOs[id]) {
       const hoje = GestorHora.hoje();
       filtrosOs[id] = PERIODO_OPCIONAL.includes(id)
-        ? { inicio: '', fim: '', status: '', tipo: '', tecnico: '' }
-        : { inicio: `${hoje.slice(0, 8)}01`, fim: hoje, status: '', tipo: '', tecnico: '' };
+        ? { inicio: '', fim: '', status: '', tipo: '', tecnico: '', item: id === 'os-produtos' ? 'produto' : '' }
+        : { inicio: `${hoje.slice(0, 8)}01`, fim: hoje, status: '', tipo: '', tecnico: '', item: id === 'os-produtos' ? 'produto' : '' };
     }
     return filtrosOs[id];
   }
@@ -54,6 +55,7 @@
     if (f.status) partes.push(`status ${apoioOs?.statuses?.find((s) => String(s.id) === f.status)?.descricao || f.status}`);
     if (f.tipo) partes.push(f.tipo === 'E' ? 'externas' : 'internas');
     if (f.tecnico) partes.push(f.tecnico === 'sem' ? 'sem técnico' : `técnico ${apoioOs?.tecnicos?.find((t) => String(t.id) === f.tecnico)?.nome || f.tecnico}`);
+    if (pedido === 'os-produtos') partes.push(f.item === 'servico' ? 'só serviços' : (f.item === 'ambos' ? 'produtos e serviços' : 'só produtos'));
     return partes.filter(Boolean).join(' · ');
   }
 
@@ -99,6 +101,10 @@
         <option value="E" ${f.tipo === 'E' ? 'selected' : ''}>Externa</option></select></label>
       <label>Técnico<select name="tecnico"><option value="">Todos</option>${opc(apoioOs?.tecnicos, f.tecnico, 'nome')}
         <option value="sem" ${f.tecnico === 'sem' ? 'selected' : ''}>Sem técnico</option></select></label>
+      ${pedido === 'os-produtos' ? `<label>Itens<select name="item">
+        <option value="produto" ${f.item !== 'servico' && f.item !== 'ambos' ? 'selected' : ''}>Produtos</option>
+        <option value="servico" ${f.item === 'servico' ? 'selected' : ''}>Serviços</option>
+        <option value="ambos" ${f.item === 'ambos' ? 'selected' : ''}>Ambos</option></select></label>` : ''}
       <button type="submit" class="btn small">Atualizar</button>
     </form>`;
   }
@@ -150,7 +156,7 @@
       ev.preventDefault();
       const dados = new FormData(form);
       const f = filtrosDe(pedido);
-      ['inicio', 'fim', 'status', 'tipo', 'tecnico'].forEach((k) => { f[k] = String(dados.get(k) || ''); });
+      ['inicio', 'fim', 'status', 'tipo', 'tecnico', 'item'].forEach((k) => { f[k] = String(dados.get(k) || ''); });
       if (f.inicio && f.fim && f.inicio > f.fim) {
         deps.showMsg?.('A data inicial é maior que a final.');
         return;

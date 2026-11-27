@@ -577,8 +577,8 @@ const Condicionais = (() => {
 
   function htmlPecas(itens) {
     return itens.map((p) => {
-      const extra = [p.cod_barras ? `barras ${p.cod_barras}` : '', p.referencia ? `ref. ${p.referencia}` : '', textoEstoque(p), money(p.prc_venda)].filter(Boolean).join(' · ');
-      const sem = Number(p.qtd_disponivel) <= 0 ? ' is-sem-estoque' : '';
+      const extra = [p.servico ? 'serviço' : '', p.cod_barras ? `barras ${p.cod_barras}` : '', p.referencia ? `ref. ${p.referencia}` : '', p.servico ? '' : textoEstoque(p), money(p.prc_venda)].filter(Boolean).join(' · ');
+      const sem = !p.servico && Number(p.qtd_disponivel) <= 0 ? ' is-sem-estoque' : '';
       return `<button type="button" class="cond-combo-opt${sem}" data-id="${p.id_identificador}" data-desc="${esc(p.descricao)}" data-prc="${p.prc_venda}" data-disp="${p.qtd_disponivel}"><strong>${esc(p.descricao)}</strong><span>cód. ${esc(p.id_estoque)} · id. ${esc(p.id_identificador)}${extra ? ` · ${esc(extra)}` : ''}</span></button>`;
     }).join('');
   }

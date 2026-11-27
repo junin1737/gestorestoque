@@ -354,6 +354,16 @@ function chaveEtapa(descricao) {
   return '';
 }
 
+/** Com a venda já na gerencial, a O.S ainda pode ir para Entregando e depois para Concluído. */
+function etapaPosVenda(origemDesc, destinoDesc) {
+  const o = chaveEtapa(origemDesc);
+  const d = chaveEtapa(destinoDesc);
+  if (o === d) return true;
+  if (o === 'finalizada' && d === 'entregando') return true;
+  if (o === 'entregando' && d === 'concluido') return true;
+  return false;
+}
+
 /** Depois de Finalizada o card só avança um passo. Antes disso, pode ir e voltar, menos para Entregando e Concluído. */
 function podeMudarEtapa(origemDesc, destinoDesc) {
   const o = chaveEtapa(origemDesc);
@@ -1192,6 +1202,17 @@ function lerLimites() {
   };
 }
 
+function lerAceitaServico() {
+  return Number(loadAppConfig().aceita_servico_condicional) === 1;
+}
+
+function salvarAceitaServico(valor) {
+  const on = valor === true || valor === 1 || valor === '1' || valor === 'S' || valor === 'true';
+  const atual = loadAppConfig();
+  saveAppConfig({ ...atual, aceita_servico_condicional: on ? 1 : 0 });
+  return lerAceitaServico();
+}
+
 function salvarLimites(body) {
   const lim = (v) => {
     const n = Number(String(v ?? '').replace(',', '.'));
@@ -1848,7 +1869,6 @@ async function trocarEntregador(id, idFunc, usuario) {
     const os = await lerOs(db, id);
     if (!os) throw new Error('O.S não encontrada.');
     if (os.cancelada) throw new Error('O.S cancelada não pode ser editada.');
-    if (os.importada) throw new Error('O.S importada não pode ser editada.');
     if (papelStatus(os.status?.descricao) !== 'entrega') throw new Error('A troca de quem entrega só vale na etapa de entrega.');
     const { funcs } = await mapasApoio(db);
     const novo = num(idFunc);
@@ -1893,7 +1913,6 @@ async function mudarStatus(id, idStatus, usuario, extra) {
     const os = await lerOs(db, id);
     if (!os) throw new Error('O.S não encontrada.');
     if (os.cancelada) throw new Error('O.S cancelada não muda de etapa.');
-    if (os.importada) throw new Error('O.S importada não pode ser editada.');
     const { porId, funcs } = await mapasApoio(db);
     let novo = porId.get(num(idStatus));
     if (!novo || !novo.ativo) throw new Error('Status inválido.');
@@ -1902,6 +1921,9 @@ async function mudarStatus(id, idStatus, usuario, extra) {
       if (andamento) novo = andamento;
     }
     if (novo.id === os.id_status) return { id: os.id, avisos: [] };
+    if (os.importada && !etapaPosVenda(os.status?.descricao, novo.descricao)) {
+      throw new Error('O.S já está na venda. A partir daqui só segue para entrega ou conclusão.');
+    }
     if (!podeMudarEtapa(os.status?.descricao, novo.descricao)) {
       throw new Error('Depois de finalizada a O.S só segue para a próxima etapa.');
     }
@@ -1975,6 +1997,7 @@ function preencherVariaveis(modelo, os, extra = {}) {
     previsao: os.previsao ? dataBr(os.previsao) : 'sem previsão',
     status: os.status?.descricao || '',
     quem_trouxe: os.quem_trouxe || '',
+    quem_levou: os.buscador || '',
   };
   return String(modelo || '').replace(/\{(\w+)\}/g, (m, k) => (k in valores ? valores[k] : m));
 }
@@ -2163,6 +2186,8 @@ function htmlImpressao(os, loja, opcoes = {}) {
   const formato = ['a4', 'meia', '80'].includes(opcoes.formato) ? opcoes.formato : 'a4';
   if (opcoes.modelo === 'historico') return htmlHistorico(os, loja);
   const fechamento = opcoes.modelo === 'fechamento';
+  const papel = opcoes.rotulo || (fechamento ? 'Fechamento' : 'Abertura');
+  const docNome = opcoes.documento || 'O.S';
   const termico = formato === '80';
   const meia = formato === 'meia';
   const page = termico
@@ -2206,17 +2231,17 @@ function htmlImpressao(os, loja, opcoes = {}) {
     : '';
   const cab = termico
     ? `<div class="cab-t">${marca}<div><b style="font-size:13px">${esc(loja?.nome || 'Loja')}</b>${endereco}${loja?.telefone ? `<div>${esc(loja.telefone)}</div>` : ''}</div></div>
-       <div class="sep"></div><div style="text-align:center"><b style="font-size:14px">O.S ${os.id} — ${fechamento ? 'FECHAMENTO' : 'ABERTURA'}</b><br>${esc(os.emissao_br)}</div><div class="sep"></div>`
+       <div class="sep"></div><div style="text-align:center"><b style="font-size:14px">${esc(docNome)} ${os.id} — ${esc(papel).toUpperCase()}</b><br>${esc(os.emissao_br)}</div><div class="sep"></div>`
     : `<header class="cab">${marca}<div class="loja"><h1>${esc(loja?.nome || 'Loja')}</h1><div class="end">${endereco}${loja?.telefone ? `<div>${esc(loja.telefone)}</div>` : ''}</div></div>
-       <div class="os"><span class="r">${fechamento ? 'Fechamento' : 'Abertura'}</span><b>O.S ${os.id}</b><span>${esc(os.emissao_br)}</span></div></header>`;
+       <div class="os"><span class="r">${esc(papel)}</span><b>${esc(docNome)} ${os.id}</b><span>${esc(os.emissao_br)}</span></div></header>`;
   const dadosCli = termico
     ? `Cliente: ${esc(os.cliente?.nome || '—')}${os.cliente?.documento ? `<br>Doc.: ${esc(os.cliente.documento)}` : ''}${os.cliente?.telefone ? `<br>Fone: ${esc(fmtFone(os.cliente.telefone))}` : ''}
-       <br>Equip.: ${esc(os.equipamento)}${os.categoria ? `<br>Categoria: ${esc(os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}` : ''}${os.quem_trouxe ? `<br>Trouxe: ${esc(os.quem_trouxe)}` : ''}${os.tecnico ? `<br>Técnico: ${esc(os.tecnico.nome)}` : ''}
+       <br>Equip.: ${esc(os.equipamento)}${os.categoria ? `<br>Categoria: ${esc(os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}` : ''}${os.buscador ? `<br>Levou: ${esc(os.buscador)}` : ''}${os.quem_trouxe ? `<br>Trouxe: ${esc(os.quem_trouxe)}` : ''}${os.tecnico ? `<br>Técnico: ${esc(os.tecnico.nome)}` : ''}
        ${os.previsao ? `<br>Previsão: ${dataBr(os.previsao)}` : ''}${fechamento && os.entrega ? `<br>Entrega: ${dataHoraBr(os.entrega)}` : ''}
        <div class="sep"></div>Defeito: ${esc(os.defeito)}${autor ? `<br>Autorização${rotAutor ? ` (${esc(rotAutor)})` : ''}: ${esc(os.autorizacao)}` : ''}${fechamento && os.solucao ? `<br>Solução: ${esc(os.solucao)}` : ''}`
     : `<h3>Cliente</h3><div class="bloco grade">${campo('Nome', os.cliente?.nome)}${campo('CPF/CNPJ', os.cliente?.documento)}${campo('Telefone', fmtFone(os.cliente?.telefone))}${campo('Endereço', os.cliente?.endereco)}</div>
-       <h3>Atendimento</h3><div class="bloco grade">${campo('Tipo', tipoTxt)}${campo('Técnico', os.tecnico?.nome)}${campo('Categoria', os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}${campo('Quem trouxe', os.quem_trouxe)}${campo('Previsão', dataBr(os.previsao))}${fechamento ? campo('Entrega', dataHoraBr(os.entrega)) : ''}${campoLargo('Equipamento', os.equipamento)}${campo('Defeito apresentado', os.defeito)}${campo(`Autorização solicitada${rotAutor ? ` · ${rotAutor}` : ''}`, os.autorizacao)}</div>${fechamento ? bloco('Solução', os.solucao) : ''}${os.obs ? bloco('Observações', os.obs) : ''}`;
-  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>O.S ${os.id}</title>
+       <h3>Atendimento</h3><div class="bloco grade">${campo('Tipo', tipoTxt)}${campo('Técnico', os.tecnico?.nome)}${campo('Categoria', os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}${campo('Quem levou', os.buscador)}${campo('Quem trouxe', os.quem_trouxe)}${campo('Previsão', dataBr(os.previsao))}${fechamento ? campo('Entrega', dataHoraBr(os.entrega)) : ''}${campoLargo('Equipamento', os.equipamento)}${campo('Defeito apresentado', os.defeito)}${campo(`Autorização solicitada${rotAutor ? ` · ${rotAutor}` : ''}`, os.autorizacao)}</div>${fechamento ? bloco('Solução', os.solucao) : ''}${os.obs ? bloco('Observações', os.obs) : ''}`;
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>${esc(docNome)} ${os.id}</title>
 <style>
   ${page}
   body{color:#152033;box-sizing:border-box;font-family:Segoe UI,Arial,sans-serif;${tela}}
@@ -2323,6 +2348,8 @@ function textoWhatsapp(os, modelo) {
     `Defeito: ${os.defeito}`,
   ];
   if (os.autorizacao || os.autor_rotulo) linhas.push(`Autorização solicitada${os.autor_rotulo ? ` (${os.autor_rotulo})` : ''}: ${os.autorizacao || '—'}`);
+  if (os.buscador) linhas.push(`Quem levou: ${os.buscador}`);
+  if (os.quem_trouxe) linhas.push(`Quem trouxe: ${os.quem_trouxe}`);
   if (os.previsao) linhas.push(`Previsão: ${dataBr(os.previsao)}`);
   if (fechamento) {
     if (os.solucao) linhas.push(`Solução: ${os.solucao}`);
@@ -2404,6 +2431,8 @@ module.exports = {
   buscarItens,
   lerLimites,
   salvarLimites,
+  lerAceitaServico,
+  salvarAceitaServico,
   liberarDesconto,
   impressao,
   htmlImpressao,
