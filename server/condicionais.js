@@ -5,6 +5,7 @@ const {
   withDb, query, hasTable, columnExists, activeTargets, writeTargets, withTransaction, nextGenIdSincronizado, refreshTables,
 } = require('./db');
 const { loadAppConfig } = require('./config');
+const { sqlTimestamp, sqlDate, sqlTime } = require('./datetime');
 
 /** O Clipp numera pelo primeiro; o trigger XX_TR_INC_PED_I da integração ManagePro, pelo segundo. */
 const GENERATORS_ITEM_PEDIDO = ['GEN_TB_PED_VENDA_ITEM_ID', 'XX_GEN_TB_PEDI_I'];
@@ -609,7 +610,7 @@ async function fecharItensNoPedido(tx, cols, casas, idPedido) {
       sets.push('CHAVE = ?');
       params.push(chaveClipp());
     }
-    if (cols.DT_LACTO && !row.DT_LACTO) sets.push('DT_LACTO = CURRENT_DATE');
+    if (cols.DT_LACTO && !row.DT_LACTO) sets.push(`DT_LACTO = ${sqlDate()}`);
     if (cols.CASAS_QTD && textoVazio(row.CASAS_QTD)) {
       sets.push('CASAS_QTD = ?');
       params.push(casas.qtd);
@@ -798,7 +799,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
               ID_CLIENTE, ID_VENDEDOR, ID_PEDIDO, DT_PEDIDO, HR_PEDIDO,
               ID_PARCELA, ID_FMAPGTO, ID_STATUS, ID_MODULO, ORIGEM,
               UPDATED_INTEGRADORA, ENVIAR_INTEGRADORA, OBSERVACAO${colsValidade}
-            ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?${valValidade})`, paramsPedido);
+            ) VALUES (?, ?, ?, ${sqlDate()}, ${sqlTime()}, ?, ?, ?, ?, 0, ${sqlTimestamp()}, 'N', ?${valValidade})`, paramsPedido);
           const pedidoPorId = new Map();
           for (const it of itensOk) pedidoPorId.set(it.id, (pedidoPorId.get(it.id) || 0) + it.qtd);
           const estoqueVisto = new Set();
@@ -833,7 +834,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
                 ID_ITEMPED, QTD_ITEM, VLR_TOTAL, PRC_CUSTO, PRC_LISTA, VLR_DESC,
                 ID_IDENTIFICADOR, ID_PEDIDO, ITEM_CANCEL, VLR_UNIT, COD_BARRA, UPDATED_INTEGRADORA
                 ${temFlagDesc ? ', EFETUOU_DESCONTO' : ''}
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, CURRENT_TIMESTAMP${temFlagDesc ? ', ?' : ''})`, [
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, ${sqlTimestamp()}${temFlagDesc ? ', ?' : ''})`, [
               idItem, it.qtd, bruto + acres, num(prod[0].PRC_CUSTO), prc, desc,
               it.id, id, prc, String(prod[0].COD_BARRA || '').slice(0, 20) || null,
               ...(temFlagDesc ? [desc > 0 ? 1 : 0] : []),
@@ -847,7 +848,7 @@ async function criar({ idCliente, idFuncionario, obs, itens, validade, idStatus,
              Sem esse toque o nome não aparece e a venda não importa o pedido. */
           await query(tx, `
             UPDATE TB_PEDIDO_VENDA
-            SET UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+            SET UPDATED_INTEGRADORA = ${sqlTimestamp()}
             WHERE ID_PEDIDO = ?`, [id]);
           await fecharItensNoPedido(tx, colsFechamento, casas, id);
           return { id };
@@ -918,7 +919,7 @@ async function gravarPedidoOS({ idCliente, idVendedor, obs, validade, itens, fre
               ID_CLIENTE, ID_VENDEDOR, ID_PEDIDO, DT_PEDIDO, HR_PEDIDO,
               ID_PARCELA, ID_FMAPGTO, ID_STATUS, ID_MODULO, ORIGEM,
               UPDATED_INTEGRADORA, ENVIAR_INTEGRADORA, OBSERVACAO${colsValidade}
-            ) VALUES (?, ?, ?, CURRENT_DATE, CURRENT_TIME, ?, ?, ?, ?, 0, CURRENT_TIMESTAMP, 'N', ?${valValidade})`, paramsPedido);
+            ) VALUES (?, ?, ?, ${sqlDate()}, ${sqlTime()}, ?, ?, ?, ?, 0, ${sqlTimestamp()}, 'N', ?${valValidade})`, paramsPedido);
           const porId = new Map();
           for (const it of itensOk) if (!it.servico) porId.set(it.id, (porId.get(it.id) || 0) + it.qtd);
           const conferido = new Set();
@@ -959,7 +960,7 @@ async function gravarPedidoOS({ idCliente, idVendedor, obs, validade, itens, fre
                 ID_ITEMPED, QTD_ITEM, VLR_TOTAL, PRC_CUSTO, PRC_LISTA, VLR_DESC,
                 ID_IDENTIFICADOR, ID_PEDIDO, ITEM_CANCEL, VLR_UNIT, COD_BARRA, UPDATED_INTEGRADORA
                 ${temFlagDesc ? ', EFETUOU_DESCONTO' : ''}
-              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, CURRENT_TIMESTAMP${temFlagDesc ? ', ?' : ''})`, [
+              ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, ${sqlTimestamp()}${temFlagDesc ? ', ?' : ''})`, [
               idItem, it.qtd, bruto + acres, num(prod[0].PRC_CUSTO), it.prc, desc,
               it.id, id, it.prc, String(prod[0].COD_BARRA || '').slice(0, 20) || null,
               ...(temFlagDesc ? [desc > 0 ? 1 : 0] : []),
@@ -971,7 +972,7 @@ async function gravarPedidoOS({ idCliente, idVendedor, obs, validade, itens, fre
             MATCHING (ID_PEDIDO)`, [id, Math.max(0, num(frete))]);
           await query(tx, `
             UPDATE TB_PEDIDO_VENDA
-            SET UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+            SET UPDATED_INTEGRADORA = ${sqlTimestamp()}
             WHERE ID_PEDIDO = ?`, [id]);
           await fecharItensNoPedido(tx, colsFechamento, casas, id);
           if (typeof depois === 'function') await depois(tx, id);
@@ -1097,7 +1098,7 @@ async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, valid
               ID_ITEMPED, QTD_ITEM, VLR_TOTAL, PRC_CUSTO, PRC_LISTA, VLR_DESC,
               ID_IDENTIFICADOR, ID_PEDIDO, ITEM_CANCEL, VLR_UNIT, COD_BARRA, UPDATED_INTEGRADORA
               ${temFlagDesc ? ', EFETUOU_DESCONTO' : ''}
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, CURRENT_TIMESTAMP${temFlagDesc ? ', ?' : ''})`, [
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'N', ?, ?, ${sqlTimestamp()}${temFlagDesc ? ', ?' : ''})`, [
             idItem, it.qtd, bruto + acres, num(prod[0]?.PRC_CUSTO), prc, desc,
             it.id, codigo, prc, String(prod[0]?.COD_BARRA || '').slice(0, 20) || null,
             ...(temFlagDesc ? [desc > 0 ? 1 : 0] : []),
@@ -1118,7 +1119,7 @@ async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, valid
             await query(tx, `
               UPDATE TB_PED_VENDA_ITEM
               SET QTD_ITEM = ?, VLR_TOTAL = ?, PRC_CUSTO = ?, PRC_LISTA = ?, VLR_DESC = ?,
-                  VLR_UNIT = ?, COD_BARRA = ?, UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+                  VLR_UNIT = ?, COD_BARRA = ?, UPDATED_INTEGRADORA = ${sqlTimestamp()}
                   ${temFlagDesc ? ', EFETUOU_DESCONTO = ?' : ''}
               WHERE ID_ITEMPED = ? AND ID_PEDIDO = ?`, [
               it.qtd, bruto + acres, num(prod[0]?.PRC_CUSTO), it.prc, desc,
@@ -1130,7 +1131,7 @@ async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, valid
           } else {
             if (linha) {
               await query(tx, `
-                UPDATE TB_PED_VENDA_ITEM SET ITEM_CANCEL = 'S', UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+                UPDATE TB_PED_VENDA_ITEM SET ITEM_CANCEL = 'S', UPDATED_INTEGRADORA = ${sqlTimestamp()}
                 WHERE ID_ITEMPED = ? AND ID_PEDIDO = ?`, [it.itemId, codigo]);
               mantidos.add(it.itemId);
             }
@@ -1141,12 +1142,12 @@ async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, valid
           const idItem = num(row.ID_ITEMPED);
           if (mantidos.has(idItem)) continue;
           await query(tx, `
-            UPDATE TB_PED_VENDA_ITEM SET ITEM_CANCEL = 'S', UPDATED_INTEGRADORA = CURRENT_TIMESTAMP
+            UPDATE TB_PED_VENDA_ITEM SET ITEM_CANCEL = 'S', UPDATED_INTEGRADORA = ${sqlTimestamp()}
             WHERE ID_ITEMPED = ? AND ID_PEDIDO = ?`, [idItem, codigo]);
         }
         const sets = [
           'ID_CLIENTE = ?', 'ID_VENDEDOR = ?', 'ID_PARCELA = ?', 'ID_FMAPGTO = ?',
-          'ID_STATUS = ?', 'OBSERVACAO = ?', 'UPDATED_INTEGRADORA = CURRENT_TIMESTAMP',
+          'ID_STATUS = ?', 'OBSERVACAO = ?', `UPDATED_INTEGRADORA = ${sqlTimestamp()}`,
         ];
         const paramsCab = [
           num(idCliente), num(idFuncionario), pagamento.id_parcela, pagamento.id_fmapgto,

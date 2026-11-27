@@ -4,20 +4,81 @@ function pad2(n) {
   return String(Math.trunc(Number(n) || 0)).padStart(2, '0');
 }
 
-/** Data/hora local do servidor no momento da gravação */
-function localNow() {
-  const n = new Date();
-  const y = n.getFullYear();
-  const m = pad2(n.getMonth() + 1);
-  const d = pad2(n.getDate());
-  const hh = pad2(n.getHours());
-  const mm = pad2(n.getMinutes());
-  const ss = pad2(n.getSeconds());
+/** Relógio civil de Brasília. Não segue o fuso configurado no Windows. */
+const FUSO_BRASILIA = 'America/Sao_Paulo';
+const DIAS_SEMANA = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+
+function partesBrasilia(instante = new Date()) {
+  const data = instante instanceof Date ? instante : new Date(instante);
+  const fmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: FUSO_BRASILIA,
+    hourCycle: 'h23',
+    weekday: 'short',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const p = {};
+  for (const parte of fmt.formatToParts(data)) {
+    if (parte.type !== 'literal') p[parte.type] = parte.value;
+  }
+  let h = Number(p.hour);
+  if (h === 24) h = 0;
+  return {
+    y: Number(p.year),
+    m: Number(p.month),
+    d: Number(p.day),
+    h,
+    min: Number(p.minute),
+    s: Number(p.second),
+    diaSemana: DIAS_SEMANA[p.weekday] ?? 0,
+  };
+}
+
+/** Data/hora de Brasília no momento da gravação. */
+function localNow(instante) {
+  const p = partesBrasilia(instante);
+  const y = p.y;
+  const m = pad2(p.m);
+  const d = pad2(p.d);
+  const hh = pad2(p.h);
+  const mm = pad2(p.min);
+  const ss = pad2(p.s);
   return {
     dataSql: `${y}-${m}-${d}`,
     horaSql: `${hh}:${mm}:${ss}`,
     display: `${d}/${m}/${y} ${hh}:${mm}:${ss}`,
+    dataBr: `${d}/${m}/${y}`,
+    diaSemana: p.diaSemana,
   };
+}
+
+function isoHoje(instante) {
+  return localNow(instante).dataSql;
+}
+
+function somarDias(iso, dias) {
+  const [y, m, d] = String(iso || '').split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + Number(dias || 0));
+  return dt.toISOString().slice(0, 10);
+}
+
+/** Literal do Firebird com o relógio de Brasília, no instante em que a frase SQL é montada. */
+function sqlTimestamp(instante) {
+  const n = localNow(instante);
+  return `TIMESTAMP '${n.dataSql} ${n.horaSql}'`;
+}
+
+function sqlDate(instante) {
+  return `DATE '${localNow(instante).dataSql}'`;
+}
+
+function sqlTime(instante) {
+  return `TIME '${localNow(instante).horaSql}'`;
 }
 
 function extractTimeParts(hora) {
@@ -135,7 +196,14 @@ function sqlExtractDataHora(dataAlias, horaAlias) {
 
 module.exports = {
   pad2,
+  FUSO_BRASILIA,
+  partesBrasilia,
   localNow,
+  isoHoje,
+  somarDias,
+  sqlTimestamp,
+  sqlDate,
+  sqlTime,
   extractTimeParts,
   extractDateParts,
   formatBrDateTime,

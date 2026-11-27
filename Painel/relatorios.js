@@ -37,16 +37,12 @@
     return typeof deps.usuario === 'function' ? deps.usuario() : '';
   }
 
-  function isoLocal(d) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-  }
-
   function filtrosDe(id) {
     if (!filtrosOs[id]) {
-      const hoje = new Date();
+      const hoje = GestorHora.hoje();
       filtrosOs[id] = PERIODO_OPCIONAL.includes(id)
         ? { inicio: '', fim: '', status: '', tipo: '', tecnico: '' }
-        : { inicio: isoLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), fim: isoLocal(hoje), status: '', tipo: '', tecnico: '' };
+        : { inicio: `${hoje.slice(0, 8)}01`, fim: hoje, status: '', tipo: '', tecnico: '' };
     }
     return filtrosOs[id];
   }

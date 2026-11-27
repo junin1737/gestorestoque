@@ -133,19 +133,11 @@ const ImportacaoNfe = (() => {
   }
 
   function todayLocal() {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    return GestorHora.hoje();
   }
 
   function todayYmd() {
-    const d = new Date();
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
+    return GestorHora.hoje();
   }
 
   function toInputDate(v) {
@@ -169,14 +161,14 @@ const ImportacaoNfe = (() => {
     }
     const dt = new Date(v);
     if (Number.isNaN(dt.getTime())) return s;
-    return dt.toLocaleDateString('pt-BR');
+    return GestorHora.data(dt);
   }
 
   function fmtDateTimeBr(v) {
     if (!v) return '—';
     const dt = new Date(v);
     if (Number.isNaN(dt.getTime())) return fmtDateBr(v);
-    return dt.toLocaleString('pt-BR');
+    return GestorHora.textoCompleto(dt);
   }
 
   function formatCnpjDisplay(v) {

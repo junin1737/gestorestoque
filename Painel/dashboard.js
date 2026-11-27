@@ -31,23 +31,18 @@ function dashTitulo(perfil) {
   return PERFIS_DASH.find((item) => item.perfil === perfil)?.titulo || 'Dashboard';
 }
 
-function isoLocal(data) {
-  const d = data || new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dia = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${dia}`;
-}
-
 function periodoPadrao() {
-  const hoje = new Date();
-  return { inicio: isoLocal(new Date(hoje.getFullYear(), hoje.getMonth(), 1)), fim: isoLocal(hoje) };
+  const hoje = GestorHora.hoje();
+  return { inicio: `${hoje.slice(0, 8)}01`, fim: hoje };
 }
 
 function periodoContador() {
-  const hoje = new Date();
-  const ini = new Date(hoje.getFullYear(), hoje.getMonth() - 1, 1);
-  const fim = new Date(hoje.getFullYear(), hoje.getMonth(), 0);
-  return { inicio: isoLocal(ini), fim: isoLocal(fim) };
+  const p = GestorHora.partes();
+  const ano = p.m === 1 ? p.y - 1 : p.y;
+  const mes = p.m === 1 ? 12 : p.m - 1;
+  const ultimo = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
+  const pad = (n) => String(n).padStart(2, '0');
+  return { inicio: `${ano}-${pad(mes)}-01`, fim: `${ano}-${pad(mes)}-${pad(ultimo)}` };
 }
 
 function brl(valor) {

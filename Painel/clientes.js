@@ -303,20 +303,18 @@ const Clientes = (() => {
     }
     const mes = Number(iso.slice(5, 7));
     const dia = Number(iso.slice(8, 10));
-    const hoje = new Date();
-    const alvo = new Date(hoje.getFullYear(), mes - 1, dia);
-    if (alvo.getMonth() !== mes - 1 || alvo.getDate() !== dia) return 'Data de nascimento inválida.';
-    const chave = (data) => data.getMonth() * 100 + data.getDate();
-    const doAniversario = (mes - 1) * 100 + dia;
+    const prova = new Date(Date.UTC(2000, mes - 1, dia));
+    if (prova.getUTCMonth() !== mes - 1 || prova.getUTCDate() !== dia) return 'Data de nascimento inválida.';
+    const hoje = GestorHora.partes();
     const quando = `${String(dia).padStart(2, '0')}/${String(mes).padStart(2, '0')}`;
-    if (doAniversario === chave(hoje)) return 'Aniversário hoje.';
-    const inicio = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate());
-    inicio.setDate(inicio.getDate() - ((inicio.getDay() + 6) % 7));
+    if (mes === hoje.m && dia === hoje.d) return 'Aniversário hoje.';
+    const hojeUtc = Date.UTC(hoje.y, hoje.m - 1, hoje.d);
+    const inicio = hojeUtc - ((hoje.diaSemana + 6) % 7) * 86400000;
     for (let i = 0; i < 7; i += 1) {
-      const dt = new Date(inicio.getFullYear(), inicio.getMonth(), inicio.getDate() + i);
-      if (chave(dt) === doAniversario) return `Aniversário nesta semana, dia ${quando}.`;
+      const dt = new Date(inicio + i * 86400000);
+      if (dt.getUTCMonth() + 1 === mes && dt.getUTCDate() === dia) return `Aniversário nesta semana, dia ${quando}.`;
     }
-    if (mes === hoje.getMonth() + 1) return `Aniversário neste mês, dia ${quando}.`;
+    if (mes === hoje.m) return `Aniversário neste mês, dia ${quando}.`;
     return 'O aniversário não cai neste mês.';
   }
 

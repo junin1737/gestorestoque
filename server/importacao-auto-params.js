@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { getAppDataDir } = require('./config');
 const { withDb, query, activeTargets, hasTable } = require('./db');
+const { sqlTimestamp } = require('./datetime');
 
 const FILE = 'importacao-auto-produtos.json';
 
@@ -309,7 +310,7 @@ async function gravarConversao(db, idIdent, idFornec, item) {
     if (!rows[0]) throw new Error('A conversão deste produto não foi encontrada.');
     await query(db, `
       UPDATE TB_MT_CONVERSAO
-      SET UNI_XML = ?, UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = ?, UPDATED_AT = CURRENT_TIMESTAMP
+      SET UNI_XML = ?, UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = ?, UPDATED_AT = ${sqlTimestamp()}
       WHERE ID = ?`, [uniXml, uniEst, fator, pacote, id]);
     return;
   }
@@ -317,7 +318,7 @@ async function gravarConversao(db, idIdent, idFornec, item) {
   const novo = Number(next[0]?.ID || 1);
   await query(db, `
     INSERT INTO TB_MT_CONVERSAO (ID, ID_IDENTIFICADOR, ID_FORNEC, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE, UPDATED_AT)
-    VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
+    VALUES (?, ?, ?, ?, ?, ?, ?, ${sqlTimestamp()})`, [
     novo, idIdent, idFornec, uniXml, uniEst, fator, pacote,
   ]);
 }

@@ -23,6 +23,7 @@
 const crypto = require('crypto');
 const { withDb, query, hasTable, refreshTables, withTransaction, activeTargets, columnExists } = require('./db');
 const { loadAppConfig, saveAppConfig, loadUsersConfig } = require('./config');
+const { isoHoje, somarDias, sqlTimestamp } = require('./datetime');
 
 const NUM_STATUS_PADRAO = [
   { descricao: 'Aberta', icone: 'pasta', cor: '#3b82f6' },
@@ -101,7 +102,7 @@ function dataHoraInformada(v) {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 function hojeIso() {
-  return dataIso(new Date());
+  return isoHoje();
 }
 /** "09", "9" ou " 9" são o mesmo tipo: tira espaço e zero à esquerda. */
 function tipoItem(v) {
@@ -629,7 +630,7 @@ async function salvarSolucao(id, body) {
       codigo = await gerar(db, 'GESTOR_GEN_OS_SOL');
       await query(db, `
         INSERT INTO GESTOR_OS_SOLUCAO (ID, DEFEITO, SOLUCAO, EQUIPAMENTO, ID_OS, USOS, DT)
-        VALUES (?, ?, ?, ?, NULL, 1, CURRENT_TIMESTAMP)`, [codigo, defeito, solucao, txt(body?.equipamento, 300)]);
+        VALUES (?, ?, ?, ?, NULL, 1, ${sqlTimestamp()})`, [codigo, defeito, solucao, txt(body?.equipamento, 300)]);
     }
     return { id: codigo };
   });
@@ -657,7 +658,7 @@ async function registrarSolucao(db, os) {
   // A mesma O.S finalizada de novo só atualiza o texto; a mesma solução vinda de outra O.S soma um uso.
   const daOs = await query(db, 'SELECT FIRST 1 ID FROM GESTOR_OS_SOLUCAO WHERE ID_OS = ?', [os.id]);
   if (daOs.length) {
-    await query(db, 'UPDATE GESTOR_OS_SOLUCAO SET SOLUCAO = ?, DEFEITO = ?, EQUIPAMENTO = ?, DT = CURRENT_TIMESTAMP WHERE ID = ?',
+    await query(db, `UPDATE GESTOR_OS_SOLUCAO SET SOLUCAO = ?, DEFEITO = ?, EQUIPAMENTO = ?, DT = ${sqlTimestamp()} WHERE ID = ?`,
       [solucao, defeito, txt(os.equipamento, 300), num(daOs[0].ID)]);
     return;
   }
@@ -665,13 +666,13 @@ async function registrarSolucao(db, os) {
     SELECT FIRST 1 ID FROM GESTOR_OS_SOLUCAO
     WHERE UPPER(DEFEITO) = UPPER(?) AND UPPER(SOLUCAO) = UPPER(?)`, [defeito, solucao]);
   if (iguais.length) {
-    await query(db, 'UPDATE GESTOR_OS_SOLUCAO SET USOS = COALESCE(USOS, 0) + 1, DT = CURRENT_TIMESTAMP WHERE ID = ?', [num(iguais[0].ID)]);
+    await query(db, `UPDATE GESTOR_OS_SOLUCAO SET USOS = COALESCE(USOS, 0) + 1, DT = ${sqlTimestamp()} WHERE ID = ?`, [num(iguais[0].ID)]);
     return;
   }
   const id = await gerar(db, 'GESTOR_GEN_OS_SOL');
   await query(db, `
     INSERT INTO GESTOR_OS_SOLUCAO (ID, DEFEITO, SOLUCAO, EQUIPAMENTO, ID_OS, USOS, DT)
-    VALUES (?, ?, ?, ?, ?, 1, CURRENT_TIMESTAMP)`, [id, defeito, solucao, txt(os.equipamento, 300), os.id]);
+    VALUES (?, ?, ?, ?, ?, 1, ${sqlTimestamp()})`, [id, defeito, solucao, txt(os.equipamento, 300), os.id]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1334,8 +1335,7 @@ async function listar(filtros = {}) {
     const temData = ['emissaoDe', 'emissaoAte', 'entregaDe', 'entregaAte', 'previsaoDe', 'previsaoAte'].some((k) => filtros[k]);
     if (finais.length && !temData && !busca && !cli) {
       where.push(`(O.ID_STATUS NOT IN (${finais.join(',')}) OR O.DT_ALTERACAO >= ?)`);
-      const d = new Date(); d.setDate(d.getDate() - 30);
-      params.push(dataIso(d));
+      params.push(somarDias(isoHoje(), -30));
     }
     const rows = await query(db, `
       SELECT FIRST 600 O.ID_OS, O.DT_EMISSAO, O.TIPO, O.MODALIDADE, O.ID_STATUS, O.ID_TECNICO, O.QUEM_TROUXE,
@@ -1427,7 +1427,7 @@ async function historico(db, idOs, usuario, evento, ant, novo) {
   const id = await gerar(db, 'GESTOR_GEN_OS_HIST');
   await query(db, `
     INSERT INTO GESTOR_OS_HISTORICO (ID, ID_OS, DT, ID_USUARIO, USUARIO, ID_STATUS_ANT, ID_STATUS_NOVO, EVENTO)
-    VALUES (?, ?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?)`, [
+    VALUES (?, ?, ${sqlTimestamp()}, ?, ?, ?, ?, ?)`, [
     id, idOs, usuario?.id ?? null, txt(usuario?.nome, 60) || null, ant || null, novo || null, txt(evento, 300) || null,
   ]);
 }
@@ -1581,7 +1581,7 @@ async function salvar(body, usuario, opcoes = {}) {
             ID_OS, DT_EMISSAO, TIPO, MODALIDADE, ID_STATUS, ID_TECNICO, QUEM_TROUXE, EQUIPAMENTO, DEFEITO, SOLUCAO, OBS,
             DT_PREVISAO, DT_ENTREGA, ID_CLIENTE, DESC_GERAL, ACRES_GERAL, FRETE, DESLOCAMENTO,
             TOTAL_PRODUTOS, TOTAL_SERVICOS, TOTAL, ID_CATEGORIA, ID_SUBCATEGORIA, AUTORIZACAO, AUTOR_STATUS, ORDEM, PERFIL, ORIGEM, ID_USUARIO, USUARIO, DT_ALTERACAO
-          ) VALUES (?, CURRENT_TIMESTAMP, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
+          ) VALUES (?, ${sqlTimestamp()}, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${sqlTimestamp()})`, [
           codigo, ...cab, num(ordem[0]?.O) || 1, perfil, opcoes.origem === 'C' ? 'C' : 'S', usuario?.id ?? null, txt(usuario?.nome, 60) || null,
         ]);
         if (opcoes.origem === 'C' && opcoes.provisorio) {
@@ -1602,7 +1602,7 @@ async function salvar(body, usuario, opcoes = {}) {
           UPDATE GESTOR_OS SET
             TIPO = ?, MODALIDADE = ?, ID_STATUS = ?, ID_TECNICO = ?, QUEM_TROUXE = ?, EQUIPAMENTO = ?, DEFEITO = ?, SOLUCAO = ?, OBS = ?,
             DT_PREVISAO = ?, DT_ENTREGA = ?, ID_CLIENTE = ?, DESC_GERAL = ?, ACRES_GERAL = ?, FRETE = ?, DESLOCAMENTO = ?,
-            TOTAL_PRODUTOS = ?, TOTAL_SERVICOS = ?, TOTAL = ?, ID_CATEGORIA = ?, ID_SUBCATEGORIA = ?, AUTORIZACAO = ?, AUTOR_STATUS = ?, DT_ALTERACAO = CURRENT_TIMESTAMP${ordemSql}
+            TOTAL_PRODUTOS = ?, TOTAL_SERVICOS = ?, TOTAL = ?, ID_CATEGORIA = ?, ID_SUBCATEGORIA = ?, AUTORIZACAO = ?, AUTOR_STATUS = ?, DT_ALTERACAO = ${sqlTimestamp()}${ordemSql}
           WHERE ID_OS = ?`, [...cab, ...extra, codigo]);
         if (atual.id_status !== entrada.id_status) {
           await historico(tx, codigo, usuario, `Status: ${porId.get(atual.id_status)?.descricao || '—'} → ${statusNovo?.descricao || '—'}`, atual.id_status, entrada.id_status);
@@ -1733,8 +1733,8 @@ async function mudarStatus(id, idStatus, usuario, extra) {
     await withTransaction(db, async (tx) => {
       const ordem = await query(tx, 'SELECT COALESCE(MAX(ORDEM), 0) + 1 AS O FROM GESTOR_OS WHERE ID_STATUS = ?', [novo.id]);
       await query(tx, `
-        UPDATE GESTOR_OS SET ID_STATUS = ?, ORDEM = ?, DT_ALTERACAO = CURRENT_TIMESTAMP
-          ${novo.final && !os.entrega ? ', DT_ENTREGA = CURRENT_TIMESTAMP' : ''}
+        UPDATE GESTOR_OS SET ID_STATUS = ?, ORDEM = ?, DT_ALTERACAO = ${sqlTimestamp()}
+          ${novo.final && !os.entrega ? `, DT_ENTREGA = ${sqlTimestamp()}` : ''}
         WHERE ID_OS = ?`, [novo.id, num(ordem[0]?.O) || 1, os.id]);
       await historico(tx, os.id, usuario, `Status: ${os.status?.descricao || '—'} → ${novo.descricao}`, os.id_status, novo.id);
       if (papel === 'busca' && naEmpresa) {
@@ -1775,7 +1775,7 @@ async function vincularTecnico(id, idTecnico, usuario) {
     if (novo && !funcs.get(novo)?.tecnico) throw new Error('Escolha um funcionário com a função Técnico no cadastro.');
     if (novo === os.id_tecnico) return { id: os.id, avisos: [] };
     await withTransaction(db, async (tx) => {
-      await query(tx, 'UPDATE GESTOR_OS SET ID_TECNICO = ?, DT_ALTERACAO = CURRENT_TIMESTAMP WHERE ID_OS = ?', [novo, os.id]);
+      await query(tx, `UPDATE GESTOR_OS SET ID_TECNICO = ?, DT_ALTERACAO = ${sqlTimestamp()} WHERE ID_OS = ?`, [novo, os.id]);
       await historico(tx, os.id, usuario, novo ? `Técnico ${funcs.get(novo).nome} vinculado` : 'Técnico removido');
     });
     const avisos = novo ? await avisarTecnico(db, os.id, usuario) : [];
@@ -1902,7 +1902,7 @@ async function cancelar(id, usuario) {
     await withTransaction(db, async (tx) => {
       const ordem = await query(tx, 'SELECT COALESCE(MAX(ORDEM), 0) + 1 AS O FROM GESTOR_OS WHERE ID_STATUS = ?', [final.id]);
       await query(tx, `
-        UPDATE GESTOR_OS SET CANCELADA = 'S', ID_STATUS = ?, ORDEM = ?, DT_ALTERACAO = CURRENT_TIMESTAMP
+        UPDATE GESTOR_OS SET CANCELADA = 'S', ID_STATUS = ?, ORDEM = ?, DT_ALTERACAO = ${sqlTimestamp()}
         WHERE ID_OS = ?`, [final.id, num(ordem[0]?.O) || 1, os.id]);
       await historico(tx, os.id, usuario, 'O.S cancelada', os.id_status, final.id);
     });
@@ -1927,7 +1927,7 @@ async function enviarParaVenda(id, usuario) {
     idCliente: dados.id_cliente,
     idVendedor: dados.id_tecnico || (Number(usuario?.id) > 0 ? Number(usuario.id) : null),
     obs,
-    validade: validade && validade >= new Date(new Date().setHours(0, 0, 0, 0)) ? validade : new Date(),
+    validade: validade && validade >= new Date(`${isoHoje()}T00:00:00-03:00`) ? validade : new Date(`${isoHoje()}T12:00:00-03:00`),
     frete: r2(num(dados.frete) + num(dados.deslocamento)),
     itens: calc.itens.map((it) => ({
       id_identificador: it.id_identificador,
@@ -1945,7 +1945,7 @@ async function enviarParaVenda(id, usuario) {
         UPDATE OR INSERT INTO GESTOR_PEDIDO_ORIGEM (ID_PEDIDO, ORIGEM, ID_ORIGEM)
         VALUES (?, 'OS', ?) MATCHING (ID_PEDIDO)`, [idPedido, dados.id]);
       await query(tx, `
-        UPDATE GESTOR_OS SET ID_PEDIDO = ?, DT_ENVIO = CURRENT_TIMESTAMP, DT_ALTERACAO = CURRENT_TIMESTAMP
+        UPDATE GESTOR_OS SET ID_PEDIDO = ?, DT_ENVIO = ${sqlTimestamp()}, DT_ALTERACAO = ${sqlTimestamp()}
         WHERE ID_OS = ?`, [idPedido, dados.id]);
       await historico(tx, dados.id, usuario, `Serviço concluído — pedido ${idPedido} na venda gerencial`);
     },

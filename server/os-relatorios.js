@@ -16,6 +16,7 @@
  */
 
 const { query, hasTable } = require('./db');
+const { isoHoje, sqlDate } = require('./datetime');
 const os = require('./os');
 
 const SQL_TIPO = (alias) => `COALESCE(NULLIF(TRIM(LEADING '0' FROM TRIM(${alias}.ID_TIPOITEM)), ''), '0')`;
@@ -70,9 +71,9 @@ function lerFiltros(q = {}, periodoObrigatorio) {
   let inicio = dia(q.inicio);
   let fim = dia(q.fim);
   if (periodoObrigatorio && (!inicio || !fim)) {
-    const hoje = new Date();
-    if (!inicio) inicio = iso(new Date(hoje.getFullYear(), hoje.getMonth(), 1));
-    if (!fim) fim = iso(hoje);
+    const hoje = isoHoje();
+    if (!inicio) inicio = `${hoje.slice(0, 8)}01`;
+    if (!fim) fim = hoje;
   }
   if (inicio && fim && inicio > fim) throw new Error('A data inicial é maior que a final.');
   const tecnicoLista = lista(q.tecnico);
@@ -236,7 +237,7 @@ async function relOperacional(db, def, f) {
   const finais = statuses.filter((s) => s.final).map((s) => s.id);
   const nomeTec = (id) => funcs.get(num(id))?.nome || (id ? `Funcionário ${id}` : 'Sem técnico');
   const nomeSt = (id) => porId.get(num(id))?.descricao || '—';
-  const hoje = iso(new Date());
+  const hoje = isoHoje();
 
   if (def.id === 'os-abertos') {
     const extra = finais.length ? [`(O.ID_STATUS IS NULL OR O.ID_STATUS NOT IN (${finais.join(',')}))`] : [];
@@ -493,7 +494,7 @@ async function dashboardServicos(db, consulta) {
   const fin = finais.length ? finais.join(',') : '0';
   const contagem = await query(db, `
     SELECT O.ID_STATUS, COUNT(*) AS N,
-           SUM(CASE WHEN O.DT_PREVISAO < CURRENT_DATE THEN 1 ELSE 0 END) AS ATRASADAS
+           SUM(CASE WHEN O.DT_PREVISAO < ${sqlDate()} THEN 1 ELSE 0 END) AS ATRASADAS
     FROM GESTOR_OS O
     WHERE (O.ID_STATUS NOT IN (${fin}) OR O.ID_STATUS IS NULL
        OR (CAST(COALESCE(O.DT_ENTREGA, O.DT_ALTERACAO) AS DATE) BETWEEN ? AND ?))

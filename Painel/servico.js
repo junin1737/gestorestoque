@@ -65,6 +65,17 @@ function esc(s) {
   }[c]));
 }
 
+function pintarRelogioRotina() {
+  const el = $('#rot-relogio');
+  if (!el || !window.GestorHora) return;
+  const p = GestorHora.partes();
+  const pad = (n) => String(n).padStart(2, '0');
+  const dias = ['domingo', 'segunda', 'terça', 'quarta', 'quinta', 'sexta', 'sábado'];
+  el.textContent = `Horário de Brasília: ${dias[p.diaSemana]}, ${pad(p.h)}:${pad(p.min)}:${pad(p.s)}`;
+}
+pintarRelogioRotina();
+setInterval(pintarRelogioRotina, 1000);
+
 async function loadRotinas() {
   const res = await api('/rotinas');
   const msg = $('#rot-msg');
@@ -110,7 +121,7 @@ $('#form-rotinas')?.addEventListener('submit', async (ev) => {
     msg.hidden = false;
     if (!res.ok) msg.textContent = res.error || 'Não foi possível salvar.';
     else if (!$('#rot-ativo')?.checked) msg.textContent = 'Horários gravados, mas a rotina está desligada. Marque Desligar automaticamente.';
-    else msg.textContent = 'Rotina salva. Cada dia desliga no horário marcado.';
+    else msg.textContent = 'Rotina salva. Cada dia desliga no horário de Brasília marcado.';
   }
 });
 
@@ -630,7 +641,7 @@ const LIC_TITULOS = {
 function fmtDataHora(iso) {
   if (!iso) return '—';
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? '—' : d.toLocaleString('pt-BR');
+  return Number.isNaN(d.getTime()) ? '—' : (window.GestorHora ? GestorHora.textoCompleto(d) : d.toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' }));
 }
 
 function fmtDiaYmd(ymd) {

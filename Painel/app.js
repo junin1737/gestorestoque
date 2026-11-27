@@ -2727,13 +2727,8 @@ function tabelaHistorico(titulo, itens, vazio, colunaQuem) {
 }
 
 function periodoHistorico() {
-  const hoje = new Date();
-  const iso = (d) => {
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const dia = String(d.getDate()).padStart(2, '0');
-    return `${d.getFullYear()}-${m}-${dia}`;
-  };
-  return { inicio: `${hoje.getFullYear()}-01-01`, fim: iso(hoje) };
+  const hoje = GestorHora.hoje();
+  return { inicio: `${hoje.slice(0, 4)}-01-01`, fim: hoje };
 }
 
 function queryHistorico() {
@@ -4561,9 +4556,14 @@ function fmtMargem(venda, custo) {
 }
 function fmtDate(d) {
   if (!d) return '—';
+  const s = String(d);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s.slice(0, 10)) && !/[T ]\d{2}:/.test(s)) {
+    const [y, m, dia] = s.slice(0, 10).split('-');
+    return `${dia}/${m}/${y}`;
+  }
   const dt = new Date(d);
-  if (Number.isNaN(dt.getTime())) return String(d).slice(0, 10);
-  return dt.toLocaleDateString('pt-BR');
+  if (Number.isNaN(dt.getTime())) return s.slice(0, 10);
+  return GestorHora.data(dt);
 }
 
 window.Contador?.init({

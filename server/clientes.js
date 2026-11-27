@@ -2,6 +2,7 @@
 
 const { withDb, withTransaction, query, nextGenId, columnExists, refreshTables } = require('./db');
 const { loadAppConfig, lerMensagemAniversario } = require('./config');
+const { sqlDate } = require('./datetime');
 
 const PAIS_BRASIL = '1058';
 
@@ -432,7 +433,7 @@ async function salvar(body) {
           DDD_CELUL, FONE_CELUL, DDD_RESID, FONE_RESID, DDD_COMER, FONE_COMER,
           END_CEP, END_TIPO, END_LOGRAD, END_NUMERO, END_BAIRRO, END_COMPLE, ID_CIDADE,
           ID_PAIS, DT_CADASTRO${marcaAtualizacao ? ', UPDATED_INTEGRADORA' : ''}
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_DATE${marcaAtualizacao ? ', CURRENT_DATE' : ''})`, [
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ${sqlDate()}${marcaAtualizacao ? ', ${sqlDate()}' : ''})`, [
         id, ...valores, PAIS_BRASIL,
       ]);
     }

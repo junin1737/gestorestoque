@@ -18,9 +18,9 @@
   let postando = false;
   let assinatura = '';
   let relogio = null;
-  const hojeData = new Date();
-  let calAno = hojeData.getFullYear();
-  let calMes = hojeData.getMonth();
+  const hojePartes = GestorHora.partes();
+  let calAno = hojePartes.y;
+  let calMes = hojePartes.m - 1;
   let buscaTimer = 0;
   let buscaSeq = 0;
   let fotoAlvo = '';
@@ -226,9 +226,7 @@
       }
     }
     for (let i = 0; i < 14; i += 1) {
-      const data = new Date();
-      data.setDate(data.getDate() + i);
-      const dia = isoDia(data);
+      const dia = GestorHora.somarDias(GestorHora.hoje(), i);
       for (const p of previstosNoDia(dia)) {
         empurrar({
           oferta_id: p.oferta_id,
@@ -1139,9 +1137,7 @@
   }
 
   function isoHoje(offset) {
-    const d = new Date();
-    d.setDate(d.getDate() + offset);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    return GestorHora.somarDias(GestorHora.hoje(), offset || 0);
   }
 
   function lerRotinaForm() {

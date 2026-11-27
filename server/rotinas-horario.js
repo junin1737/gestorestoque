@@ -1,18 +1,20 @@
 'use strict';
 
-/** Chave do dia se o horário já chegou e ainda está na janela de 90s. Vazio se não deve desligar. */
+const { partesBrasilia } = require('./datetime');
+
+/** Chave do dia se o horário de Brasília já chegou e ainda está na janela de 90s. Vazio se não deve desligar. */
 function chaveRotinaDesligamento(rotinas, agora) {
   if (!rotinas || rotinas.ativo !== true) return '';
+  const p = partesBrasilia(agora instanceof Date ? agora : new Date());
   const horas = rotinas.horas && typeof rotinas.horas === 'object' ? rotinas.horas : null;
   let hora = '';
-  if (horas) hora = String(horas[String(agora.getDay())] || '');
-  else if (Array.isArray(rotinas.dias) && rotinas.dias.map(Number).includes(agora.getDay())) hora = String(rotinas.hora || '');
+  if (horas) hora = String(horas[String(p.diaSemana)] || '');
+  else if (Array.isArray(rotinas.dias) && rotinas.dias.map(Number).includes(p.diaSemana)) hora = String(rotinas.hora || '');
   if (!/^\d{2}:\d{2}$/.test(hora)) return '';
   const [hh, mm] = hora.split(':').map(Number);
-  const alvo = new Date(agora.getFullYear(), agora.getMonth(), agora.getDate(), hh, mm, 0, 0);
-  const delta = agora.getTime() - alvo.getTime();
-  if (delta < 0 || delta >= 90 * 1000) return '';
-  return `${agora.getFullYear()}-${agora.getMonth()}-${agora.getDate()} ${hora}`;
+  const delta = (p.h * 3600 + p.min * 60 + p.s) - (hh * 3600 + mm * 60);
+  if (delta < 0 || delta >= 90) return '';
+  return `${p.y}-${p.m}-${p.d} ${hora}`;
 }
 
 module.exports = { chaveRotinaDesligamento };

@@ -150,10 +150,7 @@ function predItem(modo) {
 }
 
 function isoHoje() {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const dia = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${dia}`;
+  return require('./datetime').isoHoje();
 }
 
 function parseIso(valor) {

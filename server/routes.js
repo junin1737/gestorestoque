@@ -47,7 +47,7 @@ const {
   logProductCreate,
   hasAuditTable,
 } = require('./audit');
-const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora } = require('./datetime');
+const { localNow, formatBrDateTime, mapExtractParts, sqlExtractDataHora, sqlDate } = require('./datetime');
 const { resolveOrigem, somenteServidorLocal, isServidorLocal, viaTunel } = require('./origem');
 const licenca = require('./licenca');
 const auth = require('./auth');
@@ -2130,7 +2130,7 @@ router.get('/alteracoes', exigirModulo('alteracoes'), async (req, res) => {
 
       if (wantQty && hasTable(t.saldo)) {
         const hasObs = await columnExists(db, t.saldo, 'OBSERVACAO');
-        const where = [`S.DATA >= DATEADD(-${dias} DAY TO CURRENT_DATE)`];
+        const where = [`S.DATA >= DATEADD(-${dias} DAY TO ${sqlDate()})`];
         const params = [];
         if (!todos) {
           where.push('S.ID_FUNCIONARIO = ?');
@@ -2172,7 +2172,7 @@ router.get('/alteracoes', exigirModulo('alteracoes'), async (req, res) => {
         if (baseComManage(appCfg) && hasTable('TB_EST_SALDO_ALTERADO_2')) {
           try {
             const hasObs2 = await columnExists(db, 'TB_EST_SALDO_ALTERADO_2', 'OBSERVACAO');
-            const where2 = [`S.DATA >= DATEADD(-${dias} DAY TO CURRENT_DATE)`];
+            const where2 = [`S.DATA >= DATEADD(-${dias} DAY TO ${sqlDate()})`];
             const params2 = [];
             if (!todos) {
               where2.push('S.ID_FUNCIONARIO = ?');
@@ -2220,7 +2220,7 @@ router.get('/alteracoes', exigirModulo('alteracoes'), async (req, res) => {
           if (!hasAuditTable()) await ensureAuditSchema(db);
         } catch { /* ignore */ }
         if (hasAuditTable()) {
-          const where = [`A.DATA >= DATEADD(-${dias} DAY TO CURRENT_DATE)`];
+          const where = [`A.DATA >= DATEADD(-${dias} DAY TO ${sqlDate()})`];
           const params = [];
           if (tipo !== 'todos') {
             where.push('A.TIPO = ?');
@@ -2292,7 +2292,7 @@ router.get('/alteracoes', exigirModulo('alteracoes'), async (req, res) => {
                    WHERE L.ID_NFCOMPRA = N.ID_NFCOMPRA) AS VLR_FIN
               FROM TB_NFCOMPRA N
               LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
-              WHERE N.DT_ENTRADA >= DATEADD(-${dias} DAY TO CURRENT_DATE)
+              WHERE N.DT_ENTRADA >= DATEADD(-${dias} DAY TO ${sqlDate()})
                 AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
               ORDER BY N.DT_ENTRADA DESC, N.ID_NFCOMPRA DESC`);
           } catch (errRico) {
@@ -2312,7 +2312,7 @@ router.get('/alteracoes', exigirModulo('alteracoes'), async (req, res) => {
                 (SELECT COUNT(*) FROM TB_NFC_CTAPAG L WHERE L.ID_NFCOMPRA = N.ID_NFCOMPRA) AS QTD_PARC
               FROM TB_NFCOMPRA N
               LEFT JOIN TB_FORNECEDOR F ON F.ID_FORNEC = N.ID_FORNEC
-              WHERE N.DT_ENTRADA >= DATEADD(-${dias} DAY TO CURRENT_DATE)
+              WHERE N.DT_ENTRADA >= DATEADD(-${dias} DAY TO ${sqlDate()})
                 AND UPPER(TRIM(COALESCE(N.STATUS, ''))) <> 'C'
               ORDER BY N.DT_ENTRADA DESC, N.ID_NFCOMPRA DESC`);
           }

@@ -358,7 +358,7 @@
   }
 
   function relatorioPrevia(body, res) {
-    const agora = new Date();
+    const agoraTxt = GestorHora.texto();
     const quem = deps.usuario?.()?.nome || (deps.contador?.() ? 'Contador' : '');
     const vazio = (v) => (v === '' || v == null ? '<span class="vz">(vazio)</span>' : esc(v));
     const linhas = (res.amostra || []).map((p, idx) => {
@@ -422,7 +422,7 @@
 <div class="barra"><button type="button" onclick="if(parent!==window){parent.postMessage({tipo:'gestor-imprimir'}, location.origin)}else{window.print()}">Imprimir / Salvar PDF</button></div>
 <header>
   <div><h1>Prévia da alteração em massa</h1><div class="loja">${esc(contexto.nome || '')}${contexto.cnpj ? ` · CNPJ ${esc(contexto.cnpj)}` : ''}</div></div>
-  <div class="meta">${esc(agora.toLocaleDateString('pt-BR'))} ${esc(agora.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }))}${quem ? `<br>Gerado por ${esc(quem)}` : ''}<br>${esc(contexto.regime || '')}</div>
+  <div class="meta">${esc(agoraTxt)}${quem ? `<br>Gerado por ${esc(quem)}` : ''}<br>${esc(contexto.regime || '')}</div>
 </header>
 <div class="aviso">Prévia: nada foi gravado ainda. Os valores só mudam depois de clicar em Aplicar.</div>
 <div class="resumo">

@@ -1,6 +1,7 @@
 'use strict';
 
 const { query, hasTable, refreshTables, withDb, columnExists } = require('./db');
+const { sqlTimestamp } = require('./datetime');
 const { garantirUnidadeParaFator } = require('./importacao-unidade-conversao');
 
 const TABLE = 'TB_MT_CONVERSAO';
@@ -137,7 +138,7 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
     if (exist[0]) {
       await query(db, `
         UPDATE ${TABLE}
-        SET UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = ?, UPDATED_AT = CURRENT_TIMESTAMP
+        SET UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = ?, UPDATED_AT = ${sqlTimestamp()}
         WHERE ID = ?`, [uniEst, conversor, pacote, exist[0].ID]);
       return { id: exist[0].ID, atualizado: true, unidade: uniEst, conversor, criada };
     }
@@ -145,7 +146,7 @@ async function salvarConversaoGestor(dados = {}, dbExterno) {
     const id = Number(next[0]?.ID || 1);
     await query(db, `
       INSERT INTO ${TABLE} (ID, ID_IDENTIFICADOR, ID_FORNEC, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE, UPDATED_AT)
-      VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`, [
+      VALUES (?, ?, ?, ?, ?, ?, ?, ${sqlTimestamp()})`, [
       id, idIdent, idForn, uniXml || null, uniEst, conversor, pacote,
     ]);
     return { id, atualizado: false, unidade: uniEst, conversor, criada };
@@ -200,7 +201,7 @@ async function definirFatorProduto(dados = {}, dbExterno) {
     if (id) {
       await query(db, `
         UPDATE ${TABLE}
-        SET UNI_XML = NULL, UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = 'N', UPDATED_AT = CURRENT_TIMESTAMP
+        SET UNI_XML = NULL, UNI_ESTOQUE = ?, CONVERSOR = ?, PACOTE = 'N', UPDATED_AT = ${sqlTimestamp()}
         WHERE ID = ?`, [uniEst, fator, id]);
       for (const outro of ids.slice(1)) {
         await query(db, `DELETE FROM ${TABLE} WHERE ID = ?`, [outro]);
@@ -211,7 +212,7 @@ async function definirFatorProduto(dados = {}, dbExterno) {
     id = Number(next[0]?.ID || 1);
     await query(db, `
       INSERT INTO ${TABLE} (ID, ID_IDENTIFICADOR, ID_FORNEC, UNI_XML, UNI_ESTOQUE, CONVERSOR, PACOTE, UPDATED_AT)
-      VALUES (?, ?, ?, NULL, ?, ?, 'N', CURRENT_TIMESTAMP)`, [
+      VALUES (?, ?, ?, NULL, ?, ?, 'N', ${sqlTimestamp()})`, [
       id, idIdent, idForn, uniEst, fator,
     ]);
     return { id, atualizado: false, unidade: uniEst, conversor: fator };

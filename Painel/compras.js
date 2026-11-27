@@ -27,7 +27,7 @@ const Compras = (() => {
     if (!iso) return '';
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return '';
-    return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+    return GestorHora.texto(d);
   }
 
   function fmtDhEmi(iso) {

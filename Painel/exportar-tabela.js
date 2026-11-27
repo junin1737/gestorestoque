@@ -23,7 +23,7 @@
   }
 
   function agora() {
-    return new Date().toLocaleString('pt-BR');
+    return GestorHora.textoCompleto();
   }
 
   function nomeArquivo(titulo) {
