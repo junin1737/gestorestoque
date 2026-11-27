@@ -233,7 +233,7 @@ async function garantirServicos(env) {
 const WHATSAPP_ENDPOINT_PADRAO = 'https://mtautomacoes.apieuatendo3.com.br';
 /** Endereço gravado por engano em versões antigas (o domínio não existe). */
 const WHATSAPP_ENDPOINT_ERRADO = 'https://mtautomacoes.apleuatendo3.com.br';
-const WHATSAPP_KEY_PADRAO = '8gYagN8AMJG16aZP7qcCNtbvNTCGWV9K';
+const WHATSAPP_KEY_PADRAO = '8gYagN8AMJG16aZP7qcCNTbvNTCGWV9K';
 const NOME_INSTANCIA = /^[A-Za-z0-9][A-Za-z0-9_-]{1,39}$/;
 
 function normalizarEndpoint(valor) {
