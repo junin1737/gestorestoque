@@ -230,7 +230,9 @@ async function garantirServicos(env) {
   colunaServicosPronta = true;
 }
 
-const WHATSAPP_ENDPOINT_PADRAO = 'https://mtautomacoes.apleuatendo3.com.br';
+const WHATSAPP_ENDPOINT_PADRAO = 'https://mtautomacoes.apieuatendo3.com.br';
+/** Endereço gravado por engano em versões antigas (o domínio não existe). */
+const WHATSAPP_ENDPOINT_ERRADO = 'https://mtautomacoes.apleuatendo3.com.br';
 const WHATSAPP_KEY_PADRAO = '8gYagN8AMJG16aZP7qcCNtbvNTCGWV9K';
 const NOME_INSTANCIA = /^[A-Za-z0-9][A-Za-z0-9_-]{1,39}$/;
 
@@ -323,9 +325,10 @@ async function whatsappGlobal(env) {
   const row = await env.DB.prepare("SELECT valor FROM config WHERE chave = 'whatsapp'").first();
   let salvo = {};
   try { salvo = JSON.parse(row?.valor || '{}'); } catch { salvo = {}; }
-  const endpoint = normalizarEndpoint(salvo.endpoint || WHATSAPP_ENDPOINT_PADRAO);
+  const errado = normalizarEndpoint(salvo.endpoint) === WHATSAPP_ENDPOINT_ERRADO;
+  const endpoint = normalizarEndpoint(errado ? WHATSAPP_ENDPOINT_PADRAO : (salvo.endpoint || WHATSAPP_ENDPOINT_PADRAO));
   const apikey = String(salvo.apikey || WHATSAPP_KEY_PADRAO).trim();
-  if (!row && endpoint && apikey) await gravarWhatsappGlobal(env, { endpoint, apikey });
+  if ((!row || errado) && endpoint && apikey) await gravarWhatsappGlobal(env, { endpoint, apikey });
   return { endpoint, apikey };
 }
 
@@ -336,11 +339,16 @@ function erroEvolution(data, status) {
 }
 
 async function evolutionFetch(cfg, caminho, { method = 'GET', body, apikey } = {}) {
-  const res = await fetch(`${cfg.endpoint}${caminho}`, {
-    method,
-    headers: { apikey: apikey || cfg.apikey, 'Content-Type': 'application/json' },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let res;
+  try {
+    res = await fetch(`${cfg.endpoint}${caminho}`, {
+      method,
+      headers: { apikey: apikey || cfg.apikey, 'Content-Type': 'application/json' },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new Error(`Não foi possível acessar a Evolution API em ${cfg.endpoint}. Confira o endpoint no painel.`);
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const err = new Error(erroEvolution(data, res.status));

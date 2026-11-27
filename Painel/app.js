@@ -314,6 +314,20 @@ function setCfgTab(tab) {
     const barra = salvar.closest('.toolbar');
     if (barra) barra.hidden = salvar.hidden;
   }
+  const subCfg = {
+    tema: 'Tema e tamanho da tela',
+    produtos: 'Busca e ofertas',
+    tributos: 'Conversão de tributos',
+    saida: 'Saída',
+    clientes: 'Clientes',
+    etiquetas: 'Etiquetas',
+    conexoes: 'WhatsApp e Instagram',
+    importacao: 'Importação automática',
+    supervisor: 'Supervisor',
+  };
+  if ($('#page-preferencias') && !$('#page-preferencias').hidden && $('#page-sub')) {
+    $('#page-sub').textContent = subCfg[stateCfgTab] || '';
+  }
   if (stateCfgTab === 'etiquetas') window.Gondola?.onEtiquetas();
   if (stateCfgTab === 'conexoes') {
     pintarConexaoInstagram();
@@ -1933,7 +1947,6 @@ async function showPage(page) {
     loadUsuarios();
   } else if (page === 'preferencias') {
     $('#page-title').textContent = 'Configurações';
-    $('#page-sub').textContent = 'Tema, tributos, saída e etiquetas';
     setCfgTab(state.cfgTab || 'tema');
   } else if (page === 'empresas') {
     $('#page-title').textContent = 'Empresas';
