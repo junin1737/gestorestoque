@@ -5,10 +5,11 @@
  *
  * De onde vêm os números (especificação, item 10):
  * - Operacionais (em aberto, finalizados, por técnico): direto das tabelas GESTOR_OS*.
- * - Financeiros (produtos vendidos, totalizador, descontos e acréscimos, faturamento no dashboard):
- *   das vendas modelo 'GR' com pelo menos um serviço (tipo 9), trazendo também os produtos dessas
- *   mesmas vendas. Entra a GR já convertida em NF-e/NFC-e, porque a nota leva só os produtos e o
- *   serviço fica só na GR.
+ * - Financeiros (serviços vendidos, totalizador, descontos e acréscimos, faturamento no dashboard):
+ *   das vendas modelo 'GR'. No dashboard entra só o item tipo 9, líquido de desconto, com o
+ *   acréscimo já dentro do valor e as GR canceladas à parte. O totalizador ainda separa produto
+ *   e serviço da mesma nota. Entra a GR já convertida em NF-e/NFC-e, porque a nota leva só os
+ *   produtos e o serviço fica só na GR.
  * - A GR é ligada à O.S pelo caminho TB_NFV_ITEM → TB_PED_VENDA_NFVENDA → TB_PED_VENDA_ITEM →
  *   GESTOR_OS.ID_PEDIDO. É isso que permite filtrar os financeiros por técnico, status e tipo.
  *   Com algum desses filtros, só entram as GR que vieram de uma O.S.
@@ -202,7 +203,7 @@ const RELATORIOS = [
   { id: 'os-abertos', titulo: 'Serviços em aberto', base: 'os', periodo: 'opcional' },
   { id: 'os-finalizados', titulo: 'Serviços finalizados', base: 'os', periodo: 'mes' },
   { id: 'os-tecnico', titulo: 'Serviços por técnico', base: 'os', periodo: 'mes' },
-  { id: 'os-produtos', titulo: 'Produtos vendidos em O.S', base: 'gr', periodo: 'mes' },
+  { id: 'os-produtos', titulo: 'Serviços vendidos (tipo 9)', base: 'gr', periodo: 'mes' },
   { id: 'os-totalizador', titulo: 'Totalizador de serviços', base: 'gr', periodo: 'mes' },
   { id: 'os-descontos', titulo: 'Descontos e acréscimos', base: 'gr', periodo: 'mes' },
 ];
@@ -331,7 +332,7 @@ async function relFinanceiro(db, def, f) {
 
   if (def.id === 'os-produtos') {
     const mapa = new Map();
-    itens.filter((i) => !i.servico).forEach((i) => {
+    itens.filter((i) => i.servico).forEach((i) => {
       const p = mapa.get(i.id) || { id: i.id, descricao: i.descricao, un: i.un, qtd: 0, valor: 0, notas: new Set() };
       p.qtd += i.qtd;
       p.valor += i.valor;
@@ -346,8 +347,8 @@ async function relFinanceiro(db, def, f) {
       linhas: ordenados.map((p) => ({
         codigo: String(p.id), descricao: p.descricao, vendas: String(p.notas.size), quantidade: `${qtdBr(p.qtd)}${p.un ? ` ${p.un.toLowerCase()}` : ''}`, valor: brl(p.valor),
       })),
-      total: { codigo: 'Total', descricao: `${ordenados.length} ${ordenados.length === 1 ? 'produto' : 'produtos'}`, valor: brl(total) },
-      nota,
+      total: { codigo: 'Total', descricao: `${ordenados.length} ${ordenados.length === 1 ? 'serviço' : 'serviços'}`, valor: brl(total) },
+      nota: `${nota} Só o tipo 9. O valor já tira o desconto e mantém o acréscimo. Nota cancelada não entra.`,
     };
   }
 
@@ -427,23 +428,43 @@ async function executar(id, consulta) {
 /* Dashboard: aba Serviços e o card do Resumo                          */
 /* ------------------------------------------------------------------ */
 
+/** GR cancelada com item tipo 9: valor líquido, fora do faturamento. */
+async function canceladosTipo9(db, f) {
+  if (!hasTable('TB_NFVENDA') || !hasTable('TB_NFV_ITEM')) return { notas: 0, valor: 0 };
+  const cfop = `RIGHT(REPLACE(COALESCE(I.CFOP, ''), '.', ''), 3)`;
+  const rows = await query(db, `
+    SELECT COUNT(DISTINCT N.ID_NFVENDA) AS NOTAS,
+           SUM(COALESCE(I.VLR_TOTAL, 0) - COALESCE(I.VLR_DESC, 0) + COALESCE(I.VLR_FRETE, 0) + COALESCE(I.VLR_SEGURO, 0) + COALESCE(I.VLR_DESPESA, 0)) AS VALOR
+    FROM TB_NFV_ITEM I
+    JOIN TB_NFVENDA N ON N.ID_NFVENDA = I.ID_NFVENDA
+    JOIN TB_EST_IDENTIFICADOR IDF ON IDF.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+    JOIN TB_ESTOQUE EST ON EST.ID_ESTOQUE = IDF.ID_ESTOQUE
+    WHERE N.STATUS = 'C' AND UPPER(TRIM(N.NF_MODELO)) = 'GR'
+      AND N.DT_EMISSAO >= ? AND N.DT_EMISSAO < ?
+      AND ${cfop} NOT IN (${CFOP_FORA.map((c) => `'${c}'`).join(',')})
+      AND ${SQL_TIPO('EST')} = '9'`, [f.inicio, addDia(f.fim)]);
+  return { notas: num(rows[0]?.NOTAS), valor: cent(rows[0]?.VALOR) / 100 };
+}
+
 /** Faturamento de serviços no período (para o card do Resumo). */
 async function faturamentoServicos(db, inicio, fim) {
-  const itens = await itensGr(db, lerFiltros({ inicio, fim }, true));
-  const servicos = itens.filter((i) => i.servico).reduce((s, i) => s + i.valor, 0);
+  const itens = (await itensGr(db, lerFiltros({ inicio, fim }, true))).filter((i) => i.servico);
+  const servicos = itens.reduce((s, i) => s + i.valor, 0);
   return { valor: servicos / 100, vendas: new Set(itens.map((i) => i.nota)).size };
 }
 
 async function dashboardServicos(db, consulta) {
   const f = lerFiltros(consulta, true);
-  const itens = await itensGr(db, f);
+  const itens = (await itensGr(db, f)).filter((i) => i.servico);
   const notas = new Set(itens.map((i) => i.nota));
-  const servicos = itens.filter((i) => i.servico).reduce((s, i) => s + i.valor, 0);
-  const produtos = itens.filter((i) => !i.servico).reduce((s, i) => s + i.valor, 0);
+  const servicos = itens.reduce((s, i) => s + i.valor, 0);
+  const descontos = itens.reduce((s, i) => s + i.desconto, 0);
+  const acrescimos = itens.reduce((s, i) => s + i.acrescimo, 0);
+  const cancelamentos = await canceladosTipo9(db, f);
 
-  const rank = (filtro) => {
+  const rank = () => {
     const mapa = new Map();
-    itens.filter(filtro).forEach((i) => {
+    itens.forEach((i) => {
       const p = mapa.get(i.id) || { nome: i.descricao, unidade: i.un, quantidade: 0, valor: 0 };
       p.quantidade += i.qtd;
       p.valor += i.valor;
@@ -455,9 +476,10 @@ async function dashboardServicos(db, consulta) {
 
   if (!hasTable('GESTOR_OS')) {
     return {
-      faturamentoServicos: servicos / 100, faturamentoProdutos: produtos / 100, vendas: notas.size,
-      ticket: notas.size ? (servicos + produtos) / notas.size / 100 : 0,
-      porStatus: [], porTecnico: [], maisServicos: rank((i) => i.servico), maisProdutos: rank((i) => !i.servico),
+      faturamentoServicos: servicos / 100, faturamentoProdutos: 0, descontos: descontos / 100, acrescimos: acrescimos / 100,
+      cancelamentos, vendas: notas.size,
+      ticket: notas.size ? servicos / notas.size / 100 : 0,
+      porStatus: [], porTecnico: [], maisServicos: rank(), maisProdutos: [],
       abertas: 0, finalizadas: 0, atrasadas: 0,
     };
   }
@@ -488,13 +510,13 @@ async function dashboardServicos(db, consulta) {
     if (finais.includes(id)) finalizadas += v.n; else { abertas += v.n; atrasadas += v.atrasadas; }
   });
 
-  // Faturamento por técnico: GR ligada à O.S; sem ligação fica em "Sem O.S vinculada".
+  // Faturamento por técnico: só o tipo 9 da GR ligada à O.S; sem ligação fica em "Sem O.S vinculada".
   const tecMapa = new Map();
   itens.forEach((i) => {
     const id = i.os ? (i.os.tecnico || 0) : -1;
     const t = tecMapa.get(id) || { id, valor: 0, servicos: 0, notas: new Set() };
     t.valor += i.valor;
-    if (i.servico) t.servicos += i.valor;
+    t.servicos += i.valor;
     t.notas.add(i.nota);
     tecMapa.set(id, t);
   });
@@ -507,16 +529,19 @@ async function dashboardServicos(db, consulta) {
 
   return {
     faturamentoServicos: servicos / 100,
-    faturamentoProdutos: produtos / 100,
+    faturamentoProdutos: 0,
+    descontos: descontos / 100,
+    acrescimos: acrescimos / 100,
+    cancelamentos,
     vendas: notas.size,
-    ticket: notas.size ? (servicos + produtos) / notas.size / 100 : 0,
+    ticket: notas.size ? servicos / notas.size / 100 : 0,
     abertas,
     finalizadas,
     atrasadas,
     porStatus,
     porTecnico,
-    maisServicos: rank((i) => i.servico),
-    maisProdutos: rank((i) => !i.servico),
+    maisServicos: rank(),
+    maisProdutos: [],
     tecnicos: [...funcs.values()].filter((t) => t.tecnico).map((t) => ({ id: t.id, nome: t.nome })),
     statuses: statuses.map((s) => ({ id: s.id, descricao: s.descricao })),
   };

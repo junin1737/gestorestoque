@@ -304,13 +304,13 @@ function setCfgTab(tab) {
   stateCfgTab = tab || 'tema';
   state.cfgTab = stateCfgTab;
   $$('#cfg-tabs .tab').forEach((b) => b.classList.toggle('active', b.dataset.cfgTab === stateCfgTab));
-  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'etiquetas', 'conexoes', 'importacao', 'supervisor'].forEach((id) => {
+  ['tema', 'produtos', 'tributos', 'saida', 'clientes', 'servicos', 'etiquetas', 'conexoes', 'importacao', 'supervisor'].forEach((id) => {
     const pane = $(`#cfg-tab-${id}`);
     if (pane) pane.hidden = id !== stateCfgTab;
   });
   const salvar = $('#cfg-params-salvar');
   if (salvar) {
-    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'etiquetas' || stateCfgTab === 'conexoes' || stateCfgTab === 'importacao' || stateCfgTab === 'supervisor';
+    salvar.hidden = stateCfgTab === 'tema' || stateCfgTab === 'produtos' || stateCfgTab === 'clientes' || stateCfgTab === 'servicos' || stateCfgTab === 'etiquetas' || stateCfgTab === 'conexoes' || stateCfgTab === 'importacao' || stateCfgTab === 'supervisor';
     const barra = salvar.closest('.toolbar');
     if (barra) barra.hidden = salvar.hidden;
   }
@@ -319,7 +319,8 @@ function setCfgTab(tab) {
     produtos: 'Busca e ofertas',
     tributos: 'Conversão de tributos',
     saida: 'Saída',
-    clientes: 'Clientes',
+    clientes: 'Mensagem padrão',
+    servicos: 'Mensagens padrão dos serviços',
     etiquetas: 'Etiquetas',
     conexoes: 'WhatsApp e Instagram',
     importacao: 'Importação automática',
@@ -328,6 +329,7 @@ function setCfgTab(tab) {
   if ($('#page-preferencias') && !$('#page-preferencias').hidden && $('#page-sub')) {
     $('#page-sub').textContent = subCfg[stateCfgTab] || '';
   }
+  if (stateCfgTab === 'servicos') window.Servicos?.montarMensagens?.($('#cfg-os-mensagens'));
   if (stateCfgTab === 'etiquetas') window.Gondola?.onEtiquetas();
   if (stateCfgTab === 'conexoes') {
     pintarConexaoInstagram();

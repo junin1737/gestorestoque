@@ -181,7 +181,7 @@ const Servicos = (() => {
   }
 
   /* ---------- Cabeçalho do módulo ---------- */
-  const ABAS = [['quadro', 'Quadro'], ['mensagens', 'Mensagens padrão'], ['solucoes', 'Soluções'], ['status', 'Status'], ['tecnicos', 'Técnicos']];
+  const ABAS = [['quadro', 'Quadro'], ['solucoes', 'Soluções'], ['status', 'Status'], ['tecnicos', 'Técnicos']];
   function abasHtml() {
     return `<div class="os-topo"><div class="os-seg" role="tablist">${ABAS.map(([k, n]) => `<button type="button" role="tab" data-os-view="${k}" class="${st.view === k ? 'on' : ''}" aria-selected="${st.view === k}">${n}</button>`).join('')}</div>
       <span class="os-esp"></span>${mostrarBotaoApp() ? `<button type="button" class="ob os-btn-app" data-os-app>${ic('monitor', 'p')}Aplicativo desktop</button>` : ''}<button type="button" class="ob pri" data-os-nova>${ic('mais', 'p')}Nova O.S</button></div>`;
@@ -404,6 +404,55 @@ const Servicos = (() => {
     return Number(escolhido) || null;
   }
 
+  async function pedirAutorizacao() {
+    const res = await api('/os/funcionarios');
+    const lista = res.funcionarios || [];
+    if (!lista.length) { msg('Nenhum funcionário ativo no cadastro.'); return null; }
+    const texto = $('#os-autorizacao')?.value.trim() || '';
+    return janela(`<header><div><h2>Autorização</h2><p>Quem falou com o cliente e o que foi autorizado.</p></div></header>
+      <div class="corpo">
+        <div class="os-campo"><label for="aut-func">Funcionário que entrou em contato</label><select class="oc" id="aut-func">${lista.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('')}</select></div>
+        <div class="os-campo"><label for="aut-desc">Descrição da autorização</label><textarea class="oc" id="aut-desc" maxlength="2000" placeholder="Cliente autorizou a abertura do equipamento.">${esc(texto)}</textarea></div>
+        <label class="os-linha" style="padding:11px 13px;border-radius:12px;background:var(--os-fill)"><span>Enviar para a próxima etapa</span><span class="os-esp"></span><button type="button" class="os-chave on" id="aut-prox" aria-pressed="true" aria-label="Enviar para a próxima etapa"></button></label>
+      </div>
+      <footer><button type="button" class="ob" data-fechar="">Cancelar</button><button type="button" class="ob pri" id="aut-ok">Confirmar</button></footer>`, {
+      aoAbrir: (dlg, fechar) => {
+        $('#aut-prox', dlg).addEventListener('click', (e) => {
+          e.preventDefault();
+          e.currentTarget.classList.toggle('on');
+          e.currentTarget.setAttribute('aria-pressed', e.currentTarget.classList.contains('on'));
+        });
+        const ok = () => {
+          const descricao = $('#aut-desc', dlg).value.trim();
+          if (!descricao) { msg('Descreva a autorização. Ex.: Cliente autorizou a abertura do equipamento.'); $('#aut-desc', dlg).focus(); return; }
+          const sel = $('#aut-func', dlg);
+          const funcionario = Number(sel.value) || null;
+          if (!funcionario) { msg('Escolha quem entrou em contato.'); return; }
+          fechar({ descricao, funcionario, nome: sel.selectedOptions[0]?.textContent || '', proxima: $('#aut-prox', dlg).classList.contains('on') });
+        };
+        $('#aut-ok', dlg).addEventListener('click', ok);
+      },
+    });
+  }
+
+  async function prepararProxima() {
+    const ordem = [...(st.statuses || [])].filter((s) => s.ativo).sort((a, b) => a.ordem - b.ordem);
+    const i = ordem.findIndex((s) => s.id === st.os.id_status);
+    const prox = i >= 0 ? ordem[i + 1] : null;
+    if (!prox) { msg('Não há próxima etapa.'); return false; }
+    const papel = papelStatus(prox.descricao);
+    let idColab = null;
+    if (papel) {
+      idColab = await escolherColaborador(papel);
+      if (!idColab) return false;
+    }
+    st.os.id_status = prox.id;
+    st.os.id_colaborador_pendente = idColab;
+    const sel = $('#os-status');
+    if (sel) sel.value = String(prox.id);
+    return true;
+  }
+
   async function moverCard(id, idStatus, ids) {
     const atual = st.dados.os.find((o) => o.id === id);
     if (atual && atual.id_status !== idStatus) {
@@ -495,6 +544,8 @@ const Servicos = (() => {
       defeito: '',
       autorizacao: '',
       autor_status: '',
+      id_autor_contato: null,
+      autor_contato: '',
       solucao: '',
       obs: '',
       previsao: '',
@@ -592,6 +643,7 @@ const Servicos = (() => {
           <div class="os-campo"><label for="os-autorizacao">Autorização solicitada</label>
             <textarea class="oc" id="os-autorizacao" maxlength="2000" placeholder="O que será proposto para o cliente autorizar">${esc(o.autorizacao || '')}</textarea>
             <div class="os-seg" id="os-autor" style="margin-top:8px">${[['','Sem status'],['P','Pendente'],['A','Autorizada'],['N','Recusada']].map(([v, n]) => `<button type="button" data-autor="${v}" class="${(o.autor_status || '') === v ? 'on' : ''}">${n}</button>`).join('')}</div>
+            ${o.autor_contato ? `<p class="os-legenda" style="margin:6px 0 0">Contato: ${esc(o.autor_contato)}</p>` : ''}
           </div>
         </div>
         <div class="os-campo"><label for="os-solucao">Solução</label><textarea class="oc" id="os-solucao" maxlength="2000" placeholder="O que foi feito para resolver o problema">${esc(o.solucao)}</textarea></div>
@@ -625,11 +677,12 @@ const Servicos = (() => {
         <td class="n os-legenda">${ajuste ? `${ajuste < 0 ? '− ' : '+ '}${money(Math.abs(ajuste))}` : '—'}</td><td class="n"><b>${money(it.total)}</b></td></tr>`;
     }).join('');
     const vazio = `<tr class="vazia"><td colspan="6">${st.aba === 'P' ? 'Nenhum produto. Use Incluir produto.' : 'Nenhum serviço. Use Incluir serviço.'}</td></tr>`;
-    $('#os-itens').innerHTML = `<header><div class="os-seg" role="tablist"><button type="button" data-aba="P" class="${st.aba === 'P' ? 'on' : ''}">Produtos<b>${np}</b></button><button type="button" data-aba="S" class="${st.aba === 'S' ? 'on' : ''}">Serviços<b>${ns}</b></button></div>
-      <span class="os-esp"></span>${tr ? '<span class="os-legenda">Itens travados: a O.S já foi para a venda</span>' : `
+    $('#os-itens').innerHTML = `<header class="os-itens-topo"><div class="os-seg os-abas-item" role="tablist"><button type="button" data-aba="P" class="${st.aba === 'P' ? 'on' : ''}">Produtos<b>${np}</b></button><button type="button" data-aba="S" class="${st.aba === 'S' ? 'on' : ''}">Serviços<b>${ns}</b></button></div>
+      ${tr ? '<span class="os-legenda">Itens travados: a O.S já foi para a venda</span>' : `<div class="os-itens-acoes">
       <button type="button" class="ob sm" data-os-item-alt ${sel ? '' : 'disabled'}>${ic('lapis', 'p')}Alterar</button>
       <button type="button" class="ob sm perigo" data-os-item-exc ${sel ? '' : 'disabled'}>${ic('lixo', 'p')}Excluir</button>
-      <button type="button" class="ob sm pri" data-os-item-inc>${ic('mais', 'p')}Incluir ${st.aba === 'P' ? 'produto' : 'serviço'}</button>`}</header>
+      <button type="button" class="ob sm" data-os-item-inc="P">${ic('mais', 'p')}Incluir produto</button>
+      <button type="button" class="ob sm pri" data-os-item-inc="S">${ic('mais', 'p')}Incluir serviço</button></div>`}</header>
       <div class="corpo"><div class="os-tabela-wrap"><table class="os-tabela"><thead><tr><th>Cód.</th><th>Descrição</th>${st.aba === 'P' ? '<th class="n">Qtd</th>' : ''}<th class="n">${st.aba === 'P' ? 'Unitário' : 'Valor'}</th><th class="n">Desc./Acrésc.</th><th class="n">Total</th></tr></thead>
       <tbody>${linhas || vazio}</tbody></table></div>
       ${Number(o.desc_geral) || Number(o.acres_geral) ? '<p class="os-legenda" style="margin:0">O desconto e o acréscimo geral estão rateados entre produtos e serviços pelo valor de cada um. A diferença de centavos vai para o item de maior valor.</p>' : ''}</div>`;
@@ -712,8 +765,24 @@ const Servicos = (() => {
     }));
     $$('#os-status, #os-tecnico, #os-quem, #os-previsao, #os-entrega, #os-equip, #os-defeito, #os-autorizacao, #os-solucao, #os-obs', r)
       .forEach((el) => el?.addEventListener('input', marcarSujo));
-    $$('#os-autor button', r).forEach((b) => b.addEventListener('click', () => {
-      st.os.autor_status = b.dataset.autor || '';
+    $$('#os-autor button', r).forEach((b) => b.addEventListener('click', async () => {
+      const novo = b.dataset.autor || '';
+      if (novo === 'A' && st.os.autor_status !== 'A') {
+        const pedido = await pedirAutorizacao();
+        if (!pedido) return;
+        st.os.autor_status = 'A';
+        st.os.autorizacao = pedido.descricao;
+        st.os.id_autor_contato = pedido.funcionario;
+        st.os.autor_contato = pedido.nome || '';
+        if ($('#os-autorizacao')) $('#os-autorizacao').value = pedido.descricao;
+        $$('#os-autor button', r).forEach((x) => x.classList.toggle('on', x.dataset.autor === 'A'));
+        marcarSujo();
+        st.proximaPerguntada = true;
+        if (pedido.proxima) await prepararProxima();
+        if (st.os.id) await gravar();
+        return;
+      }
+      st.os.autor_status = novo;
       $$('#os-autor button', r).forEach((x) => x.classList.toggle('on', x === b));
       marcarSujo();
     }));
@@ -1061,7 +1130,10 @@ const Servicos = (() => {
       tr.addEventListener('click', () => { st.itemSel = Number(tr.dataset.item); renderItens(); ligarItens(); });
       tr.addEventListener('dblclick', () => { if (!travada()) janelaItem(Number(tr.dataset.item)); });
     });
-    $('[data-os-item-inc]', box)?.addEventListener('click', () => janelaItem(-1));
+    $$('[data-os-item-inc]', box).forEach((b) => b.addEventListener('click', () => {
+      st.aba = b.dataset.osItemInc === 'S' ? 'S' : 'P';
+      janelaItem(-1);
+    }));
     $('[data-os-item-alt]', box)?.addEventListener('click', () => janelaItem(st.itemSel));
     $('[data-os-item-exc]', box)?.addEventListener('click', async () => {
       const it = st.os.itens[st.itemSel];
@@ -1273,12 +1345,19 @@ const Servicos = (() => {
   }
 
   /* ---------- Lateral: gravar, imprimir, WhatsApp, venda ---------- */
+  function modeloImpressao(o) {
+    const stt = statusDe(o?.id_status);
+    const nome = String(stt?.descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (stt?.final || nome.includes('final') || nome.includes('entreg') || nome.includes('conclu')) return 'fechamento';
+    return 'abertura';
+  }
+
   function ligarLateral() {
     const lat = $('#os-lateral');
     $('[data-os-gravar]', lat)?.addEventListener('click', gravar);
-    $('[data-os-imprimir]', lat)?.addEventListener('click', () => janelaImprimir(st.os.id, statusDe(st.os.id_status)?.final ? 'fechamento' : 'abertura', { titulo: `Imprimir O.S ${st.os.id}`, semWhats: true }));
+    $('[data-os-imprimir]', lat)?.addEventListener('click', () => janelaImprimir(st.os.id, modeloImpressao(st.os), { titulo: `Imprimir O.S ${st.os.id}`, semWhats: true }));
     $('[data-os-hist]', lat)?.addEventListener('click', () => imprimir(st.os.id, 'a4', 'historico'));
-    $('[data-os-whats]', lat)?.addEventListener('click', () => janelaWhats(st.os.id, statusDe(st.os.id_status)?.final ? 'fechamento' : 'abertura'));
+    $('[data-os-whats]', lat)?.addEventListener('click', () => janelaWhats(st.os.id, modeloImpressao(st.os)));
     $('[data-os-venda]', lat)?.addEventListener('click', enviarVenda);
     $('[data-os-cancelar]', lat)?.addEventListener('click', cancelarOs);
   }
@@ -1312,7 +1391,7 @@ const Servicos = (() => {
     renderLateral();
     const body = {
       tipo: o.tipo, modalidade: o.modalidade, id_status: o.id_status, id_tecnico: o.id_tecnico, quem_trouxe: o.quem_trouxe,
-      equipamento: o.equipamento, defeito: o.defeito, autorizacao: o.autorizacao, autor_status: o.autor_status, solucao: o.solucao, obs: o.obs, previsao: o.previsao, entrega: o.entrega,
+      equipamento: o.equipamento, defeito: o.defeito, autorizacao: o.autorizacao, autor_status: o.autor_status, id_autor_contato: o.id_autor_contato || null, solucao: o.solucao, obs: o.obs, previsao: o.previsao, entrega: o.entrega,
       id_categoria: o.id_categoria, id_subcategoria: o.id_subcategoria, id_colaborador: o.id_colaborador_pendente || null,
       id_cliente: o.id_cliente, desc_geral: o.desc_geral, acres_geral: o.acres_geral, frete: o.frete, deslocamento: o.deslocamento,
       itens: o.itens.map((it) => ({ id_identificador: it.id_identificador, descricao: it.descricao, tipo: it.tipo, unidade: it.unidade, qtd: it.qtd, vlr_unit: it.vlr_unit, desc_item: it.desc_item, acres_item: it.acres_item })),
@@ -1326,13 +1405,15 @@ const Servicos = (() => {
     if (det.ok) st.os = det.os;
     st.sujo = false;
     st.statusGravado = st.os.id_status;
-    renderOs();
-    o.id_colaborador_pendente = null;
+    st.os.id_colaborador_pendente = null;
     const virouFinal = statusDe(st.os.id_status)?.final && statusAntes !== st.os.id_status;
     const mudouStatus = !eraNova && statusAntes !== st.os.id_status;
+    const jaPerguntou = st.proximaPerguntada;
+    st.proximaPerguntada = false;
     if (eraNova) await janelaImprimir(res.id, 'abertura', { titulo: `O.S ${res.id} gravada`, texto: 'Abertura registrada. Deseja imprimir ou enviar?' });
     else if (virouFinal) await perguntarFechamento(res.id, !!st.os.id_pedido);
-    if (!mudouStatus && !virouFinal) await perguntarProxima(res.id);
+    if (!mudouStatus && !virouFinal && !jaPerguntou) await perguntarProxima(res.id);
+    irPara('quadro');
   }
 
   async function perguntarProxima(id) {
@@ -1359,7 +1440,7 @@ const Servicos = (() => {
     if (!mov.ok) { msg(mov.error || 'Não foi possível mudar a etapa.'); return; }
     avisar(mov.avisos);
     const det = await api(`/os/${id}`);
-    if (det.ok) { st.os = det.os; st.statusGravado = det.os.id_status; renderOs(); }
+    if (det.ok) { st.os = det.os; st.statusGravado = det.os.id_status; }
     if (mov.final) await perguntarFechamento(id, !!st.os.id_pedido);
   }
 
@@ -1465,14 +1546,20 @@ const Servicos = (() => {
   const EXEMPLO = { numero_os: '1284', cliente: 'Mariana Alves', tecnico: 'Rafael', equipamento: 'Notebook Dell Inspiron 15', defeito: 'Não liga', previsao: '28/11/2026', status: 'Em Andamento', quem_trouxe: 'Pedro' };
   let msgSel = null;
 
-  async function renderMensagens() {
+  async function renderMensagens(host) {
+    const alvo = host || raizEl();
+    const embutido = !!host;
+    const deNovo = () => renderMensagens(embutido ? alvo : null);
     const res = await api('/os/mensagens');
-    if (!res.ok) { raizEl().innerHTML = `<div class="os">${abasHtml()}<p class="os-vazio">${esc(res.error)}</p></div>`; return; }
+    if (!res.ok) {
+      alvo.innerHTML = embutido ? `<p class="os-vazio">${esc(res.error)}</p>` : `<div class="os">${abasHtml()}<p class="os-vazio">${esc(res.error)}</p></div>`;
+      return;
+    }
     const lista = res.mensagens;
     if (!msgSel || (msgSel.id && !lista.some((m) => m.id === msgSel.id))) msgSel = lista[0] ? { ...lista[0] } : { id: 0, titulo: '', texto: '', evento: 'atribuida', ativo: true };
     const m = msgSel;
     const ev = Object.entries(res.eventos);
-    raizEl().innerHTML = `<div class="os">${abasHtml()}<div class="os-cad">
+    alvo.innerHTML = `<div class="os">${embutido ? '' : abasHtml()}<div class="os-cad">
       <section class="os-grupo"><header><h2>Mensagens</h2><span class="os-esp"></span><button type="button" class="ob sm pri" data-msg-nova>${ic('mais', 'p')}Nova</button></header>
         <div class="corpo" style="gap:2px">${lista.map((x) => `<button type="button" class="os-item-lista${x.id === m.id ? ' on' : ''}" data-msg="${x.id}"><span class="os-icost" style="--h:${x.ativo ? '#0d9488' : '#64748b'}">${ic('whats', 'p')}</span>
           <span style="min-width:0"><b>${esc(x.titulo)}</b><br><span class="os-legenda">${esc(res.eventos[x.evento] || '')}${res.automaticos.includes(x.evento) ? ' · automática' : ' · em breve'}${x.ativo ? '' : ' · inativa'}</span></span></button>`).join('') || '<p class="os-legenda">Nenhuma mensagem.</p>'}</div></section>
@@ -1486,7 +1573,7 @@ const Servicos = (() => {
           <p class="os-legenda" style="margin:0">Por enquanto só "O.S atribuída ao técnico" dispara sozinha. Sai pelo WhatsApp da loja; sem celular no cadastro do técnico, o Gestor avisa e não envia.</p>
           <div class="os-linha">${m.id ? `<button type="button" class="ob perigo" data-msg-exc>${ic('lixo', 'p')}Excluir</button>` : ''}<span class="os-esp"></span><button type="button" class="ob pri" data-msg-salvar>Salvar</button></div>
         </div></section></div></div>`;
-    const r = raizEl();
+    const r = alvo.querySelector(':scope > .os') || alvo;
     const texto = $('#msg-texto', r);
     const previa = () => { $('#msg-previa', r).textContent = texto.value.replace(/\{(\w+)\}/g, (x, k) => EXEMPLO[k] ?? x); };
     previa();
@@ -1499,22 +1586,26 @@ const Servicos = (() => {
       previa();
     }));
     $('#msg-ativo', r).addEventListener('click', (e) => { e.currentTarget.classList.toggle('on'); });
-    $$('[data-msg]', r).forEach((b) => b.addEventListener('click', () => { msgSel = { ...lista.find((x) => x.id === Number(b.dataset.msg)) }; renderMensagens(); }));
-    $('[data-msg-nova]', r).addEventListener('click', () => { msgSel = { id: 0, titulo: '', texto: '', evento: 'atribuida', ativo: true }; renderMensagens(); });
+    $$('[data-msg]', r).forEach((b) => b.addEventListener('click', () => { msgSel = { ...lista.find((x) => x.id === Number(b.dataset.msg)) }; deNovo(); }));
+    $('[data-msg-nova]', r).addEventListener('click', () => { msgSel = { id: 0, titulo: '', texto: '', evento: 'atribuida', ativo: true }; deNovo(); });
     $('[data-msg-salvar]', r).addEventListener('click', async () => {
       const body = { id: m.id, titulo: $('#msg-titulo', r).value, texto: texto.value, evento: $('#msg-evento', r).value, ativo: $('#msg-ativo', r).classList.contains('on') };
       const res2 = await api('/os/mensagens', { method: 'POST', body });
       if (!res2.ok) { msg(res2.error); return; }
       msgSel = { ...body, id: res2.id };
       msg('Mensagem salva.');
-      renderMensagens();
+      deNovo();
     });
     $('[data-msg-exc]', r)?.addEventListener('click', async () => {
       if (!(await confirmar('Excluir mensagem?', m.titulo, { sim: 'Excluir', nao: 'Cancelar', icone: 'lixo' }))) return;
       await api(`/os/mensagens/${m.id}`, { method: 'DELETE' });
       msgSel = null;
-      renderMensagens();
+      deNovo();
     });
+  }
+
+  function montarMensagens(el) {
+    if (el) renderMensagens(el);
   }
 
   /* ================================================================== */
@@ -1711,9 +1802,9 @@ const Servicos = (() => {
   /* ================================================================== */
 
   function irPara(view) {
+    if (view === 'mensagens') view = 'quadro';
     st.view = view;
     if (view === 'quadro') return carregarQuadro();
-    if (view === 'mensagens') return renderMensagens();
     if (view === 'solucoes') return renderSolucoes();
     if (view === 'status') return renderStatus();
     if (view === 'tecnicos') return renderTecnicos();
@@ -1775,7 +1866,7 @@ const Servicos = (() => {
     return false;
   }
 
-  return { init, onPageEnter, montarConfigSaida, handleBack };
+  return { init, onPageEnter, montarConfigSaida, handleBack, montarMensagens };
 })();
 
 window.Servicos = Servicos;

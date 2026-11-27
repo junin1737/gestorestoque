@@ -62,6 +62,10 @@ html[data-theme="escuro"] .os {
 /* Grupos (cartões) */
 .os-grupo { background: var(--bg-elev); border-radius: var(--os-raio); box-shadow: var(--os-lift); min-width: 0; }
 .os-grupo > header { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 14px 18px 4px; }
+.os-grupo > header.os-itens-topo { flex-direction: column; align-items: stretch; }
+.os-abas-item { display: flex; width: 100%; }
+.os-abas-item button { flex: 1; }
+.os-itens-acoes { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
 .os-grupo > header h2 { margin: 0; font-size: .95rem; font-weight: 650; letter-spacing: -.01em; }
 .os-grupo > .corpo { padding: 12px 18px 18px; display: grid; gap: 12px; }
 .os-g2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }

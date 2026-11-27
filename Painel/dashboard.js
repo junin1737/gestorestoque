@@ -411,23 +411,24 @@ function htmlOsTecnicos(lista) {
 }
 
 function htmlServicos(d) {
-  const total = (Number(d.faturamentoServicos) || 0) + (Number(d.faturamentoProdutos) || 0);
+  const canc = d.cancelamentos || {};
   return `<div class="dash-kpis">
-    ${kpi('Faturamento de serviços', brl(d.faturamentoServicos), 'mão de obra nas vendas GR', { destaque: true })}
-    ${kpi('Produtos nessas vendas', brl(d.faturamentoProdutos), `total ${brl(total)}`)}
+    ${kpi('Faturamento de serviços', brl(d.faturamentoServicos), 'tipo 9, líquido de desconto e acréscimo', { destaque: true })}
+    ${kpi('Descontos', brl(d.descontos), 'já abatidos do faturamento')}
+    ${kpi('Acréscimos', brl(d.acrescimos), 'já somados no faturamento')}
+    ${kpi('Cancelamentos', brl(canc.valor), `${num(canc.notas)} ${canc.notas === 1 ? 'GR cancelada' : 'GR canceladas'}`, { tom: canc.notas ? 'neg' : '' })}
     ${kpi('Vendas com serviço', num(d.vendas), `ticket médio ${brl(d.ticket)}`)}
     ${kpi('O.S em aberto', num(d.abertas), d.atrasadas ? `${num(d.atrasadas)} com previsão vencida` : 'nenhuma atrasada', { tom: d.atrasadas ? 'neg' : '' })}
     ${kpi('Finalizadas no período', num(d.finalizadas), 'pela data de entrega')}
   </div>
   <div class="dash-grade meio">
     ${caixa('O.S por status', 'Abertas agora e finalizadas no período', htmlOsStatus(d.porStatus))}
-    ${caixa('Faturamento por técnico', 'Vendas GR que vieram de uma O.S', htmlOsTecnicos(d.porTecnico || []))}
+    ${caixa('Faturamento por técnico', 'Só o tipo 9 das vendas que vieram de uma O.S', htmlOsTecnicos(d.porTecnico || []))}
   </div>
-  <div class="dash-grade meio">
-    ${caixa('Serviços mais vendidos', 'Por valor no período', htmlRankProdutos(d.maisServicos || [], 'valor'))}
-    ${caixa('Produtos mais usados', 'Produtos das vendas com serviço', htmlRankProdutos(d.maisProdutos || [], 'valor'))}
+  <div class="dash-grade">
+    ${caixa('Serviços mais vendidos', 'Tipo 9, valor líquido no período', htmlRankProdutos(d.maisServicos || [], 'valor'))}
   </div>
-  <p class="dash-vazio">Valores das vendas modelo GR com pelo menos um serviço, inclusive as já convertidas em nota. Os filtros de técnico, status e tipo consideram só as vendas que vieram de uma O.S.</p>`;
+  <p class="dash-vazio">Só item tipo 9 das vendas modelo GR, inclusive as já convertidas em nota. O valor tira o desconto, mantém o acréscimo e deixa a GR cancelada no card de cancelamentos. Filtro de técnico, status e tipo vale só para venda que veio de uma O.S.</p>`;
 }
 
 /* ----- Financeiro ----- */

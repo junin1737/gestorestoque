@@ -159,6 +159,7 @@ const TABELAS = {
       TOTAL NUMERIC(15,2),
       AUTORIZACAO VARCHAR(2000),
       AUTOR_STATUS CHAR(1),
+      ID_AUTOR_CONTATO INTEGER,
       ID_BUSCADOR INTEGER,
       ID_ENTREGADOR INTEGER,
       CANCELADA CHAR(1),
@@ -282,6 +283,7 @@ async function ensureOsSchema(db) {
     if (!(await columnExists(db, 'GESTOR_OS', 'ID_SUBCATEGORIA'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_SUBCATEGORIA INTEGER');
     if (!(await columnExists(db, 'GESTOR_OS', 'AUTORIZACAO'))) await query(db, 'ALTER TABLE GESTOR_OS ADD AUTORIZACAO VARCHAR(2000)');
     if (!(await columnExists(db, 'GESTOR_OS', 'AUTOR_STATUS'))) await query(db, 'ALTER TABLE GESTOR_OS ADD AUTOR_STATUS CHAR(1)');
+    if (!(await columnExists(db, 'GESTOR_OS', 'ID_AUTOR_CONTATO'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_AUTOR_CONTATO INTEGER');
     if (!(await columnExists(db, 'GESTOR_OS', 'ID_BUSCADOR'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_BUSCADOR INTEGER');
     if (!(await columnExists(db, 'GESTOR_OS', 'ID_ENTREGADOR'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_ENTREGADOR INTEGER');
     if (!(await columnExists(db, 'GESTOR_OS', 'CANCELADA'))) await query(db, 'ALTER TABLE GESTOR_OS ADD CANCELADA CHAR(1)');
@@ -1209,6 +1211,8 @@ function mapOs(r, funcs, statuses) {
     autorizacao: texto(r.AUTORIZACAO),
     autor_status: autorStatus(r.AUTOR_STATUS),
     autor_rotulo: rotuloAutor(r.AUTOR_STATUS),
+    id_autor_contato: num(r.ID_AUTOR_CONTATO) || null,
+    autor_contato: funcs?.get(num(r.ID_AUTOR_CONTATO))?.nome || '',
     id_buscador: num(r.ID_BUSCADOR) || null,
     id_entregador: num(r.ID_ENTREGADOR) || null,
     buscador: funcs?.get(num(r.ID_BUSCADOR))?.nome || '',
@@ -1469,6 +1473,7 @@ async function salvar(body, usuario, opcoes = {}) {
     id_subcategoria: Object.prototype.hasOwnProperty.call(body || {}, 'id_subcategoria') ? (num(body.id_subcategoria) || null) : undefined,
     autorizacao: Object.prototype.hasOwnProperty.call(body || {}, 'autorizacao') ? texto(body.autorizacao, 2000) : undefined,
     autor_status: Object.prototype.hasOwnProperty.call(body || {}, 'autor_status') ? autorStatus(body.autor_status) : undefined,
+    id_autor_contato: Object.prototype.hasOwnProperty.call(body || {}, 'id_autor_contato') ? (num(body.id_autor_contato) || null) : undefined,
     id_colaborador: num(body?.id_colaborador) || null,
     itens: lerItensEntrada(body?.itens),
   };
@@ -1518,6 +1523,7 @@ async function salvar(body, usuario, opcoes = {}) {
     entrada.id_subcategoria = cat.id_subcategoria;
     if (entrada.autorizacao === undefined) entrada.autorizacao = atual?.autorizacao || '';
     if (entrada.autor_status === undefined) entrada.autor_status = atual?.autor_status || '';
+    if (entrada.id_autor_contato === undefined) entrada.id_autor_contato = atual?.id_autor_contato || null;
     let cli = null;
     if (!atual || atual.id_cliente !== entrada.id_cliente) {
       cli = await lerCliente(db, entrada.id_cliente);
@@ -1607,10 +1613,17 @@ async function salvar(body, usuario, opcoes = {}) {
         const nome = entrada.id_tecnico ? funcs.get(entrada.id_tecnico)?.nome : '';
         await historico(tx, codigo, usuario, nome ? `Técnico ${nome} vinculado` : 'Técnico removido');
       }
-      const mudouAutor = !atual || atual.autorizacao !== entrada.autorizacao || atual.autor_status !== entrada.autor_status;
-      if (atual && mudouAutor && (entrada.autorizacao || entrada.autor_status)) {
+      if (entrada.id_autor_contato) {
+        await query(tx, 'UPDATE GESTOR_OS SET ID_AUTOR_CONTATO = ? WHERE ID_OS = ?', [entrada.id_autor_contato, codigo]);
+      } else if (atual?.id_autor_contato) {
+        await query(tx, 'UPDATE GESTOR_OS SET ID_AUTOR_CONTATO = NULL WHERE ID_OS = ?', [codigo]);
+      }
+      const mudouAutor = !atual || atual.autorizacao !== entrada.autorizacao || atual.autor_status !== entrada.autor_status
+        || (atual?.id_autor_contato || null) !== (entrada.id_autor_contato || null);
+      if (atual && mudouAutor && (entrada.autorizacao || entrada.autor_status || entrada.id_autor_contato)) {
         const rot = rotuloAutor(entrada.autor_status);
-        await historico(tx, codigo, usuario, `Autorização solicitada${rot ? ` (${rot})` : ''}${entrada.autorizacao ? `: ${entrada.autorizacao.slice(0, 180)}` : ''}`);
+        const contato = entrada.id_autor_contato ? funcs.get(entrada.id_autor_contato)?.nome : '';
+        await historico(tx, codigo, usuario, `Autorização solicitada${rot ? ` (${rot})` : ''}${contato ? ` — contato ${contato}` : ''}${entrada.autorizacao ? `: ${entrada.autorizacao.slice(0, 180)}` : ''}`);
       }
       let colaborador = null;
       const papel = papelStatus(statusNovo?.descricao);
@@ -1953,12 +1966,14 @@ function htmlImpressao(os, loja, opcoes = {}) {
     : `<div class="tot">${linhasTot.map(([n, v]) => `<div><span>${n}</span><span>${v < 0 ? '− ' : ''}${money(Math.abs(v))}</span></div>`).join('')}
        <div class="g"><span>Total</span><span>${money(t.total)}</span></div></div>`;
   const campo = (rotulo, valor) => (valor ? `<div><span class="r">${rotulo}</span><br>${esc(valor)}</div>` : '');
+  const campoLargo = (rotulo, valor) => (valor ? `<div class="largo"><span class="r">${rotulo}</span><br>${esc(valor)}</div>` : '');
   const bloco = (rotulo, valor, alto) => (valor || alto ? `<h3>${rotulo}</h3><div class="bloco${alto ? ' alto' : ''}">${esc(valor || '')}</div>` : '');
   const marca = loja?.logo
     ? `<img class="logo" src="${esc(loja.logo)}" alt="Logo" />`
     : '<div class="logo vazio" aria-hidden="true"></div>';
-  const autor = os.autorizacao || os.autor_rotulo
-    ? `${os.autor_rotulo ? `${os.autor_rotulo}${os.autorizacao ? ' — ' : ''}` : ''}${os.autorizacao || ''}`
+  const rotAutor = [os.autor_rotulo, os.autor_contato ? `contato ${os.autor_contato}` : ''].filter(Boolean).join(' · ');
+  const autor = os.autorizacao || rotAutor
+    ? `${rotAutor ? `${rotAutor}${os.autorizacao ? ' — ' : ''}` : ''}${os.autorizacao || ''}`
     : '';
   const cab = termico
     ? `<div class="cab-t">${marca}<div><b style="font-size:13px">${esc(loja?.nome || 'Loja')}</b>${endereco}${loja?.telefone ? `<div>${esc(loja.telefone)}</div>` : ''}</div></div>
@@ -1969,17 +1984,17 @@ function htmlImpressao(os, loja, opcoes = {}) {
     ? `Cliente: ${esc(os.cliente?.nome || '—')}${os.cliente?.documento ? `<br>Doc.: ${esc(os.cliente.documento)}` : ''}${os.cliente?.telefone ? `<br>Fone: ${esc(fmtFone(os.cliente.telefone))}` : ''}
        <br>Equip.: ${esc(os.equipamento)}${os.categoria ? `<br>Categoria: ${esc(os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}` : ''}${os.quem_trouxe ? `<br>Trouxe: ${esc(os.quem_trouxe)}` : ''}${os.tecnico ? `<br>Técnico: ${esc(os.tecnico.nome)}` : ''}
        ${os.previsao ? `<br>Previsão: ${dataBr(os.previsao)}` : ''}${fechamento && os.entrega ? `<br>Entrega: ${dataHoraBr(os.entrega)}` : ''}
-       <div class="sep"></div>Defeito: ${esc(os.defeito)}${autor ? `<br>Autorização${os.autor_rotulo ? ` (${esc(os.autor_rotulo)})` : ''}: ${esc(os.autorizacao)}` : ''}${fechamento && os.solucao ? `<br>Solução: ${esc(os.solucao)}` : ''}`
+       <div class="sep"></div>Defeito: ${esc(os.defeito)}${autor ? `<br>Autorização${rotAutor ? ` (${esc(rotAutor)})` : ''}: ${esc(os.autorizacao)}` : ''}${fechamento && os.solucao ? `<br>Solução: ${esc(os.solucao)}` : ''}`
     : `<h3>Cliente</h3><div class="bloco grade">${campo('Nome', os.cliente?.nome)}${campo('CPF/CNPJ', os.cliente?.documento)}${campo('Telefone', fmtFone(os.cliente?.telefone))}${campo('Endereço', os.cliente?.endereco)}</div>
-       <h3>Atendimento</h3><div class="bloco grade">${campo('Tipo', tipoTxt)}${campo('Técnico', os.tecnico?.nome)}${campo('Categoria', os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}${campo('Quem trouxe', os.quem_trouxe)}${campo('Previsão', dataBr(os.previsao))}${fechamento ? campo('Entrega', dataHoraBr(os.entrega)) : ''}</div>
-       ${bloco('Equipamento', os.equipamento)}<div class="par">${bloco('Defeito apresentado', os.defeito, !fechamento)}${bloco(`Autorização solicitada${os.autor_rotulo ? ` · ${os.autor_rotulo}` : ''}`, os.autorizacao, !fechamento)}</div>${fechamento ? bloco('Solução', os.solucao) : ''}${os.obs ? bloco('Observações', os.obs) : ''}`;
+       <h3>Atendimento</h3><div class="bloco grade">${campo('Tipo', tipoTxt)}${campo('Técnico', os.tecnico?.nome)}${campo('Categoria', os.subcategoria ? `${os.categoria} › ${os.subcategoria}` : os.categoria)}${campo('Quem trouxe', os.quem_trouxe)}${campo('Previsão', dataBr(os.previsao))}${fechamento ? campo('Entrega', dataHoraBr(os.entrega)) : ''}${campoLargo('Equipamento', os.equipamento)}${campo('Defeito apresentado', os.defeito)}${campo(`Autorização solicitada${rotAutor ? ` · ${rotAutor}` : ''}`, os.autorizacao)}</div>${fechamento ? bloco('Solução', os.solucao) : ''}${os.obs ? bloco('Observações', os.obs) : ''}`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>O.S ${os.id}</title>
 <style>
   ${page}
   body{color:#152033;box-sizing:border-box;font-family:Segoe UI,Arial,sans-serif;${tela}}
   .folha{width:210mm;min-height:297mm;margin:12px auto;background:#fff;box-shadow:0 8px 28px rgba(21,32,51,.12)}
   .miolo{padding:8mm 10mm;box-sizing:border-box}
-  .folha.meia .miolo{height:148.5mm;overflow:hidden;border-bottom:1px dashed #c5ced8}
+  .folha.meia .miolo{height:auto;min-height:148.5mm;overflow:visible;position:relative}
+  .folha.meia .miolo:after{content:'';position:absolute;left:0;right:0;top:148.5mm;border-top:1px dashed #c5ced8;pointer-events:none}
   .logo{width:32mm;height:18mm;object-fit:contain;object-position:left center;flex:none}
   .logo.vazio{border:1px dashed #d5dde6;border-radius:4px}
   .cab-t{display:flex;align-items:center;gap:8px;text-align:left}
@@ -1994,6 +2009,10 @@ function htmlImpressao(os, loja, opcoes = {}) {
   h3{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:#5c6b7a;margin:14px 0 5px}
   .bloco{border:1px solid #dfe4ea;border-radius:7px;padding:8px 10px;white-space:pre-wrap}
   .bloco.alto{min-height:70px} .grade{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px 18px;white-space:normal}
+  .grade .largo{grid-column:1 / -1}
+  .folha.meia h3{margin:7px 0 3px} .folha.meia .bloco{padding:6px 8px} .folha.meia .assina{margin-top:14px;gap:18px} .folha.meia .termo{margin-top:8px}
+  .folha.meia.fechamento .miolo{height:auto;overflow:visible;border-bottom:0}
+  .folha.meia.fechamento .miolo:after{content:none}
   table{width:100%;border-collapse:collapse;font-size:11.5px} th{text-align:left;font-size:10px;text-transform:uppercase;color:#5c6b7a;border-bottom:1px solid #cfd6de;padding:4px}
   td{border-bottom:1px solid #eef1f4;padding:5px 4px} .n{text-align:right;white-space:nowrap}
   .tot{margin-left:auto;width:250px;margin-top:8px} .tot div{display:flex;justify-content:space-between;padding:2px 0}
@@ -2007,11 +2026,13 @@ function htmlImpressao(os, loja, opcoes = {}) {
     body{background:#fff}
     button{display:none}
     .folha{width:auto;min-height:0;margin:0;box-shadow:none}
-    .folha.meia .miolo{height:140.5mm;overflow:hidden;border-bottom:0}
+    .folha.meia .miolo{height:auto;min-height:0;overflow:visible}
+    .folha.meia .miolo:after{top:140.5mm}
+    .folha.meia.fechamento .miolo:after{content:none}
   }
 </style></head><body>
 <button type="button" onclick="if(parent!==window){parent.postMessage({tipo:'gestor-imprimir'}, location.origin)}else{window.print()}">Imprimir / Salvar PDF</button>
-${termico ? `${cab}` : `<div class="folha${meia ? ' meia' : ''}"><div class="miolo">${cab}`}
+${termico ? `${cab}` : `<div class="folha${meia ? ' meia' : ''}${fechamento ? ' fechamento' : ''}"><div class="miolo">${cab}`}
 ${dadosCli}
 ${corpoItens}
 ${totaisHtml}
