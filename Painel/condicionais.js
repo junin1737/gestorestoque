@@ -23,7 +23,7 @@ const Condicionais = (() => {
   }
 
   function ehFinalizado(doc) {
-    return semAcento(doc?.status_label).includes('final');
+    return !!doc?.importado || semAcento(doc?.status_label).includes('final');
   }
 
   function classeStatus(label) {
@@ -259,7 +259,7 @@ const Condicionais = (() => {
       <div class="cond-ficha">
         <p class="cond-meta"><strong>${esc(doc.cliente || 'Sem cliente')}</strong> · ${esc(doc.data || '—')} ${esc(doc.horario || '')} · ${esc(doc.vendedor || 'sem vendedor')}</p>
         <p class="hint">Validade ${esc(doc.validade || '—')}${doc.obs ? ` · ${esc(doc.obs)}` : ''}</p>
-        ${travado ? '<p class="hint">Condicional finalizado. Não pode ser editado.</p>' : `
+        ${travado ? '<p class="hint">Condicional importado. Não pode ser editado nem cancelado.</p>' : `
         <div class="cond-detalhe-campos">
           <label class="cond-filtro">Situação
             <select id="cond-detalhe-status">${opcoesStatus(doc.status)}</select>
@@ -508,7 +508,7 @@ const Condicionais = (() => {
   async function abrirEdicao(doc) {
     if (ehFinalizado(doc)) {
       const msg = $('#cond-detalhe-msg');
-      if (msg) msg.textContent = 'Condicional finalizado. Não pode ser editado.';
+      if (msg) msg.textContent = 'Condicional importado. Não pode ser editado nem cancelado.';
       return;
     }
     editandoId = Number(doc.id) || 0;

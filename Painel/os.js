@@ -266,13 +266,13 @@ const Servicos = (() => {
     const tec = o.tecnico
       ? `<button type="button" class="os-av" data-os-tec="${o.id}" title="Técnico: ${esc(o.tecnico.nome)} — trocar">${esc(o.tecnico.iniciais)}</button>`
       : `<button type="button" class="os-av vazio" data-os-tec="${o.id}" title="Vincular técnico">+</button>`;
-    return `<article class="os-card${o.atrasada ? ' atrasada' : ''}" draggable="true" tabindex="0" data-os-card="${o.id}" data-status="${o.id_status}">
+    return `<article class="os-card${o.cancelada ? ' cancelada' : (o.atrasada ? ' atrasada' : '')}" draggable="${o.cancelada || o.importada ? 'false' : 'true'}" tabindex="0" data-os-card="${o.id}" data-status="${o.id_status}" data-importada="${o.importada ? '1' : '0'}">
       <div class="l1"><span class="n">O.S ${o.id}</span><span class="tp">${o.tipo === 'E' ? 'Externa' : 'Interna'} · ${o.modalidade === 'R' ? 'Remota' : 'Presencial'}</span>
         <span class="acoes"><button type="button" data-os-subir="${o.id}" title="Subir prioridade">${ic('cima')}</button><button type="button" data-os-descer="${o.id}" title="Descer prioridade">${ic('baixo')}</button><button type="button" data-os-menu="${o.id}" title="Status e técnico">${ic('pontos')}</button></span></div>
       <div class="cli">${esc(o.cliente || '—')}</div>
       <div class="eq">${ic('monitor', 'p')}<span>${esc(o.equipamento || '')}</span></div>
       <div class="l3">${tec}${o.previsao ? `<span class="prev">${ic('cal', 'p')}${o.atrasada ? 'Venceu ' : ''}${diaMes(o.previsao)}</span>` : '<span class="prev">sem previsão</span>'}
-        ${o.enviada ? '<span class="env" title="Já está na venda gerencial">na venda</span>' : ''}</div>
+        ${o.cancelada ? '<span class="canc">Cancelada</span>' : (o.enviada ? '<span class="env" title="Já está na venda gerencial">na venda</span>' : '')}</div>
     </article>`;
   }
 
@@ -336,6 +336,7 @@ const Servicos = (() => {
       });
       card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === card) abrirOs(Number(card.dataset.osCard)); });
       card.addEventListener('dragstart', (e) => {
+        if (card.classList.contains('cancelada') || card.dataset.importada === '1') { e.preventDefault(); return; }
         card.classList.add('arrastando');
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', card.dataset.osCard);
@@ -598,7 +599,8 @@ const Servicos = (() => {
       </div></section>`;
     raizEl().innerHTML = `<div class="os">
       <div class="os-topo"><button type="button" class="ob ghost" data-os-voltar>${ic('esq', 'p')}Quadro</button><span class="os-esp"></span>
-        ${tr ? `<span class="os-travada">${ic('venda', 'p')}Na venda gerencial · pedido ${o.id_pedido}</span>` : ''}</div>
+        ${o.cancelada ? `<span class="os-cancelada-tag">${ic('x', 'p')}Cancelada</span>` : ''}
+        ${o.importada ? `<span class="os-travada">${ic('cadeado', 'p')}Importada na venda. Não pode ser editada nem cancelada.</span>` : (tr ? `<span class="os-travada">${ic('venda', 'p')}Na venda gerencial · pedido ${o.id_pedido}</span>` : '')}</div>
       <div class="os-edit"><div>${cab}${cli}${eq}<section class="os-grupo" id="os-itens"></section><section class="os-grupo" id="os-totais"></section></div>
       <aside class="os-lateral" style="display:grid;gap:14px" id="os-lateral"></aside></div></div>`;
     renderItens();
@@ -670,7 +672,8 @@ const Servicos = (() => {
         <button type="button" class="ob" data-os-imprimir ${o.id ? '' : 'disabled'}>${ic('impressora', 'p')}Imprimir</button>
         <button type="button" class="ob" data-os-hist ${o.id ? '' : 'disabled'}>${ic('impressora', 'p')}Imprimir histórico</button>
         <button type="button" class="ob" data-os-whats ${o.id ? '' : 'disabled'}>${ic('whats', 'p')}WhatsApp</button>
-        ${tr ? '' : `<button type="button" class="ob largo" data-os-venda ${o.id && o.itens.length ? '' : 'disabled'} title="Grava o pedido para o Clipp concluir a venda">${ic('venda', 'p')}Concluir serviço</button>`}
+        ${tr || o.importada || o.cancelada ? '' : `<button type="button" class="ob largo" data-os-venda ${o.id && o.itens.length ? '' : 'disabled'} title="Grava o pedido para o Clipp concluir a venda">${ic('venda', 'p')}Concluir serviço</button>`}
+        ${o.id && !o.cancelada && !o.importada ? `<button type="button" class="ob perigo" data-os-cancelar>${ic('x', 'p')}Cancelar O.S</button>` : ''}
       </div>
       ${o.id ? `<section class="os-grupo"><header><h2>Histórico</h2></header><div class="corpo"><div class="os-hist">${hist || '<span class="os-legenda">Sem registros</span>'}</div></div></section>` : ''}`;
     ligarLateral();
@@ -734,6 +737,12 @@ const Servicos = (() => {
     ligarCliente();
     ligarCategoria();
     ligarItens();
+    if (st.os.cancelada || st.os.importada) {
+      $$('input, textarea, select, button', r).forEach((el) => {
+        if (el.matches('[data-os-voltar], [data-os-imprimir], [data-os-hist], [data-fechar]')) return;
+        el.disabled = true;
+      });
+    }
   }
 
   function ligarCombo({ campo, lista, mais, atual, url, aoEscolher, aoLimpar, cadastrar, vazio }) {
@@ -1271,6 +1280,7 @@ const Servicos = (() => {
     $('[data-os-hist]', lat)?.addEventListener('click', () => imprimir(st.os.id, 'a4', 'historico'));
     $('[data-os-whats]', lat)?.addEventListener('click', () => janelaWhats(st.os.id, statusDe(st.os.id_status)?.final ? 'fechamento' : 'abertura'));
     $('[data-os-venda]', lat)?.addEventListener('click', enviarVenda);
+    $('[data-os-cancelar]', lat)?.addEventListener('click', cancelarOs);
   }
 
   async function gravar() {
@@ -1412,6 +1422,19 @@ const Servicos = (() => {
       const d = await api(`/os/${id}`);
       if (d.ok) { st.os.historico = d.os.historico; renderLateral(); }
     }
+  }
+
+  async function cancelarOs() {
+    const id = st.os?.id;
+    if (!id || st.os.cancelada || st.os.importada) return;
+    if (st.sujo) { msg('Grave ou descarte as alterações antes de cancelar.'); return; }
+    const ok = await confirmar('Cancelar esta O.S?', 'Ela vai para a coluna concluída com a marca de cancelada. Se o pedido ainda não foi importado, ele fica Reprovado no Clipp.', { sim: 'Cancelar O.S', nao: 'Voltar', icone: 'alerta' });
+    if (!ok) return;
+    const res = await api(`/os/${id}/cancelar`, { method: 'POST', body: {} });
+    if (!res.ok) { msg(res.error || 'Não foi possível cancelar.'); return; }
+    msg(`O.S ${id} cancelada.`);
+    const det = await api(`/os/${id}`);
+    if (det.ok) { st.os = det.os; st.sujo = false; renderOs(); }
   }
 
   async function enviarVenda(idParam, jaConfirmado) {

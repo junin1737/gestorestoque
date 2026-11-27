@@ -96,6 +96,9 @@ html[data-theme="escuro"] .os {
 .os-card { background: var(--bg-elev); border-radius: 13px; box-shadow: var(--os-lift); padding: 11px 12px 9px; margin-bottom: 9px; border: 1px solid transparent; cursor: pointer; position: relative; }
 .os-card:hover { box-shadow: var(--os-lift-2); }
 .os-card.atrasada { border-color: color-mix(in srgb, var(--danger) 38%, transparent); }
+.os-card.cancelada { border: 2px solid #dc2626; }
+.os-card .canc { margin-left: auto; font-size: .68rem; font-weight: 700; color: #dc2626; white-space: nowrap; }
+.os-cancelada-tag { display: inline-flex; align-items: center; gap: 6px; color: #dc2626; font-weight: 700; }
 .os-card.arrastando { opacity: .45; }
 .os-card .l1 { display: flex; align-items: center; gap: 7px; white-space: nowrap; min-width: 0; }
 .os-card .n { font-weight: 700; font-size: .82rem; flex: none; }

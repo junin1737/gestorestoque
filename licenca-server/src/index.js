@@ -335,7 +335,11 @@ async function whatsappGlobal(env) {
 function erroEvolution(data, status) {
   const msg = data?.response?.message || data?.message || data?.error;
   const textoMsg = Array.isArray(msg) ? msg.join(' ') : String(msg || '');
-  return textoMsg.replace(/apikey[=:][^&\s"']+/gi, 'apikey').slice(0, 180) || `A Evolution API respondeu ${status}.`;
+  const limpo = textoMsg.replace(/apikey[=:][^&\s"']+/gi, 'apikey').slice(0, 180);
+  if (status === 401 || /unauthorized/i.test(limpo)) {
+    return 'A Evolution API recusou a chave de acesso. Atualize a API Key global no painel de licenças, em WhatsApp, com a chave atual do servidor.';
+  }
+  return limpo || `A Evolution API respondeu ${status}.`;
 }
 
 async function evolutionFetch(cfg, caminho, { method = 'GET', body, apikey } = {}) {

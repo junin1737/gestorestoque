@@ -161,6 +161,7 @@ const TABELAS = {
       AUTOR_STATUS CHAR(1),
       ID_BUSCADOR INTEGER,
       ID_ENTREGADOR INTEGER,
+      CANCELADA CHAR(1),
       ID_PEDIDO INTEGER,
       DT_ENVIO TIMESTAMP,
       PERFIL VARCHAR(32),
@@ -283,6 +284,7 @@ async function ensureOsSchema(db) {
     if (!(await columnExists(db, 'GESTOR_OS', 'AUTOR_STATUS'))) await query(db, 'ALTER TABLE GESTOR_OS ADD AUTOR_STATUS CHAR(1)');
     if (!(await columnExists(db, 'GESTOR_OS', 'ID_BUSCADOR'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_BUSCADOR INTEGER');
     if (!(await columnExists(db, 'GESTOR_OS', 'ID_ENTREGADOR'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_ENTREGADOR INTEGER');
+    if (!(await columnExists(db, 'GESTOR_OS', 'CANCELADA'))) await query(db, 'ALTER TABLE GESTOR_OS ADD CANCELADA CHAR(1)');
   }
   if (criou) await refreshTables(db);
   const st = await query(db, 'SELECT COUNT(*) AS N FROM GESTOR_OS_STATUS');
@@ -1215,7 +1217,9 @@ function mapOs(r, funcs, statuses) {
     obs: texto(r.OBS),
     previsao,
     entrega: dataHoraIso(r.DT_ENTREGA),
-    atrasada: !!previsao && previsao < hojeIso() && !(st?.final),
+    cancelada: txt(r.CANCELADA) === 'S',
+    importada: false,
+    atrasada: !!previsao && previsao < hojeIso() && !(st?.final) && txt(r.CANCELADA) !== 'S',
     ordem: num(r.ORDEM),
     id_cliente: num(r.ID_CLIENTE) || null,
     cliente: {
@@ -1304,7 +1308,13 @@ async function listar(filtros = {}) {
     }
     const rows = await query(db, `
       SELECT FIRST 600 O.ID_OS, O.DT_EMISSAO, O.TIPO, O.MODALIDADE, O.ID_STATUS, O.ID_TECNICO, O.QUEM_TROUXE,
-             O.EQUIPAMENTO, O.DT_PREVISAO, O.DT_ENTREGA, O.ORDEM, O.ID_CLIENTE, O.CLI_NOME, O.ID_PEDIDO, O.TOTAL
+             O.EQUIPAMENTO, O.DT_PREVISAO, O.DT_ENTREGA, O.ORDEM, O.ID_CLIENTE, O.CLI_NOME, O.ID_PEDIDO, O.TOTAL, O.CANCELADA,
+             CASE WHEN O.ID_PEDIDO IS NOT NULL AND (
+               EXISTS (SELECT 1 FROM TB_PEDIDO_VENDA P JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
+                 WHERE P.ID_PEDIDO = O.ID_PEDIDO AND UPPER(COALESCE(S.DESCRICAO, '')) CONTAINING 'FINAL')
+               OR EXISTS (SELECT 1 FROM TB_PED_VENDA_ITEM I JOIN TB_PED_VENDA_NFVENDA N ON N.ID_ITEMPED = I.ID_ITEMPED
+                 WHERE I.ID_PEDIDO = O.ID_PEDIDO)
+             ) THEN 'S' ELSE 'N' END AS IMPORTADA
       FROM GESTOR_OS O
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
       ORDER BY O.ORDEM, O.ID_OS DESC`, params);
@@ -1324,6 +1334,8 @@ async function listar(filtros = {}) {
         atrasada: os.atrasada,
         ordem: os.ordem,
         enviada: !!os.id_pedido,
+        cancelada: os.cancelada,
+        importada: txt(r.IMPORTADA) === 'S',
       };
     });
     return {
@@ -1364,6 +1376,7 @@ async function lerOs(db, id) {
     if (cli) os.cliente.observacao = cli.observacao;
   }
   await preencherCategoria(db, os);
+  os.importada = os.id_pedido ? await require('./condicionais').pedidoImportado(db, os.id_pedido) : false;
   return os;
 }
 
@@ -1466,6 +1479,8 @@ async function salvar(body, usuario, opcoes = {}) {
     const { porId, funcs } = await mapasApoio(db);
     const atual = id ? await lerOs(db, id) : null;
     if (id && !atual) throw new Error('O.S não encontrada.');
+    if (atual?.cancelada) throw new Error('O.S cancelada não pode ser editada.');
+    if (atual?.importada) throw new Error('O.S importada não pode ser editada.');
     if (atual && opcoes.versaoBase && !opcoes.forcar && atual.versao !== num(opcoes.versaoBase)) {
       const err = new Error(`A O.S ${id} foi alterada no servidor depois da cópia da contingência.`);
       err.code = 'CONFLITO';
@@ -1653,6 +1668,8 @@ async function mudarStatus(id, idStatus, usuario, idColaborador) {
   return comBase(async (db) => {
     const os = await lerOs(db, id);
     if (!os) throw new Error('O.S não encontrada.');
+    if (os.cancelada) throw new Error('O.S cancelada não muda de etapa.');
+    if (os.importada) throw new Error('O.S importada não pode ser editada.');
     const { porId, funcs } = await mapasApoio(db);
     const novo = porId.get(num(idStatus));
     if (!novo || !novo.ativo) throw new Error('Status inválido.');
@@ -1694,6 +1711,7 @@ async function vincularTecnico(id, idTecnico, usuario) {
   return comBase(async (db) => {
     const os = await lerOs(db, id);
     if (!os) throw new Error('O.S não encontrada.');
+    if (os.cancelada || os.importada) throw new Error(os.importada ? 'O.S importada não pode ser editada.' : 'O.S cancelada não pode ser editada.');
     const { funcs } = await mapasApoio(db);
     const novo = num(idTecnico) || null;
     if (novo && !funcs.get(novo)?.tecnico) throw new Error('Escolha um funcionário com a função Técnico no cadastro.');
@@ -1812,11 +1830,35 @@ async function avisarTecnico(db, idOs, usuario) {
   }
 }
 
+/** Cancela a O.S: vai para a coluna concluída, com a marca de cancelada. O pedido ainda não importado fica Reprovado. */
+async function cancelar(id, usuario) {
+  return comBase(async (db) => {
+    const os = await lerOs(db, id);
+    if (!os) throw new Error('O.S não encontrada.');
+    if (os.cancelada) return { id: os.id, avisos: [] };
+    if (os.importada) throw new Error('O.S importada não pode ser cancelada.');
+    const statuses = await lerStatus(db);
+    const final = statuses.find((s) => s.final && s.ativo) || statuses.find((s) => semAcento(s.descricao) === semAcento('Concluído e Entregue'));
+    if (!final) throw new Error('Não há uma coluna de concluída para receber a O.S cancelada.');
+    if (os.id_pedido) await require('./condicionais').reprovar(os.id_pedido);
+    await withTransaction(db, async (tx) => {
+      const ordem = await query(tx, 'SELECT COALESCE(MAX(ORDEM), 0) + 1 AS O FROM GESTOR_OS WHERE ID_STATUS = ?', [final.id]);
+      await query(tx, `
+        UPDATE GESTOR_OS SET CANCELADA = 'S', ID_STATUS = ?, ORDEM = ?, DT_ALTERACAO = CURRENT_TIMESTAMP
+        WHERE ID_OS = ?`, [final.id, num(ordem[0]?.O) || 1, os.id]);
+      await historico(tx, os.id, usuario, 'O.S cancelada', os.id_status, final.id);
+    });
+    return { id: os.id, avisos: [] };
+  });
+}
+
 /** Envia para a Venda Gerencial: grava como pedido (tabelas do condicional) e trava os itens. */
 async function enviarParaVenda(id, usuario) {
   const dados = await comBase(async (db) => {
     const os = await lerOs(db, id);
     if (!os) throw new Error('O.S não encontrada.');
+    if (os.cancelada) throw new Error('O.S cancelada não pode ser concluída.');
+    if (os.importada) throw new Error('O.S importada não pode ser editada.');
     if (os.id_pedido) throw new Error(`Esta O.S já foi enviada para a venda (pedido ${os.id_pedido}).`);
     return os;
   });
@@ -2077,6 +2119,7 @@ module.exports = {
   reordenar,
   vincularTecnico,
   enviarParaVenda,
+  cancelar,
   listarStatus,
   salvarStatus,
   ordenarStatus,

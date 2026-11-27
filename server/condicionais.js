@@ -325,7 +325,8 @@ async function detalhe(id) {
     doc.subtotal = doc.itens.reduce((s, it) => s + Math.max(0, num(it.total) - num(it.desconto)), 0);
     doc.total = totalDocumento(doc);
     const idReprovado = await statusReprovado(db);
-    doc.pode_reprovar = !!idReprovado && String(idReprovado) !== doc.status;
+    doc.importado = await pedidoImportado(db, codigo);
+    doc.pode_reprovar = !doc.importado && !!idReprovado && String(idReprovado) !== doc.status;
     return doc;
   });
 }
@@ -977,6 +978,20 @@ async function gravarPedidoOS({ idCliente, idVendedor, obs, validade, itens, fre
   });
 }
 
+/** Importado na venda: o Clipp deixa o pedido como Finalizado, ou já existe nota ligada ao item. */
+async function pedidoImportado(db, idPedido) {
+  const codigo = num(idPedido);
+  if (!codigo || !hasTable('TB_PEDIDO_VENDA')) return false;
+  if (await condicionalFinalizado(db, codigo)) return true;
+  if (!hasTable('TB_PED_VENDA_NFVENDA') || !hasTable('TB_PED_VENDA_ITEM')) return false;
+  const nota = await query(db, `
+    SELECT FIRST 1 1 AS X
+    FROM TB_PED_VENDA_ITEM I
+    JOIN TB_PED_VENDA_NFVENDA N ON N.ID_ITEMPED = I.ID_ITEMPED
+    WHERE I.ID_PEDIDO = ?`, [codigo]);
+  return nota.length > 0;
+}
+
 async function condicionalFinalizado(db, idPedido) {
   const rows = await query(db, `
     SELECT FIRST 1 1 AS X
@@ -1006,7 +1021,7 @@ async function atualizar(idPedido, { idCliente, idFuncionario, obs, itens, valid
   if (!num(idParcela)) throw new Error('Informe a forma de pagamento.');
   return withDb(async (db, appCfg) => {
     if (!hasTable('TB_PEDIDO_VENDA')) throw new Error('Esta base não tem pedido de venda.');
-    if (await condicionalFinalizado(db, codigo)) throw new Error('Condicional finalizado não pode ser editado.');
+    if (await pedidoImportado(db, codigo)) throw new Error('Condicional importado não pode ser editado.');
     const temValidade = await columnExists(db, 'TB_PEDIDO_VENDA', 'DT_VALIDA');
     const t = writeTargets(appCfg)[0]?.tables;
     if (!t) throw new Error('Estoque não encontrado nesta base.');
@@ -1322,7 +1337,7 @@ async function alterarStatus(id, idStatus, idParcela) {
       LEFT JOIN TB_PED_VENDA_STATUS S ON S.ID_STATUS = P.ID_STATUS
       WHERE P.ID_PEDIDO = ?`, [codigo]);
     if (!existe.length) throw new Error('Condicional não encontrado.');
-    if (await condicionalFinalizado(db, codigo)) throw new Error('Condicional finalizado não pode ser editado.');
+    if (await pedidoImportado(db, codigo)) throw new Error('Condicional importado não pode ser editado.');
     const pagamento = num(idParcela) ? await resolverPagamento(db, idParcela) : null;
     const trocaPagamento = pagamento && pagamento.id_parcela !== num(existe[0].ID_PARCELA);
     if (status !== num(existe[0].ID_STATUS) || trocaPagamento) {
@@ -1367,6 +1382,8 @@ async function statusReprovado(db) {
 async function reprovar(id) {
   const codigo = num(id);
   if (!codigo) throw new Error('Condicional inválido.');
+  const bloqueado = await withDb((db) => pedidoImportado(db, codigo));
+  if (bloqueado) throw new Error('Condicional importado não pode ser cancelado.');
   const idStatus = await withDb((db) => statusReprovado(db));
   if (!idStatus) throw new Error('Esta base não tem a situação "Reprovado" ativa no pedido de venda.');
   return alterarStatus(codigo, idStatus);
@@ -1404,6 +1421,7 @@ module.exports = {
   alinharGeradorPedido: () => withDb((db) => alinharGeradorPedido(db)),
   alterarStatus,
   reprovar,
+  pedidoImportado,
   htmlPdf,
   lojaEmitente,
   textoWhatsapp,
