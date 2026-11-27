@@ -1781,7 +1781,7 @@ const Servicos = (() => {
           <div class="os-campo"><label for="msg-texto">Texto</label><textarea class="oc" id="msg-texto" maxlength="1000" style="min-height:110px">${esc(m.texto)}</textarea></div>
           <div class="os-chips"><span class="os-legenda">Inserir:</span>${VARIAVEIS.map((v) => `<button type="button" class="os-chip" data-var="${v}">{${v}}</button>`).join('')}</div>
           <div><div class="os-legenda" style="margin-bottom:6px">Prévia</div><div class="os-bolha" id="msg-previa"></div></div>
-          <p class="os-legenda" style="margin:0">Por enquanto só "O.S atribuída ao técnico" dispara sozinha. Sai pelo WhatsApp da loja; sem celular no cadastro do técnico, o Gestor avisa e não envia.</p>
+          <p class="os-legenda" style="margin:0">Por enquanto só "O.S atribuída ao técnico" dispara sozinha. Sai pelo WhatsApp da loja. O número sai do Celular ou do WhatsApp do cadastro do funcionário; se os dois estiverem vazios, o Gestor avisa e não envia.</p>
           <div class="os-linha">${m.id ? `<button type="button" class="ob perigo" data-msg-exc>${ic('lixo', 'p')}Excluir</button>` : ''}<span class="os-esp"></span><button type="button" class="ob pri" data-msg-salvar>Salvar</button></div>
         </div></section></div></div>`;
     const r = alvo.querySelector(':scope > .os') || alvo;
@@ -1931,9 +1931,9 @@ const Servicos = (() => {
     const lista = res.funcionarios || [];
     raizEl().innerHTML = `<div class="os">${abasHtml()}<section class="os-grupo"><header><h2>Técnicos e gerentes</h2><span class="os-esp"></span>
         <span class="os-legenda">${sup ? 'Técnico vem da função Técnico no cadastro de funcionários. Gerente libera desconto acima do limite com a senha dele no Gestor.' : 'Técnico vem do cadastro de funcionários. Só o supervisor marca gerente.'}</span></header>
-      <div class="corpo"><div class="os-tabela-wrap"><table class="os-tabela"><thead><tr><th>Funcionário</th><th>Celular (aviso do WhatsApp)</th><th class="n">Técnico</th><th class="n">Gerente</th></tr></thead><tbody>
+      <div class="corpo"><div class="os-tabela-wrap"><table class="os-tabela"><thead><tr><th>Funcionário</th><th>Celular ou WhatsApp</th><th class="n">Técnico</th><th class="n">Gerente</th></tr></thead><tbody>
       ${lista.map((f) => `<tr><td><span class="os-linha"><span class="os-av" style="cursor:default">${esc(f.iniciais)}</span>${esc(f.nome)}</span></td>
-        <td>${f.celular ? esc(fmtFone(f.celular)) : '<span class="os-legenda" style="color:var(--warn)">sem celular no cadastro</span>'}</td>
+        <td>${f.celular ? esc(fmtFone(f.celular)) : '<span class="os-legenda" style="color:var(--warn)">sem celular ou WhatsApp no cadastro</span>'}</td>
         <td class="n"><button type="button" class="os-chave${f.tecnico ? ' on' : ''}" disabled title="Função Técnico no cadastro de funcionários" aria-label="Técnico ${esc(f.nome)}" aria-pressed="${f.tecnico}"></button></td>
         <td class="n"><button type="button" class="os-chave${f.gerente ? ' on' : ''}" data-func="${f.id}" data-campo="gerente" ${sup ? '' : 'disabled'} aria-label="Gerente ${esc(f.nome)}" aria-pressed="${f.gerente}"></button></td></tr>`).join('')
         || `<tr class="vazia"><td colspan="4">${res.ok ? 'Nenhum funcionário ativo.' : esc(res.error)}</td></tr>`}

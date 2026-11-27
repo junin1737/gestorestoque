@@ -468,11 +468,32 @@ async function ordenarStatus(ids) {
   });
 }
 
+function juntarFone(ddd, numero) {
+  const n = String(numero ?? '').replace(/\D/g, '');
+  if (!n) return '';
+  if (n.length >= 10) return n;
+  return `${String(ddd ?? '').replace(/\D/g, '')}${n}`;
+}
+
+/** Celular (DDD + CELULAR) ou WhatsApp (DDD_EMPRESARIAL + FONE_EMPRESARIAL). Vale o que estiver preenchido. */
 function foneFuncionario(r) {
-  const ddd = String(r?.DDD ?? '').replace(/\D/g, '');
-  const cel = String(r?.CELULAR ?? '').replace(/\D/g, '');
-  if (!cel) return '';
-  return cel.length >= 10 ? cel : `${ddd}${cel}`;
+  const candidatos = [
+    juntarFone(r?.DDD, r?.CELULAR),
+    juntarFone(r?.DDD_EMPRESARIAL, r?.FONE_EMPRESARIAL),
+  ];
+  return candidatos.find((f) => f.length >= 10) || '';
+}
+
+async function sqlFoneFuncionario(db, alias = 'F') {
+  const a = alias ? `${alias}.` : '';
+  const temDdd = await columnExists(db, 'TB_FUNCIONARIO', 'DDD_EMPRESARIAL');
+  const temFone = await columnExists(db, 'TB_FUNCIONARIO', 'FONE_EMPRESARIAL');
+  return [
+    `${a}DDD`,
+    `${a}CELULAR`,
+    temDdd ? `${a}DDD_EMPRESARIAL` : "CAST('' AS VARCHAR(2)) AS DDD_EMPRESARIAL",
+    temFone ? `${a}FONE_EMPRESARIAL` : "CAST('' AS VARCHAR(13)) AS FONE_EMPRESARIAL",
+  ].join(', ');
 }
 
 /** Id do papel no cadastro de funcionários (Atendente, Vendedor, Técnico, ...). */
@@ -490,8 +511,9 @@ async function lerFuncionarios(db) {
   const tecnicoSql = papelTecnico
     ? `(SELECT FIRST 1 'S' FROM TB_FUNC_PAPEL P WHERE P.ID_FUNCIONARIO = F.ID_FUNCIONARIO AND P.ID_PAPEL = ${papelTecnico})`
     : 'G.TECNICO';
+  const foneSql = await sqlFoneFuncionario(db, 'F');
   const rows = await query(db, `
-    SELECT F.ID_FUNCIONARIO, F.NOME, F.STATUS, F.DDD, F.CELULAR, G.GERENTE, ${tecnicoSql} AS TECNICO
+    SELECT F.ID_FUNCIONARIO, F.NOME, F.STATUS, ${foneSql}, G.GERENTE, ${tecnicoSql} AS TECNICO
     FROM TB_FUNCIONARIO F
     LEFT JOIN GESTOR_OS_FUNC G ON G.ID_FUNCIONARIO = F.ID_FUNCIONARIO
     WHERE (F.STATUS = 'A' OR F.STATUS IS NULL) AND F.ID_FUNCIONARIO <> 0
@@ -1704,11 +1726,12 @@ async function gravarColaborador(tx, idOs, papel, idFunc, usuario, funcs) {
 async function avisarColaborador(db, idOs, idFunc, papel, usuario) {
   const os = await lerOs(db, idOs);
   if (!os) return [];
-  const f = await query(db, 'SELECT NOME, DDD, CELULAR FROM TB_FUNCIONARIO WHERE ID_FUNCIONARIO = ?', [idFunc]);
+  const foneSql = await sqlFoneFuncionario(db, '');
+  const f = await query(db, `SELECT NOME, ${foneSql} FROM TB_FUNCIONARIO WHERE ID_FUNCIONARIO = ?`, [idFunc]);
   const nome = txt(f[0]?.NOME) || 'O colaborador';
   const fone = foneFuncionario(f[0]);
   const acao = papel === 'busca' ? 'buscar o equipamento no cliente' : 'entregar o equipamento';
-  if (!fone) return [`${nome} não tem celular no cadastro de funcionários. O aviso não foi enviado.`];
+  if (!fone) return [`${nome} não tem celular nem WhatsApp no cadastro de funcionários. O aviso não foi enviado.`];
   const textoMsg = `O.S ${os.id} — ${os.cliente?.nome || 'cliente'}. Você foi indicado para ${acao}. Equipamento: ${os.equipamento || '—'}.`;
   const rotulo = `Aviso de ${papel === 'busca' ? 'busca' : 'entrega'} enviado no WhatsApp para ${nome}`;
   try {
@@ -1884,10 +1907,11 @@ async function avisarTecnico(db, idOs, usuario) {
   if (!os?.id_tecnico) return [];
   const msgs = (await query(db, "SELECT * FROM GESTOR_OS_MENSAGEM WHERE EVENTO = 'atribuida' AND ATIVO = 'S' ORDER BY ID")).map(mapMensagem);
   if (!msgs.length) return [];
-  const f = await query(db, 'SELECT NOME, DDD, CELULAR FROM TB_FUNCIONARIO WHERE ID_FUNCIONARIO = ?', [os.id_tecnico]);
+  const foneSql = await sqlFoneFuncionario(db, '');
+  const f = await query(db, `SELECT NOME, ${foneSql} FROM TB_FUNCIONARIO WHERE ID_FUNCIONARIO = ?`, [os.id_tecnico]);
   const nome = txt(f[0]?.NOME);
   const fone = foneFuncionario(f[0]);
-  if (!fone) return [`${nome || 'O técnico'} não tem celular no cadastro de funcionários. A mensagem não foi enviada.`];
+  if (!fone) return [`${nome || 'O técnico'} não tem celular nem WhatsApp no cadastro de funcionários. A mensagem não foi enviada.`];
   const textoMsg = preencherVariaveis(msgs[0].texto, os, { tecnico: nome });
   try {
     const r = await enviarOuEnfileirar({ numero: fone, texto: textoMsg, idOs: os.id, rotulo: `Aviso enviado no WhatsApp para ${nome}`, usuario });
