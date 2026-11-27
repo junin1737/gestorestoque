@@ -319,6 +319,32 @@ function papelStatus(descricao) {
   return '';
 }
 
+/** Etapa pelo nome, para a ordem do quadro não ser a única regra de avanço. */
+function chaveEtapa(descricao) {
+  const n = semAcento(descricao);
+  if (n.includes('conclu')) return 'concluido';
+  if (n.includes('entreg')) return 'entregando';
+  if (n.includes('final')) return 'finalizada';
+  if (n.includes('andamento')) return 'andamento';
+  if (n.includes('peca')) return 'peca';
+  if (n.includes('autoriz')) return 'autorizacao';
+  if (n.includes('buscar')) return 'buscar';
+  if (n.includes('abert')) return 'aberta';
+  return '';
+}
+
+/** Depois de Finalizada o card só avança um passo. Antes disso, pode ir e voltar, menos para Entregando e Concluído. */
+function podeMudarEtapa(origemDesc, destinoDesc) {
+  const o = chaveEtapa(origemDesc);
+  const d = chaveEtapa(destinoDesc);
+  if (!o || !d || o === d) return true;
+  if (o === 'concluido') return false;
+  if (o === 'finalizada') return d === 'entregando';
+  if (o === 'entregando') return d === 'concluido';
+  if (d === 'entregando' || d === 'concluido') return false;
+  return true;
+}
+
 function autorStatus(v) {
   const s = String(v || '').trim().toUpperCase();
   return s === 'P' || s === 'A' || s === 'N' ? s : '';
@@ -339,7 +365,7 @@ async function ajustarFluxoStatus(db) {
       VALUES (?, 'Concluído e Entregue', 'estrela', '#166534', 99, 'S', 'S')`, [id]);
     lista = await lerStatus(db);
   }
-  const pipeline = ['Aberta', 'Buscar no Cliente', 'Aguardando Autorização', 'Aguardando Peças', 'Em Andamento', 'Finalizada', 'Entregando', 'Concluído e Entregue'];
+  const pipeline = ['Aberta', 'Buscar no Cliente', 'Em Andamento', 'Aguardando Autorização', 'Aguardando Peças', 'Finalizada', 'Entregando', 'Concluído e Entregue'];
   const idsPipe = new Set();
   let ordem = 0;
   for (const nome of pipeline) {
@@ -940,6 +966,7 @@ async function buscarItens(q, aba) {
     const t = activeTargets(appCfg)[0]?.tables;
     if (!t) return { itens: [] };
     const filtroTipo = `(${SQL_TIPO}) IN (${tipos.map((x) => `'${x}'`).join(',')})`;
+    const ligaProd = aba === 'servicos' ? 'LEFT JOIN' : 'JOIN';
     const temCmpl = await columnExists(db, t.produto, 'DESC_CMPL');
     const temInf = await columnExists(db, t.estoque, 'INFCOMPLEMENTAR');
     const temReserv = await columnExists(db, t.produto, 'QTD_RESERV');
@@ -950,7 +977,7 @@ async function buscarItens(q, aba) {
       N1.DESCRICAO AS COR, N2.DESCRICAO AS TAMANHO`;
     const base = `FROM ${t.estoque} E
       JOIN ${t.identificador} I ON I.ID_ESTOQUE = E.ID_ESTOQUE
-      JOIN ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
+      ${ligaProd} ${t.produto} P ON P.ID_IDENTIFICADOR = I.ID_IDENTIFICADOR
       LEFT JOIN ${t.nivel1} N1 ON N1.ID_NIVEL1 = P.ID_NIVEL1
       LEFT JOIN ${t.nivel2} N2 ON N2.ID_NIVEL2 = P.ID_NIVEL2
       WHERE (E.STATUS = 'A' OR E.STATUS IS NULL) AND ${filtroTipo}`;
@@ -1458,6 +1485,7 @@ async function salvar(body, usuario, opcoes = {}) {
     id_status: num(body?.id_status),
     id_tecnico: num(body?.id_tecnico) || null,
     quem_trouxe: txt(body?.quem_trouxe, 100),
+    na_empresa: body?.na_empresa === true || body?.na_empresa === 'S' || body?.na_empresa === 1,
     equipamento: txt(body?.equipamento, 300),
     defeito: texto(body?.defeito, 2000),
     solucao: texto(body?.solucao, 2000),
@@ -1513,6 +1541,9 @@ async function salvar(body, usuario, opcoes = {}) {
     const calc = calcular(entrada);
     const liberacoes = enviada ? [] : conferirDescontos({ ...entrada, itens: calc.itens }, body?.liberacoes);
     const statusNovo = porId.get(entrada.id_status);
+    if (atual && atual.id_status !== entrada.id_status && !podeMudarEtapa(atual.status?.descricao, statusNovo?.descricao)) {
+      throw new Error('Depois de finalizada a O.S só segue para a próxima etapa.');
+    }
     if (statusNovo?.final && !entrada.entrega) entrada.entrega = new Date();
     const cat = await resolverCategoria(
       db,
@@ -1627,7 +1658,11 @@ async function salvar(body, usuario, opcoes = {}) {
       }
       let colaborador = null;
       const papel = papelStatus(statusNovo?.descricao);
-      if (papel && (!atual || atual.id_status !== entrada.id_status)) {
+      const mudouEtapa = !atual || atual.id_status !== entrada.id_status;
+      if (papel === 'busca' && entrada.na_empresa && mudouEtapa) {
+        if (!entrada.quem_trouxe) throw new Error('Informe quem trouxe o equipamento.');
+        await historico(tx, codigo, usuario, `Equipamento já está na empresa. Trouxe: ${entrada.quem_trouxe}`);
+      } else if (papel && mudouEtapa) {
         colaborador = await gravarColaborador(tx, codigo, papel, entrada.id_colaborador, usuario, funcs);
       }
       return { codigo, trocouTecnico, colaborador, papel };
@@ -1677,7 +1712,10 @@ async function avisarColaborador(db, idOs, idFunc, papel, usuario) {
 }
 
 /** Troca de status pelo quadro (arrastar ou escolher no card). Vai para o fim da coluna nova. */
-async function mudarStatus(id, idStatus, usuario, idColaborador) {
+async function mudarStatus(id, idStatus, usuario, extra) {
+  const idColaborador = extra && typeof extra === 'object' ? extra.id_colaborador : extra;
+  const naEmpresa = !!(extra && typeof extra === 'object' && (extra.na_empresa === true || extra.na_empresa === 'S' || extra.na_empresa === 1));
+  const quemTrouxe = extra && typeof extra === 'object' ? txt(extra.quem_trouxe, 100) : '';
   return comBase(async (db) => {
     const os = await lerOs(db, id);
     if (!os) throw new Error('O.S não encontrada.');
@@ -1687,6 +1725,9 @@ async function mudarStatus(id, idStatus, usuario, idColaborador) {
     const novo = porId.get(num(idStatus));
     if (!novo || !novo.ativo) throw new Error('Status inválido.');
     if (novo.id === os.id_status) return { id: os.id, avisos: [] };
+    if (!podeMudarEtapa(os.status?.descricao, novo.descricao)) {
+      throw new Error('Depois de finalizada a O.S só segue para a próxima etapa.');
+    }
     const papel = papelStatus(novo.descricao);
     let colaborador = null;
     await withTransaction(db, async (tx) => {
@@ -1696,7 +1737,11 @@ async function mudarStatus(id, idStatus, usuario, idColaborador) {
           ${novo.final && !os.entrega ? ', DT_ENTREGA = CURRENT_TIMESTAMP' : ''}
         WHERE ID_OS = ?`, [novo.id, num(ordem[0]?.O) || 1, os.id]);
       await historico(tx, os.id, usuario, `Status: ${os.status?.descricao || '—'} → ${novo.descricao}`, os.id_status, novo.id);
-      if (papel) colaborador = await gravarColaborador(tx, os.id, papel, idColaborador, usuario, funcs);
+      if (papel === 'busca' && naEmpresa) {
+        if (!quemTrouxe) throw new Error('Informe quem trouxe o equipamento.');
+        await query(tx, 'UPDATE GESTOR_OS SET QUEM_TROUXE = ? WHERE ID_OS = ?', [quemTrouxe, os.id]);
+        await historico(tx, os.id, usuario, `Equipamento já está na empresa. Trouxe: ${quemTrouxe}`);
+      } else if (papel) colaborador = await gravarColaborador(tx, os.id, papel, idColaborador, usuario, funcs);
     });
     const avisos = [];
     if (novo.final && os.solucao) {

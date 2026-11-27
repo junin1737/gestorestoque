@@ -386,6 +386,40 @@ const Servicos = (() => {
     return '';
   }
 
+  function tipoEtapa(s) {
+    const n = String(s?.descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+    if (n.includes('conclu')) return 'concluido';
+    if (n.includes('entreg')) return 'entregando';
+    if (n.includes('final')) return 'finalizada';
+    if (n.includes('andamento')) return 'andamento';
+    if (n.includes('peca')) return 'peca';
+    if (n.includes('autoriz')) return 'autorizacao';
+    if (n.includes('buscar')) return 'buscar';
+    if (n.includes('abert')) return 'aberta';
+    return '';
+  }
+
+  function proximaEtapa(atual) {
+    const segue = {
+      aberta: 'buscar', buscar: 'andamento', autorizacao: 'andamento', peca: 'andamento',
+      andamento: 'finalizada', finalizada: 'entregando', entregando: 'concluido',
+    };
+    const alvo = segue[tipoEtapa(atual)];
+    if (!alvo) return null;
+    return (st.statuses || []).filter((s) => s.ativo).find((s) => tipoEtapa(s) === alvo) || null;
+  }
+
+  function podeMoverPara(origem, destino) {
+    if (!origem || !destino || origem.id === destino.id) return true;
+    const o = tipoEtapa(origem);
+    const d = tipoEtapa(destino);
+    if (o === 'concluido') return false;
+    if (o === 'finalizada') return d === 'entregando';
+    if (o === 'entregando') return d === 'concluido';
+    if (d === 'entregando' || d === 'concluido') return false;
+    return true;
+  }
+
   async function escolherColaborador(papel) {
     const res = await api('/os/funcionarios');
     const lista = res.funcionarios || [];
@@ -402,6 +436,64 @@ const Servicos = (() => {
       },
     });
     return Number(escolhido) || null;
+  }
+
+  async function escolherBusca() {
+    const res = await api('/os/funcionarios');
+    const lista = res.funcionarios || [];
+    return janela(`<header><div><h2>Buscar no cliente</h2><p>Se o equipamento já chegou, registre quem trouxe. Senão, escolha quem vai buscar.</p></div></header>
+      <div class="corpo">
+        <div class="os-seg" id="busca-modo"><button type="button" data-v="buscar" class="on">Alguém vai buscar</button><button type="button" data-v="empresa">Já se encontra na empresa</button></div>
+        <div class="os-campo" id="busca-func"><label for="os-colab">Quem vai buscar</label><select class="oc" id="os-colab">${lista.map((f) => `<option value="${f.id}">${esc(f.nome)}</option>`).join('') || '<option value="">Nenhum funcionário ativo</option>'}</select></div>
+        <div class="os-campo" id="busca-quem" hidden><label for="busca-nome">Quem trouxe</label><input class="oc" id="busca-nome" maxlength="100" placeholder="Nome de quem entregou o equipamento" /></div>
+      </div>
+      <footer><button type="button" class="ob" data-fechar="">Cancelar</button><button type="button" class="ob pri" id="busca-ok">Confirmar</button></footer>`, {
+      aoAbrir: (dlg, fechar) => {
+        let modo = 'buscar';
+        $$('#busca-modo button', dlg).forEach((b) => b.addEventListener('click', () => {
+          modo = b.dataset.v;
+          $$('#busca-modo button', dlg).forEach((x) => x.classList.toggle('on', x === b));
+          $('#busca-func', dlg).hidden = modo !== 'buscar';
+          $('#busca-quem', dlg).hidden = modo !== 'empresa';
+          if (modo === 'empresa') $('#busca-nome', dlg).focus();
+        }));
+        $('#busca-ok', dlg).addEventListener('click', () => {
+          if (modo === 'empresa') {
+            const quem = $('#busca-nome', dlg).value.trim();
+            if (!quem) { msg('Informe quem trouxe o equipamento.'); $('#busca-nome', dlg).focus(); return; }
+            fechar({ na_empresa: true, quem_trouxe: quem, id_colaborador: null });
+            return;
+          }
+          const idc = Number($('#os-colab', dlg).value) || null;
+          if (!idc) { msg('Nenhum funcionário ativo no cadastro.'); return; }
+          fechar({ na_empresa: false, quem_trouxe: '', id_colaborador: idc });
+        });
+      },
+    });
+  }
+
+  async function confirmarDestino(origem, destino) {
+    if (!podeMoverPara(origem, destino)) {
+      msg('Depois de finalizada a O.S só segue para a próxima etapa.');
+      return null;
+    }
+    if (tipoEtapa(destino) === 'buscar' && tipoEtapa(origem) === 'aberta') {
+      const r = await escolherBusca();
+      return r && typeof r === 'object' ? r : null;
+    }
+    const papel = papelStatus(destino?.descricao);
+    if (papel && origem?.id !== destino?.id) {
+      const idc = await escolherColaborador(papel);
+      if (!idc) return null;
+      return { id_colaborador: idc, na_empresa: false, quem_trouxe: '' };
+    }
+    return { id_colaborador: null, na_empresa: false, quem_trouxe: '' };
+  }
+
+  async function oferecerConclusao(id, enviada) {
+    if (enviada) return;
+    const ok = await confirmar('Concluir serviço?', 'A O.S vira um pedido para o Clipp importar na venda. Os produtos ficam reservados e os itens não podem mais ser alterados.', { sim: 'Concluir serviço', nao: 'Agora não', icone: 'venda' });
+    if (ok) await enviarVenda(id, true);
   }
 
   async function pedirAutorizacao() {
@@ -436,18 +528,15 @@ const Servicos = (() => {
   }
 
   async function prepararProxima() {
-    const ordem = [...(st.statuses || [])].filter((s) => s.ativo).sort((a, b) => a.ordem - b.ordem);
-    const i = ordem.findIndex((s) => s.id === st.os.id_status);
-    const prox = i >= 0 ? ordem[i + 1] : null;
+    const atual = statusDe(st.os.id_status);
+    const prox = proximaEtapa(atual);
     if (!prox) { msg('Não há próxima etapa.'); return false; }
-    const papel = papelStatus(prox.descricao);
-    let idColab = null;
-    if (papel) {
-      idColab = await escolherColaborador(papel);
-      if (!idColab) return false;
-    }
+    const extra = await confirmarDestino(atual, prox);
+    if (!extra) return false;
     st.os.id_status = prox.id;
-    st.os.id_colaborador_pendente = idColab;
+    st.os.id_colaborador_pendente = extra.id_colaborador || null;
+    st.os.na_empresa = !!extra.na_empresa;
+    if (extra.quem_trouxe) st.os.quem_trouxe = extra.quem_trouxe;
     const sel = $('#os-status');
     if (sel) sel.value = String(prox.id);
     return true;
@@ -456,19 +545,18 @@ const Servicos = (() => {
   async function moverCard(id, idStatus, ids) {
     const atual = st.dados.os.find((o) => o.id === id);
     if (atual && atual.id_status !== idStatus) {
+      const origem = statusDe(atual.id_status);
       const destino = (st.dados.statuses || st.statuses || []).find((s) => s.id === idStatus);
-      const papel = papelStatus(destino?.descricao);
-      let idColab = null;
-      if (papel) {
-        idColab = await escolherColaborador(papel);
-        if (!idColab) return carregarQuadro();
-      }
-      const res = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: idStatus, id_colaborador: idColab } });
+      const extra = await confirmarDestino(origem, destino);
+      if (!extra) return carregarQuadro();
+      const res = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: idStatus, ...extra } });
       if (!res.ok) { msg(res.error || 'Não foi possível mudar o status.'); return carregarQuadro(); }
       avisar(res.avisos);
       await api('/os/ordem', { method: 'POST', body: { id_status: idStatus, ids } });
       await carregarQuadro();
+      const etapa = tipoEtapa(destino);
       if (res.final) await perguntarFechamento(id, res.enviada);
+      else if (!res.enviada && (etapa === 'finalizada' || etapa === 'entregando')) await oferecerConclusao(id, false);
       return undefined;
     }
     await api('/os/ordem', { method: 'POST', body: { id_status: idStatus, ids } });
@@ -487,8 +575,9 @@ const Servicos = (() => {
     const m = document.createElement('div');
     m.className = 'os-menu';
     m.setAttribute('role', 'menu');
+    const origem = statusDe(o.id_status);
     const status = modo === 'tudo'
-      ? `<p>Mudar status</p>${st.dados.statuses.filter((s) => s.ativo).map((s) => `<button type="button" role="menuitem" data-st="${s.id}" class="${s.id === o.id_status ? 'on' : ''}" style="--h:${esc(s.cor)}"><span class="os-icost" style="width:24px;height:24px">${ic(s.icone, 'p')}</span>${esc(s.descricao)}</button>`).join('')}`
+      ? `<p>Mudar status</p>${st.dados.statuses.filter((s) => s.ativo && (s.id === o.id_status || podeMoverPara(origem, s))).map((s) => `<button type="button" role="menuitem" data-st="${s.id}" class="${s.id === o.id_status ? 'on' : ''}" style="--h:${esc(s.cor)}"><span class="os-icost" style="width:24px;height:24px">${ic(s.icone, 'p')}</span>${esc(s.descricao)}</button>`).join('')}`
       : '';
     const tecs = `<p>Técnico</p>${st.dados.tecnicos.map((t) => `<button type="button" role="menuitem" data-tec="${t.id}" class="${t.id === o.id_tecnico ? 'on' : ''}"><span class="os-av" style="width:22px;height:22px">${esc(t.iniciais)}</span>${esc(t.nome)}</button>`).join('') || '<p style="text-transform:none;font-weight:500">Nenhum técnico. Marque a função Técnico no cadastro de funcionários.</p>'}
       ${o.id_tecnico ? '<button type="button" role="menuitem" data-tec="0">Remover técnico</button>' : ''}`;
@@ -614,9 +703,8 @@ const Servicos = (() => {
       <div class="corpo"><div class="os-g4">
         <div class="os-campo"><span>Tipo</span>${seg('tipo', [['I', 'Interna'], ['E', 'Externa']])}</div>
         <div class="os-campo"><span>Modalidade</span>${seg('modalidade', [['P', 'Presencial'], ['R', 'Remota']])}</div>
-        <div class="os-campo"><label for="os-status">Status</label><select class="oc" id="os-status">${st.statuses.filter((x) => x.ativo || x.id === o.id_status).map((x) => `<option value="${x.id}" ${x.id === o.id_status ? 'selected' : ''}>${esc(x.descricao)}</option>`).join('')}</select></div>
+        <div class="os-campo"><label for="os-status">Status</label><select class="oc" id="os-status">${st.statuses.filter((x) => (x.ativo || x.id === o.id_status) && (x.id === o.id_status || podeMoverPara(s, x))).map((x) => `<option value="${x.id}" ${x.id === o.id_status ? 'selected' : ''}>${esc(x.descricao)}</option>`).join('')}</select></div>
         <div class="os-campo"><label for="os-tecnico">Técnico responsável</label><select class="oc" id="os-tecnico"><option value="">Sem técnico</option>${tecnicosOpc.map((t) => `<option value="${t.id}" ${t.id === o.id_tecnico ? 'selected' : ''}>${esc(t.nome)}</option>`).join('')}</select></div>
-        <div class="os-campo"><label for="os-quem">Quem trouxe o equipamento</label><input class="oc" id="os-quem" maxlength="100" value="${esc(o.quem_trouxe)}" /></div>
         <div class="os-campo"><label for="os-previsao">Previsão</label><input class="oc" id="os-previsao" type="date" value="${esc(o.previsao || '')}" /></div>
         <div class="os-campo"><label for="os-entrega">Entrega</label><input class="oc" id="os-entrega" type="datetime-local" value="${esc((o.entrega || '').slice(0, 16))}" /></div>
         <div class="os-campo os-combo"><label for="os-cat">Categoria</label><div class="os-com-mais"><input class="oc" id="os-cat" autocomplete="off" placeholder="Ex.: Computador" value="${esc(o.categoria || '')}" /><button type="button" class="ob ico" id="os-cat-mais" title="Cadastrar categoria" aria-label="Cadastrar categoria">${ic('mais', 'p')}</button></div><div class="os-combo-lista" id="os-cat-lista" hidden></div></div>
@@ -635,7 +723,7 @@ const Servicos = (() => {
         ${c.os_abertas && !o.id ? `<div class="os-legenda">Este cliente tem ${c.os_abertas} O.S em aberto.</div>` : ''}
       </div></section>`;
     const eq = `<section class="os-grupo"><header><h2>Equipamento e defeito</h2></header><div class="corpo">
-        <div class="os-campo"><label for="os-equip">Equipamento</label><input class="oc" id="os-equip" maxlength="300" value="${esc(o.equipamento)}" placeholder="Marca, modelo, cor e acessórios que vieram junto" /></div>
+        <div class="os-campo"><label for="os-equip">Equipamento</label><input class="oc" id="os-equip" maxlength="300" value="${esc(o.equipamento)}" placeholder="Marca, modelo, cor e acessórios que vieram junto" />${o.quem_trouxe ? `<p class="os-legenda" style="margin:6px 0 0">Quem trouxe: ${esc(o.quem_trouxe)}</p>` : ''}</div>
         <div class="os-g2">
           <div class="os-campo"><label for="os-defeito">Defeito apresentado</label><div class="os-linha" style="align-items:flex-start">
             <textarea class="oc" id="os-defeito" maxlength="2000" style="flex:1">${esc(o.defeito)}</textarea>
@@ -741,7 +829,6 @@ const Servicos = (() => {
     if (!$('#os-equip')) return;
     o.id_status = Number($('#os-status').value) || o.id_status;
     o.id_tecnico = Number($('#os-tecnico').value) || null;
-    o.quem_trouxe = $('#os-quem').value.trim();
     o.previsao = $('#os-previsao').value;
     o.entrega = $('#os-entrega').value;
     o.equipamento = $('#os-equip').value.trim();
@@ -763,7 +850,7 @@ const Servicos = (() => {
       $$(`[data-seg="${b.dataset.seg}"]`, r).forEach((x) => { x.classList.toggle('on', x === b); x.setAttribute('aria-pressed', x === b); });
       marcarSujo();
     }));
-    $$('#os-status, #os-tecnico, #os-quem, #os-previsao, #os-entrega, #os-equip, #os-defeito, #os-autorizacao, #os-solucao, #os-obs', r)
+    $$('#os-status, #os-tecnico, #os-previsao, #os-entrega, #os-equip, #os-defeito, #os-autorizacao, #os-solucao, #os-obs', r)
       .forEach((el) => el?.addEventListener('input', marcarSujo));
     $$('#os-autor button', r).forEach((b) => b.addEventListener('click', async () => {
       const novo = b.dataset.autor || '';
@@ -789,11 +876,12 @@ const Servicos = (() => {
     $('#os-status', r).addEventListener('change', async () => {
       const anterior = st.os.id_status;
       const novoId = Number($('#os-status').value);
-      const papel = papelStatus(statusDe(novoId)?.descricao);
-      if (papel && novoId !== anterior) {
-        const idc = await escolherColaborador(papel);
-        if (!idc) { $('#os-status').value = String(anterior || ''); return; }
-        st.os.id_colaborador_pendente = idc;
+      if (novoId !== anterior) {
+        const extra = await confirmarDestino(statusDe(anterior), statusDe(novoId));
+        if (!extra) { $('#os-status').value = String(anterior || ''); return; }
+        st.os.id_colaborador_pendente = extra.id_colaborador || null;
+        st.os.na_empresa = !!extra.na_empresa;
+        if (extra.quem_trouxe) st.os.quem_trouxe = extra.quem_trouxe;
       }
       st.os.id_status = novoId;
       const cab = $('.os-cab-os', r);
@@ -1233,7 +1321,13 @@ const Servicos = (() => {
           const q = busca.value.trim();
           if (!q || !dlg.isConnected) return;
           const r = await api(`/os/itens?aba=${servico ? 'servicos' : 'produtos'}&q=${encodeURIComponent(q)}&_=${Date.now()}`);
-          if (!r.ok || !dlg.isConnected || busca.value.trim() !== q) return;
+          if (!dlg.isConnected || busca.value.trim() !== q) return;
+          if (!r.ok) {
+            itens = [];
+            res.hidden = false;
+            res.innerHTML = `<div class="os-legenda" style="padding:10px">${esc(r.error || 'Não foi possível buscar.')}</div>`;
+            return;
+          }
           itens = r.itens || [];
           if (sel >= itens.length) sel = itens.length ? 0 : -1;
           if (itens.length && sel < 0) sel = 0;
@@ -1392,7 +1486,7 @@ const Servicos = (() => {
     const body = {
       tipo: o.tipo, modalidade: o.modalidade, id_status: o.id_status, id_tecnico: o.id_tecnico, quem_trouxe: o.quem_trouxe,
       equipamento: o.equipamento, defeito: o.defeito, autorizacao: o.autorizacao, autor_status: o.autor_status, id_autor_contato: o.id_autor_contato || null, solucao: o.solucao, obs: o.obs, previsao: o.previsao, entrega: o.entrega,
-      id_categoria: o.id_categoria, id_subcategoria: o.id_subcategoria, id_colaborador: o.id_colaborador_pendente || null,
+      id_categoria: o.id_categoria, id_subcategoria: o.id_subcategoria, id_colaborador: o.id_colaborador_pendente || null, na_empresa: !!o.na_empresa,
       id_cliente: o.id_cliente, desc_geral: o.desc_geral, acres_geral: o.acres_geral, frete: o.frete, deslocamento: o.deslocamento,
       itens: o.itens.map((it) => ({ id_identificador: it.id_identificador, descricao: it.descricao, tipo: it.tipo, unidade: it.unidade, qtd: it.qtd, vlr_unit: it.vlr_unit, desc_item: it.desc_item, acres_item: it.acres_item })),
       liberacoes: st.liberacoes,
@@ -1417,31 +1511,25 @@ const Servicos = (() => {
   }
 
   async function perguntarProxima(id) {
-    const ordem = [...(st.statuses || [])].filter((s) => s.ativo).sort((a, b) => a.ordem - b.ordem);
     const atual = statusDe(st.os?.id_status);
-    const i = ordem.findIndex((s) => s.id === atual?.id);
-    const nomeAtual = String(atual?.descricao || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
-    if (nomeAtual === 'finalizada' && !st.os?.id_pedido) {
-      const ok = await confirmar('Concluir serviço?', 'A O.S vira um pedido para o Clipp importar na venda. Os produtos ficam reservados e os itens não podem mais ser alterados.', { sim: 'Concluir serviço', nao: 'Agora não', icone: 'venda' });
-      if (ok) await enviarVenda(id, true);
-      return;
-    }
-    const prox = i >= 0 ? ordem[i + 1] : null;
+    const prox = proximaEtapa(atual);
     if (!prox) return;
     const ok = await confirmar('Enviar para a próxima etapa?', `Mover esta O.S para ${prox.descricao}.`, { sim: 'Enviar', nao: 'Ficar aqui' });
-    if (!ok) return;
-    const papel = papelStatus(prox.descricao);
-    let idColab = null;
-    if (papel) {
-      idColab = await escolherColaborador(papel);
-      if (!idColab) return;
+    if (!ok) {
+      const etapa = tipoEtapa(atual);
+      if (!st.os?.id_pedido && (etapa === 'finalizada' || etapa === 'entregando')) await oferecerConclusao(id, false);
+      return;
     }
-    const mov = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: prox.id, id_colaborador: idColab } });
+    const extra = await confirmarDestino(atual, prox);
+    if (!extra) return;
+    const mov = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: prox.id, ...extra } });
     if (!mov.ok) { msg(mov.error || 'Não foi possível mudar a etapa.'); return; }
     avisar(mov.avisos);
     const det = await api(`/os/${id}`);
     if (det.ok) { st.os = det.os; st.statusGravado = det.os.id_status; }
+    const etapa = tipoEtapa(statusDe(st.os?.id_status));
     if (mov.final) await perguntarFechamento(id, !!st.os.id_pedido);
+    else if (!st.os?.id_pedido && (etapa === 'finalizada' || etapa === 'entregando')) await oferecerConclusao(id, false);
   }
 
   async function janelaImprimir(id, modelo, { titulo, texto, semWhats, oferecerVenda } = {}) {
@@ -1514,8 +1602,8 @@ const Servicos = (() => {
     const res = await api(`/os/${id}/cancelar`, { method: 'POST', body: {} });
     if (!res.ok) { msg(res.error || 'Não foi possível cancelar.'); return; }
     msg(`O.S ${id} cancelada.`);
-    const det = await api(`/os/${id}`);
-    if (det.ok) { st.os = det.os; st.sujo = false; renderOs(); }
+    st.sujo = false;
+    irPara('quadro');
   }
 
   async function enviarVenda(idParam, jaConfirmado) {

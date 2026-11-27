@@ -97,7 +97,11 @@ router.post('/os', rota((req) => os.salvar(req.body, usuario(req))));
 router.post('/os/ordem', rota((req) => os.reordenar(req.body?.id_status, req.body?.ids)));
 router.get('/os/:id', rota((req) => os.detalhe(req.params.id)));
 router.post('/os/:id', rota((req) => os.salvar({ ...req.body, id: req.params.id }, usuario(req))));
-router.post('/os/:id/status', rota((req) => os.mudarStatus(req.params.id, req.body?.id_status, usuario(req), req.body?.id_colaborador)));
+router.post('/os/:id/status', rota((req) => os.mudarStatus(req.params.id, req.body?.id_status, usuario(req), {
+  id_colaborador: req.body?.id_colaborador,
+  quem_trouxe: req.body?.quem_trouxe,
+  na_empresa: req.body?.na_empresa,
+})));
 router.post('/os/:id/tecnico', rota((req) => os.vincularTecnico(req.params.id, req.body?.id_tecnico, usuario(req))));
 router.post('/os/:id/enviar-venda', rota((req) => os.enviarParaVenda(req.params.id, usuario(req))));
 router.post('/os/:id/cancelar', rota((req) => os.cancelar(req.params.id, usuario(req))));

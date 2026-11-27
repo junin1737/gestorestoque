@@ -923,14 +923,22 @@ async function gravarPedidoOS({ idCliente, idVendedor, obs, validade, itens, fre
           for (const it of itensOk) if (!it.servico) porId.set(it.id, (porId.get(it.id) || 0) + it.qtd);
           const conferido = new Set();
           for (const it of itensOk) {
-            const prod = await query(tx, `
+            let prod = await query(tx, `
               SELECT FIRST 1 E.DESCRICAO, E.PRC_CUSTO, P.COD_BARRA, P.QTD_ATUAL
                      ${temReserv ? ', P.QTD_RESERV' : ''}
               FROM ${t.produto} P
               JOIN ${t.identificador} I ON I.ID_IDENTIFICADOR = P.ID_IDENTIFICADOR
               JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
               WHERE P.ID_IDENTIFICADOR = ?`, [it.id]);
-            if (!prod.length) throw new Error(`Produto ${it.id} não encontrado.`);
+            if (!prod.length && it.servico) {
+              prod = await query(tx, `
+                SELECT FIRST 1 E.DESCRICAO, E.PRC_CUSTO, CAST(NULL AS VARCHAR(20)) AS COD_BARRA,
+                       CAST(0 AS NUMERIC(15,3)) AS QTD_ATUAL ${temReserv ? ', CAST(0 AS NUMERIC(15,3)) AS QTD_RESERV' : ''}
+                FROM ${t.identificador} I
+                JOIN ${t.estoque} E ON E.ID_ESTOQUE = I.ID_ESTOQUE
+                WHERE I.ID_IDENTIFICADOR = ?`, [it.id]);
+            }
+            if (!prod.length) throw new Error(`${it.servico ? 'Serviço' : 'Produto'} ${it.id} não encontrado.`);
             const nome = String(prod[0].DESCRICAO || it.descricao || it.id).trim();
             if (!it.servico && !conferido.has(it.id)) {
               conferido.add(it.id);
