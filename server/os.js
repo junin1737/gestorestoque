@@ -222,6 +222,8 @@ const TABELAS = {
       SOLUCAO VARCHAR(2000),
       EQUIPAMENTO VARCHAR(300),
       ID_OS INTEGER,
+      ID_CATEGORIA INTEGER,
+      ID_SUBCATEGORIA INTEGER,
       USOS INTEGER,
       DT TIMESTAMP,
       CONSTRAINT PK_GESTOR_OS_SOLUCAO PRIMARY KEY (ID)
@@ -289,6 +291,24 @@ async function ensureOsSchema(db) {
     if (!(await columnExists(db, 'GESTOR_OS', 'ID_ENTREGADOR'))) await query(db, 'ALTER TABLE GESTOR_OS ADD ID_ENTREGADOR INTEGER');
     if (!(await columnExists(db, 'GESTOR_OS', 'CANCELADA'))) await query(db, 'ALTER TABLE GESTOR_OS ADD CANCELADA CHAR(1)');
   }
+  if (tabelas.has('GESTOR_OS_SOLUCAO') || criou) {
+    const novaCategoria = !(await columnExists(db, 'GESTOR_OS_SOLUCAO', 'ID_CATEGORIA'));
+    if (novaCategoria) await query(db, 'ALTER TABLE GESTOR_OS_SOLUCAO ADD ID_CATEGORIA INTEGER');
+    if (!(await columnExists(db, 'GESTOR_OS_SOLUCAO', 'ID_SUBCATEGORIA'))) await query(db, 'ALTER TABLE GESTOR_OS_SOLUCAO ADD ID_SUBCATEGORIA INTEGER');
+    if (novaCategoria) {
+      await query(db, `
+        UPDATE GESTOR_OS_SOLUCAO S SET
+          ID_CATEGORIA = (SELECT O.ID_CATEGORIA FROM GESTOR_OS O WHERE O.ID_OS = S.ID_OS),
+          ID_SUBCATEGORIA = (SELECT O.ID_SUBCATEGORIA FROM GESTOR_OS O WHERE O.ID_OS = S.ID_OS)
+        WHERE S.ID_OS IS NOT NULL`);
+      await query(db, `
+        UPDATE GESTOR_OS_SOLUCAO S SET ID_CATEGORIA = (
+          SELECT FIRST 1 C.ID FROM GESTOR_OS_CATEGORIA C
+          WHERE C.ID_PAI IS NULL AND UPPER(TRIM(C.NOME)) = UPPER(TRIM(S.EQUIPAMENTO))
+        )
+        WHERE S.ID_CATEGORIA IS NULL AND TRIM(COALESCE(S.EQUIPAMENTO, '')) <> ''`);
+    }
+  }
   if (criou) await refreshTables(db);
   const st = await query(db, 'SELECT COUNT(*) AS N FROM GESTOR_OS_STATUS');
   if (!num(st[0]?.N)) {
@@ -344,6 +364,10 @@ function podeMudarEtapa(origemDesc, destinoDesc) {
   if (o === 'entregando') return d === 'concluido';
   if (d === 'entregando' || d === 'concluido') return false;
   return true;
+}
+
+function statusDaEtapa(porId, chave) {
+  return [...porId.values()].find((s) => s.ativo && chaveEtapa(s.descricao) === chave) || null;
 }
 
 function etapaExigeItem(descricao) {
@@ -605,10 +629,21 @@ function mapSolucao(r) {
     solucao: texto(r.SOLUCAO),
     equipamento: txt(r.EQUIPAMENTO),
     id_os: num(r.ID_OS) || null,
+    id_categoria: num(r.ID_CATEGORIA) || null,
+    id_subcategoria: num(r.ID_SUBCATEGORIA) || null,
+    categoria: txt(r.CATEGORIA),
+    subcategoria: txt(r.SUBCATEGORIA),
     usos: num(r.USOS),
     data: dataBr(r.DT),
   };
 }
+
+const SQL_SOLUCAO = `
+  SELECT S.ID, S.DEFEITO, S.SOLUCAO, S.EQUIPAMENTO, S.ID_OS, S.USOS, S.DT,
+         S.ID_CATEGORIA, S.ID_SUBCATEGORIA, C.NOME AS CATEGORIA, B.NOME AS SUBCATEGORIA
+  FROM GESTOR_OS_SOLUCAO S
+  LEFT JOIN GESTOR_OS_CATEGORIA C ON C.ID = S.ID_CATEGORIA
+  LEFT JOIN GESTOR_OS_CATEGORIA B ON B.ID = S.ID_SUBCATEGORIA`;
 
 async function listarSolucoes(q) {
   const termo = txt(q, 100);
@@ -616,31 +651,41 @@ async function listarSolucoes(q) {
     const where = [];
     const params = [];
     for (const p of termo.split(/\s+/).filter(Boolean)) {
-      where.push('(UPPER(DEFEITO) CONTAINING UPPER(?) OR UPPER(SOLUCAO) CONTAINING UPPER(?) OR UPPER(EQUIPAMENTO) CONTAINING UPPER(?))');
-      params.push(p, p, p);
+      where.push('(UPPER(S.DEFEITO) CONTAINING UPPER(?) OR UPPER(S.SOLUCAO) CONTAINING UPPER(?) OR UPPER(S.EQUIPAMENTO) CONTAINING UPPER(?) OR UPPER(C.NOME) CONTAINING UPPER(?))');
+      params.push(p, p, p, p);
     }
     const rows = await query(db, `
-      SELECT FIRST 300 * FROM GESTOR_OS_SOLUCAO
+      SELECT FIRST 300 ${SQL_SOLUCAO.replace(/^\s*SELECT/i, '')}
       ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
-      ORDER BY USOS DESC, DT DESC`, params);
+      ORDER BY S.USOS DESC, S.DT DESC`, params);
     return { solucoes: rows.map(mapSolucao) };
   });
 }
 
-/** Defeitos parecidos: conta as palavras em comum (prefixo de 5 letras aceita "liga"/"ligar"), depois os mais usados. */
-async function sugerirSolucoes(defeito, equipamento) {
+/** Defeitos parecidos da mesma categoria. Outra categoria não entra; a da O.S entra mesmo com poucas palavras em comum. */
+async function sugerirSolucoes(defeito, equipamento, categoria, subcategoria) {
   const alvo = palavras(`${defeito || ''} ${equipamento || ''}`);
-  if (!alvo.length) return { solucoes: [], palavras: [] };
+  const cat = num(categoria);
+  const sub = num(subcategoria);
+  if (!alvo.length && !cat) return { solucoes: [], palavras: [] };
   return comBase(async (db) => {
-    const rows = await query(db, 'SELECT FIRST 3000 * FROM GESTOR_OS_SOLUCAO ORDER BY USOS DESC');
+    const rows = await query(db, `SELECT FIRST 3000 ${SQL_SOLUCAO.replace(/^\s*SELECT/i, '')} ORDER BY S.USOS DESC`);
     const raiz = (p) => p.slice(0, 5);
     const alvoRaiz = new Set(alvo.map(raiz));
-    const lista = rows.map((r) => {
+    const lista = [];
+    for (const r of rows) {
+      const idCat = num(r.ID_CATEGORIA);
+      const idSub = num(r.ID_SUBCATEGORIA);
+      if (cat && idCat && idCat !== cat) continue;
       const s = mapSolucao(r);
-      const ps = palavras(`${s.defeito} ${s.equipamento}`);
-      const comuns = ps.filter((p) => alvoRaiz.has(raiz(p)));
-      return { ...s, comuns, pontos: comuns.length };
-    }).filter((s) => s.pontos > 0);
+      const comuns = palavras(`${s.defeito} ${s.equipamento}`).filter((p) => alvoRaiz.has(raiz(p)));
+      const mesma = !!(cat && idCat === cat);
+      let pontos = comuns.length;
+      if (mesma) pontos += 4;
+      if (sub && idSub === sub) pontos += 2;
+      if (!pontos) continue;
+      lista.push({ ...s, comuns, pontos });
+    }
     lista.sort((a, b) => b.pontos - a.pontos || b.usos - a.usos);
     return { solucoes: lista.slice(0, 12), palavras: alvo };
   });
@@ -651,15 +696,20 @@ async function salvarSolucao(id, body) {
   const solucao = texto(body?.solucao, 2000);
   if (!defeito || !solucao) throw new Error('Preencha o defeito e a solução.');
   return comBase(async (db) => {
+    const cat = await resolverCategoria(db, body?.id_categoria, body?.id_subcategoria);
     let codigo = num(id);
     if (codigo) {
-      await query(db, 'UPDATE GESTOR_OS_SOLUCAO SET DEFEITO = ?, SOLUCAO = ?, EQUIPAMENTO = ? WHERE ID = ?',
-        [defeito, solucao, txt(body?.equipamento, 300), codigo]);
+      await query(db, `
+        UPDATE GESTOR_OS_SOLUCAO
+        SET DEFEITO = ?, SOLUCAO = ?, EQUIPAMENTO = ?, ID_CATEGORIA = ?, ID_SUBCATEGORIA = ?
+        WHERE ID = ?`,
+      [defeito, solucao, txt(body?.equipamento, 300), cat.id_categoria, cat.id_subcategoria, codigo]);
     } else {
       codigo = await gerar(db, 'GESTOR_GEN_OS_SOL');
       await query(db, `
-        INSERT INTO GESTOR_OS_SOLUCAO (ID, DEFEITO, SOLUCAO, EQUIPAMENTO, ID_OS, USOS, DT)
-        VALUES (?, ?, ?, ?, NULL, 1, ${sqlTimestamp()})`, [codigo, defeito, solucao, txt(body?.equipamento, 300)]);
+        INSERT INTO GESTOR_OS_SOLUCAO (ID, DEFEITO, SOLUCAO, EQUIPAMENTO, ID_OS, ID_CATEGORIA, ID_SUBCATEGORIA, USOS, DT)
+        VALUES (?, ?, ?, ?, NULL, ?, ?, 1, ${sqlTimestamp()})`,
+      [codigo, defeito, solucao, txt(body?.equipamento, 300), cat.id_categoria, cat.id_subcategoria]);
     }
     return { id: codigo };
   });
@@ -685,23 +735,30 @@ async function registrarSolucao(db, os) {
   const solucao = texto(os.solucao, 2000);
   if (!defeito || !solucao) return;
   // A mesma O.S finalizada de novo só atualiza o texto; a mesma solução vinda de outra O.S soma um uso.
+  const idCat = num(os.id_categoria) || null;
+  const idSub = num(os.id_subcategoria) || null;
   const daOs = await query(db, 'SELECT FIRST 1 ID FROM GESTOR_OS_SOLUCAO WHERE ID_OS = ?', [os.id]);
   if (daOs.length) {
-    await query(db, `UPDATE GESTOR_OS_SOLUCAO SET SOLUCAO = ?, DEFEITO = ?, EQUIPAMENTO = ?, DT = ${sqlTimestamp()} WHERE ID = ?`,
-      [solucao, defeito, txt(os.equipamento, 300), num(daOs[0].ID)]);
+    await query(db, `
+      UPDATE GESTOR_OS_SOLUCAO
+      SET SOLUCAO = ?, DEFEITO = ?, EQUIPAMENTO = ?, ID_CATEGORIA = ?, ID_SUBCATEGORIA = ?, DT = ${sqlTimestamp()}
+      WHERE ID = ?`,
+    [solucao, defeito, txt(os.equipamento, 300), idCat, idSub, num(daOs[0].ID)]);
     return;
   }
   const iguais = await query(db, `
     SELECT FIRST 1 ID FROM GESTOR_OS_SOLUCAO
-    WHERE UPPER(DEFEITO) = UPPER(?) AND UPPER(SOLUCAO) = UPPER(?)`, [defeito, solucao]);
+    WHERE UPPER(DEFEITO) = UPPER(?) AND UPPER(SOLUCAO) = UPPER(?) AND COALESCE(ID_CATEGORIA, 0) = ?`,
+  [defeito, solucao, idCat || 0]);
   if (iguais.length) {
     await query(db, `UPDATE GESTOR_OS_SOLUCAO SET USOS = COALESCE(USOS, 0) + 1, DT = ${sqlTimestamp()} WHERE ID = ?`, [num(iguais[0].ID)]);
     return;
   }
   const id = await gerar(db, 'GESTOR_GEN_OS_SOL');
   await query(db, `
-    INSERT INTO GESTOR_OS_SOLUCAO (ID, DEFEITO, SOLUCAO, EQUIPAMENTO, ID_OS, USOS, DT)
-    VALUES (?, ?, ?, ?, ?, 1, ${sqlTimestamp()})`, [id, defeito, solucao, txt(os.equipamento, 300), os.id]);
+    INSERT INTO GESTOR_OS_SOLUCAO (ID, DEFEITO, SOLUCAO, EQUIPAMENTO, ID_OS, ID_CATEGORIA, ID_SUBCATEGORIA, USOS, DT)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 1, ${sqlTimestamp()})`,
+  [id, defeito, solucao, txt(os.equipamento, 300), os.id, idCat, idSub]);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1569,7 +1626,15 @@ async function salvar(body, usuario, opcoes = {}) {
     }
     const calc = calcular(entrada);
     const liberacoes = enviada ? [] : conferirDescontos({ ...entrada, itens: calc.itens }, body?.liberacoes);
-    const statusNovo = porId.get(entrada.id_status);
+    const naEmpresa = entrada.na_empresa === true || entrada.na_empresa === 'S' || entrada.na_empresa === 1;
+    let statusNovo = porId.get(entrada.id_status);
+    if (naEmpresa && papelStatus(statusNovo?.descricao) === 'busca') {
+      const andamento = statusDaEtapa(porId, 'andamento');
+      if (andamento) {
+        entrada.id_status = andamento.id;
+        statusNovo = andamento;
+      }
+    }
     if (atual && atual.id_status !== entrada.id_status && !podeMudarEtapa(atual.status?.descricao, statusNovo?.descricao)) {
       throw new Error('Depois de finalizada a O.S só segue para a próxima etapa.');
     }
@@ -1691,7 +1756,7 @@ async function salvar(body, usuario, opcoes = {}) {
       let colaborador = null;
       const papel = papelStatus(statusNovo?.descricao);
       const mudouEtapa = !atual || atual.id_status !== entrada.id_status;
-      if (papel === 'busca' && entrada.na_empresa && mudouEtapa) {
+      if (naEmpresa && mudouEtapa) {
         if (!entrada.quem_trouxe) throw new Error('Informe quem trouxe o equipamento.');
         await historico(tx, codigo, usuario, `Equipamento já está na empresa. Trouxe: ${entrada.quem_trouxe}`);
       } else if (papel && mudouEtapa) {
@@ -1705,9 +1770,10 @@ async function salvar(body, usuario, opcoes = {}) {
     if (resultado.trocouTecnico && entrada.id_tecnico) {
       avisos.push(...await avisarTecnico(db, resultado.codigo, usuario));
     }
-    if (resultado.colaborador) {
+    if (resultado.papel === 'entrega') {
+      avisos.push(...await avisarEquipeEntrega(db, resultado.codigo, resultado.colaborador, usuario));
+    } else if (resultado.colaborador) {
       avisos.push(...await avisarColaborador(db, resultado.codigo, resultado.colaborador.id, resultado.papel, usuario));
-      if (resultado.papel === 'entrega') avisos.push(...await avisarClienteEntrega(db, resultado.codigo, resultado.colaborador.nome, usuario));
     }
     return { id: resultado.codigo, avisos };
   });
@@ -1740,6 +1806,40 @@ async function avisarClienteEntrega(db, idOs, nomeEntregador, usuario) {
   } catch (err) {
     return [`O aviso de entrega para o cliente não saiu: ${err.message}`];
   }
+}
+
+/** Avisa o técnico da O.S que o equipamento saiu para entrega, quando outra pessoa leva. */
+async function avisarTecnicoEntrega(db, os, idTec, nomeEntregador, usuario) {
+  const foneSql = await sqlFoneFuncionario(db, '');
+  const f = await query(db, `SELECT NOME, ${foneSql} FROM TB_FUNCIONARIO WHERE ID_FUNCIONARIO = ?`, [idTec]);
+  const nome = txt(f[0]?.NOME) || 'O técnico';
+  const fone = foneFuncionario(f[0]);
+  if (!fone) return [`${nome} não tem celular nem WhatsApp no cadastro. O aviso de entrega para o técnico não foi enviado.`];
+  const quem = txt(nomeEntregador);
+  const textoMsg = `O.S ${os.id} — ${os.cliente?.nome || 'cliente'}. O equipamento${os.equipamento ? ` (${os.equipamento})` : ''} está saindo para entrega${quem ? ` com ${quem}` : ''}.`;
+  const rotulo = `Aviso de entrega enviado no WhatsApp para o técnico ${nome}`;
+  try {
+    const r = await enviarOuEnfileirar({ numero: fone, texto: textoMsg, idOs: os.id, rotulo, usuario });
+    if (r.enfileirada) return [`Sem internet agora: o aviso de entrega para ${nome} vai sair quando a conexão voltar.`];
+    await historico(db, os.id, usuario, rotulo);
+    return [`Aviso de entrega enviado no WhatsApp para o técnico ${nome}.`];
+  } catch (err) {
+    return [`O aviso de entrega para ${nome} não saiu pelo WhatsApp: ${err.message}`];
+  }
+}
+
+/** Quem leva, o técnico da O.S (se for outra pessoa) e o cliente. */
+async function avisarEquipeEntrega(db, idOs, colaborador, usuario) {
+  const os = await lerOs(db, idOs);
+  if (!os) return [];
+  const avisos = [];
+  if (colaborador) avisos.push(...await avisarColaborador(db, idOs, colaborador.id, 'entrega', usuario));
+  const idTec = num(os.id_tecnico);
+  if (idTec && idTec !== num(colaborador?.id)) {
+    avisos.push(...await avisarTecnicoEntrega(db, os, idTec, colaborador?.nome || '', usuario));
+  }
+  avisos.push(...await avisarClienteEntrega(db, idOs, colaborador?.nome || '', usuario));
+  return avisos;
 }
 
 /** Troca quem entrega sem mudar a etapa, e avisa o novo colaborador. */
@@ -1795,8 +1895,12 @@ async function mudarStatus(id, idStatus, usuario, extra) {
     if (os.cancelada) throw new Error('O.S cancelada não muda de etapa.');
     if (os.importada) throw new Error('O.S importada não pode ser editada.');
     const { porId, funcs } = await mapasApoio(db);
-    const novo = porId.get(num(idStatus));
+    let novo = porId.get(num(idStatus));
     if (!novo || !novo.ativo) throw new Error('Status inválido.');
+    if (naEmpresa && papelStatus(novo.descricao) === 'busca') {
+      const andamento = statusDaEtapa(porId, 'andamento');
+      if (andamento) novo = andamento;
+    }
     if (novo.id === os.id_status) return { id: os.id, avisos: [] };
     if (!podeMudarEtapa(os.status?.descricao, novo.descricao)) {
       throw new Error('Depois de finalizada a O.S só segue para a próxima etapa.');
@@ -1811,7 +1915,7 @@ async function mudarStatus(id, idStatus, usuario, extra) {
           ${novo.final && !os.entrega ? `, DT_ENTREGA = ${sqlTimestamp()}` : ''}
         WHERE ID_OS = ?`, [novo.id, num(ordem[0]?.O) || 1, os.id]);
       await historico(tx, os.id, usuario, `Status: ${os.status?.descricao || '—'} → ${novo.descricao}`, os.id_status, novo.id);
-      if (papel === 'busca' && naEmpresa) {
+      if (naEmpresa) {
         if (!quemTrouxe) throw new Error('Informe quem trouxe o equipamento.');
         await query(tx, 'UPDATE GESTOR_OS SET QUEM_TROUXE = ? WHERE ID_OS = ?', [quemTrouxe, os.id]);
         await historico(tx, os.id, usuario, `Equipamento já está na empresa. Trouxe: ${quemTrouxe}`);
@@ -1821,9 +1925,10 @@ async function mudarStatus(id, idStatus, usuario, extra) {
     if (novo.final && os.solucao) {
       try { await registrarSolucao(db, os); } catch (err) { avisos.push(`A solução não entrou na base: ${err.message}`); }
     }
-    if (colaborador) {
+    if (papel === 'entrega') {
+      avisos.push(...await avisarEquipeEntrega(db, os.id, colaborador, usuario));
+    } else if (colaborador) {
       avisos.push(...await avisarColaborador(db, os.id, colaborador.id, papel, usuario));
-      if (papel === 'entrega') avisos.push(...await avisarClienteEntrega(db, os.id, colaborador.nome, usuario));
     }
     return { id: os.id, avisos, final: novo.final, enviada: !!os.id_pedido };
   });

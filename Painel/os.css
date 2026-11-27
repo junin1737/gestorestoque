@@ -91,13 +91,14 @@ html[data-theme="escuro"] .os {
 
 /* Quadro kanban */
 .os-quadro { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(236px, 1fr); gap: 14px; overflow-x: auto; padding-bottom: 8px; align-items: start; scroll-snap-type: x proximity; }
+.os-quadro.os-arraste { scroll-snap-type: none; touch-action: none; }
 .os-col { border-radius: 16px; background: color-mix(in srgb, var(--h, #64748b) 8%, var(--bg)); padding: 10px; min-height: 420px; scroll-snap-align: start; transition: box-shadow .15s; }
 .os-col.alvo { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--h) 55%, transparent); }
 .os-col > header { display: flex; align-items: center; gap: 9px; padding: 4px 4px 10px; }
 .os-col > header h3 { margin: 0; font-size: .85rem; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .os-col > header .qtd { margin-left: auto; font-size: .75rem; font-weight: 700; color: var(--muted); background: var(--bg-elev); border-radius: 99px; padding: 1px 8px; }
 .os-col .vazio { font-size: .78rem; color: var(--muted); text-align: center; padding: 18px 6px; border: 1.5px dashed var(--os-sep); border-radius: 12px; }
-.os-card { background: var(--bg-elev); border-radius: 13px; box-shadow: var(--os-lift); padding: 11px 12px 9px; margin-bottom: 9px; border: 1px solid transparent; cursor: pointer; position: relative; }
+.os-card { background: var(--bg-elev); border-radius: 13px; box-shadow: var(--os-lift); padding: 11px 12px 9px; margin-bottom: 9px; border: 1px solid transparent; cursor: pointer; position: relative; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
 .os-card:hover { box-shadow: var(--os-lift-2); }
 .os-card.atrasada { border-color: color-mix(in srgb, var(--danger) 38%, transparent); }
 .os-card.cancelada { border: 2px solid #dc2626; }

@@ -571,6 +571,7 @@ public class MainActivity extends AppCompatActivity {
         webView.setHorizontalScrollBarEnabled(true);
         webView.setVerticalScrollBarEnabled(true);
         webView.setNestedScrollingEnabled(true);
+        webView.setOverScrollMode(View.OVER_SCROLL_NEVER);
 
         webView.addJavascriptInterface(new GestorJsBridge(), "GestorApp");
 
@@ -599,6 +600,7 @@ public class MainActivity extends AppCompatActivity {
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
                     String falhou = request.getUrl() != null ? request.getUrl().toString() : "";
+                    if (!falhou.startsWith("http://") && !falhou.startsWith("https://")) return;
                     if (!ehOnline(falhou) && !urlOnline().isEmpty()) {
                         testarOnline();
                         return;

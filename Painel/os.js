@@ -90,6 +90,7 @@ const Servicos = (() => {
     statuses: [],
     sujo: false,
     gravando: false,
+    podeTecnicos: false,
   };
   let raiz = null;
 
@@ -124,7 +125,8 @@ const Servicos = (() => {
   }
 
   function avisar(avisos) {
-    for (const a of avisos || []) msg(a);
+    const lista = (avisos || []).filter(Boolean);
+    if (lista.length) msg(lista.join(' '));
   }
 
   async function imprimir(id, formato, modelo) {
@@ -182,8 +184,11 @@ const Servicos = (() => {
 
   /* ---------- Cabeçalho do módulo ---------- */
   const ABAS = [['quadro', 'Quadro'], ['solucoes', 'Soluções'], ['status', 'Status'], ['tecnicos', 'Técnicos']];
+  function abasVisiveis() {
+    return ABAS.filter(([k]) => k !== 'tecnicos' || st.podeTecnicos);
+  }
   function abasHtml() {
-    return `<div class="os-topo"><div class="os-seg" role="tablist">${ABAS.map(([k, n]) => `<button type="button" role="tab" data-os-view="${k}" class="${st.view === k ? 'on' : ''}" aria-selected="${st.view === k}">${n}</button>`).join('')}</div>
+    return `<div class="os-topo"><div class="os-seg" role="tablist">${abasVisiveis().map(([k, n]) => `<button type="button" role="tab" data-os-view="${k}" class="${st.view === k ? 'on' : ''}" aria-selected="${st.view === k}">${n}</button>`).join('')}</div>
       <span class="os-esp"></span>${mostrarBotaoApp() ? `<button type="button" class="ob os-btn-app" data-os-app>${ic('monitor', 'p')}Aplicativo desktop</button>` : ''}<button type="button" class="ob pri" data-os-nova>${ic('mais', 'p')}Nova O.S</button></div>`;
   }
 
@@ -329,14 +334,17 @@ const Servicos = (() => {
     });
     $('[data-os-maisf]', r)?.addEventListener('click', () => { st.maisFiltros = !st.maisFiltros; renderQuadro(); });
     $('[data-os-limpar]', r)?.addEventListener('click', () => { st.filtros = { q: '', tecnico: '', tipo: '', modalidade: '', status: '' }; carregarQuadro(); });
+    const usaToque = !!(window.__GESTOR_APP__ || window.matchMedia?.('(pointer: coarse)')?.matches);
     $$('.os-card', r).forEach((card) => {
+      if (usaToque) card.draggable = false;
       card.addEventListener('click', (e) => {
         if (e.target.closest('button')) return;
+        if (card.dataset.osArraste === '1') { card.dataset.osArraste = ''; return; }
         abrirOs(Number(card.dataset.osCard));
       });
       card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === card) abrirOs(Number(card.dataset.osCard)); });
       card.addEventListener('dragstart', (e) => {
-        if (card.classList.contains('cancelada') || card.dataset.importada === '1') { e.preventDefault(); return; }
+        if (usaToque || card.classList.contains('cancelada') || card.dataset.importada === '1') { e.preventDefault(); return; }
         card.classList.add('arrastando');
         e.dataTransfer.effectAllowed = 'move';
         e.dataTransfer.setData('text/plain', card.dataset.osCard);
@@ -377,6 +385,77 @@ const Servicos = (() => {
     }));
     $$('[data-os-tec]', r).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); menuCard(Number(b.dataset.osTec), b, 'tecnico'); }));
     $$('[data-os-menu]', r).forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); menuCard(Number(b.dataset.osMenu), b, 'tudo'); }));
+    if (usaToque) ligarArrasteToque(r);
+  }
+
+  /** No celular o arraste nativo do navegador recarrega a WebView e volta para o login. Segura o card e solta na coluna. */
+  function ligarArrasteToque(r) {
+    const quadro = $('.os-quadro', r);
+    if (!quadro) return;
+    let press = null;
+    let arrastando = null;
+    let timer = 0;
+    const limparAlvo = () => $$('.os-col.alvo', quadro).forEach((c) => c.classList.remove('alvo'));
+    const soltarPress = () => { clearTimeout(timer); timer = 0; press = null; };
+    const encerrar = () => {
+      soltarPress();
+      if (arrastando) arrastando.card.classList.remove('arrastando');
+      arrastando = null;
+      quadro.classList.remove('os-arraste');
+      limparAlvo();
+    };
+    const colunaEm = (x, y) => document.elementFromPoint(x, y)?.closest?.('.os-col') || null;
+    quadro.addEventListener('pointerdown', (e) => {
+      const card = e.target.closest?.('.os-card');
+      if (!card || e.target.closest('button')) return;
+      if (card.classList.contains('cancelada') || card.dataset.importada === '1') return;
+      press = { id: Number(card.dataset.osCard), card, x: e.clientX, y: e.clientY, pointerId: e.pointerId };
+      timer = setTimeout(() => {
+        if (!press) return;
+        arrastando = press;
+        press = null;
+        arrastando.card.classList.add('arrastando');
+        quadro.classList.add('os-arraste');
+        try { arrastando.card.setPointerCapture(arrastando.pointerId); } catch { /* o dedo segue no quadro */ }
+      }, 280);
+    });
+    quadro.addEventListener('pointermove', (e) => {
+      if (press && (Math.hypot(e.clientX - press.x, e.clientY - press.y) > 12)) soltarPress();
+      if (!arrastando || e.pointerId !== arrastando.pointerId) return;
+      e.preventDefault();
+      arrastando.x = e.clientX;
+      arrastando.y = e.clientY;
+      const col = colunaEm(e.clientX, e.clientY);
+      $$('.os-col', quadro).forEach((c) => c.classList.toggle('alvo', c === col));
+      const b = quadro.getBoundingClientRect();
+      if (e.clientX < b.left + 56) quadro.scrollLeft -= 18;
+      else if (e.clientX > b.right - 56) quadro.scrollLeft += 18;
+    }, { passive: false });
+    const soltar = (e) => {
+      if (press && e.pointerId === press.pointerId) soltarPress();
+      if (!arrastando || e.pointerId !== arrastando.pointerId) return;
+      const dados = arrastando;
+      const col = colunaEm(e.clientX, e.clientY);
+      dados.card.dataset.osArraste = '1';
+      encerrar();
+      if (!col) return;
+      const id = dados.id;
+      const idStatus = Number(col.dataset.osCol);
+      const cards = $$('.os-card', col).filter((c) => Number(c.dataset.osCard) !== id);
+      let pos = cards.length;
+      for (let i = 0; i < cards.length; i += 1) {
+        const box = cards[i].getBoundingClientRect();
+        if (e.clientY < box.top + box.height / 2) { pos = i; break; }
+      }
+      const ids = cards.map((c) => Number(c.dataset.osCard));
+      ids.splice(pos, 0, id);
+      moverCard(id, idStatus, ids);
+    };
+    quadro.addEventListener('pointerup', soltar);
+    quadro.addEventListener('pointercancel', (e) => {
+      if ((press && e.pointerId === press.pointerId) || (arrastando && e.pointerId === arrastando.pointerId)) encerrar();
+    });
+    quadro.addEventListener('contextmenu', (e) => { if (e.target.closest('.os-card')) e.preventDefault(); });
   }
 
   function papelStatus(descricao) {
@@ -499,7 +578,12 @@ const Servicos = (() => {
     }
     if (tipoEtapa(destino) === 'buscar' && tipoEtapa(origem) === 'aberta') {
       const r = await escolherBusca();
-      return r && typeof r === 'object' ? r : null;
+      if (!r || typeof r !== 'object') return null;
+      if (r.na_empresa) {
+        const andamento = (st.statuses || []).find((s) => s.ativo && tipoEtapa(s) === 'andamento');
+        if (andamento) r.id_status = andamento.id;
+      }
+      return r;
     }
     const papel = papelStatus(destino?.descricao);
     if (papel && origem?.id !== destino?.id) {
@@ -557,12 +641,13 @@ const Servicos = (() => {
     if (!prox) { msg('Não há próxima etapa.'); return false; }
     const extra = await confirmarDestino(atual, prox);
     if (!extra) return false;
-    st.os.id_status = prox.id;
+    const destino = extra.id_status ? (statusDe(extra.id_status) || prox) : prox;
+    st.os.id_status = destino.id;
     st.os.id_colaborador_pendente = extra.id_colaborador || null;
     st.os.na_empresa = !!extra.na_empresa;
     if (extra.quem_trouxe) st.os.quem_trouxe = extra.quem_trouxe;
     const sel = $('#os-status');
-    if (sel) sel.value = String(prox.id);
+    if (sel) sel.value = String(destino.id);
     return true;
   }
 
@@ -573,12 +658,14 @@ const Servicos = (() => {
       const destino = (st.dados.statuses || st.statuses || []).find((s) => s.id === idStatus);
       const extra = await confirmarDestino(origem, destino);
       if (!extra) return carregarQuadro();
-      const res = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: idStatus, ...extra } });
+      const idNovo = extra.id_status || idStatus;
+      const destinoReal = (st.dados.statuses || st.statuses || []).find((s) => s.id === idNovo) || destino;
+      const res = await api(`/os/${id}/status`, { method: 'POST', body: { id_status: idNovo, ...extra } });
       if (!res.ok) { msg(res.error || 'Não foi possível mudar o status.'); return carregarQuadro(); }
       avisar(res.avisos);
-      await api('/os/ordem', { method: 'POST', body: { id_status: idStatus, ids } });
+      if (idNovo === idStatus) await api('/os/ordem', { method: 'POST', body: { id_status: idStatus, ids } });
       await carregarQuadro();
-      const etapa = tipoEtapa(destino);
+      const etapa = tipoEtapa(destinoReal);
       if (res.final) await perguntarFechamento(id, res.enviada);
       else if (!res.enviada && (etapa === 'finalizada' || etapa === 'entregando')) await oferecerConclusao(id, false);
       return undefined;
@@ -1019,8 +1106,21 @@ const Servicos = (() => {
         st.os.id_colaborador_pendente = extra.id_colaborador || null;
         st.os.na_empresa = !!extra.na_empresa;
         if (extra.quem_trouxe) st.os.quem_trouxe = extra.quem_trouxe;
-      }
-      st.os.id_status = novoId;
+        if (extra.id_status && extra.id_status !== novoId) {
+          const selSt = $('#os-status');
+          if (selSt && ![...selSt.options].some((o) => Number(o.value) === extra.id_status)) {
+            const coluna = statusDe(extra.id_status);
+            if (coluna) {
+              const opt = document.createElement('option');
+              opt.value = String(coluna.id);
+              opt.textContent = coluna.descricao;
+              selSt.appendChild(opt);
+            }
+          }
+          if (selSt) selSt.value = String(extra.id_status);
+          st.os.id_status = extra.id_status;
+        } else st.os.id_status = novoId;
+      } else st.os.id_status = novoId;
       const cab = $('.os-cab-os', r);
       cab.querySelector('.os-pill')?.remove();
       cab.insertAdjacentHTML('beforeend', pillHtml(statusDe(st.os.id_status)));
@@ -1327,15 +1427,16 @@ const Servicos = (() => {
   async function abrirLampada() {
     lerCabecalho();
     const o = st.os;
-    if (!o.defeito && !o.equipamento) { msg('Descreva o defeito para buscar soluções parecidas.'); return; }
-    const res = await api(`/os/solucoes/sugerir?defeito=${encodeURIComponent(o.defeito)}&equipamento=${encodeURIComponent(o.equipamento)}`);
+    if (!o.defeito && !o.equipamento && !o.id_categoria) { msg('Descreva o defeito para buscar soluções parecidas.'); return; }
+    const catOs = [o.categoria, o.subcategoria].filter(Boolean).join(' › ');
+    const res = await api(`/os/solucoes/sugerir?defeito=${encodeURIComponent(o.defeito || '')}&equipamento=${encodeURIComponent(o.equipamento || '')}&categoria=${encodeURIComponent(o.id_categoria || '')}&subcategoria=${encodeURIComponent(o.id_subcategoria || '')}`);
     if (!res.ok) { msg(res.error || 'Não foi possível buscar soluções.'); return; }
     const lista = res.solucoes || [];
     const escolhida = await janela(`<header><span class="circ" style="background:color-mix(in srgb,#d4a106 18%,transparent);color:color-mix(in srgb,#d4a106 70%,var(--text))">${ic('lampada')}</span>
-      <div><h2>Soluções parecidas</h2><p>${lista.length ? `Palavras em comum com o defeito: ${res.palavras.slice(0, 6).map((p) => `<b>${esc(p)}</b>`).join(', ')}` : 'Nenhuma solução parecida na base ainda. Elas entram quando uma O.S é finalizada com a solução preenchida.'}</p></div>
+      <div><h2>Soluções parecidas</h2><p>${lista.length ? `${catOs ? `Categoria ${esc(catOs)}. ` : ''}Palavras em comum com o defeito: ${(res.palavras || []).slice(0, 6).map((p) => `<b>${esc(p)}</b>`).join(', ') || 'a mesma categoria'}` : `Nenhuma solução parecida${catOs ? ` em ${esc(catOs)}` : ''} ainda. Elas entram quando uma O.S desta categoria é finalizada com a solução preenchida.`}</p></div>
       <span class="os-esp"></span><button type="button" class="ob ico sm" data-fechar="" aria-label="Fechar">${ic('x', 'p')}</button></header>
       <div class="corpo">${lista.map((s) => `<div class="os-sug"><div class="os-linha"><b style="font-weight:650">${esc(s.defeito)}</b><span class="os-esp"></span><span class="os-chip">Usada ${s.usos}×</span></div>
-        <p>${esc(s.solucao)}</p><div class="os-linha"><span class="os-legenda">${s.id_os ? `O.S ${s.id_os}` : 'Cadastrada à mão'}${s.equipamento ? ` · ${esc(s.equipamento)}` : ''}</span><span class="os-esp"></span>
+        <p>${esc(s.solucao)}</p><div class="os-linha"><span class="os-legenda">${[s.categoria, s.subcategoria].filter(Boolean).join(' › ') || (s.id_os ? `O.S ${s.id_os}` : 'Cadastrada à mão')}${s.equipamento ? ` · ${esc(s.equipamento)}` : ''}</span><span class="os-esp"></span>
         <button type="button" class="ob sm pri" data-fechar="${s.id}">${ic('copiar', 'p')}Usar esta solução</button></div></div>`).join('')}</div>`);
     const s = lista.find((x) => String(x.id) === String(escolhida));
     if (!s) return;
@@ -1857,7 +1958,7 @@ const Servicos = (() => {
         <label class="os-filtros" style="flex:1"><span class="os-busca" style="max-width:460px;flex:1">${ic('busca', 'p')}<input class="oc" type="search" id="sol-busca" value="${esc(solBusca)}" placeholder="Buscar defeito, solução ou equipamento…" aria-label="Buscar soluções" /></span></label>
         <span class="os-legenda">Entram sozinhas ao finalizar uma O.S com a solução preenchida</span><button type="button" class="ob sm pri" data-sol-nova>${ic('mais', 'p')}Nova</button></header>
       <div class="corpo"><div class="os-tabela-wrap"><table class="os-tabela"><thead><tr><th>Defeito</th><th>Solução</th><th>Equipamento</th><th class="n">Usada</th><th>Última vez</th><th></th></tr></thead><tbody>
-      ${lista.map((s) => `<tr><td style="min-width:200px"><b style="font-weight:600">${esc(s.defeito)}</b>${s.id_os ? `<span class="sub">O.S ${s.id_os}</span>` : ''}</td><td class="os-legenda" style="min-width:240px">${esc(s.solucao)}</td><td>${esc(s.equipamento)}</td>
+      ${lista.map((s) => `<tr><td style="min-width:200px"><b style="font-weight:600">${esc(s.defeito)}</b>${s.categoria ? `<span class="sub">${esc([s.categoria, s.subcategoria].filter(Boolean).join(' › '))}</span>` : ''}${s.id_os ? `<span class="sub">O.S ${s.id_os}</span>` : ''}</td><td class="os-legenda" style="min-width:240px">${esc(s.solucao)}</td><td>${esc(s.equipamento)}</td>
         <td class="n"><span class="os-chip">${s.usos}×</span></td><td class="os-legenda">${esc(s.data)}</td>
         <td class="n"><button type="button" class="ob ico sm" data-sol-ed="${s.id}" aria-label="Editar">${ic('lapis', 'p')}</button> <button type="button" class="ob ico sm perigo" data-sol-exc="${s.id}" aria-label="Excluir">${ic('lixo', 'p')}</button></td></tr>`).join('')
         || `<tr class="vazia"><td colspan="6">${res.ok ? 'Nenhuma solução gravada ainda.' : esc(res.error)}</td></tr>`}
@@ -1869,17 +1970,42 @@ const Servicos = (() => {
       timer = setTimeout(async () => { solBusca = e.target.value; await renderSolucoes(); const b = $('#sol-busca'); b.focus(); b.setSelectionRange(b.value.length, b.value.length); }, 350);
     });
     const editar = async (s) => {
+      const cats = await api('/os/categorias?q=');
+      const opcoes = (cats.categorias || []).map((c) => `<option value="${c.id_categoria}" ${Number(c.id_categoria) === Number(s?.id_categoria) ? 'selected' : ''}>${esc(c.categoria)}</option>`).join('');
       const salvo = await janela(`<header><div><h2>${s ? 'Editar solução' : 'Nova solução'}</h2></div></header><div class="corpo">
+        <div class="os-campo"><label for="se-cat">Categoria</label><select class="oc" id="se-cat"><option value="">Sem categoria</option>${opcoes}</select></div>
+        <div class="os-campo"><label for="se-sub">Subcategoria</label><select class="oc" id="se-sub"><option value="">Sem subcategoria</option></select></div>
         <div class="os-campo"><label for="se-def">Defeito</label><textarea class="oc" id="se-def" maxlength="2000">${esc(s?.defeito || '')}</textarea></div>
         <div class="os-campo"><label for="se-sol">Solução</label><textarea class="oc" id="se-sol" maxlength="2000">${esc(s?.solucao || '')}</textarea></div>
         <div class="os-campo"><label for="se-eq">Equipamento</label><input class="oc" id="se-eq" maxlength="300" value="${esc(s?.equipamento || '')}" /></div>
         <div class="os-erro" id="se-erro"></div></div>
         <footer><button type="button" class="ob" data-fechar="">Cancelar</button><button type="button" class="ob pri" id="se-ok">Salvar</button></footer>`, {
-        aoAbrir: (dlg, fechar) => $('#se-ok', dlg).addEventListener('click', async () => {
-          const rr = await api('/os/solucoes', { method: 'POST', body: { id: s?.id, defeito: $('#se-def', dlg).value, solucao: $('#se-sol', dlg).value, equipamento: $('#se-eq', dlg).value } });
-          if (!rr.ok) { $('#se-erro', dlg).textContent = rr.error; return; }
-          fechar('ok');
-        }),
+        aoAbrir: (dlg, fechar) => {
+          const cat = $('#se-cat', dlg);
+          const sub = $('#se-sub', dlg);
+          const encherSub = async (pai, marcar) => {
+            sub.innerHTML = '<option value="">Sem subcategoria</option>';
+            if (!pai) return;
+            const rs = await api(`/os/categorias?pai=${encodeURIComponent(pai)}&q=`);
+            for (const c of rs.categorias || []) {
+              const opt = document.createElement('option');
+              opt.value = String(c.id_subcategoria);
+              opt.textContent = c.subcategoria;
+              if (Number(c.id_subcategoria) === Number(marcar)) opt.selected = true;
+              sub.appendChild(opt);
+            }
+          };
+          cat.addEventListener('change', () => encherSub(cat.value, 0));
+          encherSub(cat.value, s?.id_subcategoria);
+          $('#se-ok', dlg).addEventListener('click', async () => {
+            const rr = await api('/os/solucoes', { method: 'POST', body: {
+              id: s?.id, defeito: $('#se-def', dlg).value, solucao: $('#se-sol', dlg).value, equipamento: $('#se-eq', dlg).value,
+              id_categoria: Number(cat.value) || null, id_subcategoria: Number(sub.value) || null,
+            } });
+            if (!rr.ok) { $('#se-erro', dlg).textContent = rr.error; return; }
+            fechar('ok');
+          });
+        },
       });
       if (salvo) renderSolucoes();
     };
@@ -2038,8 +2164,20 @@ const Servicos = (() => {
   /* Navegação                                                           */
   /* ================================================================== */
 
+  async function atualizarAcessoTecnicos() {
+    const u = usuario();
+    if (u?.supervisor) { st.podeTecnicos = true; return; }
+    const res = await api('/os/funcionarios');
+    const eu = (res.funcionarios || []).find((f) => Number(f.id) === Number(u?.id));
+    st.podeTecnicos = !!eu?.gerente;
+  }
+
   function irPara(view) {
     if (view === 'mensagens') view = 'quadro';
+    if (view === 'tecnicos' && !st.podeTecnicos) {
+      msg('A aba Técnicos é só para o supervisor ou o gerente.');
+      view = 'quadro';
+    }
     st.view = view;
     if (view === 'quadro') return carregarQuadro();
     if (view === 'solucoes') return renderSolucoes();
@@ -2051,8 +2189,10 @@ const Servicos = (() => {
   function onPageEnter() {
     const r = raizEl();
     if (!r) return;
-    if (st.view === 'os' && st.os) { renderOs(); return; }
-    irPara(st.view === 'os' ? 'quadro' : st.view);
+    atualizarAcessoTecnicos().finally(() => {
+      if (st.view === 'os' && st.os) { renderOs(); return; }
+      irPara(st.view === 'os' ? 'quadro' : st.view);
+    });
   }
 
   function init(options) {
